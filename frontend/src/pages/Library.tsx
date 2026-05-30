@@ -66,7 +66,6 @@ function PaginationBar({ page, totalPages, onPage }: { page: number; totalPages:
 
   return (
     <div className="flex items-center justify-center gap-2 mt-8">
-      <button onClick={() => onPage(1)} disabled={page === 1} className={btnCls}>« First</button>
       <button onClick={() => onPage(page - 1)} disabled={page === 1} className={btnCls}>Prev</button>
       <div className="flex items-center gap-1.5 text-sm text-gray-400">
         <input
@@ -81,7 +80,6 @@ function PaginationBar({ page, totalPages, onPage }: { page: number; totalPages:
         <span>/ {totalPages}</span>
       </div>
       <button onClick={() => onPage(page + 1)} disabled={page === totalPages} className={btnCls}>Next</button>
-      <button onClick={() => onPage(totalPages)} disabled={page === totalPages} className={btnCls}>Last »</button>
     </div>
   );
 }
