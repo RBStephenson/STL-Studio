@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npm create *)",
-      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\brent\\\\OneDrive\\\\Documents\\\\Code Projects\\\\STL Inventory\" -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object -ExpandProperty FullName | Sort-Object)"
-    ]
-  }
-}
