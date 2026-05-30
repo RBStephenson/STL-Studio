@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
-import { X, Copy, Check, Wrench } from "lucide-react";
-import { STLFile } from "../api/client";
+import { X, Copy, Check, Wrench, Download } from "lucide-react";
+import { STLFile, api } from "../api/client";
 
 interface Props {
   modelName: string;
@@ -16,6 +16,7 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
   // selection: partType → fileId (one per group)
   const [selection, setSelection] = useState<Record<string, number>>({});
   const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   // Group files by part_type; null → "Uncategorized"
   const groups = useMemo(() => {
@@ -53,6 +54,17 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadZip = async () => {
+    if (!selectedFiles.length) return;
+    setDownloading(true);
+    try {
+      const date = new Date().toISOString().slice(0, 10);
+      await api.downloadZip(selectedFiles.map((f) => f.id), `${modelName} ${date}`);
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const categorizedCount = [...groups.keys()].filter((k) => k !== "__none__").length;
@@ -140,10 +152,18 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
             <button
               onClick={copyToClipboard}
               disabled={selectedFiles.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 border border-gray-700 hover:border-gray-500 disabled:opacity-40 disabled:cursor-not-allowed text-gray-300 text-sm transition-colors"
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
               {copied ? "Copied!" : "Copy list"}
+            </button>
+            <button
+              onClick={downloadZip}
+              disabled={selectedFiles.length === 0 || downloading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm transition-colors"
+            >
+              <Download size={14} />
+              {downloading ? "Zipping…" : "Download zip"}
             </button>
           </div>
         </div>

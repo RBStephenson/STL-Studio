@@ -1,7 +1,9 @@
 """Serve local image files and STL files from the mounted drives."""
+import io
+import zipfile
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from app.config import settings
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -45,6 +47,49 @@ def serve_stl(path: str):
     if not p.exists():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(p, media_type="application/octet-stream")
+
+
+@router.post("/download-zip")
+def download_zip(body: dict):
+    """
+    Build a zip archive from a list of STL file IDs and stream it to the client.
+    Body: { "file_ids": [1, 2, 3], "zip_name": "My Model 2026-05-30" }
+    """
+    from app.database import SessionLocal
+    from app.models import STLFile
+
+    file_ids: list[int] = body.get("file_ids", [])
+    zip_name: str = body.get("zip_name", "kit-build")
+
+    if not file_ids:
+        raise HTTPException(status_code=400, detail="No file IDs provided")
+
+    db = SessionLocal()
+    try:
+        files = db.query(STLFile).filter(STLFile.id.in_(file_ids)).all()
+    finally:
+        db.close()
+
+    if not files:
+        raise HTTPException(status_code=404, detail="No matching files found")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            p = Path(f.path)
+            if not _is_safe_path(p) or not p.exists():
+                continue
+            zf.write(p, arcname=f.filename)
+    buf.seek(0)
+
+    safe_name = "".join(c if c.isalnum() or c in " .-_()" else "_" for c in zip_name).strip()
+    filename = f"{safe_name}.zip"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/model-images/{model_id}")

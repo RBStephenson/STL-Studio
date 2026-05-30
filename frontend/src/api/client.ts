@@ -140,4 +140,19 @@ export const api = {
   },
   fileUrl: (path: string) => `/api/files/image?path=${encodeURIComponent(path)}`,
   stlUrl: (path: string) => `/api/files/stl?path=${encodeURIComponent(path)}`,
+  downloadZip: async (fileIds: number[], zipName: string) => {
+    const res = await fetch(`${BASE}/files/download-zip`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_ids: fileIds, zip_name: zipName }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = zipName + ".zip";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
 };
