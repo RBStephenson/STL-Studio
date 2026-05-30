@@ -62,7 +62,7 @@ Your library database is stored in your user data folder and survives app update
 - Grid view with search, filter by creator, site, tag, NSFW flag, thumbnail presence, and review status
 - Filter presets saved in localStorage; all filter state lives in the URL
 - **Variant grouping** — folders that share a parent character (e.g. `Full_cutted`, `No_cuts`, `Semi_cutted` under `Akuma/`) are collapsed into a single group card with a variant count badge; click to open the group and select individual variants
-- Pagination with jump-to-page input and First / Last buttons
+- Pagination with jump-to-page input (Prev / page / Next)
 
 ### Triage Queue (`/triage`)
 - Keyboard-driven review of flagged models
@@ -91,6 +91,7 @@ Your library database is stored in your user data folder and survives app update
 - Fuzzy-matches scraped listings against local models and bulk-applies metadata (source URL, thumbnail, external ID)
 
 ### Scan
+- **Parallel** — scans up to 4 creator directories concurrently for faster indexing on large libraries
 - Incremental — skips unchanged folders (mtime check), caches STL file walks
 - Cancel button; Library auto-refreshes on completion
 - On each rescan, `needs_review` is cleared for any model that already has indexed STL files (reduces false-positive review queue)
