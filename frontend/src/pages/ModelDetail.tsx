@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench } from "lucide-react";
+import { ArrowLeft, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown } from "lucide-react";
 import { api, ModelDetail as ModelDetailType } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 import STLViewer from "../components/STLViewer";
@@ -36,6 +36,7 @@ export default function ModelDetail() {
   const [tags, setTags] = useState<string[]>([]);
   const [partTypes, setPartTypes] = useState<Record<number, string>>({});
   const [showKitBuilder, setShowKitBuilder] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
 
   // sync local state from loaded model
   useEffect(() => {
@@ -47,6 +48,18 @@ export default function ModelDetail() {
       setPartTypes(pts);
     }
   }, [model]);
+
+  const downloadAllFiles = async () => {
+    if (!model || downloadingAll) return;
+    setDownloadingAll(true);
+    try {
+      const date = new Date().toISOString().slice(0, 10);
+      const name = model.title || model.name;
+      await api.downloadZip(model.stl_files.map((f) => f.id), `${name} ${date}`);
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
 
   const savePartType = async (fileId: number, value: string) => {
     const pt = value.trim().toLowerCase() || "";
@@ -347,13 +360,23 @@ export default function ModelDetail() {
                 Files ({model.stl_files.length})
               </h3>
               {model.stl_files.length > 0 && (
-                <button
-                  onClick={() => setShowKitBuilder(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-indigo-950 border border-gray-700 hover:border-indigo-600 text-xs text-gray-400 hover:text-indigo-300 transition-colors"
-                >
-                  <Wrench size={12} />
-                  Kit Builder
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={downloadAllFiles}
+                    disabled={downloadingAll}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 disabled:opacity-40 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                  >
+                    <FolderDown size={12} />
+                    {downloadingAll ? "Zipping…" : "Download all"}
+                  </button>
+                  <button
+                    onClick={() => setShowKitBuilder(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-indigo-950 border border-gray-700 hover:border-indigo-600 text-xs text-gray-400 hover:text-indigo-300 transition-colors"
+                  >
+                    <Wrench size={12} />
+                    Kit Builder
+                  </button>
+                </div>
               )}
             </div>
             <datalist id="part-type-list">
