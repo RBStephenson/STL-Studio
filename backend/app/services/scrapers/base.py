@@ -3,6 +3,30 @@ Shared result type and base class for all site scrapers.
 """
 from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlparse
+
+
+_SITE_DOMAINS = {
+    "myminifactory.com": "myminifactory",
+    "gumroad.com": "gumroad",
+    "cults3d.com": "cults3d",
+}
+
+
+def detect_site(url: str) -> Optional[str]:
+    """Return the storefront key for a URL, or None if unsupported.
+
+    Matches on the actual hostname (exact domain or sub-domain) rather than a
+    substring, so a URL that merely *contains* a known domain — e.g.
+    ``https://cults3d.com.evil.com/`` or ``https://evil.com/?x=cults3d.com`` — is
+    rejected instead of being fetched server-side (open-fetch / SSRF guard).
+    """
+    parsed = urlparse(url if "//" in url else f"https://{url}")
+    host = (parsed.hostname or "").lower()
+    for domain, site in _SITE_DOMAINS.items():
+        if host == domain or host.endswith("." + domain):
+            return site
+    return None
 
 
 @dataclass

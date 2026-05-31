@@ -16,6 +16,8 @@ from bs4 import BeautifulSoup
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.services.scrapers.base import detect_site
+
 logger = logging.getLogger(__name__)
 
 _HEADERS = {
@@ -37,17 +39,6 @@ class StorefrontProduct:
     thumbnail_url: Optional[str] = None
     description: Optional[str] = None
     tags: list[str] = field(default_factory=list)
-
-
-def detect_site(url: str) -> Optional[str]:
-    u = url.lower()
-    if "myminifactory.com" in u:
-        return "myminifactory"
-    if "gumroad.com" in u:
-        return "gumroad"
-    if "cults3d.com" in u:
-        return "cults3d"
-    return None
 
 
 async def scrape_storefront(url: str) -> list[StorefrontProduct]:

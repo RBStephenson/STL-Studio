@@ -2,7 +2,7 @@
 Scraper dispatcher — routes URLs and search queries to the right site adapter.
 """
 from typing import Optional
-from app.services.scrapers.base import ScrapedModel, SearchResult
+from app.services.scrapers.base import ScrapedModel, SearchResult, detect_site
 from app.services.scrapers import mmf, gumroad, cults3d
 
 SITE_PATTERNS = [
@@ -11,16 +11,7 @@ SITE_PATTERNS = [
     ("cults3d",       cults3d),
 ]
 
-
-def detect_site(url: str) -> Optional[str]:
-    url_lower = url.lower()
-    if "myminifactory.com" in url_lower:
-        return "myminifactory"
-    if "gumroad.com" in url_lower:
-        return "gumroad"
-    if "cults3d.com" in url_lower:
-        return "cults3d"
-    return None
+__all__ = ["detect_site", "ScrapedModel", "SearchResult"]
 
 
 async def fetch_url(url: str) -> Optional[ScrapedModel]:
