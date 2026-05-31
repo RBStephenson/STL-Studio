@@ -9,6 +9,9 @@ interface Props {
   selected?: boolean;
   onSelect?: (id: number) => void;
   backTo?: string;
+  /** Called after a successful favorite/queue toggle so parents can refresh
+   *  derived data (e.g. the Library's favorites/queued count chips). */
+  onMutate?: () => void;
 }
 
 const SITE_LABELS: Record<string, string> = {
@@ -30,7 +33,7 @@ const TAG_COLORS: Record<string, string> = {
   "figure":        "bg-indigo-900 text-indigo-300",
 };
 
-export default function ModelCard({ model, selected = false, onSelect, backTo }: Props) {
+export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate }: Props) {
   const location = useLocation();
   const { showNSFW } = useNSFW();
   const [nsfw, setNsfw] = useState(model.nsfw);
@@ -46,7 +49,11 @@ export default function ModelCard({ model, selected = false, onSelect, backTo }:
     e.stopPropagation();
     const next = !nsfw;
     setNsfw(next);
-    await api.models.setNSFW(model.id, next);
+    try {
+      await api.models.setNSFW(model.id, next);
+    } catch {
+      setNsfw(!next);  // revert on failure
+    }
   };
 
   const toggleFavorite = async (e: React.MouseEvent) => {
@@ -54,7 +61,12 @@ export default function ModelCard({ model, selected = false, onSelect, backTo }:
     e.stopPropagation();
     const next = !favorite;
     setFavorite(next);
-    await api.models.setFavorite(model.id, next);
+    try {
+      await api.models.setFavorite(model.id, next);
+      onMutate?.();
+    } catch {
+      setFavorite(!next);  // revert on failure
+    }
   };
 
   const toggleQueue = async (e: React.MouseEvent) => {
@@ -62,7 +74,12 @@ export default function ModelCard({ model, selected = false, onSelect, backTo }:
     e.stopPropagation();
     const next = !queued;
     setQueued(next);
-    await api.models.setQueue(model.id, next);
+    try {
+      await api.models.setQueue(model.id, next);
+      onMutate?.();
+    } catch {
+      setQueued(!next);  // revert on failure
+    }
   };
 
   const handleSelect = (e: React.MouseEvent) => {

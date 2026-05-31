@@ -161,7 +161,8 @@ export default function Library() {
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.models.creators().then(setCreators).catch(() => {}); }, []);
-  useEffect(() => { api.models.stats().then(setStats).catch(() => {}); }, []);
+  const refreshStats = useCallback(() => { api.models.stats().then(setStats).catch(() => {}); }, []);
+  useEffect(() => { refreshStats(); }, [refreshStats]);
   useEffect(() => { api.models.tags().then(setAllTags).catch(() => {}); }, []);
 
   // Restore scroll position when navigating back from a model detail page
@@ -497,6 +498,7 @@ export default function Library() {
               model={m}
               selected={selection.has(m.id)}
               onSelect={toggleSelect}
+              onMutate={refreshStats}
             />
           ))}
         </div>

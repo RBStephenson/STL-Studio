@@ -104,26 +104,45 @@ export default function ModelDetail() {
   const toggleNSFW = async () => {
     const next = !nsfw;
     setNsfw(next);
-    await api.models.setNSFW(Number(id), next);
+    try {
+      await api.models.setNSFW(Number(id), next);
+    } catch {
+      setNsfw(!next);  // revert on failure
+    }
   };
 
   const toggleFavorite = async () => {
     const next = !favorite;
     setFavorite(next);
-    await api.models.setFavorite(Number(id), next);
+    try {
+      await api.models.setFavorite(Number(id), next);
+    } catch {
+      setFavorite(!next);  // revert on failure
+    }
   };
 
   const toggleQueue = async () => {
     const next = !queued;
     setQueued(next);
-    await api.models.setQueue(Number(id), next);
+    try {
+      await api.models.setQueue(Number(id), next);
+    } catch {
+      setQueued(!next);  // revert on failure
+    }
   };
 
   const togglePrinted = async () => {
     const next = !printedAt;
+    const prevPrinted = printedAt;
+    const prevQueued = queued;
     setPrintedAt(next ? new Date().toISOString() : null);
     if (next) setQueued(false);  // marking printed clears the queue
-    await api.models.setPrinted(Number(id), next);
+    try {
+      await api.models.setPrinted(Number(id), next);
+    } catch {
+      setPrintedAt(prevPrinted);  // revert both on failure
+      setQueued(prevQueued);
+    }
   };
 
   const load = useCallback(() => {
