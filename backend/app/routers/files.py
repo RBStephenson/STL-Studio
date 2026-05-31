@@ -212,7 +212,7 @@ def list_model_images(model_id: int):
         boundary_prefix = str(boundary)
         other_model_folders = {
             p for (p,) in db.query(ModelDB.folder_path)
-            .filter(ModelDB.folder_path.like(f"{boundary_prefix}%"),
+            .filter(ModelDB.folder_path.like(f"{boundary_prefix}/%"),
                     ModelDB.id != model.id)
             .all() if p
         }
