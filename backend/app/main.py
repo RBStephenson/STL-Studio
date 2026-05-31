@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -6,10 +8,7 @@ from app.routers import models, scan, files, collections, scrape, enrich
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="STL Inventory", version="0.1.0")
 
-
-@app.on_event("startup")
 def _migrate_schema():
     """Add columns that didn't exist in earlier schema versions."""
     import logging
@@ -37,7 +36,6 @@ def _migrate_schema():
                 logger.info(f"Migrated: added {table}.{column}")
 
 
-@app.on_event("startup")
 def _seed_tag_index():
     """Populate model_tags from JSON columns if the table is empty (one-time migration)."""
     import logging
@@ -57,6 +55,17 @@ def _seed_tag_index():
         logger.exception("Failed to seed model_tags on startup")
     finally:
         db.close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # One-time startup migrations / seeding, run before the app serves requests.
+    _migrate_schema()
+    _seed_tag_index()
+    yield
+
+
+app = FastAPI(title="STL Inventory", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
