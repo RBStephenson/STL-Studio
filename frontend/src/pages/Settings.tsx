@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
-import { HardDrive, Plus, Trash2, AlertCircle, CheckCircle } from "lucide-react";
+import { HardDrive, Plus, Trash2, AlertCircle, CheckCircle, FolderSearch } from "lucide-react";
 import { api, ScanRoot } from "../api/client";
+import FolderPicker from "../components/FolderPicker";
 
 export default function Settings() {
   const [roots, setRoots] = useState<ScanRoot[]>([]);
@@ -8,6 +9,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const flash = (msg: string, type: "ok" | "err") => {
@@ -24,8 +26,8 @@ export default function Settings() {
 
   useEffect(() => { load(); }, []);
 
-  const addRoot = async () => {
-    const path = newPath.trim();
+  const addRoot = async (pathArg?: string) => {
+    const path = (pathArg ?? newPath).trim();
     if (!path) return;
     try {
       await api.scan.addRoot(path);
@@ -126,7 +128,15 @@ export default function Settings() {
             className="flex-1 bg-gray-900 border border-gray-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none font-mono"
           />
           <button
-            onClick={addRoot}
+            onClick={() => setPicking(true)}
+            title="Browse for a folder"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm transition-colors"
+          >
+            <FolderSearch size={15} />
+            Browse…
+          </button>
+          <button
+            onClick={() => addRoot()}
             disabled={!newPath.trim()}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm transition-colors"
           >
@@ -135,7 +145,7 @@ export default function Settings() {
           </button>
         </div>
         <p className="text-xs text-gray-600 mt-2">
-          Enter the full path to a folder containing your STL files. Subfolders are scanned automatically.
+          Use <strong className="text-gray-500">Browse…</strong> to pick a folder, or type the full path. Subfolders are scanned automatically.
         </p>
       </section>
 
@@ -163,6 +173,13 @@ export default function Settings() {
           ))}
         </div>
       </section>
+
+      {picking && (
+        <FolderPicker
+          onClose={() => setPicking(false)}
+          onSelect={(path) => { setPicking(false); addRoot(path); }}
+        />
+      )}
     </div>
   );
 }
