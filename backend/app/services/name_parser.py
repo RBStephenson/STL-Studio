@@ -35,18 +35,18 @@ class NameSignals:
 # ---------------------------------------------------------------------------
 # Scale patterns
 # ---------------------------------------------------------------------------
-_SCALE_RATIO = re.compile(r"\b1[-/:\s_](\d{1,2})\b", re.I)
+_SCALE_RATIO = re.compile(r"(?<!\d)1[-/:\s_](\d{1,2})(?!\d)", re.I)
 
 _SCALE_MM = re.compile(
-    r"\b(14|18|28|30|32|35|40|54|70|75|90|120|180|200|300|350)\s*mm\b",
+    r"(?<!\d)(14|18|28|30|32|35|40|54|70|75|90|120|180|200|300|350)\s*mm\b",
     re.I,
 )
 
 # Scales that imply a collectible statue (not a miniature)
 _STATUE_SCALES = {"1:4", "1:5", "1:6", "1:8", "1:9", "1:10", "1:12"}
 
-# Normalise "1_12scale" / "1:6scale" → "1_12 scale" before regex runs
-_SCALE_GLUED = re.compile(r"(\b1[-/:\s_]\d{1,2})(scale)\b", re.I)
+# Normalise "1_12scale" / "1:6Scale" → "1_12 scale" before ratio regex runs
+_SCALE_GLUED = re.compile(r"((?<!\d)1[-/:\s_]\d{1,2})(scale)\b", re.I)
 
 # ---------------------------------------------------------------------------
 # Type keywords
