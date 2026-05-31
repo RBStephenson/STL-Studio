@@ -477,6 +477,7 @@ export default function ModelDetail() {
         <ImagePicker
           modelId={model.id}
           currentPath={model.thumbnail_path}
+          currentUrl={model.thumbnail_url ?? null}
           onApplied={() => { setShowImagePicker(false); load(); }}
           onClose={() => setShowImagePicker(false)}
         />

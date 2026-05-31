@@ -10,11 +10,12 @@ interface ImageEntry {
 interface Props {
   modelId: number;
   currentPath: string | null;
+  currentUrl: string | null;
   onApplied: () => void;
   onClose: () => void;
 }
 
-export default function ImagePicker({ modelId, currentPath, onApplied, onClose }: Props) {
+export default function ImagePicker({ modelId, currentPath, currentUrl, onApplied, onClose }: Props) {
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(currentPath);
@@ -148,7 +149,7 @@ export default function ImagePicker({ modelId, currentPath, onApplied, onClose }
         <div className="flex items-center justify-between px-5 py-4 border-t border-gray-800">
           <button
             onClick={() => apply(true)}
-            disabled={saving || (!currentPath && !urlInput)}
+            disabled={saving || (!currentPath && !currentUrl)}
             title="Remove the current thumbnail"
             className="flex items-center gap-1.5 px-3 py-2 rounded bg-gray-800 hover:bg-red-900/50 hover:text-red-400 disabled:opacity-30 text-sm text-gray-500 transition-colors"
           >
