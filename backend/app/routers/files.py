@@ -191,21 +191,18 @@ def list_model_images(model_id: int):
         if not folder.exists():
             return []
 
-        # Find the character boundary: walk up until the parent is the creator
-        # dir (whose own parent is a scan root). That gives us e.g. 'Absolute
-        # Joker/' regardless of how deep the model sits inside it.
+        # Find the character boundary: the folder directly inside the creator dir.
+        # Walk up until the parent is the creator dir (its parent is a scan root).
+        # If the model is directly under the creator dir, boundary stays as the
+        # model folder itself — don't expand to the full creator dir.
         roots = {str(r) for r in _allowed_roots()}
         boundary = folder
         current = folder.parent
         while current != current.parent:
             if str(current) in roots:
-                # current IS a scan root — model is directly under creator, no
-                # character grouping; boundary stays as the model folder itself.
                 break
             if str(current.parent) in roots:
-                # current.parent is the scan root → current is the creator dir
-                # → boundary is the folder just inside the creator dir.
-                boundary = current if boundary == folder else boundary
+                # current is the creator dir — stop; boundary is already correct
                 break
             boundary = current
             current = current.parent
