@@ -299,7 +299,8 @@ def _index_model(
     if not folder_unchanged:
         # Thumbnail: walk upward if not already set
         if not model.thumbnail_path:
-            _find_thumbnail(model, folder, boundary=creator_boundary or folder)
+            _find_thumbnail(model, folder, boundary=creator_boundary or folder,
+                            stl_cache=stl_cache)
 
         _index_stl_files(model, folder, db)
 
@@ -331,25 +332,55 @@ def _any_child_has_stls_cached(child_dirs: list[Path], cache: dict[str, bool]) -
     return False
 
 
-def _find_thumbnail(model: Model, leaf: Path, boundary: Path):
+def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
+                    stl_cache: dict[str, bool] | None = None):
     """
     Walk upward from leaf to creator boundary looking for an image.
-    Checks preferred sub-folder names first at each level.
+
+    Priority at each level:
+      1. PREFERRED-named subdirs (renders, images, …) — rglob for nested layouts
+      2. Direct image files in the folder itself
+      3. Any other subdir that doesn't contain STLs (i.e. not a model folder)
     """
     PREFERRED = {
         "renders", "render", "images", "image", "photos", "photo",
         "preview", "previews", "pics", "pictures", "gallery",
     }
 
+    def _has_stls_cached(d: Path) -> bool:
+        key = str(d)
+        if stl_cache is not None:
+            if key not in stl_cache:
+                stl_cache[key] = _has_stls(d, recurse=True)
+            return stl_cache[key]
+        return _has_stls(d, recurse=True)
+
     def first_image(folder: Path) -> Path | None:
-        for sub in sorted(folder.iterdir()):
-            if sub.is_dir() and sub.name.lower() in PREFERRED:
-                for img in sorted(sub.iterdir()):
+        try:
+            children = list(folder.iterdir())
+        except PermissionError:
+            return None
+        subdirs = [c for c in children if c.is_dir()]
+
+        # 1. PREFERRED subdirs first — rglob to handle nested layouts (e.g. Renders/Color/)
+        for sub in sorted(subdirs):
+            if sub.name.lower() in PREFERRED:
+                for img in sorted(sub.rglob("*")):
                     if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS:
                         return img
-        for img in sorted(folder.iterdir()):
-            if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS:
-                return img
+
+        # 2. Direct image files at this level
+        for f in sorted(children):
+            if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS:
+                return f
+
+        # 3. Any other subdir that isn't a model folder (no STLs inside)
+        for sub in sorted(subdirs):
+            if sub.name.lower() not in PREFERRED and not _has_stls_cached(sub):
+                for img in sorted(sub.rglob("*")):
+                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS:
+                        return img
+
         return None
 
     current = leaf
