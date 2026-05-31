@@ -82,6 +82,18 @@ export interface ScanRoot {
   last_scanned: string | null;
 }
 
+export interface DirEntry {
+  name: string;
+  path: string;
+}
+
+export interface DirListing {
+  path: string;
+  parent: string | null;
+  is_drive_list: boolean;
+  entries: DirEntry[];
+}
+
 export interface ScanStatus {
   running: boolean;
   message: string;
@@ -194,6 +206,8 @@ export const api = {
       request<ScanStatus>(`/scan/creator/${creatorId}`, { method: "POST" }),
     cancel: () => request<{ ok: boolean }>("/scan/cancel", { method: "POST" }),
     status: () => request<ScanStatus>("/scan/status"),
+    browse: (path?: string) =>
+      request<DirListing>(`/scan/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
     roots: () => request<ScanRoot[]>("/scan/roots"),
     addRoot: (path: string) =>
       request<ScanRoot>("/scan/roots", {
