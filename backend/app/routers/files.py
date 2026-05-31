@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from app.config import settings
+from app.schemas import DownloadZipRequest
 
 logger = logging.getLogger(__name__)
 
@@ -95,16 +96,13 @@ def serve_stl(path: str):
 
 
 @router.post("/download-zip")
-def download_zip(body: dict):
-    """
-    Build a zip archive from a list of STL file IDs and stream it to the client.
-    Body: { "file_ids": [1, 2, 3], "zip_name": "My Model 2026-05-30" }
-    """
+def download_zip(body: DownloadZipRequest):
+    """Build a zip archive from a list of STL file IDs and stream it to the client."""
     from app.database import SessionLocal
     from app.models import STLFile
 
-    file_ids: list[int] = body.get("file_ids", [])
-    zip_name: str = body.get("zip_name", "kit-build")
+    file_ids = body.file_ids
+    zip_name = body.zip_name
 
     if not file_ids:
         raise HTTPException(status_code=400, detail="No file IDs provided")

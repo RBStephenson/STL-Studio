@@ -4,7 +4,11 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import Model, Creator, ModelTag
-from app.schemas import ModelList, ModelRead, ModelDetail, CreatorRead
+from app.schemas import (
+    ModelList, ModelRead, ModelDetail, CreatorRead,
+    ModelUpdate, ThumbnailUpdate, FavoriteUpdate, QueueUpdate, PrintedUpdate,
+    STLFileUpdate, BulkTagUpdate,
+)
 from app.services.tag_sync import sync_model_tags
 from app.config import settings
 from app.utils import utcnow
@@ -201,25 +205,26 @@ def list_variants(
 
 
 @router.patch("/stl-files/{file_id}")
-def update_stl_file(file_id: int, body: dict, db: Session = Depends(get_db)):
+def update_stl_file(file_id: int, body: STLFileUpdate, db: Session = Depends(get_db)):
     """Update metadata on a single STL file (e.g. part_type)."""
     from app.models import STLFile
     f = db.query(STLFile).filter(STLFile.id == file_id).first()
     if not f:
         raise HTTPException(status_code=404, detail="STL file not found")
-    if "part_type" in body:
-        pt = body["part_type"]
+    data = body.model_dump(exclude_unset=True)
+    if "part_type" in data:
+        pt = data["part_type"]
         f.part_type = pt.strip().lower() if pt and pt.strip() else None
     db.commit()
     return {"ok": True}
 
 
 @router.patch("/bulk")
-def bulk_tag_models(body: dict, db: Session = Depends(get_db)):
+def bulk_tag_models(body: BulkTagUpdate, db: Session = Depends(get_db)):
     """Add or remove tags across multiple models in one request."""
-    ids = body.get("ids", [])
-    add_tags = [t.strip().lower() for t in body.get("add_tags", []) if t.strip()]
-    remove_set = {t.strip().lower() for t in body.get("remove_tags", []) if t.strip()}
+    ids = body.ids
+    add_tags = [t.strip().lower() for t in body.add_tags if t.strip()]
+    remove_set = {t.strip().lower() for t in body.remove_tags if t.strip()}
 
     if not ids:
         raise HTTPException(status_code=400, detail="No model IDs provided")
@@ -240,32 +245,33 @@ def bulk_tag_models(body: dict, db: Session = Depends(get_db)):
 
 
 @router.patch("/{model_id}")
-def update_model(model_id: int, body: dict, db: Session = Depends(get_db)):
-    """Partial update of model metadata fields."""
+def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(get_db)):
+    """Partial update of model metadata fields — only fields actually sent apply."""
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
 
+    data = body.model_dump(exclude_unset=True)
     allowed = {
         "title", "description", "notes", "source_url", "source_site",
         "license", "category", "tags", "custom_attributes", "nsfw",
         "needs_review", "thumbnail_url",
     }
-    for key, value in body.items():
+    for key, value in data.items():
         if key in allowed:
             if key == "tags" and isinstance(value, list):
                 value = list(dict.fromkeys(t.strip().lower() for t in value if t.strip()))
             setattr(model, key, value)
 
-    if "creator_name" in body and body["creator_name"]:
-        creator = db.query(Creator).filter(Creator.name == body["creator_name"]).first()
+    if data.get("creator_name"):
+        creator = db.query(Creator).filter(Creator.name == data["creator_name"]).first()
         if not creator:
-            creator = Creator(name=body["creator_name"])
+            creator = Creator(name=data["creator_name"])
             db.add(creator)
             db.flush()
         model.creator_id = creator.id
 
-    if "needs_review" not in body:
+    if "needs_review" not in data:
         model.needs_review = False
 
     model.updated_at = utcnow()
@@ -275,50 +281,50 @@ def update_model(model_id: int, body: dict, db: Session = Depends(get_db)):
 
 
 @router.patch("/{model_id}/thumbnail")
-def set_thumbnail(model_id: int, body: dict, db: Session = Depends(get_db)):
+def set_thumbnail(model_id: int, body: ThumbnailUpdate, db: Session = Depends(get_db)):
     """Set thumbnail_path or thumbnail_url on a model."""
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if "thumbnail_path" in body:
-        model.thumbnail_path = body["thumbnail_path"] or None
-    if "thumbnail_url" in body:
-        model.thumbnail_url = body["thumbnail_url"] or None
+    data = body.model_dump(exclude_unset=True)
+    if "thumbnail_path" in data:
+        model.thumbnail_path = data["thumbnail_path"] or None
+    if "thumbnail_url" in data:
+        model.thumbnail_url = data["thumbnail_url"] or None
     db.commit()
     return {"ok": True}
 
 
 @router.patch("/{model_id}/favorite")
-def set_favorite(model_id: int, body: dict, db: Session = Depends(get_db)):
-    """Toggle a model's favorite flag. Body: {"is_favorite": bool}."""
+def set_favorite(model_id: int, body: FavoriteUpdate, db: Session = Depends(get_db)):
+    """Toggle a model's favorite flag."""
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    model.is_favorite = bool(body.get("is_favorite"))
+    model.is_favorite = body.is_favorite
     db.commit()
     return {"ok": True, "is_favorite": model.is_favorite}
 
 
 @router.patch("/{model_id}/queue")
-def set_queue(model_id: int, body: dict, db: Session = Depends(get_db)):
-    """Add/remove a model from the print queue. Body: {"in_queue": bool}."""
+def set_queue(model_id: int, body: QueueUpdate, db: Session = Depends(get_db)):
+    """Add/remove a model from the print queue."""
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    in_queue = bool(body.get("in_queue"))
-    model.in_queue = in_queue
-    model.queued_at = utcnow() if in_queue else None
+    model.in_queue = body.in_queue
+    model.queued_at = utcnow() if body.in_queue else None
     db.commit()
     return {"ok": True, "in_queue": model.in_queue}
 
 
 @router.patch("/{model_id}/printed")
-def set_printed(model_id: int, body: dict, db: Session = Depends(get_db)):
-    """Mark a model printed (clears the queue) or un-mark it. Body: {"printed": bool}."""
+def set_printed(model_id: int, body: PrintedUpdate, db: Session = Depends(get_db)):
+    """Mark a model printed (clears the queue) or un-mark it."""
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if bool(body.get("printed")):
+    if body.printed:
         model.printed_at = utcnow()
         # Marking printed removes it from the active queue.
         model.in_queue = False
