@@ -15,12 +15,26 @@ def _migrate_schema():
     import logging
     from sqlalchemy import text
     logger = logging.getLogger(__name__)
+
+    # (table, column, column definition) for additive migrations
+    migrations = [
+        ("stl_files", "part_type", "TEXT"),
+        ("models", "is_favorite", "BOOLEAN DEFAULT 0"),
+        ("models", "in_queue", "BOOLEAN DEFAULT 0"),
+        ("models", "queued_at", "DATETIME"),
+        ("models", "printed_at", "DATETIME"),
+    ]
     with engine.connect() as conn:
-        cols = {r[1] for r in conn.execute(text("PRAGMA table_info(stl_files)"))}
-        if "part_type" not in cols:
-            conn.execute(text("ALTER TABLE stl_files ADD COLUMN part_type TEXT"))
-            conn.commit()
-            logger.info("Migrated: added stl_files.part_type")
+        table_cols: dict[str, set[str]] = {}
+        for table, column, coldef in migrations:
+            if table not in table_cols:
+                table_cols[table] = {
+                    r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))
+                }
+            if column not in table_cols[table]:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {coldef}"))
+                conn.commit()
+                logger.info(f"Migrated: added {table}.{column}")
 
 
 @app.on_event("startup")

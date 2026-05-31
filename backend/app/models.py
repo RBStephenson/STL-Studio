@@ -62,6 +62,12 @@ class Model(Base):
     # Review state
     needs_review = Column(Boolean, default=False)  # scanner flagged low-confidence detection
 
+    # User curation — independent flags
+    is_favorite = Column(Boolean, default=False, index=True)
+    in_queue = Column(Boolean, default=False, index=True)   # queued to print next
+    queued_at = Column(DateTime, nullable=True)              # ordering within the queue
+    printed_at = Column(DateTime, nullable=True)             # marked printed (clears queue)
+
     # Images
     thumbnail_path = Column(String, nullable=True)   # local path
     thumbnail_url = Column(String, nullable=True)    # remote URL

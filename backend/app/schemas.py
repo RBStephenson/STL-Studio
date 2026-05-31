@@ -49,6 +49,10 @@ class ModelRead(ModelBase):
     custom_attributes: dict = {}
     needs_review: bool = False
     nsfw: bool = False
+    is_favorite: bool = False
+    in_queue: bool = False
+    queued_at: Optional[datetime] = None
+    printed_at: Optional[datetime] = None
     thumbnail_path: Optional[str] = None
     thumbnail_url: Optional[str] = None
     image_paths: list = []

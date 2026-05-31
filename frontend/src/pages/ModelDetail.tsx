@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check } from "lucide-react";
+import { ArrowLeft, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer } from "lucide-react";
 import { api, ModelDetail as ModelDetailType } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 import STLViewer from "../components/STLViewer";
@@ -33,6 +33,9 @@ export default function ModelDetail() {
   const [editing, setEditing] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("images");
   const [nsfw, setNsfw] = useState(false);
+  const [favorite, setFavorite] = useState(false);
+  const [queued, setQueued] = useState(false);
+  const [printedAt, setPrintedAt] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>([]);
   const [partTypes, setPartTypes] = useState<Record<number, string>>({});
   const [showKitBuilder, setShowKitBuilder] = useState(false);
@@ -44,6 +47,9 @@ export default function ModelDetail() {
   useEffect(() => {
     if (model) {
       setNsfw(model.nsfw);
+      setFavorite(model.is_favorite);
+      setQueued(model.in_queue);
+      setPrintedAt(model.printed_at);
       setTags(model.tags ?? []);
       const pts: Record<number, string> = {};
       model.stl_files.forEach((f) => { if (f.part_type) pts[f.id] = f.part_type; });
@@ -99,6 +105,25 @@ export default function ModelDetail() {
     const next = !nsfw;
     setNsfw(next);
     await api.models.setNSFW(Number(id), next);
+  };
+
+  const toggleFavorite = async () => {
+    const next = !favorite;
+    setFavorite(next);
+    await api.models.setFavorite(Number(id), next);
+  };
+
+  const toggleQueue = async () => {
+    const next = !queued;
+    setQueued(next);
+    await api.models.setQueue(Number(id), next);
+  };
+
+  const togglePrinted = async () => {
+    const next = !printedAt;
+    setPrintedAt(next ? new Date().toISOString() : null);
+    if (next) setQueued(false);  // marking printed clears the queue
+    await api.models.setPrinted(Number(id), next);
   };
 
   const load = useCallback(() => {
@@ -241,6 +266,42 @@ export default function ModelDetail() {
               )}
             </div>
             <div className="flex gap-2 shrink-0">
+              <button
+                onClick={toggleFavorite}
+                title={favorite ? "Remove from favorites" : "Add to favorites"}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm transition-colors ${
+                  favorite
+                    ? "bg-yellow-950/60 border-yellow-800 text-yellow-400 hover:bg-yellow-900/60"
+                    : "bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <Star size={14} fill={favorite ? "currentColor" : "none"} />
+                Favorite
+              </button>
+              <button
+                onClick={toggleQueue}
+                title={queued ? "Remove from print queue" : "Add to print queue"}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm transition-colors ${
+                  queued
+                    ? "bg-sky-950/60 border-sky-800 text-sky-400 hover:bg-sky-900/60"
+                    : "bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <Printer size={14} />
+                {queued ? "Queued" : "Queue"}
+              </button>
+              <button
+                onClick={togglePrinted}
+                title={printedAt ? "Un-mark as printed" : "Mark as printed"}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm transition-colors ${
+                  printedAt
+                    ? "bg-emerald-950/60 border-emerald-800 text-emerald-400 hover:bg-emerald-900/60"
+                    : "bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <Check size={14} />
+                {printedAt ? "Printed" : "Mark printed"}
+              </button>
               <button
                 onClick={toggleNSFW}
                 title={nsfw ? "Mark as SFW" : "Mark as NSFW"}

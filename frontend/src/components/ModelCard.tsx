@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Package, Star, AlertCircle, Check, Layers } from "lucide-react";
+import { Package, Star, AlertCircle, Check, Layers, Printer } from "lucide-react";
 import { Model, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 
@@ -35,6 +35,9 @@ export default function ModelCard({ model, selected = false, onSelect, backTo }:
   const { showNSFW } = useNSFW();
   const [nsfw, setNsfw] = useState(model.nsfw);
 
+  const [favorite, setFavorite] = useState(model.is_favorite);
+  const [queued, setQueued] = useState(model.in_queue);
+
   const variantCount = model.variant_count ?? 1;
   const isGroup = variantCount > 1;
 
@@ -44,6 +47,22 @@ export default function ModelCard({ model, selected = false, onSelect, backTo }:
     const next = !nsfw;
     setNsfw(next);
     await api.models.setNSFW(model.id, next);
+  };
+
+  const toggleFavorite = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const next = !favorite;
+    setFavorite(next);
+    await api.models.setFavorite(model.id, next);
+  };
+
+  const toggleQueue = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const next = !queued;
+    setQueued(next);
+    await api.models.setQueue(model.id, next);
   };
 
   const handleSelect = (e: React.MouseEvent) => {
@@ -150,11 +169,40 @@ export default function ModelCard({ model, selected = false, onSelect, backTo }:
           )}
         </div>
 
-        {model.source_site && (
-          <span className="absolute top-2 right-2 bg-black/70 text-xs px-1.5 py-0.5 rounded text-gray-300">
-            {SITE_LABELS[model.source_site] ?? model.source_site}
-          </span>
-        )}
+        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+          {model.source_site && (
+            <span className="bg-black/70 text-xs px-1.5 py-0.5 rounded text-gray-300">
+              {SITE_LABELS[model.source_site] ?? model.source_site}
+            </span>
+          )}
+          {/* Favorite + queue toggles — only on individual models, not groups */}
+          {!isGroup && (
+            <div className="flex gap-1">
+              <button
+                onClick={toggleQueue}
+                title={queued ? "Remove from print queue" : "Add to print queue"}
+                className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
+                  queued
+                    ? "text-sky-400 opacity-100"
+                    : "text-gray-400 hover:text-sky-300 opacity-0 group-hover:opacity-100"
+                }`}
+              >
+                <Printer size={13} />
+              </button>
+              <button
+                onClick={toggleFavorite}
+                title={favorite ? "Remove from favorites" : "Add to favorites"}
+                className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
+                  favorite
+                    ? "text-yellow-400 opacity-100"
+                    : "text-gray-400 hover:text-yellow-300 opacity-0 group-hover:opacity-100"
+                }`}
+              >
+                <Star size={13} fill={favorite ? "currentColor" : "none"} />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="p-3 flex flex-col gap-1.5 flex-1">

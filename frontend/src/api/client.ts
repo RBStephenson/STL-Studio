@@ -23,6 +23,10 @@ export interface Model {
   category: string | null;
   needs_review: boolean;
   nsfw: boolean;
+  is_favorite: boolean;
+  in_queue: boolean;
+  queued_at: string | null;
+  printed_at: string | null;
   thumbnail_path: string | null;
   thumbnail_url: string | null;
   image_paths: string[];
@@ -38,6 +42,9 @@ export interface ModelStats {
   total: number;
   needs_review: number;
   no_thumbnail: number;
+  favorites: number;
+  queued: number;
+  printed: number;
 }
 
 export interface STLFile {
@@ -132,6 +139,24 @@ export const api = {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nsfw }),
+      }),
+    setFavorite: (id: number, is_favorite: boolean) =>
+      request<{ ok: boolean; is_favorite: boolean }>(`/models/${id}/favorite`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_favorite }),
+      }),
+    setQueue: (id: number, in_queue: boolean) =>
+      request<{ ok: boolean; in_queue: boolean }>(`/models/${id}/queue`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ in_queue }),
+      }),
+    setPrinted: (id: number, printed: boolean) =>
+      request<{ ok: boolean; printed_at: string | null }>(`/models/${id}/printed`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ printed }),
       }),
     bulkTag: (ids: number[], addTags: string[], removeTags: string[]) =>
       request<{ ok: boolean; updated: number }>("/models/bulk", {

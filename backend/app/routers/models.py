@@ -24,6 +24,10 @@ def list_models(
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
     nsfw: bool | None = None,
+    is_favorite: bool | None = None,
+    in_queue: bool | None = None,
+    printed: bool | None = None,
+    sort: str = Query("name"),  # "name" | "queued_at" | "printed_at"
     group_variants: bool = Query(True),
     db: Session = Depends(get_db),
 ):
@@ -62,6 +66,14 @@ def list_models(
         q = q.filter(Model.needs_review == needs_review)
     if nsfw is not None:
         q = q.filter(Model.nsfw == nsfw)
+    if is_favorite is not None:
+        q = q.filter(Model.is_favorite == is_favorite)
+    if in_queue is not None:
+        q = q.filter(Model.in_queue == in_queue)
+    if printed is True:
+        q = q.filter(Model.printed_at != None)
+    if printed is False:
+        q = q.filter(Model.printed_at == None)
 
     # Variant grouping: collapse multi-variant characters to one representative card.
     # The representative is the variant with a thumbnail (earliest ID), else the
@@ -86,7 +98,14 @@ def list_models(
             q = q.filter(~Model.id.in_(non_reps))
 
     total = q.count()
-    items = q.order_by(Model.character, Model.name).offset((page - 1) * page_size).limit(page_size).all()
+    if sort == "queued_at":
+        order = Model.queued_at.asc()
+    elif sort == "printed_at":
+        order = Model.printed_at.desc()
+    else:
+        order = (Model.character, Model.name)
+    order_cols = order if isinstance(order, tuple) else (order,)
+    items = q.order_by(*order_cols).offset((page - 1) * page_size).limit(page_size).all()
 
     # Build variant count map for annotating group representatives
     vc_map: dict[tuple[int, str], int] = {}
@@ -136,7 +155,13 @@ def model_stats(db: Session = Depends(get_db)):
     no_thumbnail = db.query(func.count(Model.id)).filter(
         Model.thumbnail_path == None, Model.thumbnail_url == None
     ).scalar()
-    return {"total": total, "needs_review": needs_review, "no_thumbnail": no_thumbnail}
+    favorites = db.query(func.count(Model.id)).filter(Model.is_favorite == True).scalar()
+    queued = db.query(func.count(Model.id)).filter(Model.in_queue == True).scalar()
+    printed = db.query(func.count(Model.id)).filter(Model.printed_at != None).scalar()
+    return {
+        "total": total, "needs_review": needs_review, "no_thumbnail": no_thumbnail,
+        "favorites": favorites, "queued": queued, "printed": printed,
+    }
 
 
 @router.get("/tags/all")
@@ -261,6 +286,47 @@ def set_thumbnail(model_id: int, body: dict, db: Session = Depends(get_db)):
         model.thumbnail_url = body["thumbnail_url"] or None
     db.commit()
     return {"ok": True}
+
+
+@router.patch("/{model_id}/favorite")
+def set_favorite(model_id: int, body: dict, db: Session = Depends(get_db)):
+    """Toggle a model's favorite flag. Body: {"is_favorite": bool}."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    model.is_favorite = bool(body.get("is_favorite"))
+    db.commit()
+    return {"ok": True, "is_favorite": model.is_favorite}
+
+
+@router.patch("/{model_id}/queue")
+def set_queue(model_id: int, body: dict, db: Session = Depends(get_db)):
+    """Add/remove a model from the print queue. Body: {"in_queue": bool}."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    in_queue = bool(body.get("in_queue"))
+    model.in_queue = in_queue
+    model.queued_at = datetime.utcnow() if in_queue else None
+    db.commit()
+    return {"ok": True, "in_queue": model.in_queue}
+
+
+@router.patch("/{model_id}/printed")
+def set_printed(model_id: int, body: dict, db: Session = Depends(get_db)):
+    """Mark a model printed (clears the queue) or un-mark it. Body: {"printed": bool}."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    if bool(body.get("printed")):
+        model.printed_at = datetime.utcnow()
+        # Marking printed removes it from the active queue.
+        model.in_queue = False
+        model.queued_at = None
+    else:
+        model.printed_at = None
+    db.commit()
+    return {"ok": True, "printed_at": model.printed_at}
 
 
 @router.get("/{model_id}", response_model=ModelDetail)

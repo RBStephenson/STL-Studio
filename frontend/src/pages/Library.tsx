@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus } from "lucide-react";
+import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer } from "lucide-react";
 import { api, Model, Creator, ModelStats } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
@@ -96,6 +96,8 @@ export default function Library() {
   const needsReview  = searchParams.get("needs_review") === "1";
   const nsfwParam    = searchParams.get("nsfw") ?? "";        // "" | "1" | "0"
   const thumbParam   = searchParams.get("has_thumbnail") ?? ""; // "" | "1" | "0"
+  const favParam     = searchParams.get("is_favorite") === "1";
+  const queueParam   = searchParams.get("in_queue") === "1";
 
   const setParam = (key: string, value: string) => {
     setSearchParams((prev) => {
@@ -135,7 +137,11 @@ export default function Library() {
   const fetchModels = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, string | number | boolean> = { page, page_size: PAGE_SIZE, group_variants: true };
+      // Variant grouping collapses non-representative variants. When filtering by
+      // favorites/queue (which apply to individual variants), disable grouping so a
+      // favorited/queued non-representative variant isn't hidden behind its group.
+      const groupVariants = !favParam && !queueParam;
+      const params: Record<string, string | number | boolean> = { page, page_size: PAGE_SIZE, group_variants: groupVariants };
       if (search)      params.q             = search;
       if (creatorId)   params.creator_id    = creatorId;
       if (site)        params.source_site   = site;
@@ -143,13 +149,15 @@ export default function Library() {
       if (needsReview) params.needs_review  = true;
       if (nsfwParam)   params.nsfw          = nsfwParam === "1";
       if (thumbParam)  params.has_thumbnail = thumbParam === "1";
+      if (favParam)    params.is_favorite   = true;
+      if (queueParam)  params.in_queue      = true;
       const data = await api.models.list(params);
       setModels(data.items);
       setTotal(data.total);
     } finally {
       setLoading(false);
     }
-  }, [page, search, creatorId, site, activeTag, needsReview, nsfwParam, thumbParam]);
+  }, [page, search, creatorId, site, activeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.models.creators().then(setCreators).catch(() => {}); }, []);
@@ -172,7 +180,7 @@ export default function Library() {
   }, [savingPreset]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
-  const hasFilters = !!(creatorId || site || activeTag || needsReview || nsfwParam || thumbParam);
+  const hasFilters = !!(creatorId || site || activeTag || needsReview || nsfwParam || thumbParam || favParam || queueParam);
 
   const visibleTags = allTags.filter(({ tag }) =>
     !tagSearch || tag.includes(tagSearch.toLowerCase())
@@ -240,6 +248,32 @@ export default function Library() {
               >
                 <AlertCircle size={11} />
                 {stats.needs_review} need review
+              </button>
+            )}
+            {stats && stats.favorites > 0 && (
+              <button
+                onClick={() => setParam("is_favorite", favParam ? "" : "1")}
+                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
+                  favParam
+                    ? "bg-yellow-500 text-yellow-950 font-medium"
+                    : "bg-yellow-950/50 text-yellow-400 hover:bg-yellow-900/50"
+                }`}
+              >
+                <Star size={11} fill="currentColor" />
+                {stats.favorites} favorites
+              </button>
+            )}
+            {stats && stats.queued > 0 && (
+              <button
+                onClick={() => setParam("in_queue", queueParam ? "" : "1")}
+                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
+                  queueParam
+                    ? "bg-sky-500 text-sky-950 font-medium"
+                    : "bg-sky-950/50 text-sky-400 hover:bg-sky-900/50"
+                }`}
+              >
+                <Printer size={11} />
+                {stats.queued} queued
               </button>
             )}
           </div>

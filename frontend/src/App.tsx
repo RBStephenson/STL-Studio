@@ -4,6 +4,7 @@ import Library from "./pages/Library";
 import ModelDetail from "./pages/ModelDetail";
 import Creators from "./pages/Creators";
 import Collections from "./pages/Collections";
+import Queue from "./pages/Queue";
 import Triage from "./pages/Triage";
 import VariantGroup from "./pages/VariantGroup";
 import Settings from "./pages/Settings";
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="/groups/:creatorId/:character" element={<VariantGroup />} />
           <Route path="/creators" element={<Creators />} />
           <Route path="/collections" element={<Collections />} />
+          <Route path="/queue" element={<Queue />} />
           <Route path="/triage" element={<Triage />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>

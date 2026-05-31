@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Box, FolderOpen, Users, LayoutGrid, EyeOff, Eye, AlertTriangle, Settings } from "lucide-react";
+import { Box, FolderOpen, Users, LayoutGrid, EyeOff, Eye, AlertTriangle, Settings, Printer } from "lucide-react";
 import { useNSFW } from "../context/NSFWContext";
 import { api } from "../api/client";
 
@@ -8,15 +8,20 @@ export default function Navbar() {
   const { pathname } = useLocation();
   const { showNSFW, toggle } = useNSFW();
   const [reviewCount, setReviewCount] = useState<number | null>(null);
+  const [queueCount, setQueueCount] = useState<number | null>(null);
 
   useEffect(() => {
-    api.models.stats().then(s => setReviewCount(s.needs_review)).catch(() => {});
+    api.models.stats().then(s => {
+      setReviewCount(s.needs_review);
+      setQueueCount(s.queued);
+    }).catch(() => {});
   }, []);
 
   const links = [
     { to: "/",            label: "Library",     icon: LayoutGrid,    badge: null },
     { to: "/creators",    label: "Creators",    icon: Users,         badge: null },
     { to: "/collections", label: "Collections", icon: FolderOpen,    badge: null },
+    { to: "/queue",       label: "Queue",       icon: Printer,       badge: queueCount },
     { to: "/triage",      label: "Triage",      icon: AlertTriangle, badge: reviewCount },
     { to: "/settings",   label: "Settings",    icon: Settings,      badge: null },
   ];
