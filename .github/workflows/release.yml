@@ -1,75 +1,68 @@
-name: Build & Release
+name: Release
 
+# Two ways to release:
+#   1. Actions tab -> "Release" -> Run workflow -> pick patch/minor/major.
+#      Computes the next version, creates+pushes the tag, then builds & publishes.
+#   2. Push a tag manually (git tag v1.2.3 && git push origin v1.2.3).
 on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
   push:
     tags:
       - "v*"
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact: stl-inventory.exe
-            label: windows
-          - os: macos-latest
-            artifact: stl-inventory
-            label: macos
-          - os: ubuntu-latest
-            artifact: stl-inventory
-            label: linux
-
-    runs-on: ${{ matrix.os }}
-
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to create and push the new tag
+    outputs:
+      tag: ${{ steps.compute.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # ---- Build React frontend ----
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+          fetch-depth: 0   # need all tags to compute the next version
 
-      - name: Install frontend deps
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-
-      # ---- Build Python executable ----
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install backend deps + PyInstaller
-        working-directory: backend
-        run: pip install -r requirements.txt pyinstaller
-
-      - name: Build executable
-        run: pyinstaller packaging/stl-inventory.spec --distpath dist-standalone
-
-      # ---- Rename artifact with platform label ----
-      - name: Rename artifact (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: Compute tag
+        id: compute
         run: |
-          mv dist-standalone/stl-inventory.exe dist-standalone/stl-inventory-${{ matrix.label }}.exe
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Triggered by a manual tag push — just use it.
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "Using pushed tag ${GITHUB_REF_NAME}"
+            exit 0
+          fi
 
-      - name: Rename artifact (Unix)
-        if: matrix.os != 'windows-latest'
-        run: |
-          mv dist-standalone/stl-inventory dist-standalone/stl-inventory-${{ matrix.label }}
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          latest=${latest:-v0.0.0}
+          ver=${latest#v}
+          IFS=. read -r major minor patch <<< "$ver"
+          case "${{ inputs.bump }}" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            patch) patch=$((patch+1)) ;;
+          esac
+          newtag="v${major}.${minor}.${patch}"
+          echo "Latest tag: ${latest} -> new tag: ${newtag}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$newtag" -m "Release $newtag"
+          git push origin "$newtag"
+          echo "tag=$newtag" >> "$GITHUB_OUTPUT"
 
-      # ---- Upload to GitHub Release ----
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist-standalone/stl-inventory-${{ matrix.label }}*
-          generate_release_notes: true
+  release:
+    needs: version
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: write
+    with:
+      release: true
+      tag: ${{ needs.version.outputs.tag }}
+      ref: ${{ needs.version.outputs.tag }}

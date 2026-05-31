@@ -110,6 +110,20 @@ Or rebuild both at once:
 docker compose build && docker compose up -d
 ```
 
+## Releasing
+
+Standalone executables (Windows/macOS/Linux) are built by GitHub Actions.
+
+**One-click release:** Go to the **Actions** tab → **Release** → **Run workflow**, pick
+`patch`/`minor`/`major`. It computes the next version, creates the tag, and builds +
+publishes a GitHub Release with auto-generated notes.
+
+**Manual tag** (alternative): `git tag v1.2.3 && git push origin v1.2.3` triggers the
+same build.
+
+Every PR to `main` runs **Build Check**, which compiles all three platform binaries
+(without releasing) so packaging breaks are caught before merge.
+
 ## Ports
 
 | Service | Port |

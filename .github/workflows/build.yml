@@ -1,0 +1,97 @@
+name: Build
+
+# Reusable build of the standalone executables for all three platforms.
+# Called by release.yml (publishes a Release) and build-check.yml (CI only).
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: "Publish artifacts to a GitHub Release"
+        type: boolean
+        default: false
+      tag:
+        description: "Release tag to publish under (required when release=true)"
+        type: string
+        default: ""
+      ref:
+        description: "Git ref to build (defaults to the triggering ref)"
+        type: string
+        default: ""
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+          - os: macos-latest
+            label: macos
+          - os: ubuntu-latest
+            label: linux
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write   # needed for the Release upload step
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      # ---- Build React frontend ----
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      # ---- Build Python executable ----
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend deps + PyInstaller
+        working-directory: backend
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build executable
+        run: pyinstaller packaging/stl-inventory.spec --distpath dist-standalone
+
+      # ---- Rename artifact with platform label ----
+      - name: Rename artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        run: mv dist-standalone/stl-inventory.exe dist-standalone/stl-inventory-${{ matrix.label }}.exe
+
+      - name: Rename artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        run: mv dist-standalone/stl-inventory dist-standalone/stl-inventory-${{ matrix.label }}
+
+      # ---- Publish (release) OR keep as CI artifact (build-check) ----
+      - name: Upload to Release
+        if: ${{ inputs.release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: dist-standalone/stl-inventory-${{ matrix.label }}*
+          generate_release_notes: true
+
+      - name: Upload build artifact
+        if: ${{ !inputs.release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: stl-inventory-${{ matrix.label }}
+          path: dist-standalone/stl-inventory-${{ matrix.label }}*
+          retention-days: 7
