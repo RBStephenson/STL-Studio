@@ -11,6 +11,18 @@ interface Props {
 
 const SITES = ["myminifactory", "gumroad", "cults3d", "printables", "thingiverse", "thangs", "makerworld", "patreon", "other"];
 
+// Defined at module scope (NOT inside the component) so its identity is stable
+// across renders. Defining it inside would create a new component type on every
+// keystroke, remounting the inputs and dropping focus after each character.
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</label>
+      {children}
+    </div>
+  );
+}
+
 export default function MetadataEditor({ model, onSaved, onCancel }: Props) {
   const [form, setForm] = useState({
     title:         model.title        ?? "",
@@ -84,13 +96,6 @@ export default function MetadataEditor({ model, onSaved, onCancel }: Props) {
     }));
     setScraped(null);
   };
-
-  const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</label>
-      {children}
-    </div>
-  );
 
   const inputClass =
     "bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors";
