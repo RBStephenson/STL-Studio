@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ScanRoot, Creator
-from app.schemas import ScanStatus
+from app.schemas import ScanStatus, ScanRootCreate
 from app.services import scanner
 from app.config import settings
 
@@ -121,8 +121,8 @@ def list_roots(db: Session = Depends(get_db)):
 
 
 @router.post("/roots")
-def add_root(body: dict, db: Session = Depends(get_db)):
-    path = (body.get("path") or "").strip()
+def add_root(body: ScanRootCreate, db: Session = Depends(get_db)):
+    path = body.path.strip()
     if not path:
         raise HTTPException(status_code=400, detail="Path is required")
     existing = db.query(ScanRoot).filter(ScanRoot.path == path).first()

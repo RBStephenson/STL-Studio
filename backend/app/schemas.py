@@ -97,5 +97,62 @@ class CollectionRead(CollectionBase):
     model_count: Optional[int] = 0
     created_at: datetime
 
+
+# ---------------------------------------------------------------------------
+# Request bodies
+# ---------------------------------------------------------------------------
+
+class ModelUpdate(BaseModel):
+    """Partial update — only the fields actually sent are applied."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    notes: Optional[str] = None
+    source_url: Optional[str] = None
+    source_site: Optional[str] = None
+    license: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[list[str]] = None
+    custom_attributes: Optional[dict] = None
+    nsfw: Optional[bool] = None
+    needs_review: Optional[bool] = None
+    thumbnail_url: Optional[str] = None
+    creator_name: Optional[str] = None
+
+
+class ThumbnailUpdate(BaseModel):
+    thumbnail_path: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+
+
+class FavoriteUpdate(BaseModel):
+    is_favorite: bool
+
+
+class QueueUpdate(BaseModel):
+    in_queue: bool
+
+
+class PrintedUpdate(BaseModel):
+    printed: bool
+
+
+class STLFileUpdate(BaseModel):
+    part_type: Optional[str] = None
+
+
+class BulkTagUpdate(BaseModel):
+    ids: list[int]
+    add_tags: list[str] = []
+    remove_tags: list[str] = []
+
+
+class ScanRootCreate(BaseModel):
+    path: str
+
+
+class DownloadZipRequest(BaseModel):
+    file_ids: list[int]
+    zip_name: str = "kit-build"
+
     class Config:
         from_attributes = True
