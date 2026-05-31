@@ -90,4 +90,5 @@ jobs:
       - name: Publish the draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}   # this job has no checkout; tell gh the repo
         run: gh release edit "${{ needs.version.outputs.tag }}" --draft=false
