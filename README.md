@@ -2,6 +2,12 @@
 
 Local web app for cataloguing, browsing, and managing a large STL file library (12,500+ models).
 
+📖 **User documentation:** see the **[docs/](docs/README.md)** folder —
+[Getting Started](docs/getting-started.md) ·
+[Feature Guide](docs/features.md) ·
+[Scanning & Folder Structure](docs/scanning-and-folders.md) ·
+[Troubleshooting](docs/troubleshooting.md).
+
 ## Installation
 
 ### Standalone (recommended for most users — no Docker needed)
