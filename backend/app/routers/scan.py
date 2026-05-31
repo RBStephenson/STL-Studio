@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ScanRoot
+from app.models import ScanRoot, Creator
 from app.schemas import ScanStatus
 from app.services import scanner
 from app.config import settings
@@ -24,6 +24,25 @@ def start_scan(db: Session = Depends(get_db)):
     thread.start()
 
     return ScanStatus(running=True, message="scan started")
+
+
+@router.post("/creator/{creator_id}", response_model=ScanStatus)
+def start_creator_scan(creator_id: int, db: Session = Depends(get_db)):
+    """Rescan a single creator's folder(s), in addition to the full scan."""
+    status = scanner.get_status()
+    if status["running"]:
+        raise HTTPException(status_code=409, detail="Scan already running")
+
+    creator = db.query(Creator).filter(Creator.id == creator_id).first()
+    if not creator:
+        raise HTTPException(status_code=404, detail="Creator not found")
+
+    thread = threading.Thread(
+        target=scanner.scan_creator, args=(creator_id,), daemon=True
+    )
+    thread.start()
+
+    return ScanStatus(running=True, message=f"scanning {creator.name}")
 
 
 @router.post("/cancel")

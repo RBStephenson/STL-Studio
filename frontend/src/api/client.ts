@@ -190,6 +190,8 @@ export const api = {
   },
   scan: {
     start: () => request<ScanStatus>("/scan/start", { method: "POST" }),
+    startCreator: (creatorId: number) =>
+      request<ScanStatus>(`/scan/creator/${creatorId}`, { method: "POST" }),
     cancel: () => request<{ ok: boolean }>("/scan/cancel", { method: "POST" }),
     status: () => request<ScanStatus>("/scan/status"),
     roots: () => request<ScanRoot[]>("/scan/roots"),

@@ -108,6 +108,92 @@ def scan_all_roots(db: Session | None = None):
         _scan_lock.release()
 
 
+def _creator_dirs_for(creator: Creator, db: Session) -> list[tuple[Path, dict]]:
+    """Resolve the on-disk top-level folder(s) for a creator from its indexed
+    models — the path segment that sits directly under a scan root. A creator
+    normally maps to one folder, but we handle several defensively."""
+    roots = [Path(r.path) for r in db.query(ScanRoot).filter(ScanRoot.enabled == True).all()]
+    boundaries: set[Path] = set()
+    for (fp,) in db.query(Model.folder_path).filter(Model.creator_id == creator.id):
+        if not fp:
+            continue
+        p = Path(fp)
+        for root in roots:
+            try:
+                rel = p.relative_to(root)
+            except ValueError:
+                continue
+            if rel.parts:
+                boundaries.add(root / rel.parts[0])
+            break
+
+    result: list[tuple[Path, dict]] = []
+    for d in sorted(boundaries):
+        if d.exists():
+            meta = orynt3d_parser.parse_creator_config(str(d)) or {}
+            result.append((d, meta))
+    return result
+
+
+def scan_creator(creator_id: int):
+    """Rescan a single creator's folder(s) — a targeted alternative to a full scan.
+    Runs single-threaded (one creator) and forces a full reindex so newly added
+    or changed models under that creator are picked up."""
+    global _cancel_requested
+    if not _scan_lock.acquire(blocking=False):
+        return
+    _cancel_requested = False
+    _scan_state.update(running=True, message="starting", models_found=0, files_found=0, cancelled=False)
+    try:
+        db = SessionLocal()
+        try:
+            creator = db.get(Creator, creator_id)
+            if not creator:
+                _scan_state["message"] = "creator not found"
+                return
+
+            # Clear stale needs_review on this creator's already-indexed models.
+            db.execute(_sqltext(
+                """
+                UPDATE models SET needs_review = 0
+                WHERE needs_review = 1 AND creator_id = :cid
+                  AND (orynt3d_parsed = 1 OR id IN (SELECT DISTINCT model_id FROM stl_files))
+                """
+            ), {"cid": creator_id})
+            db.commit()
+
+            dirs = _creator_dirs_for(creator, db)
+            if not dirs:
+                _scan_state["message"] = "no folders found for creator"
+                return
+
+            for creator_dir, meta in dirs:
+                if _cancel_requested:
+                    _scan_state["message"] = "cancelled"
+                    _scan_state["cancelled"] = True
+                    break
+                with _state_lock:
+                    _scan_state["message"] = f"scanning {creator_dir.name}"
+                _walk_for_models(
+                    folder=creator_dir,
+                    creator=creator,
+                    inherited=meta,
+                    db=db,
+                    creator_boundary=creator_dir,
+                    character=None,
+                    stl_cache={},
+                    last_scanned=None,  # full reindex of this creator
+                )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.exception(f"Creator scan failed: {e}")
+        _scan_state["message"] = f"error: {e}"
+    finally:
+        _scan_state["running"] = False
+        _scan_lock.release()
+
+
 def _scan_root(root: ScanRoot, db: Session):
     root_path = Path(root.path)
     if not root_path.exists():
