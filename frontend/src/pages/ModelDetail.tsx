@@ -8,6 +8,7 @@ import ImagePicker from "../components/ImagePicker";
 import MetadataEditor from "../components/MetadataEditor";
 import KitBuilder from "../components/KitBuilder";
 import { useNSFW } from "../context/NSFWContext";
+import { useToast } from "../context/ToastContext";
 
 const PART_TYPE_SUGGESTIONS = [
   "head", "torso", "body",
@@ -25,6 +26,7 @@ export default function ModelDetail() {
   const location = useLocation();
   const backTo = (location.state as any)?.from ?? "/";
   const { showNSFW } = useNSFW();
+  const { toast } = useToast();
   const [model, setModel] = useState<ModelDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState<string | null>(null);
@@ -108,6 +110,7 @@ export default function ModelDetail() {
       await api.models.setNSFW(Number(id), next);
     } catch {
       setNsfw(!next);  // revert on failure
+      toast("Couldn't update NSFW flag — try again.", "error");
     }
   };
 
@@ -118,6 +121,7 @@ export default function ModelDetail() {
       await api.models.setFavorite(Number(id), next);
     } catch {
       setFavorite(!next);  // revert on failure
+      toast("Couldn't update favorite — try again.", "error");
     }
   };
 
@@ -128,6 +132,7 @@ export default function ModelDetail() {
       await api.models.setQueue(Number(id), next);
     } catch {
       setQueued(!next);  // revert on failure
+      toast("Couldn't update the print queue — try again.", "error");
     }
   };
 
@@ -142,6 +147,7 @@ export default function ModelDetail() {
     } catch {
       setPrintedAt(prevPrinted);  // revert both on failure
       setQueued(prevQueued);
+      toast("Couldn't update printed status — try again.", "error");
     }
   };
 

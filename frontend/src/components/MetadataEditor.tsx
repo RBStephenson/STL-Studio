@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Save, X, Loader2, Download, CheckCircle, AlertCircle } from "lucide-react";
 import { api, ModelDetail, ScrapePreview } from "../api/client";
 import TagInput from "./TagInput";
+import { useToast } from "../context/ToastContext";
 
 interface Props {
   model: ModelDetail;
@@ -44,6 +45,7 @@ export default function MetadataEditor({ model, onSaved, onCancel }: Props) {
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [scraped, setScraped] = useState<ScrapePreview | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     api.models.tags().then(setTagSuggestions).catch(() => {});
@@ -57,9 +59,11 @@ export default function MetadataEditor({ model, onSaved, onCancel }: Props) {
     setError(null);
     try {
       await api.models.update(model.id, form);
+      toast("Saved", "success");
       onSaved();
     } catch (e: any) {
       setError(e.message);
+      toast("Couldn't save changes.", "error");
     } finally {
       setSaving(false);
     }

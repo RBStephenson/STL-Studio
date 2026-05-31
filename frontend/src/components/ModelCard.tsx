@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Package, Star, AlertCircle, Check, Layers, Printer } from "lucide-react";
 import { Model, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
+import { useToast } from "../context/ToastContext";
 
 interface Props {
   model: Model;
@@ -36,6 +37,7 @@ const TAG_COLORS: Record<string, string> = {
 export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate }: Props) {
   const location = useLocation();
   const { showNSFW } = useNSFW();
+  const { toast } = useToast();
   const [nsfw, setNsfw] = useState(model.nsfw);
 
   const [favorite, setFavorite] = useState(model.is_favorite);
@@ -53,6 +55,7 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
       await api.models.setNSFW(model.id, next);
     } catch {
       setNsfw(!next);  // revert on failure
+      toast("Couldn't update NSFW flag — try again.", "error");
     }
   };
 
@@ -66,6 +69,7 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
       onMutate?.();
     } catch {
       setFavorite(!next);  // revert on failure
+      toast("Couldn't update favorite — try again.", "error");
     }
   };
 
@@ -79,6 +83,7 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
       onMutate?.();
     } catch {
       setQueued(!next);  // revert on failure
+      toast("Couldn't update the print queue — try again.", "error");
     }
   };
 
