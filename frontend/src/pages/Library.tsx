@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer } from "lucide-react";
+import { useSearchParams, Link } from "react-router-dom";
+import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, FolderPlus, ArrowRight } from "lucide-react";
 import { api, Model, Creator, ModelStats } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
@@ -131,6 +131,8 @@ export default function Library() {
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
   const presetInputRef = useRef<HTMLInputElement>(null);
+  // null = unknown/loading; number = how many scan folders are configured
+  const [scanRootCount, setScanRootCount] = useState<number | null>(null);
 
   const scrollRestoredRef = useRef(false);
 
@@ -160,6 +162,7 @@ export default function Library() {
   }, [page, search, creatorId, site, activeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
+  useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);
   useEffect(() => { api.models.creators().then(setCreators).catch(() => {}); }, []);
   useEffect(() => { api.models.stats().then(setStats).catch(() => {}); }, []);
   useEffect(() => { api.models.tags().then(setAllTags).catch(() => {}); }, []);
@@ -231,6 +234,31 @@ export default function Library() {
 
   return (
     <div className="p-6">
+      {/* First-run onboarding: no scan folders configured yet */}
+      {scanRootCount === 0 && (
+        <div className="mb-6 rounded-xl border border-indigo-700/60 bg-indigo-950/40 p-5">
+          <div className="flex items-start gap-4">
+            <div className="rounded-lg bg-indigo-600/20 p-2.5 text-indigo-300 shrink-0">
+              <FolderPlus size={22} />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-semibold text-gray-100">Welcome to STL Inventory 👋</h2>
+              <p className="text-sm text-gray-400 mt-1">
+                No folders are set up yet. Tell the app where your STL files live, then run a
+                scan to build your library.
+              </p>
+              <Link
+                to="/settings"
+                className="inline-flex items-center gap-1.5 mt-3 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+              >
+                Add your STL folder in Settings
+                <ArrowRight size={15} />
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
