@@ -197,33 +197,38 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
               {SITE_LABELS[model.source_site] ?? model.source_site}
             </span>
           )}
-          {/* Favorite + queue toggles — only on individual models, not groups */}
-          {!isGroup && (
-            <div className="flex gap-1">
-              <button
-                onClick={toggleQueue}
-                title={queued ? "Remove from print queue" : "Add to print queue"}
-                className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
-                  queued
-                    ? "text-sky-400 opacity-100"
-                    : "text-gray-400 hover:text-sky-300 opacity-0 group-hover:opacity-100"
-                }`}
-              >
-                <Printer size={13} />
-              </button>
-              <button
-                onClick={toggleFavorite}
-                title={favorite ? "Remove from favorites" : "Add to favorites"}
-                className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
-                  favorite
-                    ? "text-yellow-400 opacity-100"
-                    : "text-gray-400 hover:text-yellow-300 opacity-0 group-hover:opacity-100"
-                }`}
-              >
-                <Star size={13} fill={favorite ? "currentColor" : "none"} />
-              </button>
-            </div>
-          )}
+          {/* Favorite + queue toggles. On a variant group these act on the
+              representative variant (model.id) — flag the model for printing now,
+              pick the specific variant later from the group page. The actions
+              also remain available on each individual variant. */}
+          <div className="flex gap-1">
+            <button
+              onClick={toggleQueue}
+              title={
+                isGroup
+                  ? queued ? "Remove model from print queue" : "Add model to print queue (pick variant later)"
+                  : queued ? "Remove from print queue" : "Add to print queue"
+              }
+              className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
+                queued
+                  ? "text-sky-400 opacity-100"
+                  : "text-gray-400 hover:text-sky-300 opacity-0 group-hover:opacity-100"
+              }`}
+            >
+              <Printer size={13} />
+            </button>
+            <button
+              onClick={toggleFavorite}
+              title={favorite ? "Remove from favorites" : "Add to favorites"}
+              className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
+                favorite
+                  ? "text-yellow-400 opacity-100"
+                  : "text-gray-400 hover:text-yellow-300 opacity-0 group-hover:opacity-100"
+              }`}
+            >
+              <Star size={13} fill={favorite ? "currentColor" : "none"} />
+            </button>
+          </div>
         </div>
       </div>
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer } from "lucide-react";
-import { api, ModelDetail as ModelDetailType } from "../api/client";
+import { ArrowLeft, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers } from "lucide-react";
+import { api, Model, ModelDetail as ModelDetailType } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 import STLViewer from "../components/STLViewer";
 import ImagePicker from "../components/ImagePicker";
@@ -28,6 +28,7 @@ export default function ModelDetail() {
   const { showNSFW } = useNSFW();
   const { toast } = useToast();
   const [model, setModel] = useState<ModelDetailType | null>(null);
+  const [variants, setVariants] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [showFindOnWeb, setShowFindOnWeb] = useState(false);
@@ -164,6 +165,19 @@ export default function ModelDetail() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Fetch sibling variants for the variant switcher. Keyed on the (creator,
+  // character) group so navigating between siblings doesn't refetch needlessly.
+  useEffect(() => {
+    if (model?.creator_id && model.character) {
+      api.models
+        .variants(model.creator_id, model.character)
+        .then((data) => setVariants(data.items))
+        .catch(() => setVariants([]));
+    } else {
+      setVariants([]);
+    }
+  }, [model?.creator_id, model?.character]);
 
   if (loading) return <div className="p-8 text-gray-500 animate-pulse">Loading…</div>;
   if (!model) return <div className="p-8 text-gray-500">Model not found.</div>;
@@ -366,6 +380,69 @@ export default function ModelDetail() {
 
           {/* ---- Display mode ---- */}
           {!editing && (<>
+
+          {/* Variant switcher — sibling variants of this character. Lets you pick
+              the specific variant to print after flagging the model at the group. */}
+          {variants.length > 1 && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-gray-600 flex items-center gap-1.5">
+                <Layers size={12} className="text-indigo-400" />
+                {variants.length} variants of {model.character}
+              </p>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {variants.map((v) => {
+                  const vThumb = v.thumbnail_path
+                    ? api.fileUrl(v.thumbnail_path)
+                    : v.thumbnail_url ?? null;
+                  const isCurrent = v.id === model.id;
+                  // For the current variant, reflect live local toggles rather
+                  // than the (possibly stale) value from the variants fetch.
+                  const vFavorite = isCurrent ? favorite : v.is_favorite;
+                  const vQueued = isCurrent ? queued : v.in_queue;
+                  return (
+                    <Link
+                      key={v.id}
+                      to={`/models/${v.id}`}
+                      state={{ from: backTo }}
+                      title={v.title || v.name}
+                      className={`relative shrink-0 w-20 rounded-lg overflow-hidden border-2 transition-colors ${
+                        isCurrent
+                          ? "border-indigo-500"
+                          : "border-gray-800 hover:border-gray-600"
+                      }`}
+                    >
+                      <div className="aspect-square bg-gray-800">
+                        {vThumb ? (
+                          <img src={vThumb} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-700">
+                            <Package size={20} />
+                          </div>
+                        )}
+                      </div>
+                      {(vFavorite || vQueued) && (
+                        <div className="absolute top-1 right-1 flex gap-0.5">
+                          {vQueued && (
+                            <span className="bg-black/70 rounded p-0.5 text-sky-400">
+                              <Printer size={9} />
+                            </span>
+                          )}
+                          {vFavorite && (
+                            <span className="bg-black/70 rounded p-0.5 text-yellow-400">
+                              <Star size={9} fill="currentColor" />
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <p className="px-1 py-0.5 text-[10px] leading-tight text-gray-400 truncate">
+                        {v.title || v.name}
+                      </p>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Stats row */}
           <div className="flex items-center gap-4 text-sm text-gray-400">
