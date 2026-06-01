@@ -9,6 +9,7 @@ export default function Creators() {
   const [enriching, setEnriching] = useState<Creator | null>(null);
   const [search, setSearch] = useState("");
   const [scanningId, setScanningId] = useState<number | null>(null);
+  const [sortBy, setSortBy] = useState<"name" | "models">("name");
 
   const loadCreators = () => api.models.creators().then(setCreators).catch(() => {});
   useEffect(() => { loadCreators(); }, []);
@@ -32,9 +33,13 @@ export default function Creators() {
     }
   };
 
-  const filtered = search
-    ? creators.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
-    : creators;
+  const filtered = creators
+    .filter((c) => !search || c.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) =>
+      sortBy === "name"
+        ? a.name.localeCompare(b.name)
+        : b.model_count - a.model_count
+    );
 
   return (
     <div className="p-6">
@@ -44,13 +49,25 @@ export default function Creators() {
           <h1 className="text-2xl font-bold text-gray-100">Creators</h1>
           <span className="text-sm text-gray-500 ml-1">({creators.length})</span>
         </div>
-        <input
-          type="text"
-          placeholder="Search creators…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-48"
-        />
+        <div className="flex items-center gap-2">
+          <div className="flex rounded border border-gray-700 overflow-hidden text-xs">
+            <button
+              onClick={() => setSortBy("name")}
+              className={`px-3 py-1.5 transition-colors ${sortBy === "name" ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-gray-100 hover:bg-gray-800"}`}
+            >A–Z</button>
+            <button
+              onClick={() => setSortBy("models")}
+              className={`px-3 py-1.5 transition-colors ${sortBy === "models" ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-gray-100 hover:bg-gray-800"}`}
+            >Most models</button>
+          </div>
+          <input
+            type="text"
+            placeholder="Search creators…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-48"
+          />
+        </div>
       </div>
 
       {/* Storefront enrich panel */}
