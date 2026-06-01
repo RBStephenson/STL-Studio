@@ -136,6 +136,25 @@ class TestVariantGrouping:
         assert len(models) == 1
         assert models[0].character is None
 
+    def test_character_pack_splits_into_per_character_models(self, db, tmp_path):
+        """A pack folder whose children are character names (e.g. 'Sinister Six'
+        -> Electro, Sandman, Spiderman) must split per character — not collapse
+        into one model — even when a stray loose STL sits in the pack root."""
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Sinister Six"
+        _stl(pack, "head_new_hair.stl")          # stray loose part in the pack root
+        for char in ("Electro", "Sandman", "Spiderman"):
+            _stl(pack / char / "supported")
+            _stl(pack / char / "unsupported")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert {m.character for m in models} == {"Electro", "Sandman", "Spiderman"}
+        # The pack folder itself must not be indexed as a model.
+        assert "Sinister Six" not in {Path(m.folder_path).name for m in models}
+
 
 # ---------------------------------------------------------------------------
 # Regression: thumbnail discovery must not raise (the stl_cache NameError)

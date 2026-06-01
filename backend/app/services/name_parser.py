@@ -178,12 +178,26 @@ def parse_folder(
 
 
 def children_look_like_parts(child_names: list[str]) -> bool:
+    """True if a folder's child directories look like part/structure sub-folders
+    (head, body, supported, files…) rather than distinct products.
+
+    A child counts as part-like only if it's an explicit part keyword, a
+    structural folder, or a generic non-descriptive token (single/double char or
+    purely numeric, e.g. "A", "01"). It deliberately does NOT count low-confidence
+    proper-noun names: a pack folder whose children are character names (Electro,
+    Kraven, Mysterio…) must recurse into those characters, not collapse into one
+    model.
+    """
     if not child_names:
         return False
-    parts_count = sum(
-        1 for n in child_names
-        if parse(n).is_parts or parse(n).confidence < 0.25
-    )
+
+    def _is_part_like(n: str) -> bool:
+        if parse(n).is_parts or is_structural_folder(n):
+            return True
+        token = n.strip().lower()
+        return len(token) <= 2 or token.isdigit()
+
+    parts_count = sum(1 for n in child_names if _is_part_like(n))
     return parts_count / len(child_names) >= 0.6
 
 
