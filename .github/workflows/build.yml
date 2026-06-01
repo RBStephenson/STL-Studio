@@ -38,13 +38,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
 
       # ---- Build React frontend ----
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: "npm"
@@ -60,7 +60,7 @@ jobs:
 
       # ---- Build Python executable ----
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -85,7 +85,7 @@ jobs:
       #      release mutable so all three platform jobs can attach their binary. ----
       - name: Upload to draft release
         if: ${{ inputs.release }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
           files: dist-standalone/stl-inventory-${{ matrix.label }}*
@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload build artifact
         if: ${{ !inputs.release }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: stl-inventory-${{ matrix.label }}
           path: dist-standalone/stl-inventory-${{ matrix.label }}*

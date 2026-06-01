@@ -25,7 +25,7 @@ jobs:
       tag: ${{ steps.compute.outputs.tag }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0   # need all tags to compute the next version
 
