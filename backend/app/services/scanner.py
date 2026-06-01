@@ -107,6 +107,7 @@ def scan_all_roots(db: Session | None = None):
                 _db.commit()
 
             if not _cancel_requested:
+                _prune_stale_paths(_db)
                 _prune_phantoms(_db)
         finally:
             if own_db:
@@ -117,6 +118,41 @@ def scan_all_roots(db: Session | None = None):
     finally:
         _scan_state["running"] = False
         _scan_lock.release()
+
+
+def _prune_stale_paths(db: Session):
+    """Remove models whose folder_path no longer exists on disk.
+
+    This cleans up orphaned DB rows left behind after a creator folder is
+    renamed (e.g. 'polyminds studios' → 'PolyMind Studios'). The scanner
+    never visits the old path again, so the rows survive the phantom prune.
+    After removal, orphaned Creator rows (no remaining models) are also deleted.
+    """
+    all_models = db.query(Model.id, Model.folder_path, Model.creator_id).all()
+    stale_ids = [m.id for m in all_models if m.folder_path and not Path(m.folder_path).exists()]
+    if not stale_ids:
+        return
+
+    for i in range(0, len(stale_ids), 500):
+        chunk = stale_ids[i:i + 500]
+        db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
+        db.query(ModelTag).filter(ModelTag.model_id.in_(chunk)).delete(synchronize_session=False)
+        db.query(CollectionModel).filter(CollectionModel.model_id.in_(chunk)).delete(synchronize_session=False)
+        db.query(Model).filter(Model.id.in_(chunk)).delete(synchronize_session=False)
+    db.commit()
+    logger.info(f"Post-scan: pruned {len(stale_ids)} models with missing folder paths")
+
+    # Clean up Creator rows that now have no models
+    orphan_creators = (
+        db.query(Creator)
+        .filter(~Creator.id.in_(db.query(Model.creator_id).filter(Model.creator_id != None).distinct()))
+        .all()
+    )
+    if orphan_creators:
+        for c in orphan_creators:
+            db.delete(c)
+        db.commit()
+        logger.info(f"Post-scan: removed {len(orphan_creators)} creator(s) with no remaining models")
 
 
 def _prune_phantoms(db: Session, creator_id: int | None = None):
