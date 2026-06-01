@@ -186,3 +186,20 @@ class TestPrunePhantoms:
         scanner._prune_phantoms(db)        # 3/4 empty -> over the 50% cap
 
         assert db.query(Model).count() == 4   # nothing pruned
+
+    def test_creator_scoped_prune_leaves_other_creators_alone(self, db, tmp_path):
+        c1 = make_creator(db, "C1")
+        c2 = make_creator(db, "C2")
+        # c1 has a phantom; c2 has a phantom that must NOT be touched
+        m1 = Model(name="c1-phantom", folder_path="/x/c1", creator_id=c1.id)
+        m2 = Model(name="c2-phantom", folder_path="/x/c2", creator_id=c2.id)
+        real = Model(name="c1-real", folder_path="/x/c1/real", creator_id=c1.id)
+        db.add_all([m1, m2, real])
+        db.flush()
+        db.add(STLFile(model_id=real.id, path="/x/c1/real/a.stl", filename="a.stl"))
+        db.commit()
+
+        scanner._prune_phantoms(db, creator_id=c1.id)
+
+        names = {m.name for m in db.query(Model).all()}
+        assert names == {"c1-real", "c2-phantom"}

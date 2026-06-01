@@ -107,7 +107,7 @@ def scan_all_roots(db: Session | None = None):
         _scan_lock.release()
 
 
-def _prune_phantoms(db: Session):
+def _prune_phantoms(db: Session, creator_id: int | None = None):
     """Delete models that have no STL files — render/preview/empty folders that
     earlier scanner versions wrongly indexed.
 
@@ -116,11 +116,17 @@ def _prune_phantoms(db: Session):
     keep prior STL rows, so unchanged real models are never empty.) Set-based for
     speed — no per-model disk walk. As a safety net against a botched indexing run,
     skip pruning if an implausibly large share of models look empty.
+
+    Pass creator_id to restrict pruning to a single creator (used after per-creator
+    rescans so we don't touch creators that haven't been walked yet).
     """
-    total = db.query(func.count(Model.id)).scalar() or 0
+    base_q = db.query(Model.id)
+    if creator_id is not None:
+        base_q = base_q.filter(Model.creator_id == creator_id)
+    total = base_q.count()
     ids = [
         row[0] for row in
-        db.query(Model.id).filter(~Model.id.in_(db.query(STLFile.model_id).distinct()))
+        base_q.filter(~Model.id.in_(db.query(STLFile.model_id).distinct()))
     ]
     if not ids:
         return
@@ -210,6 +216,9 @@ def scan_creator(creator_id: int):
                     stl_cache={},
                     last_scanned=None,  # full reindex of this creator
                 )
+
+            if not _cancel_requested:
+                _prune_phantoms(db, creator_id=creator_id)
         finally:
             db.close()
     except Exception as e:
