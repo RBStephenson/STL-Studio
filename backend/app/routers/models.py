@@ -11,6 +11,7 @@ from app.schemas import (
 )
 from app.services.tag_sync import sync_model_tags
 from app.services import scanner
+from app.services.scanner import resolve_creator
 from app.config import settings
 from app.utils import utcnow
 
@@ -265,12 +266,7 @@ def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(get_db)
             setattr(model, key, value)
 
     if data.get("creator_name"):
-        creator = db.query(Creator).filter(Creator.name == data["creator_name"]).first()
-        if not creator:
-            creator = Creator(name=data["creator_name"])
-            db.add(creator)
-            db.flush()
-        model.creator_id = creator.id
+        model.creator_id = resolve_creator(data["creator_name"], db).id
 
     if "needs_review" not in data:
         model.needs_review = False

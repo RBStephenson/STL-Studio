@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Model, Creator
 from app.services import scrapers
+from app.services.scanner import resolve_creator
 from app.utils import utcnow
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
@@ -128,12 +129,7 @@ async def apply_metadata(
 
     # Resolve or create creator
     if body.creator_name:
-        creator = db.query(Creator).filter(Creator.name == body.creator_name).first()
-        if not creator:
-            creator = Creator(name=body.creator_name)
-            db.add(creator)
-            db.flush()
-        model.creator_id = creator.id
+        model.creator_id = resolve_creator(body.creator_name, db).id
 
     model.source_last_fetched = utcnow()
     model.needs_review = False  # user reviewed it, clear the flag

@@ -689,3 +689,19 @@ def _get_or_create_creator(name: str, db: Session) -> Creator:
         db.add(creator)
         db.flush()
     return creator
+
+
+def resolve_creator(name: str, db: Session) -> Creator:
+    """Case-insensitive get-or-create for use outside the scanner.
+
+    Matches an existing creator by name (case-insensitive) so that a
+    scraped name like 'Abe3d' doesn't create a duplicate alongside a
+    folder-derived 'abe3d'. If no match exists, creates with the
+    supplied casing.
+    """
+    creator = db.query(Creator).filter(Creator.name.ilike(name)).first()
+    if not creator:
+        creator = Creator(name=name)
+        db.add(creator)
+        db.flush()
+    return creator
