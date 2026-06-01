@@ -78,7 +78,8 @@ class Model(Base):
     # User curation — independent flags
     is_favorite = Column(Boolean, default=False, index=True)
     in_queue = Column(Boolean, default=False, index=True)   # queued to print next
-    queued_at = Column(DateTime, nullable=True)              # ordering within the queue
+    queued_at = Column(DateTime, nullable=True)              # when added (tiebreak ordering)
+    queue_position = Column(Integer, nullable=True)          # manual drag-to-reorder order
     printed_at = Column(DateTime, nullable=True)             # marked printed (clears queue)
 
     # Images

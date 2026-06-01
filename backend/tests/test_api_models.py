@@ -267,3 +267,57 @@ class TestSTLFilePartType:
     def test_unknown_file_returns_404(self, client):
         resp = client.patch("/models/stl-files/99999", json={"part_type": "head"})
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Print queue ordering
+# ---------------------------------------------------------------------------
+
+class TestQueueOrdering:
+    def _queue_names(self, client):
+        resp = client.get("/models?in_queue=true&sort=queue&group_variants=false")
+        assert resp.status_code == 200
+        return [i["name"] for i in resp.json()["items"]]
+
+    def test_favorites_float_to_top(self, client, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A")
+        b = make_model(db, creator, name="B")
+        c = make_model(db, creator, name="C")
+        for m, pos in ((a, 0), (b, 1), (c, 2)):
+            m.in_queue = True
+            m.queue_position = pos
+        c.is_favorite = True   # favorite jumps to the front despite position 2
+        commit_all(db)
+
+        assert self._queue_names(client) == ["C", "A", "B"]
+
+    def test_reorder_persists(self, client, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A")
+        b = make_model(db, creator, name="B")
+        c = make_model(db, creator, name="C")
+        commit_all(db)
+        for m in (a, b, c):
+            client.patch(f"/models/{m.id}/queue", json={"in_queue": True})
+
+        # Default order is insertion order A, B, C.
+        assert self._queue_names(client) == ["A", "B", "C"]
+
+        resp = client.patch("/models/queue/reorder", json={"ids": [c.id, a.id, b.id]})
+        assert resp.status_code == 200
+        assert resp.json()["updated"] == 3
+
+        assert self._queue_names(client) == ["C", "A", "B"]
+
+    def test_favorite_overrides_manual_order(self, client, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A")
+        b = make_model(db, creator, name="B")
+        commit_all(db)
+        for m in (a, b):
+            client.patch(f"/models/{m.id}/queue", json={"in_queue": True})
+        # Manual order A, B; favorite B -> B floats to top.
+        client.patch(f"/models/{b.id}/favorite", json={"is_favorite": True})
+
+        assert self._queue_names(client) == ["B", "A"]

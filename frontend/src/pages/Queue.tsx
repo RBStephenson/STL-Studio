@@ -1,18 +1,63 @@
 import { useState, useEffect, useCallback } from "react";
-import { Printer, Check, History } from "lucide-react";
+import { Printer, Check, History, GripVertical } from "lucide-react";
+import {
+  DndContext, closestCenter, PointerSensor, KeyboardSensor,
+  useSensor, useSensors, DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext, arrayMove, rectSortingStrategy,
+  useSortable, sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { api, Model } from "../api/client";
 import ModelCard from "../components/ModelCard";
+import { useToast } from "../context/ToastContext";
+
+/** A queued card wrapped so it can be dragged to reorder. The drag handle lives
+ *  in the bottom-left corner so it doesn't clash with the card's favorite/queue
+ *  toggles (top-right) or badges (top-left); the rest of the card stays a link. */
+function SortableCard({ model, onMutate }: { model: Model; onMutate: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: model.id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="relative group/drag">
+      <button
+        {...attributes}
+        {...listeners}
+        title="Drag to reorder"
+        aria-label="Drag to reorder"
+        className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 hover:bg-black/90 text-gray-300 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/drag:opacity-100 transition-opacity"
+      >
+        <GripVertical size={14} />
+      </button>
+      <ModelCard model={model} backTo="/queue" onMutate={onMutate} />
+    </div>
+  );
+}
 
 export default function Queue() {
   const [queued, setQueued] = useState<Model[]>([]);
   const [printed, setPrinted] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  const sensors = useSensors(
+    // A small movement threshold lets a plain click still open the card.
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [q, p] = await Promise.all([
-        api.models.list({ in_queue: true, sort: "queued_at", group_variants: false, page_size: 200 }),
+        api.models.list({ in_queue: true, sort: "queue", group_variants: false, page_size: 200 }),
         api.models.list({ printed: true, sort: "printed_at", group_variants: false, page_size: 60 }),
       ]);
       setQueued(q.items);
@@ -24,13 +69,35 @@ export default function Queue() {
 
   useEffect(() => { load(); }, [load]);
 
+  const onDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = queued.findIndex((m) => m.id === active.id);
+    const newIndex = queued.findIndex((m) => m.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const next = arrayMove(queued, oldIndex, newIndex);
+    setQueued(next);   // optimistic
+    try {
+      await api.models.reorderQueue(next.map((m) => m.id));
+    } catch {
+      toast("Couldn't save the new order — reloading.", "error");
+      load();
+    }
+  };
+
   return (
     <div className="p-6">
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-2 mb-2">
         <Printer size={20} className="text-sky-400" />
         <h1 className="text-2xl font-bold text-gray-100">Print Queue</h1>
         <span className="text-sm text-gray-500 ml-1">({queued.length})</span>
       </div>
+      {queued.length > 1 && (
+        <p className="text-xs text-gray-500 mb-6">
+          Drag the handle to set your print order. Favorites always stay on top.
+        </p>
+      )}
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
@@ -45,11 +112,15 @@ export default function Queue() {
           <p className="text-sm mt-1">Add models to the queue from any model's card or detail page</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {queued.map((m) => (
-            <ModelCard key={m.id} model={m} backTo="/queue" />
-          ))}
-        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={queued.map((m) => m.id)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {queued.map((m) => (
+                <SortableCard key={m.id} model={m} onMutate={load} />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
 
       {/* Recently printed */}

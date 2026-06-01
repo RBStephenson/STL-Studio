@@ -22,6 +22,7 @@ def _migrate_schema():
         ("models", "in_queue", "BOOLEAN DEFAULT 0"),
         ("models", "queued_at", "DATETIME"),
         ("models", "printed_at", "DATETIME"),
+        ("models", "queue_position", "INTEGER"),
     ]
     with engine.connect() as conn:
         table_cols: dict[str, set[str]] = {}

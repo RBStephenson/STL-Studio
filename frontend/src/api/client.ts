@@ -164,6 +164,12 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ in_queue }),
       }),
+    reorderQueue: (ids: number[]) =>
+      request<{ ok: boolean; updated: number }>("/models/queue/reorder", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      }),
     setPrinted: (id: number, printed: boolean) =>
       request<{ ok: boolean; printed_at: string | null }>(`/models/${id}/printed`, {
         method: "PATCH",

@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models import Model, Creator, ModelTag
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
-    ModelUpdate, ThumbnailUpdate, FavoriteUpdate, QueueUpdate, PrintedUpdate,
+    ModelUpdate, ThumbnailUpdate, FavoriteUpdate, QueueUpdate, QueueReorder, PrintedUpdate,
     STLFileUpdate, BulkTagUpdate,
 )
 from app.services.tag_sync import sync_model_tags
@@ -103,7 +103,18 @@ def list_models(
             q = q.filter(~Model.id.in_(non_reps))
 
     total = q.count()
-    if sort == "queued_at":
+    if sort == "queue":
+        # Print queue order: favorited (unprinted) models always float to the top,
+        # then manual drag order (queue_position), then insertion time as a tiebreak.
+        # `is_(None)` sorts False(0) before True(1), so positioned items precede
+        # any legacy un-positioned ones.
+        order = (
+            Model.is_favorite.desc(),
+            Model.queue_position.is_(None),
+            Model.queue_position.asc(),
+            Model.queued_at.asc(),
+        )
+    elif sort == "queued_at":
         order = Model.queued_at.asc()
     elif sort == "printed_at":
         order = Model.printed_at.desc()
@@ -309,14 +320,36 @@ def set_favorite(model_id: int, body: FavoriteUpdate, db: Session = Depends(get_
 
 @router.patch("/{model_id}/queue")
 def set_queue(model_id: int, body: QueueUpdate, db: Session = Depends(get_db)):
-    """Add/remove a model from the print queue."""
+    """Add/remove a model from the print queue. New items append to the end of the
+    manual order (favorites still float to the top at display time)."""
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     model.in_queue = body.in_queue
-    model.queued_at = utcnow() if body.in_queue else None
+    if body.in_queue:
+        model.queued_at = utcnow()
+        max_pos = db.query(func.max(Model.queue_position)).filter(Model.in_queue == True).scalar()
+        model.queue_position = (max_pos or 0) + 1
+    else:
+        model.queued_at = None
+        model.queue_position = None
     db.commit()
     return {"ok": True, "in_queue": model.in_queue}
+
+
+@router.patch("/queue/reorder")
+def reorder_queue(body: QueueReorder, db: Session = Depends(get_db)):
+    """Persist a manual drag order for the print queue. `ids` is the queue in the
+    user's desired order; we store each model's index as its queue_position.
+    Favorites still float to the top at display time (see list_models sort)."""
+    pos_by_id = {mid: i for i, mid in enumerate(body.ids)}
+    if not pos_by_id:
+        return {"ok": True, "updated": 0}
+    models = db.query(Model).filter(Model.id.in_(pos_by_id)).all()
+    for m in models:
+        m.queue_position = pos_by_id[m.id]
+    db.commit()
+    return {"ok": True, "updated": len(models)}
 
 
 @router.patch("/{model_id}/printed")

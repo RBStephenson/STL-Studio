@@ -132,6 +132,10 @@ class QueueUpdate(BaseModel):
     in_queue: bool
 
 
+class QueueReorder(BaseModel):
+    ids: list[int]   # queued model ids in the desired manual order
+
+
 class PrintedUpdate(BaseModel):
     printed: bool
 
