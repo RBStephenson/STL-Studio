@@ -116,11 +116,6 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
       to={linkTo}
       state={{ from: backTo ?? location.pathname + location.search }}
       onClick={handleCardClick}
-      // Disable the browser's native drag of the anchor: in the Queue the card is
-      // wrapped in a dnd-kit sortable, and a native anchor drag hijacks the
-      // pointer interaction (you get the "not-allowed" cursor and reordering
-      // never starts). Click-to-open is unaffected.
-      draggable={false}
       className={`group bg-gray-900 rounded-lg overflow-hidden border transition-colors flex flex-col ${
         selected
           ? "border-indigo-500 ring-1 ring-indigo-500/50"
@@ -132,9 +127,6 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
           <img
             src={thumbnail}
             alt={displayName}
-            // Images are natively draggable too; without this the thumbnail
-            // starts a native drag that blocks dnd-kit reordering in the Queue.
-            draggable={false}
             className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
               nsfw && !showNSFW ? "blur-xl" : ""
             }`}
