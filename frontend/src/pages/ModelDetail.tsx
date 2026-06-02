@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split } from "lucide-react";
 import { api, Model, ModelDetail as ModelDetailType } from "../api/client";
@@ -174,16 +174,19 @@ export default function ModelDetail() {
     }
   };
 
+  const loadIdRef = useRef(0);
   const load = useCallback(() => {
     if (!id) return;
+    const loadId = ++loadIdRef.current;
     api.models.get(Number(id)).then((m) => {
+      if (loadId !== loadIdRef.current) return; // stale — newer load in flight
       setModel(m);
       const thumb = m.thumbnail_path
         ? api.fileUrl(m.thumbnail_path)
         : m.thumbnail_url ?? null;
       setActiveImage(thumb);
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch(() => { if (loadId === loadIdRef.current) setLoading(false); });
   }, [id]);
 
   useEffect(() => { load(); }, [load]);

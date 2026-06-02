@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import {
   ChevronLeft, SkipForward, CheckCircle, ExternalLink,
@@ -17,19 +17,27 @@ export default function Triage() {
   const [loading, setLoading] = useState(true);
   const [done, setDone] = useState(false);
   const [creators, setCreators] = useState<Map<number, string>>(new Map());
+  const skippedIdsRef = useRef<Set<number>>(new Set());
 
-  const loadBatch = useCallback(async () => {
+  const loadBatch = useCallback(async (resetSkipped = false) => {
     setLoading(true);
+    if (resetSkipped) skippedIdsRef.current = new Set();
     try {
       const [batch, stats] = await Promise.all([
         api.models.list({ needs_review: true, page_size: BATCH_SIZE }),
         api.models.stats(),
       ]);
       setTotal(stats.needs_review);
-      if (batch.items.length === 0) {
+      const filtered = batch.items.filter(m => !skippedIdsRef.current.has(m.id));
+      if (filtered.length === 0 && batch.items.length > 0) {
+        // All items in this batch were previously skipped — cycle around
+        skippedIdsRef.current = new Set();
+        setQueue(batch.items);
+        setCursor(0);
+      } else if (filtered.length === 0) {
         setDone(true);
       } else {
-        setQueue(batch.items);
+        setQueue(filtered);
         setCursor(0);
       }
     } finally {
@@ -63,6 +71,7 @@ export default function Triage() {
 
   const skip = useCallback(() => {
     if (!current) return;
+    skippedIdsRef.current.add(current.id);
     if (cursor + 1 >= queue.length) {
       loadBatch();
     } else {
@@ -133,7 +142,7 @@ export default function Triage() {
         <h1 className="text-xl font-bold text-gray-100">Review Queue</h1>
         <div className="flex items-center gap-3">
           <button
-            onClick={loadBatch}
+            onClick={() => loadBatch()}
             title="Refresh queue"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-sm text-gray-300 hover:bg-gray-700 transition-colors"
           >

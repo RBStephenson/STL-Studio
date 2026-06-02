@@ -135,8 +135,10 @@ export default function Library() {
   const [scanRootCount, setScanRootCount] = useState<number | null>(null);
 
   const scrollRestoredRef = useRef(false);
+  const fetchIdRef = useRef(0);
 
   const fetchModels = useCallback(async () => {
+    const fetchId = ++fetchIdRef.current;
     setLoading(true);
     try {
       // Variant grouping collapses non-representative variants. When filtering by
@@ -154,10 +156,11 @@ export default function Library() {
       if (favParam)    params.is_favorite   = true;
       if (queueParam)  params.in_queue      = true;
       const data = await api.models.list(params);
+      if (fetchId !== fetchIdRef.current) return; // stale response — a newer fetch is in flight
       setModels(data.items);
       setTotal(data.total);
     } finally {
-      setLoading(false);
+      if (fetchId === fetchIdRef.current) setLoading(false);
     }
   }, [page, search, creatorId, site, activeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam]);
 

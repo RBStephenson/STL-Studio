@@ -2,6 +2,7 @@
 import io
 import os
 import time
+from urllib.parse import quote as _url_quote
 import logging
 import platform
 import subprocess
@@ -231,7 +232,7 @@ def list_model_images(model_id: int):
                     if key not in seen:
                         seen.add(key)
                         images.append({"path": key, "filename": entry.name,
-                                       "url": f"/api/files/image?path={entry}"})
+                                       "url": f"/api/files/image?path={_url_quote(str(entry), safe='')}"})
 
         _collect(boundary)
         return images
