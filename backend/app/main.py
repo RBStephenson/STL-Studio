@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine, SessionLocal
-from app.routers import models, scan, files, collections, scrape, enrich
+from app.routers import models, scan, files, collections, scrape, enrich, database
 
 Base.metadata.create_all(bind=engine)
 
@@ -81,6 +81,7 @@ app.include_router(files.router)
 app.include_router(collections.router)
 app.include_router(scrape.router)
 app.include_router(enrich.router)
+app.include_router(database.router)
 
 
 @app.get("/health")
