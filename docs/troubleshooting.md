@@ -11,6 +11,7 @@
 - [NSFW images are showing / blurred](#nsfw-images-are-showing--blurred)
 - [macOS won't open the app](#macos-wont-open-the-app)
 - [Where is my data stored? Is it safe?](#where-is-my-data-stored-is-it-safe)
+- [How do I back up or move my library?](#how-do-i-back-up-or-move-my-library)
 
 ---
 
@@ -102,3 +103,22 @@ database lives in your user data folder (see
 [Getting Started](getting-started.md#standalone-recommended)) and survives app
 updates. The app reads your STL folders; in Docker mode they're mounted
 **read-only**, so your original files are never modified.
+
+For an extra safety net, use **Settings → Data Management → Download Backup** to
+save a snapshot of the catalog (see below).
+
+## How do I back up or move my library?
+
+Open **Settings → Data Management**:
+
+- **Download Backup** saves your whole catalog — tags, favorites, collections,
+  and print queue — as a single timestamped `.db` file. Do this before any risky
+  change, or just periodically.
+- **Restore from Backup…** loads one of those files back in (after validating
+  it), replacing your current catalog. This is also how you move your library to
+  another machine: back up on the old one, install the app on the new one, then
+  restore.
+
+Both actions only affect the index — they never touch your STL files on disk.
+Restore can't run while a scan is in progress, and it asks you to type a
+confirmation phrase since it overwrites your current catalog.

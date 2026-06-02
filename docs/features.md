@@ -14,6 +14,7 @@ A tour of every screen and what it does.
 - [Bulk tag editor](#bulk-tag-editor)
 - [Creators & per-creator rescan](#creators--per-creator-rescan)
 - [Settings](#settings)
+- [Backup, restore & reset](#backup-restore--reset)
 - [NSFW toggle](#nsfw-toggle)
 
 ---
@@ -83,8 +84,9 @@ combination of these.
 - **★ Favorite** — bookmark models you love. Filter the Library to favorites
   with the header chip.
 - **🖨 Queue** — add models to your print queue. The **Queue** page (in the top
-  nav) shows everything queued, in the order you added it, so you have a running
-  "to print" list. The nav shows a live count badge.
+  nav) shows everything queued so you have a running "to print" list, and the nav
+  shows a live count badge. **Drag the handle** (bottom-left of each card) to set
+  your own print order; **favorites always float to the top**.
 - **✓ Printed** — mark a model as printed. This records the date and removes it
   from the active queue. The Queue page keeps a **Recently Printed** section so
   you can see what you've finished.
@@ -148,6 +150,30 @@ can:
 At **/settings** you manage your **scan roots** — the top-level folder paths the
 app reads from. Add or remove paths, and see when each was last scanned. This is
 also where standalone users point the app at their drives for the first time.
+
+It's also home to **Data Management** (see below).
+
+## Backup, restore & reset
+
+At the bottom of **Settings**, under **Data Management**, you can manage the
+library database itself. This only ever touches the *index* — your metadata,
+tags, favorites, collections, and print queue. **Your STL files on disk are
+never modified.**
+
+- **Download Backup** — saves a consistent snapshot of your whole library as a
+  `.db` file (named with a timestamp). Keep this somewhere safe; it's the only
+  way to recover your tags, favorites, and queue if something goes wrong.
+- **Restore from Backup…** — pick a previously downloaded `.db` file to replace
+  your current library with it. The file is validated first (it must be a real
+  STL Inventory backup), and an older backup's schema is brought up to date
+  automatically.
+- **Delete All Data** — wipes the entire index back to empty. You'd then run a
+  full scan to rebuild it.
+
+Restore and Delete are in a **Danger Zone**: each overwrites or erases your
+library and **cannot be undone**, so they make you type a confirmation phrase
+first. Download a backup before using either. (Neither can run while a scan is
+in progress.)
 
 ## NSFW toggle
 
