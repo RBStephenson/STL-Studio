@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { api, ScanRoot } from "../api/client";
 import FolderPicker from "../components/FolderPicker";
+import HelpLink from "../components/HelpLink";
 
 const ACK_PHRASE = "ACKNOWLEDGED";
 
@@ -127,7 +128,10 @@ export default function Settings() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-white mb-1">Settings</h1>
+      <h1 className="flex items-center gap-2 text-2xl font-bold text-white mb-1">
+        Settings
+        <HelpLink section="settings" label="About scan locations & data management" />
+      </h1>
       <p className="text-sm text-gray-500 mb-8">Manage the drives and folders that STL Inventory scans for models.</p>
 
       {/* Feedback */}

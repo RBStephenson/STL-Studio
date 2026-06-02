@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { api, Model } from "../api/client";
 import ScanButton from "../components/ScanButton";
+import HelpLink from "../components/HelpLink";
 
 const BATCH_SIZE = 50;
 
@@ -139,7 +140,10 @@ export default function Triage() {
     <div className="max-w-5xl mx-auto px-6 py-6 flex flex-col gap-5">
       {/* Top bar */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-100">Review Queue</h1>
+        <h1 className="flex items-center gap-2 text-xl font-bold text-gray-100">
+          Review Queue
+          <HelpLink section="triage" label="How the review queue works" />
+        </h1>
         <div className="flex items-center gap-3">
           <button
             onClick={() => loadBatch()}
