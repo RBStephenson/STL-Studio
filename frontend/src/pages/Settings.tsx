@@ -9,9 +9,46 @@ import HelpLink from "../components/HelpLink";
 
 const ACK_PHRASE = "ACKNOWLEDGED";
 
+// Sample folder name shown for each layout role in the live preview.
+const LAYOUT_SAMPLES: Record<string, string> = {
+  "{creator}": "Abe3D",
+  "{tag}": "Sci-Fi",
+  "{ignore}": "_misc",
+  "*": "_misc",
+};
+
+/**
+ * Render a human-readable preview of how a layout template maps folder levels,
+ * e.g. "{tag}/{creator}" → "Sci-Fi (tag) › Abe3D (creator) › …models". Returns
+ * null when the template breaks a rule the server enforces, so the preview never
+ * looks valid for something the backend will reject: every level must be a known
+ * token, and there must be exactly one {creator} as the last level.
+ */
+function layoutPreview(template: string): string | null {
+  const segs = (template.trim() || "{creator}")
+    .replace(/^[/\\]+|[/\\]+$/g, "")
+    .split(/[/\\]+/)
+    .filter(Boolean);
+  if (segs.length === 0) return null;
+  // Exactly one creator, and it must be the last level.
+  if (segs.filter((s) => s === "{creator}").length !== 1) return null;
+  if (segs[segs.length - 1] !== "{creator}") return null;
+  const parts = segs.map((s) => {
+    const sample = LAYOUT_SAMPLES[s];
+    if (!sample) return null;
+    const role = s === "*" ? "ignore" : s.replace(/[{}]/g, "");
+    return `${sample} (${role})`;
+  });
+  if (parts.some((p) => p === null)) return null;
+  return [...parts, "…models"].join(" › ");
+}
+
 export default function Settings() {
   const [roots, setRoots] = useState<ScanRoot[]>([]);
   const [newPath, setNewPath] = useState("");
+  const [newLayout, setNewLayout] = useState("{creator}");
+  // Per-root in-progress layout edits, keyed by root id.
+  const [layoutEdits, setLayoutEdits] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -43,12 +80,38 @@ export default function Settings() {
     const path = (pathArg ?? newPath).trim();
     if (!path) return;
     try {
-      await api.scan.addRoot(path);
+      await api.scan.addRoot(path, newLayout.trim() || "{creator}");
       setNewPath("");
+      setNewLayout("{creator}");
       load();
       flash("Drive added — run a scan to index it", "ok");
     } catch (e: any) {
-      flash(e.message.includes("409") ? "That path is already in the list" : "Could not add drive", "err");
+      const msg = e.message || "";
+      if (msg.includes("409")) flash("That path is already in the list", "err");
+      else if (msg.includes("400")) flash("Invalid layout template — check the format", "err");
+      else flash("Could not add drive", "err");
+    }
+  };
+
+  const saveLayout = async (root: ScanRoot) => {
+    const next = (layoutEdits[root.id] ?? root.layout).trim() || "{creator}";
+    const clearEdit = () =>
+      setLayoutEdits((m) => {
+        const copy = { ...m };
+        delete copy[root.id];
+        return copy;
+      });
+    if (next === root.layout) {
+      clearEdit();
+      return;
+    }
+    try {
+      await api.scan.updateRoot(root.id, { layout: next });
+      clearEdit();
+      load();
+      flash("Layout updated — rescan to apply it", "ok");
+    } catch {
+      flash("Invalid layout template — check the format", "err");
     }
   };
 
@@ -160,27 +223,48 @@ export default function Settings() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {roots.map((r) => (
-              <div
-                key={r.id}
-                className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3"
-              >
-                <HardDrive size={15} className="text-indigo-400 shrink-0" />
-                <span className="text-sm text-gray-200 flex-1 truncate font-mono">{r.path}</span>
-                {r.last_scanned && (
-                  <span className="text-xs text-gray-600 shrink-0">
-                    Last scanned {new Date(r.last_scanned).toLocaleDateString()}
-                  </span>
-                )}
-                <button
-                  onClick={() => removeRoot(r.id, r.path)}
-                  className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
-                  title="Remove this drive"
+            {roots.map((r) => {
+              const layoutVal = layoutEdits[r.id] ?? r.layout;
+              const preview = layoutPreview(layoutVal);
+              return (
+                <div
+                  key={r.id}
+                  className="flex flex-col gap-2 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3"
                 >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
+                  <div className="flex items-center gap-3">
+                    <HardDrive size={15} className="text-indigo-400 shrink-0" />
+                    <span className="text-sm text-gray-200 flex-1 truncate font-mono">{r.path}</span>
+                    {r.last_scanned && (
+                      <span className="text-xs text-gray-600 shrink-0">
+                        Last scanned {new Date(r.last_scanned).toLocaleDateString()}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => removeRoot(r.id, r.path)}
+                      className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
+                      title="Remove this drive"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 pl-[27px]">
+                    <label className="text-xs text-gray-500 shrink-0">Layout</label>
+                    <input
+                      type="text"
+                      value={layoutVal}
+                      onChange={(e) => setLayoutEdits((m) => ({ ...m, [r.id]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      onBlur={() => saveLayout(r)}
+                      spellCheck={false}
+                      className="w-56 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-xs text-white focus:outline-none font-mono"
+                    />
+                    <span className={`text-xs truncate ${preview ? "text-gray-600" : "text-amber-400"}`}>
+                      {preview ?? "needs exactly one {creator}, last"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
@@ -220,6 +304,30 @@ export default function Settings() {
         <p className="text-xs text-gray-600 mt-2">
           Use <strong className="text-gray-500">Browse…</strong> to pick a folder, or type the full path. Subfolders are scanned automatically.
         </p>
+
+        <div className="mt-4">
+          <label className="block text-xs text-gray-500 mb-1">Folder layout</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newLayout}
+              onChange={(e) => setNewLayout(e.target.value)}
+              spellCheck={false}
+              placeholder="{creator}"
+              className="w-64 bg-gray-900 border border-gray-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none font-mono"
+            />
+            <span className={`text-xs truncate ${layoutPreview(newLayout) ? "text-gray-500" : "text-amber-400"}`}>
+              {layoutPreview(newLayout) ?? "needs exactly one {creator}, as the last level"}
+            </span>
+          </div>
+          <p className="text-xs text-gray-600 mt-2 leading-relaxed">
+            Describe the folders <em>above your models</em>, one level per <code className="text-gray-500">/</code>.
+            Use <code className="text-gray-500">{"{creator}"}</code> for the creator level (required, last),
+            <code className="text-gray-500"> {"{tag}"}</code> to tag every model with a folder name
+            (e.g. genre), and <code className="text-gray-500">{"{ignore}"}</code> to skip a level.
+            The default <code className="text-gray-500">{"{creator}"}</code> means the top folders are creators.
+          </p>
+        </div>
       </section>
 
       {/* Path examples */}

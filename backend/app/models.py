@@ -13,6 +13,9 @@ class ScanRoot(Base):
     id = Column(Integer, primary_key=True)
     path = Column(String, unique=True, nullable=False)
     enabled = Column(Boolean, default=True)
+    # Folder-layout template (see services/layout.py). Describes the path levels
+    # down to the creator; the scanner detects models heuristically below it.
+    layout = Column(String, nullable=False, default="{creator}", server_default="{creator}")
     last_scanned = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 

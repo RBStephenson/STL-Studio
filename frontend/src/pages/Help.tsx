@@ -276,7 +276,7 @@ const SECTIONS: Section[] = [
       <Variant>/          ← a MODEL (head.stl, body.stl…)
       <Another Variant>/  ← a separate MODEL`}</pre>
         <ul>
-          <li>The top-level folder under a scan root is <strong>always a creator</strong>, never a model.</li>
+          <li>By default the top-level folder under a scan root is a <strong>creator</strong>, never a model. If your creators live deeper (e.g. under a genre folder), set a <strong>custom layout</strong> on that scan root in Settings — for example <code>{"{tag}/{creator}"}</code> tags every model with the folder above the creator.</li>
           <li>A <strong>model</strong> is a folder whose subtree contains 3D files (<code>.stl</code> / <code>.3mf</code> / <code>.obj</code>). Render-only folders are skipped.</li>
           <li><strong>Auto-tags</strong> are detected from folder/file names — scale (<code>1:6</code>, <code>75mm</code>), type (bust, statue, terrain), and modifiers (pre-supported, NSFW). They're kept separate from tags you add, and refresh on every scan.</li>
           <li>A <strong>full scan</strong> is incremental — unchanged folders skip the expensive file-indexing step, but metadata and tags still refresh.</li>
@@ -293,7 +293,10 @@ const SECTIONS: Section[] = [
         At <strong>Settings</strong> you manage your <strong>scan roots</strong> — the
         top-level folder paths the app reads from. Add or remove paths and see when each
         was last scanned. Use <strong>Browse…</strong> to pick a folder, or type the full
-        path. This is also where standalone users point the app at their drives for the
+        path. Each scan root also has a <strong>Layout</strong> field describing how its
+        folders are arranged (see <a href="#scanning">folder layout</a>) — leave it as
+        <code>{"{creator}"}</code> unless your creators sit below a genre or wrapper
+        folder. This is also where standalone users point the app at their drives for the
         first time, and it's home to <strong>Data Management</strong> (below).
       </p>
     ),

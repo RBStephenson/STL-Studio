@@ -78,6 +78,7 @@ export interface ScanRoot {
   id: number;
   path: string;
   enabled: boolean;
+  layout: string;
   last_scanned: string | null;
 }
 
@@ -218,11 +219,17 @@ export const api = {
     browse: (path?: string) =>
       request<DirListing>(`/scan/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
     roots: () => request<ScanRoot[]>("/scan/roots"),
-    addRoot: (path: string) =>
+    addRoot: (path: string, layout?: string) =>
       request<ScanRoot>("/scan/roots", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path }),
+        body: JSON.stringify({ path, layout: layout || "{creator}" }),
+      }),
+    updateRoot: (id: number, body: { layout?: string; enabled?: boolean }) =>
+      request<ScanRoot>(`/scan/roots/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       }),
     removeRoot: (id: number) =>
       request<{ ok: boolean }>(`/scan/roots/${id}`, { method: "DELETE" }),

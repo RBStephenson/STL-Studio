@@ -93,6 +93,63 @@ class TestLeafDetection:
 
 
 # ---------------------------------------------------------------------------
+# Configurable folder layouts — layout {tag} levels become model auto-tags
+# ---------------------------------------------------------------------------
+
+class TestLayoutTags:
+    def test_layout_tags_become_auto_tags(self, db, tmp_path):
+        """Tag folder names from levels above the creator are merged into every
+        model's auto_tags, lower-cased and de-duplicated with detected signals."""
+        creator_dir = tmp_path / "Abe3D"
+        _stl(creator_dir / "Cloud" / "1-6 Bust")
+        creator = make_creator(db, "Abe3D")
+
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=None,
+            layout_tags=["Sci-Fi", "Mechs"],
+        )
+
+        models = _models(db, creator)
+        assert models
+        for m in models:
+            assert "sci-fi" in m.auto_tags
+            assert "mechs" in m.auto_tags
+            # Detected signals still present alongside layout tags.
+            assert "bust" in m.auto_tags
+
+    def test_no_layout_tags_leaves_auto_tags_unchanged(self, db, tmp_path):
+        creator_dir = tmp_path / "Abe3D"
+        _stl(creator_dir / "Cloud" / "Bust")
+        creator = make_creator(db, "Abe3D")
+
+        _walk(db, creator, creator_dir)
+
+        for m in _models(db, creator):
+            assert "sci-fi" not in m.auto_tags
+
+    def test_layout_tags_indexed_in_model_tags(self, db, tmp_path):
+        """Layout tags flow through sync_model_tags into the model_tags index
+        so they're filterable in the Library."""
+        from app.models import ModelTag
+
+        creator_dir = tmp_path / "Abe3D"
+        _stl(creator_dir / "Cloud" / "Bust")
+        creator = make_creator(db, "Abe3D")
+
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=None,
+            layout_tags=["Sci-Fi"],
+        )
+
+        tags = {t.tag for t in db.query(ModelTag).all()}
+        assert "sci-fi" in tags
+
+
+# ---------------------------------------------------------------------------
 # Variant grouping (character assignment)
 # ---------------------------------------------------------------------------
 

@@ -4,6 +4,7 @@ This explains how STL Inventory reads your library — useful if your models are
 laid out unusually or aren't being detected the way you'd expect.
 
 - [The folder layout it expects](#the-folder-layout-it-expects)
+- [Custom folder layouts](#custom-folder-layouts)
 - [How a "model" is detected](#how-a-model-is-detected)
 - [Thumbnails](#thumbnails)
 - [Automatic tagging](#automatic-tagging)
@@ -29,13 +30,45 @@ The scanner is built around this general shape, but it's flexible about depth:
 
 Key ideas:
 
-- **The top-level folder under a scan root is always a creator** — never a model
-  itself, even if its name contains a word like "Figures" or "Miniatures."
+- **By default, the top-level folder under a scan root is a creator** — never a
+  model itself, even if its name contains a word like "Figures" or "Miniatures."
+  If your creators live deeper (e.g. under a genre folder), set a
+  [custom layout](#custom-folder-layouts) per scan root.
 - A **model** is a folder containing the actual printable parts for one product
   or variant. A folder is only ever indexed as a model if its subtree contains
   3D files (`.stl` / `.3mf` / `.obj`) — render/preview-only folders are skipped.
 - Folders below a model (e.g. `head/`, `base/`, `Supported/STL/`) are treated as
   **parts of that model**, not separate models.
+
+## Custom folder layouts
+
+If your library doesn't put creators at the top level, you can tell each scan
+root how its folders are arranged with a **layout template** (Settings → the
+*Layout* field on each scan location). A template describes the levels **above
+your models**, one per `/`, down to the level that names the creator:
+
+| Token | Meaning |
+|---|---|
+| `{creator}` | This level's folder name is the **creator**. Required, and must be the **last** token. |
+| `{tag}` | This level's folder name is added as an **auto-tag** to every model beneath it (e.g. a genre or collection folder). |
+| `{ignore}` (or `*`) | A structural level that's walked past and carries no meaning. |
+
+Everything **below** the creator level is still detected automatically (the
+character/variant/model heuristics below), so you only describe the part of the
+tree above your products.
+
+Examples:
+
+| Template | Disk layout | Result |
+|---|---|---|
+| `{creator}` *(default)* | `Abe3D/…` | Top folders are creators — today's behavior. |
+| `{tag}/{creator}` | `Sci-Fi/Abe3D/…` | Creators sit under a genre folder; every model gets a `sci-fi` tag. |
+| `{tag}/{tag}/{creator}` | `Sci-Fi/Mechs/Abe3D/…` | Two tag levels — models tagged `sci-fi` and `mechs`. |
+| `{ignore}/{creator}` | `_incoming/Abe3D/…` | A wrapper folder is skipped; creators sit one level down. |
+
+The same creator can appear under more than one `{tag}` branch — its models are
+merged under one creator, each keeping the tag from its own path. Changing a
+layout takes effect on the next scan (full or per-creator).
 
 ## How a "model" is detected
 

@@ -152,6 +152,12 @@ class BulkTagUpdate(BaseModel):
 
 class ScanRootCreate(BaseModel):
     path: str
+    layout: str = "{creator}"
+
+
+class ScanRootUpdate(BaseModel):
+    layout: Optional[str] = None
+    enabled: Optional[bool] = None
 
 
 class DownloadZipRequest(BaseModel):

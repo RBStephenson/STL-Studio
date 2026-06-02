@@ -32,7 +32,7 @@ from sqlalchemy import text as _sqltext, func
 
 from app.database import SessionLocal
 from app.models import Creator, Model, STLFile, ScanRoot, ModelTag, CollectionModel, PackOverride
-from app.services import name_parser
+from app.services import name_parser, layout
 from app.services.tag_sync import sync_model_tags
 from app.utils import utcnow
 
@@ -200,26 +200,30 @@ def _prune_phantoms(db: Session, creator_id: int | None = None):
     logger.info(f"Post-scan: pruned {len(ids)} phantom models (no STL files)")
 
 
-def _creator_dirs_for(creator: Creator, db: Session) -> list[Path]:
-    """Resolve the on-disk top-level folder(s) for a creator from its indexed
-    models — the path segment that sits directly under a scan root. A creator
-    normally maps to one folder, but we handle several defensively."""
-    roots = [Path(r.path) for r in db.query(ScanRoot).filter(ScanRoot.enabled == True).all()]
-    boundaries: set[Path] = set()
+def _creator_dirs_for(creator: Creator, db: Session) -> list[tuple[Path, list[str]]]:
+    """Resolve the on-disk creator-level folder(s) for a creator from its indexed
+    models, honouring each scan root's layout. Returns (creator_dir, layout_tags)
+    pairs. A creator normally maps to one folder, but we handle several
+    defensively (e.g. the same name under multiple {tag} branches)."""
+    roots = [(Path(r.path), layout.roles_for(r.layout))
+             for r in db.query(ScanRoot).filter(ScanRoot.enabled == True).all()]
+    boundaries: dict[Path, list[str]] = {}
     for (fp,) in db.query(Model.folder_path).filter(Model.creator_id == creator.id):
         if not fp:
             continue
         p = Path(fp)
-        for root in roots:
+        for root, roles in roots:
             try:
                 rel = p.relative_to(root)
             except ValueError:
                 continue
-            if rel.parts:
-                boundaries.add(root / rel.parts[0])
+            depth = layout.creator_depth(roles)
+            if len(rel.parts) > depth:
+                creator_dir = root.joinpath(*rel.parts[:depth + 1])
+                boundaries[creator_dir] = layout.tags_for_path(creator_dir, root, roles)
             break
 
-    return [d for d in sorted(boundaries) if d.exists()]
+    return [(d, tags) for d, tags in sorted(boundaries.items()) if d.exists()]
 
 
 def scan_creator(creator_id: int):
@@ -266,7 +270,7 @@ def scan_creator(creator_id: int):
                 db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
             db.commit()
 
-            for creator_dir in dirs:
+            for creator_dir, layout_tags in dirs:
                 if _cancel_requested:
                     _scan_state["message"] = "cancelled"
                     _scan_state["cancelled"] = True
@@ -281,6 +285,7 @@ def scan_creator(creator_id: int):
                     character=None,
                     stl_cache={},
                     last_scanned=None,  # full reindex of this creator
+                    layout_tags=layout_tags,
                 )
 
             if not _cancel_requested:
@@ -342,6 +347,17 @@ def split_pack(model_id: int) -> dict:
             db.expunge(model)
 
             # Re-walk the pack as a boundary: it's never a model, each child is.
+            # Recover the layout tags for the pack's path so split children keep
+            # the same above-creator auto-tags a normal scan would assign.
+            pack_layout_tags: list[str] = []
+            for r in db.query(ScanRoot).filter(ScanRoot.enabled == True).all():
+                try:
+                    pack.relative_to(Path(r.path))
+                except ValueError:
+                    continue
+                pack_layout_tags = layout.tags_for_path(pack, Path(r.path), layout.roles_for(r.layout))
+                break
+
             before = db.query(func.count(Model.id)).filter(Model.creator_id == creator_id).scalar() or 0
             _walk_for_models(
                 folder=pack,
@@ -351,6 +367,7 @@ def split_pack(model_id: int) -> dict:
                 character=None,
                 stl_cache={},
                 last_scanned=None,
+                layout_tags=pack_layout_tags,
             )
             db.commit()
             after = db.query(func.count(Model.id)).filter(Model.creator_id == creator_id).scalar() or 0
@@ -374,21 +391,26 @@ def _scan_root(root: ScanRoot, db: Session):
         _scan_state["message"] = f"path not found: {root.path}"
         return
 
-    creator_dirs = sorted(d for d in root_path.iterdir() if d.is_dir())
+    # Resolve creator-level folders via the root's layout template. Each entry is
+    # (creator_dir, layout_tags) where layout_tags are the {tag} folder names from
+    # the levels above the creator (captured as auto-tags on every model beneath).
+    roles = layout.roles_for(root.layout)
+    creator_entries = layout.iter_creator_dirs(root_path, roles)
 
     # Capture last_scanned as a plain value before fanning out — `root` belongs to
     # the main-thread session and must not be touched from worker threads.
     root_last_scanned = root.last_scanned
 
     # Pre-create all Creator rows in the main session before going parallel so
-    # worker threads never race to INSERT the same creator name.
+    # worker threads never race to INSERT the same creator name. The same creator
+    # name can appear under multiple {tag} branches; _get_or_create_creator dedups.
     creator_ids: dict[str, int] = {}
-    for creator_dir in creator_dirs:
+    for creator_dir, _tags in creator_entries:
         creator = _get_or_create_creator(creator_dir.name, db)
         creator_ids[str(creator_dir)] = creator.id
     db.commit()
 
-    def _scan_one(creator_dir: Path):
+    def _scan_one(creator_dir: Path, layout_tags: list[str]):
         if _cancel_requested:
             return
         creator_id = creator_ids[str(creator_dir)]
@@ -405,6 +427,7 @@ def _scan_root(root: ScanRoot, db: Session):
                 character=None,
                 stl_cache={},
                 last_scanned=root_last_scanned,
+                layout_tags=layout_tags,
             )
         except Exception:
             logger.exception(f"Error scanning creator: {creator_dir.name}")
@@ -412,7 +435,7 @@ def _scan_root(root: ScanRoot, db: Session):
             thread_db.close()
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(_scan_one, d) for d in creator_dirs]
+        futures = [executor.submit(_scan_one, d, tags) for d, tags in creator_entries]
         for future in as_completed(futures):
             future.result()  # propagate any unexpected exception to the outer handler
 
@@ -426,6 +449,7 @@ def _walk_for_models(
     stl_cache: dict[str, bool],
     last_scanned: datetime | None,
     parent_names: list[str] | None = None,
+    layout_tags: list[str] | None = None,
 ):
     if not folder.is_dir():
         return
@@ -462,7 +486,8 @@ def _walk_for_models(
     )
     if not is_creator_root and signals.is_product and has_any_stls:
         _index_model(folder, creator, db, creator_boundary, character,
-                     stl_cache, auto_signals=signals, last_scanned=last_scanned)
+                     stl_cache, auto_signals=signals, last_scanned=last_scanned,
+                     layout_tags=layout_tags)
         return
 
     # --- Step 2: has STLs + children look like parts ---
@@ -470,13 +495,15 @@ def _walk_for_models(
         child_names = [d.name for d in child_dirs]
         if has_direct_stls and name_parser.children_look_like_parts(child_names):
             _index_model(folder, creator, db, creator_boundary, character,
-                         stl_cache, auto_signals=signals, last_scanned=last_scanned)
+                         stl_cache, auto_signals=signals, last_scanned=last_scanned,
+                         layout_tags=layout_tags)
             return
 
         # --- Step 3: deepest fallback — STLs here, nothing below ---
         if has_direct_stls and not any_child_stls:
             _index_model(folder, creator, db, creator_boundary, character,
-                         stl_cache, auto_signals=signals, last_scanned=last_scanned)
+                         stl_cache, auto_signals=signals, last_scanned=last_scanned,
+                         layout_tags=layout_tags)
             return
 
     # Not a leaf — recurse. Decide the variant-grouping "character" for each child by
@@ -547,7 +574,8 @@ def _walk_for_models(
             child_character = own_character
         _walk_for_models(child, creator, db, creator_boundary,
                          character=child_character, parent_names=next_parents,
-                         stl_cache=stl_cache, last_scanned=last_scanned)
+                         stl_cache=stl_cache, last_scanned=last_scanned,
+                         layout_tags=layout_tags)
 
 
 def _index_model(
@@ -559,6 +587,7 @@ def _index_model(
     stl_cache: dict[str, bool],
     auto_signals: name_parser.NameSignals | None = None,
     last_scanned: datetime | None = None,
+    layout_tags: list[str] | None = None,
 ):
     folder_path = str(folder)
 
@@ -593,9 +622,12 @@ def _index_model(
         # an earlier scanner version assigned from a structural folder name.
         model.character = character
 
-        # Auto-detected signals
+        # Auto-detected signals, merged with layout-derived tags (from {tag}
+        # folder levels above the creator). Lower-cased and de-duplicated, order
+        # preserved: detected signals first, then layout tags. The walk always
+        # passes auto_signals, so this also covers the layout-tags-only case.
         if auto_signals:
-            model.auto_tags = auto_signals.auto_tags
+            model.auto_tags = _merge_auto_tags(auto_signals.auto_tags, layout_tags)
             # Only flag needs_review for brand-new models that look genuinely
             # ambiguous: no name/type signals AND no direct STL files in this
             # folder (only found recursively). Existing models are cleared at
@@ -625,6 +657,19 @@ def _index_model(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _merge_auto_tags(detected: list[str], layout_tags: list[str] | None) -> list[str]:
+    """Combine detected auto-tags with layout-derived tags, lower-cased and
+    de-duplicated while preserving order (detected first, then layout)."""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for raw in list(detected or []) + list(layout_tags or []):
+        t = (raw or "").strip().lower()
+        if t and t not in seen:
+            seen.add(t)
+            merged.append(t)
+    return merged
+
 
 def _has_stls(folder: Path, recurse: bool = False) -> bool:
     if recurse:

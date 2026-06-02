@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ScanRoot, Creator
-from app.schemas import ScanStatus, ScanRootCreate
-from app.services import scanner
+from app.schemas import ScanStatus, ScanRootCreate, ScanRootUpdate
+from app.services import scanner, layout
 from app.config import settings
 
 router = APIRouter(prefix="/scan", tags=["scan"])
@@ -169,8 +169,30 @@ def add_root(body: ScanRootCreate, db: Session = Depends(get_db)):
     existing = db.query(ScanRoot).filter(ScanRoot.path == path).first()
     if existing:
         raise HTTPException(status_code=409, detail="Root already exists")
-    root = ScanRoot(path=path, enabled=True)
+    try:
+        layout.parse_template(body.layout)
+    except layout.LayoutError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    root = ScanRoot(path=path, enabled=True, layout=(body.layout or "{creator}").strip())
     db.add(root)
+    db.commit()
+    db.refresh(root)
+    return root
+
+
+@router.patch("/roots/{root_id}")
+def update_root(root_id: int, body: ScanRootUpdate, db: Session = Depends(get_db)):
+    root = db.query(ScanRoot).filter(ScanRoot.id == root_id).first()
+    if not root:
+        raise HTTPException(status_code=404, detail="Root not found")
+    if body.layout is not None:
+        try:
+            layout.parse_template(body.layout)
+        except layout.LayoutError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        root.layout = body.layout.strip() or "{creator}"
+    if body.enabled is not None:
+        root.enabled = body.enabled
     db.commit()
     db.refresh(root)
     return root

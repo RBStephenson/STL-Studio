@@ -43,3 +43,34 @@ class TestBrowse:
         # The returned path can be browsed directly.
         nested = client.get("/scan/browse", params={"path": entry_path}).json()
         assert [e["name"] for e in nested["entries"]] == ["Model"]
+
+
+class TestScanRoots:
+    def test_add_root_defaults_to_creator_layout(self, client, tmp_path):
+        resp = client.post("/scan/roots", json={"path": str(tmp_path)})
+        assert resp.status_code == 200
+        assert resp.json()["layout"] == "{creator}"
+
+    def test_add_root_with_custom_layout(self, client, tmp_path):
+        resp = client.post("/scan/roots", json={"path": str(tmp_path), "layout": "{tag}/{creator}"})
+        assert resp.status_code == 200
+        assert resp.json()["layout"] == "{tag}/{creator}"
+
+    def test_add_root_rejects_invalid_layout(self, client, tmp_path):
+        resp = client.post("/scan/roots", json={"path": str(tmp_path), "layout": "{creator}/{tag}"})
+        assert resp.status_code == 400
+
+    def test_patch_root_updates_layout(self, client, tmp_path):
+        root_id = client.post("/scan/roots", json={"path": str(tmp_path)}).json()["id"]
+
+        resp = client.patch(f"/scan/roots/{root_id}", json={"layout": "{ignore}/{creator}"})
+        assert resp.status_code == 200
+        assert resp.json()["layout"] == "{ignore}/{creator}"
+
+        listed = client.get("/scan/roots").json()
+        assert listed[0]["layout"] == "{ignore}/{creator}"
+
+    def test_patch_root_rejects_invalid_layout(self, client, tmp_path):
+        root_id = client.post("/scan/roots", json={"path": str(tmp_path)}).json()["id"]
+        resp = client.patch(f"/scan/roots/{root_id}", json={"layout": "no-creator-here"})
+        assert resp.status_code == 400

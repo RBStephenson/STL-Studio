@@ -76,6 +76,10 @@ def _migrate():
         if "part_type" not in cols:
             conn.execute(text("ALTER TABLE stl_files ADD COLUMN part_type TEXT"))
             conn.commit()
+        root_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(scan_roots)"))}
+        if "layout" not in root_cols:
+            conn.execute(text("ALTER TABLE scan_roots ADD COLUMN layout VARCHAR NOT NULL DEFAULT '{creator}'"))
+            conn.commit()
 
 
 @app.on_event("startup")
