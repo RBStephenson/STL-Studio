@@ -16,15 +16,43 @@ from app.config import settings
 router = APIRouter(prefix="/scan", tags=["scan"])
 
 
+def _configured_roots(db: Session) -> list[Path]:
+    """Return all enabled scan roots from the DB plus the env config."""
+    from app.models import ScanRoot as ScanRootModel
+    db_roots = [Path(r) for (r,) in db.query(ScanRootModel.path).filter(ScanRootModel.enabled == True)]
+    env_roots = [Path(r) for r in settings.stl_root_list]
+    seen: set[Path] = set()
+    result = []
+    for r in db_roots + env_roots:
+        if r not in seen:
+            seen.add(r)
+            result.append(r)
+    return result
+
+
+def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
+    try:
+        for root in roots:
+            p.relative_to(root)
+            return True
+    except ValueError:
+        pass
+    return False
+
+
 @router.get("/browse")
-def browse_dirs(path: str = ""):
+def browse_dirs(path: str = "", db: Session = Depends(get_db)):
     """List sub-directories for the Settings folder picker.
 
     With no path: Windows returns available drive letters; other OSes start at
     the user's home directory. Otherwise returns the immediate sub-folders of
     `path`, plus its parent (for an "up" button). Directories only — never files.
+
+    Once scan roots are configured, browsing is restricted to paths within those
+    roots to avoid exposing the rest of the container/host filesystem.
     """
     system = platform.system()
+    roots = _configured_roots(db)
 
     # Top level — drive list on Windows, home dir elsewhere.
     if not path:
@@ -41,6 +69,10 @@ def browse_dirs(path: str = ""):
     p = Path(path)
     if not p.exists() or not p.is_dir():
         raise HTTPException(status_code=404, detail="Folder not found")
+
+    # Once roots are configured, only allow browsing within them.
+    if roots and not _is_under_configured_root(p, roots):
+        raise HTTPException(status_code=403, detail="Path is outside configured scan roots")
 
     try:
         entries = sorted(
@@ -125,6 +157,15 @@ def add_root(body: ScanRootCreate, db: Session = Depends(get_db)):
     path = body.path.strip()
     if not path:
         raise HTTPException(status_code=400, detail="Path is required")
+    p = Path(path)
+    # Reject filesystem roots (/, C:\, D:\, etc.) — adding one would make the
+    # file-serving allowlist match every path on the system.
+    if p == p.parent:
+        raise HTTPException(status_code=400, detail="Cannot add a filesystem root as a scan path")
+    if not p.exists():
+        raise HTTPException(status_code=400, detail="Path does not exist")
+    if not p.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
     existing = db.query(ScanRoot).filter(ScanRoot.path == path).first()
     if existing:
         raise HTTPException(status_code=409, detail="Root already exists")
