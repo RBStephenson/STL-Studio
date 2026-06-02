@@ -2,7 +2,7 @@
 
 [![Release](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml)
 [![Build Check](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml)
-![Tests](https://img.shields.io/badge/tests-144%20passing-brightgreen)
+[![Tests](https://github.com/RBStephenson/STL-Inventory/actions/workflows/tests.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/tests.yml)
 &nbsp;
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -149,6 +149,18 @@ rebuild:
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 (The base image runs without `--reload` — it's a dev-only flag.)
+
+## Tests
+
+The backend suite lives in `backend/tests` (pytest, in-memory SQLite — no
+external services needed). Run it locally:
+```
+cd backend
+pip install -r requirements-test.txt
+pytest
+```
+Every PR to `main` (and every push to `main`) runs the suite via the **Tests**
+workflow, so logic regressions are caught alongside the binary **Build Check**.
 
 ## Releasing
 
