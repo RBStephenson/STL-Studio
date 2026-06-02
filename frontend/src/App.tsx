@@ -8,6 +8,7 @@ import Queue from "./pages/Queue";
 import Triage from "./pages/Triage";
 import VariantGroup from "./pages/VariantGroup";
 import Settings from "./pages/Settings";
+import Help from "./pages/Help";
 import BackToTop from "./components/BackToTop";
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/queue" element={<Queue />} />
           <Route path="/triage" element={<Triage />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/help" element={<Help />} />
         </Routes>
       </main>
       <BackToTop />

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Box, FolderOpen, Users, LayoutGrid, EyeOff, Eye, AlertTriangle, Settings, Printer } from "lucide-react";
+import { Box, FolderOpen, Users, LayoutGrid, EyeOff, Eye, AlertTriangle, Settings, Printer, HelpCircle } from "lucide-react";
 import { useNSFW } from "../context/NSFWContext";
 import { api } from "../api/client";
 
@@ -24,6 +24,7 @@ export default function Navbar() {
     { to: "/queue",       label: "Queue",       icon: Printer,       badge: queueCount },
     { to: "/triage",      label: "Triage",      icon: AlertTriangle, badge: reviewCount },
     { to: "/settings",   label: "Settings",    icon: Settings,      badge: null },
+    { to: "/help",        label: "Help",        icon: HelpCircle,    badge: null },
   ];
 
   return (

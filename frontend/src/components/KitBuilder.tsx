@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { X, Copy, Check, Wrench, Download } from "lucide-react";
 import { STLFile, api } from "../api/client";
+import HelpLink from "./HelpLink";
 
 interface Props {
   modelName: string;
@@ -76,6 +77,7 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
         <div className="flex items-center gap-2">
           <Wrench size={18} className="text-indigo-400" />
           <h2 className="text-lg font-semibold text-white">Kit Builder</h2>
+          <HelpLink section="kit-builder" label="How the Kit Builder works" />
           <span className="text-gray-500 text-sm">— {modelName}</span>
         </div>
         <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">

@@ -5,6 +5,7 @@ import { api, Model, Creator, ModelStats } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
 import BulkTagBar from "../components/BulkTagBar";
+import HelpLink from "../components/HelpLink";
 
 const SITES = ["thingiverse", "printables", "myminifactory", "cults3d", "gumroad", "thangs", "makerworld", "other"];
 const PAGE_SIZE = 48;
@@ -268,7 +269,10 @@ export default function Library() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-100">Library</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-100">
+            Library
+            <HelpLink section="library" label="How the Library works" />
+          </h1>
           <div className="flex items-center gap-3 mt-0.5">
             <p className="text-sm text-gray-500">{total.toLocaleString()} models</p>
             {stats && stats.needs_review > 0 && (
