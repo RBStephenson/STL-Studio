@@ -109,6 +109,7 @@ def scan_all_roots(db: Session | None = None):
             if not _cancel_requested:
                 _prune_stale_paths(_db)
                 _prune_phantoms(_db)
+                _prune_empty_creators(_db)
         finally:
             if own_db:
                 _db.close()
@@ -142,17 +143,20 @@ def _prune_stale_paths(db: Session):
     db.commit()
     logger.info(f"Post-scan: pruned {len(stale_ids)} models with missing folder paths")
 
-    # Clean up Creator rows that now have no models
-    orphan_creators = (
+
+def _prune_empty_creators(db: Session):
+    """Delete Creator rows that have no models — left behind by the scraper
+    creating duplicate creators with different casing, or by stale-path pruning."""
+    orphans = (
         db.query(Creator)
         .filter(~Creator.id.in_(db.query(Model.creator_id).filter(Model.creator_id != None).distinct()))
         .all()
     )
-    if orphan_creators:
-        for c in orphan_creators:
+    if orphans:
+        for c in orphans:
             db.delete(c)
         db.commit()
-        logger.info(f"Post-scan: removed {len(orphan_creators)} creator(s) with no remaining models")
+        logger.info(f"Post-scan: removed {len(orphans)} creator(s) with no remaining models")
 
 
 def _prune_phantoms(db: Session, creator_id: int | None = None):
