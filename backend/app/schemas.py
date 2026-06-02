@@ -49,6 +49,7 @@ class ModelRead(ModelBase):
     custom_attributes: dict = {}
     needs_review: bool = False
     nsfw: bool = False
+    excluded: bool = False
     is_favorite: bool = False
     in_queue: bool = False
     queued_at: Optional[datetime] = None
@@ -138,6 +139,10 @@ class QueueReorder(BaseModel):
 
 class PrintedUpdate(BaseModel):
     printed: bool
+
+
+class ExcludeUpdate(BaseModel):
+    excluded: bool
 
 
 class STLFileUpdate(BaseModel):

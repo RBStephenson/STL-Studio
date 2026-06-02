@@ -598,6 +598,11 @@ def _index_model(
     with _db_lock:
         model = db.query(Model).filter(Model.folder_path == folder_path).first()
 
+        # User-excluded model: leave it hidden. Never re-index, re-tag, or reset
+        # the flag, so a rescan never resurrects something the user removed.
+        if model is not None and model.excluded:
+            return
+
         # Skip expensive file indexing when the folder hasn't changed since the
         # last scan. Metadata/tag updates still run so manual edits and parser
         # improvements are picked up.

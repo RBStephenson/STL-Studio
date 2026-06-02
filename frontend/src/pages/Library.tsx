@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, Check, FolderPlus, ArrowRight } from "lucide-react";
+import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, Check, FolderPlus, ArrowRight, EyeOff } from "lucide-react";
 import { api, Model, Creator, ModelStats } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
@@ -100,6 +100,7 @@ export default function Library() {
   const favParam     = searchParams.get("is_favorite") === "1";
   const queueParam   = searchParams.get("in_queue") === "1";
   const printedParam = searchParams.get("printed") === "1";
+  const excludedParam = searchParams.get("excluded") === "1";
 
   const setParam = (key: string, value: string) => {
     setSearchParams((prev) => {
@@ -146,7 +147,7 @@ export default function Library() {
       // Variant grouping collapses non-representative variants. When filtering by
       // favorites/queue/printed (which apply to individual variants), disable grouping
       // so a flagged non-representative variant isn't hidden behind its group.
-      const groupVariants = !favParam && !queueParam && !printedParam;
+      const groupVariants = !favParam && !queueParam && !printedParam && !excludedParam;
       const params: Record<string, string | number | boolean> = { page, page_size: PAGE_SIZE, group_variants: groupVariants };
       if (search)      params.q             = search;
       if (creatorId)   params.creator_id    = creatorId;
@@ -158,6 +159,7 @@ export default function Library() {
       if (favParam)    params.is_favorite   = true;
       if (queueParam)  params.in_queue      = true;
       if (printedParam) params.printed      = true;
+      if (excludedParam) params.excluded    = true;
       const data = await api.models.list(params);
       if (fetchId !== fetchIdRef.current) return; // stale response — a newer fetch is in flight
       setModels(data.items);
@@ -165,7 +167,7 @@ export default function Library() {
     } finally {
       if (fetchId === fetchIdRef.current) setLoading(false);
     }
-  }, [page, search, creatorId, site, activeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam]);
+  }, [page, search, creatorId, site, activeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam, excludedParam]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);
@@ -238,6 +240,14 @@ export default function Library() {
   }, [models]);
 
   const clearSelection = useCallback(() => setSelection(new Set()), []);
+
+  // After a model is excluded/restored, drop it from the current grid right away
+  // and refresh the count chips (its own fetch keeps totals correct on next load).
+  const handleRemoved = useCallback((id: number) => {
+    setModels((prev) => prev.filter((m) => m.id !== id));
+    setTotal((t) => Math.max(0, t - 1));
+    refreshStats();
+  }, [refreshStats]);
 
   return (
     <div className="p-6">
@@ -325,6 +335,19 @@ export default function Library() {
               >
                 <Check size={11} />
                 {stats.printed} printed
+              </button>
+            )}
+            {stats && (stats.excluded > 0 || excludedParam) && (
+              <button
+                onClick={() => setParam("excluded", excludedParam ? "" : "1")}
+                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
+                  excludedParam
+                    ? "bg-gray-500 text-gray-950 font-medium"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                }`}
+              >
+                <EyeOff size={11} />
+                {stats.excluded} excluded
               </button>
             )}
           </div>
@@ -554,6 +577,8 @@ export default function Library() {
               selected={selection.has(m.id)}
               onSelect={toggleSelect}
               onMutate={refreshStats}
+              excludedView={excludedParam}
+              onRemoved={handleRemoved}
             />
           ))}
         </div>

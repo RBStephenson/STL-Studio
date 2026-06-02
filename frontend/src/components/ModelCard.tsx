@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Package, Star, AlertCircle, Check, Layers, Printer } from "lucide-react";
+import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw } from "lucide-react";
 import { Model, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 import { useToast } from "../context/ToastContext";
@@ -13,6 +13,12 @@ interface Props {
   /** Called after a successful favorite/queue toggle so parents can refresh
    *  derived data (e.g. the Library's favorites/queued count chips). */
   onMutate?: () => void;
+  /** When true, the card is shown in the Excluded view: the hide action becomes
+   *  a Restore action. */
+  excludedView?: boolean;
+  /** Called after the model is excluded (or restored) so the parent can drop the
+   *  card from the current list optimistically. */
+  onRemoved?: (id: number) => void;
 }
 
 const SITE_LABELS: Record<string, string> = {
@@ -34,7 +40,7 @@ const TAG_COLORS: Record<string, string> = {
   "figure":        "bg-indigo-900 text-indigo-300",
 };
 
-export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate }: Props) {
+export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved }: Props) {
   const location = useLocation();
   const { showNSFW } = useNSFW();
   const { toast } = useToast();
@@ -84,6 +90,21 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
     } catch {
       setQueued(!next);  // revert on failure
       toast("Couldn't update the print queue — try again.", "error");
+    }
+  };
+
+  const toggleExclude = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // In the normal library this hides the model; in the Excluded view it restores it.
+    const next = !excludedView;
+    try {
+      await api.models.setExcluded(model.id, next);
+      onRemoved?.(model.id);  // card leaves the current view
+      onMutate?.();
+      toast(next ? "Model excluded from the viewer." : "Model restored.", "success");
+    } catch {
+      toast(next ? "Couldn't exclude the model — try again." : "Couldn't restore the model — try again.", "error");
     }
   };
 
@@ -227,6 +248,17 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
               }`}
             >
               <Star size={13} fill={favorite ? "currentColor" : "none"} />
+            </button>
+            <button
+              onClick={toggleExclude}
+              title={excludedView ? "Restore to the viewer" : "Exclude from the viewer (files kept on disk)"}
+              className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
+                excludedView
+                  ? "text-emerald-400 opacity-100 hover:text-emerald-300"
+                  : "text-gray-400 hover:text-red-300 opacity-0 group-hover:opacity-100"
+              }`}
+            >
+              {excludedView ? <RotateCcw size={13} /> : <EyeOff size={13} />}
             </button>
           </div>
         </div>

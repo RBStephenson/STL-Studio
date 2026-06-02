@@ -7,7 +7,7 @@ from app.models import Model, Creator, ModelTag
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
     ModelUpdate, ThumbnailUpdate, FavoriteUpdate, QueueUpdate, QueueReorder, PrintedUpdate,
-    STLFileUpdate, BulkTagUpdate,
+    ExcludeUpdate, STLFileUpdate, BulkTagUpdate,
 )
 from app.services.tag_sync import sync_model_tags
 from app.services import scanner
@@ -33,11 +33,16 @@ def list_models(
     is_favorite: bool | None = None,
     in_queue: bool | None = None,
     printed: bool | None = None,
+    excluded: bool = False,  # default: hide user-excluded models; pass true for the Excluded view
     sort: str = Query("name"),  # "name" | "queued_at" | "printed_at"
     group_variants: bool = Query(True),
     db: Session = Depends(get_db),
 ):
     q = db.query(Model)
+
+    # User-excluded models are hidden from every view by default. The Excluded
+    # view passes excluded=true to list them so they can be restored.
+    q = q.filter(Model.excluded == excluded)
 
     if search:
         like = f"%{search}%"
@@ -155,7 +160,7 @@ def list_models(
 def list_creators(db: Session = Depends(get_db)):
     rows = (
         db.query(Creator, func.count(Model.id).label("cnt"))
-        .outerjoin(Model, Model.creator_id == Creator.id)
+        .outerjoin(Model, (Model.creator_id == Creator.id) & (Model.excluded == False))
         .group_by(Creator.id)
         .order_by(Creator.name)
         .all()
@@ -170,17 +175,27 @@ def list_creators(db: Session = Depends(get_db)):
 
 @router.get("/stats")
 def model_stats(db: Session = Depends(get_db)):
-    total = db.query(func.count(Model.id)).scalar()
-    needs_review = db.query(func.count(Model.id)).filter(Model.needs_review == True).scalar()
+    # All counts ignore user-excluded models so the stats match the visible grid.
+    base = db.query(func.count(Model.id)).filter(Model.excluded == False)
+    total = base.scalar()
+    needs_review = base.filter(Model.needs_review == True).scalar()
     no_thumbnail = db.query(func.count(Model.id)).filter(
-        Model.thumbnail_path == None, Model.thumbnail_url == None
+        Model.excluded == False, Model.thumbnail_path == None, Model.thumbnail_url == None
     ).scalar()
-    favorites = db.query(func.count(Model.id)).filter(Model.is_favorite == True).scalar()
-    queued = db.query(func.count(Model.id)).filter(Model.in_queue == True).scalar()
-    printed = db.query(func.count(Model.id)).filter(Model.printed_at != None).scalar()
+    favorites = db.query(func.count(Model.id)).filter(
+        Model.excluded == False, Model.is_favorite == True
+    ).scalar()
+    queued = db.query(func.count(Model.id)).filter(
+        Model.excluded == False, Model.in_queue == True
+    ).scalar()
+    printed = db.query(func.count(Model.id)).filter(
+        Model.excluded == False, Model.printed_at != None
+    ).scalar()
+    excluded = db.query(func.count(Model.id)).filter(Model.excluded == True).scalar()
     return {
         "total": total, "needs_review": needs_review, "no_thumbnail": no_thumbnail,
         "favorites": favorites, "queued": queued, "printed": printed,
+        "excluded": excluded,
     }
 
 
@@ -189,6 +204,8 @@ def list_tags(db: Session = Depends(get_db)):
     """Return all unique tags with usage counts, sorted by frequency."""
     rows = (
         db.query(ModelTag.tag, func.count(ModelTag.id).label("count"))
+        .join(Model, Model.id == ModelTag.model_id)
+        .filter(Model.excluded == False)
         .group_by(ModelTag.tag)
         .order_by(func.count(ModelTag.id).desc())
         .all()
@@ -213,7 +230,11 @@ def list_variants(
     """Return all variant models for a (creator, character) group."""
     items = (
         db.query(Model)
-        .filter(Model.creator_id == creator_id, Model.character == character)
+        .filter(
+            Model.creator_id == creator_id,
+            Model.character == character,
+            Model.excluded == False,
+        )
         .order_by(Model.name)
         .all()
     )
@@ -363,6 +384,23 @@ def set_printed(model_id: int, body: PrintedUpdate, db: Session = Depends(get_db
         model.printed_at = None
     db.commit()
     return {"ok": True, "printed_at": model.printed_at}
+
+
+@router.patch("/{model_id}/exclude")
+def set_excluded(model_id: int, body: ExcludeUpdate, db: Session = Depends(get_db)):
+    """Hide a model from the viewer (or restore it). Files on disk are untouched;
+    the scanner preserves this flag so an excluded model is never resurrected."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    model.excluded = body.excluded
+    if body.excluded:
+        # A hidden model shouldn't linger in print-queue state.
+        model.in_queue = False
+        model.queued_at = None
+        model.queue_position = None
+    db.commit()
+    return {"ok": True, "excluded": model.excluded}
 
 
 @router.post("/{model_id}/split")

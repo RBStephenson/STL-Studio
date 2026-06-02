@@ -23,6 +23,7 @@ def _migrate_schema():
         ("models", "queued_at", "DATETIME"),
         ("models", "printed_at", "DATETIME"),
         ("models", "queue_position", "INTEGER"),
+        ("models", "excluded", "BOOLEAN DEFAULT 0"),
         ("scan_roots", "layout", "VARCHAR NOT NULL DEFAULT '{creator}'"),
     ]
     with engine.connect() as conn:

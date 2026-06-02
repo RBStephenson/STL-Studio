@@ -372,6 +372,34 @@ class TestSplitPack:
 
 
 # ---------------------------------------------------------------------------
+# User-excluded models survive rescans
+# ---------------------------------------------------------------------------
+
+class TestExcludedPersistence:
+    def test_rescan_does_not_resurrect_excluded_model(self, db, tmp_path):
+        """A model the user excluded must stay excluded after a rescan of its
+        folder — the walk skips it instead of re-indexing and clearing the flag."""
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Junk Cube"
+        _stl(model_dir)
+        creator = make_creator(db, "Creator")
+
+        # First scan indexes the model, then the user excludes it.
+        _walk(db, creator, creator_dir)
+        model = _models(db, creator)[0]
+        model.excluded = True
+        db.commit()
+
+        # Re-walk the same tree (a normal rescan).
+        _walk(db, creator, creator_dir)
+
+        db.refresh(model)
+        assert model.excluded is True
+        # Still exactly one model row; it was not duplicated or un-excluded.
+        assert len(_models(db, creator)) == 1
+
+
+# ---------------------------------------------------------------------------
 # Regression: thumbnail discovery must not raise (the stl_cache NameError)
 # ---------------------------------------------------------------------------
 

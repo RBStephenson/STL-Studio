@@ -24,6 +24,7 @@ export interface Model {
   category: string | null;
   needs_review: boolean;
   nsfw: boolean;
+  excluded: boolean;
   is_favorite: boolean;
   in_queue: boolean;
   queued_at: string | null;
@@ -45,6 +46,7 @@ export interface ModelStats {
   favorites: number;
   queued: number;
   printed: number;
+  excluded: number;
 }
 
 export interface STLFile {
@@ -170,6 +172,12 @@ export const api = {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids }),
+      }),
+    setExcluded: (id: number, excluded: boolean) =>
+      request<{ ok: boolean; excluded: boolean }>(`/models/${id}/exclude`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ excluded }),
       }),
     setPrinted: (id: number, printed: boolean) =>
       request<{ ok: boolean; printed_at: string | null }>(`/models/${id}/printed`, {

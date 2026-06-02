@@ -203,6 +203,76 @@ class TestStats:
 
 
 # ---------------------------------------------------------------------------
+# Exclude / restore
+# ---------------------------------------------------------------------------
+
+class TestExclude:
+    def test_excluded_model_hidden_from_list(self, client, db):
+        creator = make_creator(db)
+        keep = make_model(db, creator, name="Keep")
+        drop = make_model(db, creator, name="Drop")
+        commit_all(db)
+
+        resp = client.patch(f"/models/{drop.id}/exclude", json={"excluded": True})
+        assert resp.status_code == 200
+        assert resp.json()["excluded"] is True
+
+        data = client.get("/models").json()
+        names = {i["name"] for i in data["items"]}
+        assert names == {"Keep"}
+        assert data["total"] == 1
+        # The kept model is untouched.
+        assert keep.id is not None
+
+    def test_excluded_view_lists_only_excluded(self, client, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="Keep")
+        drop = make_model(db, creator, name="Drop")
+        commit_all(db)
+        client.patch(f"/models/{drop.id}/exclude", json={"excluded": True})
+
+        data = client.get("/models?excluded=true").json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "Drop"
+
+    def test_restore_brings_model_back(self, client, db):
+        creator = make_creator(db)
+        drop = make_model(db, creator, name="Drop")
+        commit_all(db)
+        client.patch(f"/models/{drop.id}/exclude", json={"excluded": True})
+        assert client.get("/models").json()["total"] == 0
+
+        client.patch(f"/models/{drop.id}/exclude", json={"excluded": False})
+        assert client.get("/models").json()["total"] == 1
+
+    def test_excluded_drops_from_stats(self, client, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="A")
+        drop = make_model(db, creator, name="B")
+        commit_all(db)
+        client.patch(f"/models/{drop.id}/exclude", json={"excluded": True})
+
+        stats = client.get("/models/stats").json()
+        assert stats["total"] == 1
+        assert stats["excluded"] == 1
+
+    def test_excluding_clears_queue_state(self, client, db):
+        creator = make_creator(db)
+        m = make_model(db, creator, name="Queued")
+        commit_all(db)
+        client.patch(f"/models/{m.id}/queue", json={"in_queue": True})
+
+        client.patch(f"/models/{m.id}/exclude", json={"excluded": True})
+        db.refresh(m)
+        assert m.in_queue is False
+        assert m.queue_position is None
+
+    def test_exclude_unknown_model_returns_404(self, client):
+        resp = client.patch("/models/99999/exclude", json={"excluded": True})
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Model PATCH
 # ---------------------------------------------------------------------------
 

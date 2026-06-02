@@ -78,6 +78,10 @@ class Model(Base):
     # Review state
     needs_review = Column(Boolean, default=False)  # scanner flagged low-confidence detection
 
+    # User-hidden from the viewer. Files on disk are left untouched; the scanner
+    # preserves this flag and never resurrects an excluded model on rescan.
+    excluded = Column(Boolean, default=False, index=True)
+
     # User curation — independent flags
     is_favorite = Column(Boolean, default=False, index=True)
     in_queue = Column(Boolean, default=False, index=True)   # queued to print next

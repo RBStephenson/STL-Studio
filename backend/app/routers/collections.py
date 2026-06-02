@@ -12,8 +12,9 @@ router = APIRouter(prefix="/collections", tags=["collections"])
 @router.get("", response_model=list[CollectionRead])
 def list_collections(db: Session = Depends(get_db)):
     rows = (
-        db.query(Collection, func.count(CollectionModel.id).label("cnt"))
+        db.query(Collection, func.count(Model.id).label("cnt"))
         .outerjoin(CollectionModel, CollectionModel.collection_id == Collection.id)
+        .outerjoin(Model, (Model.id == CollectionModel.model_id) & (Model.excluded == False))
         .group_by(Collection.id)
         .order_by(Collection.name)
         .all()
