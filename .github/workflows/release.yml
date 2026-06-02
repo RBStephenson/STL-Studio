@@ -8,10 +8,14 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: "Version bump"
+        description: "Version bump (ignored if version is set)"
         type: choice
         options: [patch, minor, major]
         default: patch
+      version:
+        description: "Explicit version tag (e.g. v0.2.3) — overrides bump"
+        type: string
+        default: ""
   push:
     tags:
       - "v*"
@@ -40,16 +44,23 @@ jobs:
             exit 0
           fi
 
-          latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
-          latest=${latest:-v0.0.0}
-          ver=${latest#v}
-          IFS=. read -r major minor patch <<< "$ver"
-          case "${{ inputs.bump }}" in
-            major) major=$((major+1)); minor=0; patch=0 ;;
-            minor) minor=$((minor+1)); patch=0 ;;
-            patch) patch=$((patch+1)) ;;
-          esac
-          newtag="v${major}.${minor}.${patch}"
+          # Allow an explicit version to override auto-computation.
+          if [ -n "${{ inputs.version }}" ]; then
+            newtag="${{ inputs.version }}"
+            echo "Using explicit version: ${newtag}"
+          else
+            latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+            latest=${latest:-v0.0.0}
+            ver=${latest#v}
+            IFS=. read -r major minor patch <<< "$ver"
+            case "${{ inputs.bump }}" in
+              major) major=$((major+1)); minor=0; patch=0 ;;
+              minor) minor=$((minor+1)); patch=0 ;;
+              patch) patch=$((patch+1)) ;;
+            esac
+            newtag="v${major}.${minor}.${patch}"
+            echo "Latest tag: ${latest} -> new tag: ${newtag}"
+          fi
           echo "Latest tag: ${latest} -> new tag: ${newtag}"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
