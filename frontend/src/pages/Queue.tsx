@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Printer, Check, History, GripVertical } from "lucide-react";
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
@@ -13,30 +13,12 @@ import { api, Model } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import { useToast } from "../context/ToastContext";
 
-/** A queued card wrapped so the whole card can be dragged to reorder. We attach
- *  the drag listeners to the wrapper (not a small handle) because users expect to
- *  grab the card itself. A grip icon in the bottom-left is a visual affordance
- *  only. The PointerSensor's distance constraint keeps a plain click opening the
- *  card; the onClickCapture guard suppresses the trailing click after a real drag
- *  so dropping a card never also navigates into it. */
+/** A queued card wrapped so it can be dragged to reorder. The drag handle lives
+ *  in the bottom-left corner so it doesn't clash with the card's favorite/queue
+ *  toggles (top-right) or badges (top-left); the rest of the card stays a link. */
 function SortableCard({ model, onMutate }: { model: Model; onMutate: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: model.id });
-
-  // isDragging is already false by the time the trailing click fires, so latch it
-  // while the drag is active and consume the next click in the capture phase.
-  const draggedRef = useRef(false);
-  useEffect(() => {
-    if (isDragging) draggedRef.current = true;
-  }, [isDragging]);
-  const suppressClickAfterDrag = (e: React.MouseEvent) => {
-    if (draggedRef.current) {
-      e.preventDefault();
-      e.stopPropagation();
-      draggedRef.current = false;
-    }
-  };
-
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -44,18 +26,16 @@ function SortableCard({ model, onMutate }: { model: Model; onMutate: () => void 
     zIndex: isDragging ? 10 : undefined,
   };
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      onClickCapture={suppressClickAfterDrag}
-      className="relative group/drag cursor-grab active:cursor-grabbing"
-    >
-      {/* Visual affordance only — the whole card is the drag target. */}
-      <div className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 text-gray-300 opacity-0 group-hover/drag:opacity-100 transition-opacity pointer-events-none">
+    <div ref={setNodeRef} style={style} className="relative group/drag">
+      <button
+        {...attributes}
+        {...listeners}
+        title="Drag to reorder"
+        aria-label="Drag to reorder"
+        className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 hover:bg-black/90 text-gray-300 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/drag:opacity-100 transition-opacity"
+      >
         <GripVertical size={14} />
-      </div>
+      </button>
       <ModelCard model={model} backTo="/queue" onMutate={onMutate} />
     </div>
   );
@@ -115,7 +95,7 @@ export default function Queue() {
       </div>
       {queued.length > 1 && (
         <p className="text-xs text-gray-500 mb-6">
-          Drag a card to set your print order. Favorites always stay on top.
+          Drag the handle to set your print order. Favorites always stay on top.
         </p>
       )}
 
