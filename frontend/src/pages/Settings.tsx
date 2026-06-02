@@ -215,6 +215,34 @@ export default function Settings() {
           <HardDrive size={14} /> Scan Locations
         </h2>
 
+        {/* How layouts work — example shown above the configured locations */}
+        <div className="bg-gray-900/60 border border-gray-800 rounded-lg px-4 py-3 mb-4">
+          <p className="text-xs text-gray-400 mb-2">
+            A <strong className="text-gray-300">layout</strong> tells STL Inventory how the folders
+            above each model map to a <span className="text-indigo-300">creator</span> and{" "}
+            <span className="text-emerald-300">tags</span>. Read each path left to right, one folder
+            per <code className="text-gray-500">/</code>:
+          </p>
+          <div className="font-mono text-xs bg-gray-950 border border-gray-800 rounded px-3 py-2 mb-2 overflow-x-auto">
+            <span className="text-gray-500">D:\3D STLs\</span>
+            <span className="text-emerald-300">Sci-Fi</span>
+            <span className="text-gray-600">\</span>
+            <span className="text-indigo-300">Abe3D</span>
+            <span className="text-gray-600">\</span>
+            <span className="text-amber-300">Space Marine</span>
+            <span className="text-gray-600">\model.stl</span>
+          </div>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            With the layout <code className="text-gray-400">{"{tag}/{creator}"}</code>, the example above
+            tags the model <span className="text-emerald-300">Sci-Fi</span>, credits it to creator{" "}
+            <span className="text-indigo-300">Abe3D</span>, and treats{" "}
+            <span className="text-amber-300">Space Marine</span> as the model folder.
+            Tokens you can use: <code className="text-gray-400">{"{creator}"}</code> (required, last
+            level), <code className="text-gray-400">{"{tag}"}</code> (tag every model with the folder
+            name), and <code className="text-gray-400">{"{ignore}"}</code> (skip a level).
+          </p>
+        </div>
+
         {loading ? (
           <p className="text-sm text-gray-600">Loading…</p>
         ) : roots.length === 0 ? (
