@@ -93,6 +93,12 @@ A folder is only indexed as a model if it contains 3D files.
 - STL preview (3D viewer)
 - **Part labeling** — tag each STL file with a part category (head, right arm, base, weapon, etc.) using a free-text input with common suggestions
 
+### Favorites & Print Queue
+- ★ Favorite models, 🖨 queue them to print, and ✓ mark them printed — all
+  toggleable from a card or the model header
+- The **Queue** page is a drag-to-reorder print list (favorites float to the
+  top) with a live count badge in the nav and a **Recently Printed** history
+
 ### Kit Builder
 - Launched from any model's detail page
 - Groups all STL files in the model by their part label
@@ -114,6 +120,14 @@ A folder is only indexed as a model if it contains 3D files.
 - Cancel button; Library auto-refreshes on completion
 - On each rescan, `needs_review` is cleared for any model that already has indexed STL files (reduces false-positive review queue)
 - Tag index kept in sync via normalized `model_tags` table for fast filtering
+
+### Data Management
+- **Settings → Data Management** to back up, restore, or reset the catalog
+- **Download Backup** saves a consistent snapshot (`.db`) of your index — tags,
+  favorites, collections, and queue
+- **Restore** swaps in a validated backup (also how you migrate to a new
+  machine); **Reset** wipes the index to empty
+- Backups only cover the index — your STL files on disk are never touched
 
 ## Development
 
