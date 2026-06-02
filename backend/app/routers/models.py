@@ -84,24 +84,27 @@ def list_models(
     # Variant grouping: collapse multi-variant characters to one representative card.
     # The representative is the variant with a thumbnail (earliest ID), else the
     # earliest ID overall. Models with no character, or a unique character, show as-is.
+    # Non-reps are computed from the *filtered* set so a model that is the only match
+    # under the current filters is never hidden by a sibling that doesn't match.
     if group_variants:
-        non_reps = db.execute(_sql("""
-            SELECT m.id FROM models m
-            JOIN (
-                SELECT creator_id, character,
-                    COALESCE(
-                        MIN(CASE WHEN thumbnail_path IS NOT NULL OR thumbnail_url IS NOT NULL THEN id END),
-                        MIN(id)
-                    ) AS rep_id
-                FROM models
-                WHERE character IS NOT NULL
-                GROUP BY creator_id, character
-                HAVING COUNT(*) > 1
-            ) g ON m.creator_id = g.creator_id AND m.character = g.character
-            WHERE m.id != g.rep_id
-        """)).scalars().all()
-        if non_reps:
-            q = q.filter(~Model.id.in_(non_reps))
+        from collections import defaultdict
+        rows = q.with_entities(
+            Model.id, Model.creator_id, Model.character,
+            Model.thumbnail_path, Model.thumbnail_url,
+        ).all()
+        groups: dict[tuple, list] = defaultdict(list)
+        for row in rows:
+            if row.character and row.creator_id is not None:
+                groups[(row.creator_id, row.character)].append(row)
+        non_rep_ids: list[int] = []
+        for group_rows in groups.values():
+            if len(group_rows) <= 1:
+                continue
+            with_thumb = [r for r in group_rows if r.thumbnail_path or r.thumbnail_url]
+            rep_id = min(with_thumb, key=lambda r: r.id).id if with_thumb else min(group_rows, key=lambda r: r.id).id
+            non_rep_ids.extend(r.id for r in group_rows if r.id != rep_id)
+        if non_rep_ids:
+            q = q.filter(~Model.id.in_(non_rep_ids))
 
     total = q.count()
     if sort == "queued_at":
@@ -267,9 +270,6 @@ def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(get_db)
 
     if data.get("creator_name"):
         model.creator_id = resolve_creator(data["creator_name"], db).id
-
-    if "needs_review" not in data:
-        model.needs_review = False
 
     model.updated_at = utcnow()
     sync_model_tags(model, db)

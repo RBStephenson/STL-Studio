@@ -191,6 +191,7 @@ def _prune_phantoms(db: Session, creator_id: int | None = None):
 
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
+        db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
         db.query(ModelTag).filter(ModelTag.model_id.in_(chunk)).delete(synchronize_session=False)
         db.query(CollectionModel).filter(CollectionModel.model_id.in_(chunk)).delete(synchronize_session=False)
         db.query(Model).filter(Model.id.in_(chunk)).delete(synchronize_session=False)
