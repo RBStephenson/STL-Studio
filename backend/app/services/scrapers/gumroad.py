@@ -147,7 +147,8 @@ async def search(query: str, limit: int = 12) -> list[SearchResult]:
     soup = BeautifulSoup(html, "html.parser")
     results = []
     for card in soup.select("[data-permalink]")[:limit]:
-        href = card.get("data-permalink") or card.select_one("a[href*='/l/']")
+        fallback = card.select_one("a[href*='/l/']")
+        href = card.get("data-permalink") or (fallback.get("href", "") if fallback else "")
         if not href:
             continue
         product_url = f"https://gumroad.com{href}" if href.startswith("/") else href
