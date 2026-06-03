@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Collection, CollectionModel, Model
-from app.schemas import CollectionBase, CollectionRead
+from app.schemas import CollectionBase, CollectionRead, CollectionUpdate, ModelRead
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -31,9 +32,28 @@ def list_collections(db: Session = Depends(get_db)):
 def create_collection(body: CollectionBase, db: Session = Depends(get_db)):
     col = Collection(**body.model_dump())
     db.add(col)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A collection with that name already exists")
     db.refresh(col)
     return col
+
+
+@router.get("/{collection_id}/models", response_model=list[ModelRead])
+def get_collection_models(collection_id: int, db: Session = Depends(get_db)):
+    col = db.query(Collection).filter(Collection.id == collection_id).first()
+    if not col:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    models = (
+        db.query(Model)
+        .join(CollectionModel, CollectionModel.model_id == Model.id)
+        .filter(CollectionModel.collection_id == collection_id, Model.excluded == False)
+        .order_by(Model.title, Model.name)
+        .all()
+    )
+    return models
 
 
 @router.post("/{collection_id}/models/{model_id}", status_code=204)
@@ -51,6 +71,31 @@ def add_model_to_collection(collection_id: int, model_id: int, db: Session = Dep
     if not existing:
         db.add(CollectionModel(collection_id=collection_id, model_id=model_id))
         db.commit()
+
+
+@router.patch("/{collection_id}", response_model=CollectionRead)
+def update_collection(collection_id: int, body: CollectionUpdate, db: Session = Depends(get_db)):
+    col = db.query(Collection).filter(Collection.id == collection_id).first()
+    if not col:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(col, field, value)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A collection with that name already exists")
+    db.refresh(col)
+    return col
+
+
+@router.delete("/{collection_id}", status_code=204)
+def delete_collection(collection_id: int, db: Session = Depends(get_db)):
+    col = db.query(Collection).filter(Collection.id == collection_id).first()
+    if not col:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    db.delete(col)
+    db.commit()
 
 
 @router.delete("/{collection_id}/models/{model_id}", status_code=204)

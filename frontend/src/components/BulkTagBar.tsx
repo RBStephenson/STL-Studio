@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { Tag, Trash2, X, Check, Loader2 } from "lucide-react";
-import { api } from "../api/client";
+import { Tag, Trash2, X, Check, Loader2, FolderOpen } from "lucide-react";
+import { api, Collection } from "../api/client";
 
 interface Props {
   selectedIds: number[];
@@ -8,9 +8,10 @@ interface Props {
   onSelectAll: () => void;
   onClear: () => void;
   onDone: () => void; // called after a successful bulk op so Library can re-fetch
+  collections: Collection[];
 }
 
-type Mode = "idle" | "add" | "remove";
+type Mode = "idle" | "add" | "remove" | "collection";
 type Status = "idle" | "loading" | "success" | "error";
 
 function parseTags(raw: string): string[] {
@@ -20,7 +21,7 @@ function parseTags(raw: string): string[] {
     .filter(Boolean);
 }
 
-export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onClear, onDone }: Props) {
+export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onClear, onDone, collections }: Props) {
   const [mode, setMode] = useState<Mode>("idle");
   const [tagInput, setTagInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
@@ -28,7 +29,7 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (mode !== "idle") inputRef.current?.focus();
+    if (mode !== "idle" && mode !== "collection") inputRef.current?.focus();
   }, [mode]);
 
   const reset = () => {
@@ -64,6 +65,20 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") apply();
     if (e.key === "Escape") reset();
+  };
+
+  const addToCollection = async (col: Collection) => {
+    setStatus("loading");
+    try {
+      await api.collections.bulkAddModels(col.id, selectedIds);
+      setStatus("success");
+      setMessage(`Added to "${col.name}"`);
+      setTimeout(reset, 1800);
+    } catch {
+      setStatus("error");
+      setMessage("Failed — try again");
+      setTimeout(() => setStatus("idle"), 2500);
+    }
   };
 
   const allSelected = selectedIds.length >= totalOnPage;
@@ -138,6 +153,31 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
           </span>
         )}
 
+        {/* Collection picker */}
+        {status === "idle" && mode === "collection" && (
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className="text-xs font-medium text-indigo-400 shrink-0">Add to:</span>
+            <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+              {collections.length === 0 ? (
+                <span className="text-xs text-gray-500">No collections yet</span>
+              ) : (
+                collections.map((col) => (
+                  <button
+                    key={col.id}
+                    onClick={() => addToCollection(col)}
+                    className="text-xs px-2.5 py-1 rounded-full bg-indigo-950 border border-indigo-800 text-indigo-300 hover:bg-indigo-900 transition-colors"
+                  >
+                    {col.name}
+                  </button>
+                ))
+              )}
+            </div>
+            <button onClick={reset} className="text-gray-600 hover:text-gray-400 transition-colors shrink-0">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* Action buttons */}
         {status === "idle" && mode === "idle" && (
           <div className="flex items-center gap-2 ml-auto">
@@ -154,6 +194,13 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
             >
               <Trash2 size={13} />
               Remove Tags
+            </button>
+            <button
+              onClick={() => setMode("collection")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+            >
+              <FolderOpen size={13} />
+              Add to Collection
             </button>
           </div>
         )}

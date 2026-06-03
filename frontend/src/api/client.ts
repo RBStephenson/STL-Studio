@@ -60,6 +60,7 @@ export interface STLFile {
 export interface ModelDetail extends Model {
   stl_files: STLFile[];
   creator: { id: number; name: string; source_url: string | null } | null;
+  collection_ids: number[];
 }
 
 export interface ModelList {
@@ -284,6 +285,31 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, description }),
       }),
+    getModels: (collectionId: number) =>
+      request<Model[]>(`/collections/${collectionId}/models`),
+    addModel: async (collectionId: number, modelId: number) => {
+      const res = await fetch(`${BASE}/collections/${collectionId}/models/${modelId}`, { method: "POST" });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    },
+    removeModel: async (collectionId: number, modelId: number) => {
+      const res = await fetch(`${BASE}/collections/${collectionId}/models/${modelId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    },
+    update: (collectionId: number, body: { name?: string; description?: string }) =>
+      request<Collection>(`/collections/${collectionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    delete: async (collectionId: number) => {
+      const res = await fetch(`${BASE}/collections/${collectionId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    },
+    bulkAddModels: async (collectionId: number, modelIds: number[]) => {
+      await Promise.all(modelIds.map((id) => {
+        return fetch(`${BASE}/collections/${collectionId}/models/${id}`, { method: "POST" });
+      }));
+    },
   },
   fileUrl: (path: string) => `/api/files/image?path=${encodeURIComponent(path)}`,
   stlUrl: (path: string) => `/api/files/stl?path=${encodeURIComponent(path)}`,

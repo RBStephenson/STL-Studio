@@ -70,6 +70,7 @@ class ModelRead(ModelBase):
 class ModelDetail(ModelRead):
     stl_files: list[STLFileRead] = []
     creator: Optional[CreatorRead] = None
+    collection_ids: list[int] = []
 
 
 class ModelList(BaseModel):
@@ -92,11 +93,19 @@ class CollectionBase(BaseModel):
     description: Optional[str] = None
 
 
+class CollectionUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
 class CollectionRead(CollectionBase):
     id: int
     cover_image_path: Optional[str] = None
     model_count: Optional[int] = 0
     created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ---------------------------------------------------------------------------

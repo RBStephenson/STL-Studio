@@ -11,6 +11,7 @@ A tour of every screen and what it does.
 - [Kit Builder](#kit-builder)
 - [Metadata editing & web enrichment](#metadata-editing--web-enrichment)
 - [Triage queue](#triage-queue)
+- [Collections](#collections)
 - [Bulk tag editor](#bulk-tag-editor)
 - [Creators & per-creator rescan](#creators--per-creator-rescan)
 - [Settings](#settings)
@@ -56,6 +57,7 @@ Click a card to open the model. From here you can:
 - Edit metadata, tags, source URL, and the NSFW flag.
 - See and label each STL file (head, arm, base, etc.).
 - **Download all** files as a zip, or open the **Kit Builder**.
+- Add the model to one or more **Collections** (see below).
 - See the model's **Location** on disk — copy the path, or (standalone only)
   click **Open folder** to jump to it in your file manager.
 
@@ -131,11 +133,53 @@ uncertain (`needs_review`). Work through them quickly:
 
 The nav shows a live count of how many models still need review.
 
+## Collections
+
+**Collections** let you group models into named sets — independent of tags or
+creators. Use them for things like "Army project", "Current print queue", or
+"Gift ideas".
+
+### Collections page (`/collections`)
+
+- **Create** a collection with the **New Collection** button.
+- **Rename** a collection — hover the card and click the pencil icon, then type
+  a new name and press Enter (or click **Save**).
+- **Delete** a collection — hover the card and click the trash icon, then
+  confirm. Deleting a collection does not delete any models; it only removes the
+  grouping.
+- Click a collection card to open its **detail view**.
+
+### Collection detail view
+
+Shows every model in the collection as a standard grid. To **remove** a model
+from the collection, hover the card and click the **×** button in the top-left
+corner.
+
+### Adding models to a collection
+
+There are two ways:
+
+1. **From a model's detail page** — scroll to the **Collections** section in
+   the right column and click **Manage**. A checkbox list appears; tick any
+   collection to add the model to it (untick to remove). You can also create a
+   new collection inline from the same panel — it's created and the model is
+   added in one step.
+
+2. **Bulk add from the Library** — select multiple models using their hover
+   checkboxes, then click **Add to Collection** in the floating bar at the
+   bottom of the screen. Pick a collection from the list that appears.
+
+### Notes
+
+- A model can belong to any number of collections.
+- Collections are included in the database backup, so they survive a
+  backup/restore with no extra work.
+
 ## Bulk tag editor
 
 In the Library, hover a card and use the checkbox to select multiple models. A
-floating bar appears where you can **add or remove tags** across the whole
-selection at once.
+floating bar appears where you can **add or remove tags** or **add to a
+collection** across the whole selection at once.
 
 ## Creators & per-creator rescan
 

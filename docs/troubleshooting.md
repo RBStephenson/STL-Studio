@@ -12,6 +12,7 @@
 - [macOS won't open the app](#macos-wont-open-the-app)
 - [Where is my data stored? Is it safe?](#where-is-my-data-stored-is-it-safe)
 - [How do I back up or move my library?](#how-do-i-back-up-or-move-my-library)
+- [A collection shows 0 models after I added some](#a-collection-shows-0-models-after-i-added-some)
 
 ---
 
@@ -122,3 +123,13 @@ Open **Settings → Data Management**:
 Both actions only affect the index — they never touch your STL files on disk.
 Restore can't run while a scan is in progress, and it asks you to type a
 confirmation phrase since it overwrites your current catalog.
+
+Your **collections** (names, memberships, and renames) are part of the index and
+are included in every backup automatically.
+
+## A collection shows 0 models after I added some
+
+The model count on the Collections page is refreshed when the page loads. If you
+added models from a detail page and then navigated back, click away and return to
+the Collections page to see the updated counts. The counts are always accurate
+when you open a collection's detail view.

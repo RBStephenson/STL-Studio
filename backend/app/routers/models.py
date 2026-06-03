@@ -3,7 +3,7 @@ from sqlalchemy import func, exists, text as _sql
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.models import Model, Creator, ModelTag
+from app.models import Model, Creator, ModelTag, CollectionModel
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
     ModelUpdate, ThumbnailUpdate, FavoriteUpdate, QueueUpdate, QueueReorder, PrintedUpdate,
@@ -422,7 +422,11 @@ def split_pack(model_id: int, db: Session = Depends(get_db)):
 def get_model(model_id: int, db: Session = Depends(get_db)):
     model = (
         db.query(Model)
-        .options(joinedload(Model.stl_files), joinedload(Model.creator))
+        .options(
+            joinedload(Model.stl_files),
+            joinedload(Model.creator),
+            joinedload(Model.collection_links),
+        )
         .filter(Model.id == model_id)
         .first()
     )
@@ -430,4 +434,5 @@ def get_model(model_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Model not found")
     result = ModelDetail.model_validate(model)
     result.native_folder_path = settings.to_native_path(model.folder_path)
+    result.collection_ids = [link.collection_id for link in model.collection_links]
     return result

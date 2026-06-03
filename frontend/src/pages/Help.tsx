@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, type LucideIcon,
 } from "lucide-react";
 
 /** A keyboard key, styled like the hints elsewhere in the app. */
@@ -232,14 +232,54 @@ const SECTIONS: Section[] = [
     ),
   },
   {
+    id: "collections",
+    title: "Collections",
+    icon: FolderOpen,
+    body: (
+      <>
+        <p>
+          Collections let you group models into named sets, independent of tags or creators —
+          useful for projects, wishlists, or anything you want to track together.
+        </p>
+        <ul>
+          <li>
+            <strong>Create</strong> a collection from the Collections page (nav → Collections →
+            New Collection).
+          </li>
+          <li>
+            <strong>Rename</strong> — hover a collection card and click the pencil icon.
+          </li>
+          <li>
+            <strong>Delete</strong> — hover a collection card and click the trash icon. Models
+            are not deleted, only the grouping.
+          </li>
+          <li>
+            <strong>Add a model</strong> — open a model's detail page, scroll to the
+            Collections section, click <strong>Manage</strong>, and tick the collections you
+            want. You can also create a new collection inline from that panel.
+          </li>
+          <li>
+            <strong>Bulk add</strong> — select models in the Library using their hover
+            checkboxes, then click <strong>Add to Collection</strong> in the floating bar.
+          </li>
+          <li>
+            <strong>Remove a model</strong> — open the collection's detail view, hover the
+            card, and click the <strong>×</strong> button.
+          </li>
+        </ul>
+        <p>Collections are saved in your database and survive backup/restore.</p>
+      </>
+    ),
+  },
+  {
     id: "bulk-tags",
     title: "Bulk tag editor",
     icon: Tags,
     body: (
       <p>
         In the Library, hover a card and use the checkbox to select multiple models. A
-        floating bar appears where you can <strong>add or remove tags</strong> across the
-        whole selection at once.
+        floating bar appears where you can <strong>add or remove tags</strong> or{" "}
+        <strong>add to a collection</strong> across the whole selection at once.
       </p>
     ),
   },

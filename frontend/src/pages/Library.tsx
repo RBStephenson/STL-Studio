@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, Check, FolderPlus, ArrowRight, EyeOff } from "lucide-react";
-import { api, Model, Creator, ModelStats } from "../api/client";
+import { api, Model, Creator, ModelStats, Collection } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
 import BulkTagBar from "../components/BulkTagBar";
@@ -136,6 +136,7 @@ export default function Library() {
   const presetInputRef = useRef<HTMLInputElement>(null);
   // null = unknown/loading; number = how many scan folders are configured
   const [scanRootCount, setScanRootCount] = useState<number | null>(null);
+  const [collections, setCollections] = useState<Collection[]>([]);
 
   const scrollRestoredRef = useRef(false);
   const fetchIdRef = useRef(0);
@@ -175,6 +176,7 @@ export default function Library() {
   const refreshStats = useCallback(() => { api.models.stats().then(setStats).catch(() => {}); }, []);
   useEffect(() => { refreshStats(); }, [refreshStats]);
   useEffect(() => { api.models.tags().then(setAllTags).catch(() => {}); }, []);
+  useEffect(() => { api.collections.list().then(setCollections).catch(() => {}); }, []);
 
   // Restore scroll position when navigating back from a model detail page
   useEffect(() => {
@@ -591,6 +593,7 @@ export default function Library() {
           onSelectAll={selectAll}
           onClear={clearSelection}
           onDone={fetchModels}
+          collections={collections}
         />
       )}
 
