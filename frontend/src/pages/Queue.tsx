@@ -9,14 +9,20 @@ import {
   useSortable, sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { api, Model } from "../api/client";
+import { api, Model, Collection } from "../api/client";
 import ModelCard from "../components/ModelCard";
+import BulkTagBar from "../components/BulkTagBar";
 import { useToast } from "../context/ToastContext";
 
 /** A queued card wrapped so it can be dragged to reorder. The drag handle lives
  *  in the bottom-left corner so it doesn't clash with the card's favorite/queue
  *  toggles (top-right) or badges (top-left); the rest of the card stays a link. */
-function SortableCard({ model, onMutate }: { model: Model; onMutate: () => void }) {
+function SortableCard({ model, onMutate, selected, onSelect }: {
+  model: Model;
+  onMutate: () => void;
+  selected?: boolean;
+  onSelect?: (id: number) => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: model.id });
   const style: React.CSSProperties = {
@@ -36,7 +42,7 @@ function SortableCard({ model, onMutate }: { model: Model; onMutate: () => void 
       >
         <GripVertical size={14} />
       </button>
-      <ModelCard model={model} backTo="/queue" onMutate={onMutate} />
+      <ModelCard model={model} backTo="/queue" onMutate={onMutate} selected={selected} onSelect={onSelect} />
     </div>
   );
 }
@@ -45,7 +51,23 @@ export default function Queue() {
   const [queued, setQueued] = useState<Model[]>([]);
   const [printed, setPrinted] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selection, setSelection] = useState<Set<number>>(new Set());
+  const [collections, setCollections] = useState<Collection[]>([]);
   const { toast } = useToast();
+
+  const toggleSelect = useCallback((id: number) => {
+    setSelection(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelection(new Set(queued.map(m => m.id)));
+  }, [queued]);
+
+  const clearSelection = useCallback(() => setSelection(new Set()), []);
 
   const sensors = useSensors(
     // A small movement threshold lets a plain click still open the card.
@@ -68,6 +90,7 @@ export default function Queue() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { api.collections.list().then(setCollections).catch(() => {}); }, []);
 
   const onDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -116,11 +139,22 @@ export default function Queue() {
           <SortableContext items={queued.map((m) => m.id)} strategy={rectSortingStrategy}>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
               {queued.map((m) => (
-                <SortableCard key={m.id} model={m} onMutate={load} />
+                <SortableCard key={m.id} model={m} onMutate={load} selected={selection.has(m.id)} onSelect={toggleSelect} />
               ))}
             </div>
           </SortableContext>
         </DndContext>
+      )}
+
+      {selection.size > 0 && (
+        <BulkTagBar
+          selectedIds={Array.from(selection)}
+          totalOnPage={queued.length}
+          onSelectAll={selectAll}
+          onClear={clearSelection}
+          onDone={load}
+          collections={collections}
+        />
       )}
 
       {/* Recently printed */}

@@ -24,17 +24,23 @@ function parseTags(raw: string): string[] {
 export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onClear, onDone, collections }: Props) {
   const [mode, setMode] = useState<Mode>("idle");
   const [tagInput, setTagInput] = useState("");
+  const [colSearch, setColSearch] = useState("");
+  const [colOpen, setColOpen] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const colInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (mode !== "idle" && mode !== "collection") inputRef.current?.focus();
+    if (mode === "collection") { setColOpen(true); colInputRef.current?.focus(); }
+    else if (mode !== "idle") inputRef.current?.focus();
   }, [mode]);
 
   const reset = () => {
     setMode("idle");
     setTagInput("");
+    setColSearch("");
+    setColOpen(false);
     setStatus("idle");
     setMessage("");
   };
@@ -157,20 +163,37 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
         {status === "idle" && mode === "collection" && (
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <span className="text-xs font-medium text-indigo-400 shrink-0">Add to:</span>
-            <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-              {collections.length === 0 ? (
-                <span className="text-xs text-gray-500">No collections yet</span>
-              ) : (
-                collections.map((col) => (
-                  <button
-                    key={col.id}
-                    onClick={() => addToCollection(col)}
-                    className="text-xs px-2.5 py-1 rounded-full bg-indigo-950 border border-indigo-800 text-indigo-300 hover:bg-indigo-900 transition-colors"
-                  >
-                    {col.name}
-                  </button>
-                ))
-              )}
+            <div className="relative flex-1 min-w-0 max-w-xs">
+              <input
+                ref={colInputRef}
+                type="text"
+                value={colSearch}
+                onChange={e => { setColSearch(e.target.value); setColOpen(true); }}
+                onFocus={() => setColOpen(true)}
+                onKeyDown={e => { if (e.key === "Escape") reset(); }}
+                placeholder={collections.length === 0 ? "No collections yet" : "Search collections…"}
+                disabled={collections.length === 0}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2.5 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 disabled:opacity-40"
+              />
+              {colOpen && collections.length > 0 && (() => {
+                const filtered = collections.filter(c =>
+                  c.name.toLowerCase().includes(colSearch.toLowerCase())
+                );
+                return filtered.length > 0 ? (
+                  <ul className="absolute bottom-full mb-1 left-0 right-0 bg-gray-800 border border-gray-600 rounded shadow-xl max-h-48 overflow-y-auto z-10">
+                    {filtered.map(col => (
+                      <li key={col.id}>
+                        <button
+                          onMouseDown={e => { e.preventDefault(); addToCollection(col); }}
+                          className="w-full text-left px-3 py-1.5 text-sm text-gray-200 hover:bg-indigo-700 hover:text-white transition-colors"
+                        >
+                          {col.name}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null;
+              })()}
             </div>
             <button onClick={reset} className="text-gray-600 hover:text-gray-400 transition-colors shrink-0">
               <X size={14} />
