@@ -1,0 +1,4 @@
+# Global owner — required reviewer on every pull request.
+# Add contributor GitHub usernames here (one per line, space-separated) when
+# you want them to be required reviewers on all or specific paths.
+* @RBStephenson
