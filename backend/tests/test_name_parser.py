@@ -243,6 +243,7 @@ class TestCharacterKey:
 
     @pytest.mark.parametrize("name", [
         "Unsupported", "Supported_Solid", "75mm Unsupported", "Presupported", "Solid",
+        "Full_cutted", "Full cutted", "Full cut",
     ])
     def test_pure_variant_descriptor_is_empty(self, name):
         assert character_key(name) == ""
@@ -251,6 +252,13 @@ class TestCharacterKey:
         # CA3D-style leaf names that are only scale/cut descriptors → no identity
         assert character_key("1,12 pre supports") == ""
         assert character_key("1,12 uncut") == ""
+
+    def test_full_cutted_stripped_from_character_name(self):
+        # "Full_cutted" is a print-prep variant (pre-separated parts), not a character.
+        # It must be stripped so that e.g. Cloud/Full_cutted and Wolverine/Full_cutted
+        # are not grouped together as variants of each other.
+        assert character_key("Cloud_Full_cutted") == "Cloud"
+        assert character_key("Wolverine Full cutted") == "Wolverine"
 
     def test_distinct_products_keep_distinct_keys(self):
         assert character_key("AleCask_32mm_UnSupported") != character_key("Barrel_32mm_UnSupported")
@@ -292,6 +300,7 @@ class TestIsStructuralFolder:
         "no_supported", "Supports", "Renders", "Render Images", "Colored Turntable",
         "75mm", "178mm", "Bust", "1-10 Scale", "1-10 Scale Split", "Supported Solid",
         "32mm Supported", "parts", "base",
+        "Full_cutted", "Full cutted", "Full cut", "cutted",
     ])
     def test_structural_names(self, name):
         assert name_parser.is_structural_folder(name) is True

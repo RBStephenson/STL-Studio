@@ -213,6 +213,10 @@ _STRUCTURAL_EXACT: set[str] = {
     "renders", "render", "images", "image", "photos", "photo",
     "preview", "previews", "gallery", "turntable",
     "split", "merged", "solid", "hollow",
+    # "full cut" / "full cutted" — print-prep term meaning pre-separated body parts,
+    # analogous to "presupported". Must not be treated as a character/product name.
+    "cutted",
+    "full cut", "full cutted", "full_cut", "full_cutted", "fullcut", "fullcutted",
 }
 
 
@@ -225,7 +229,7 @@ _SUPPORT_FORMAT = re.compile(
     r"un[\s_-]?supported|presupport(?:ed)?|unsupported|supports?|presup|pre|"
     r"no[\s_-]?supports?|nosupports?|"
     r"solid|hollow|"
-    r"without|uncut|no[\s_-]?cuts?|cuts?|"
+    r"without|uncut|no[\s_-]?cuts?|full[\s_-]?cut(?:s|ted)?|cut(?:s|ted)?|"
     r"ready[\s_-]?to[\s_-]?slice|readytoslice|"
     r"lychee|chitubox|merged|split"
     r")\b",
@@ -250,7 +254,7 @@ _SCALE_MM_ANY = re.compile(r"(?<!\d)\d{1,4}\s*mm\b", re.I)
 _VARIANT_JUNK = re.compile(
     r"\b("
     r"scale|stls?|lychee|chitubox|files?|renders?|images?|previews?|photos?|"
-    r"extras?|merge[d]?|version|without|cuts?|nsfw|sfw|"
+    r"extras?|merge[d]?|version|without|cut(?:s|ted)?|nsfw|sfw|"
     r"\d+"
     r")\b",
     re.I,
