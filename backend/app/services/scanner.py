@@ -531,7 +531,8 @@ def _walk_for_models(
     own_character = character
     if (not is_creator_root
             and not signals.is_parts
-            and not name_parser.is_structural_folder(folder.name)):
+            and not name_parser.is_structural_folder(folder.name)
+            and name_parser.character_key(folder.name)):
         own_character = folder.name
 
     #   strict-majority shared key → children are support/format/scale variants of one
