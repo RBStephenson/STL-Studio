@@ -4,6 +4,7 @@ A tour of every screen and what it does.
 
 - [Library](#library)
 - [Variant grouping](#variant-grouping)
+  - [Fixing mis-grouped models](#fixing-mis-grouped-models)
 - [Model detail](#model-detail)
 - [3D viewer](#3d-viewer)
 - [Image picker (thumbnails)](#image-picker-thumbnails)
@@ -47,6 +48,47 @@ collapses them into a **single group card** with a "*N* variants" badge.
 Click it to open the group and see each variant individually.
 
 This keeps the grid tidy when a creator ships many cuts/versions of one model.
+
+### Fixing mis-grouped models
+
+The scanner infers the character group from folder names — it's accurate for
+most layouts but occasionally gets it wrong (typo'd folder, unusual nesting,
+inconsistent studio naming). You can fix any mis-grouping durably, so your
+correction survives future rescans:
+
+**From the group view** (fastest for fixing a whole group at once)
+
+Open a group card to see all its variants. Below each card there are two
+quick actions:
+
+- **Move to group** — type the target group name. As you type, a dropdown
+  offers the creator's existing groups so you don't have to remember exact
+  names. Press **Enter** or click **Move** to apply; the variant is removed
+  from the current list immediately.
+- **× Remove** — pull the model out of this group entirely, making it a
+  standalone model in the Library.
+
+**From a model's detail page**
+
+Click a model, then find the **Set group** button in the header (alongside
+*Edit*, *Find on Web*, and *Split pack*):
+
+- Click **Set group** to open an inline input. Start typing — existing groups
+  for that creator appear as suggestions so you can pick from a list rather
+  than type the full name from memory. Leave the field blank and save to
+  **ungroup** the model. Press **Enter** or click **Save**; press **Escape** to
+  cancel.
+- Once an override is active, the button changes to an indigo **Group: [name]**
+  chip. Click it to change the assignment, or click **✕** beside it to clear
+  the override (restoring scanner-detected grouping on the next rescan).
+
+**How overrides work**
+
+A group override is written to the database and applied immediately — the
+model moves to the new group without needing a rescan. On every future rescan
+the scanner sees the override and applies it instead of the heuristic, so your
+corrections are permanent. Clearing an override removes the record; the scanner
+will re-derive the group on the next rescan.
 
 ## Model detail
 

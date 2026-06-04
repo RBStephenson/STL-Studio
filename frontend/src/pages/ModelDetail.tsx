@@ -235,6 +235,10 @@ export default function ModelDetail() {
   const [copiedPath, setCopiedPath] = useState(false);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
+  const [settingGroup, setSettingGroup] = useState(false);
+  const [groupInput, setGroupInput] = useState("");
+  const [savingGroup, setSavingGroup] = useState(false);
+  const [groupSuggestions, setGroupSuggestions] = useState<string[]>([]);
   // undefined = loading, null = boundary/unavailable, NavTarget = navigable
   const [prevNav, setPrevNav] = useState<NavTarget | null | undefined>(undefined);
   const [nextNav, setNextNav] = useState<NavTarget | null | undefined>(undefined);
@@ -261,6 +265,7 @@ export default function ModelDetail() {
     setShowImagePicker(false);
     setShowKitBuilder(false);
     setOpenFolderError(null);
+    setSettingGroup(false);
   }, [id]);
 
   const downloadAllFiles = async () => {
@@ -311,6 +316,45 @@ export default function ModelDetail() {
     } catch (e: any) {
       toast(e?.message || "Couldn't split this model — try again.", "error");
       setSplitting(false);
+    }
+  };
+
+  const openSetGroup = () => {
+    setGroupInput(model?.character ?? "");
+    setSettingGroup(true);
+    if (model?.creator_id) {
+      api.models.characters(model.creator_id).then(setGroupSuggestions).catch(() => {});
+    }
+  };
+
+  const saveGroup = async () => {
+    if (!model || savingGroup) return;
+    setSavingGroup(true);
+    try {
+      const trimmed = groupInput.trim();
+      await api.models.setGroupOverride(model.id, trimmed || null);
+      toast(trimmed ? `Moved to group "${trimmed}".` : "Removed from group.", "success");
+      setSettingGroup(false);
+      load();
+    } catch (e: any) {
+      toast(e?.message || "Couldn't save group — try again.", "error");
+    } finally {
+      setSavingGroup(false);
+    }
+  };
+
+  const clearGroup = async () => {
+    if (!model) return;
+    const ok = window.confirm(
+      "Clear the group override?\n\nThe model will return to its scanner-detected group on the next rescan."
+    );
+    if (!ok) return;
+    try {
+      await api.models.clearGroupOverride(model.id);
+      toast("Group override cleared — rescan to apply heuristic.", "success");
+      load();
+    } catch (e: any) {
+      toast(e?.message || "Couldn't clear override — try again.", "error");
     }
   };
 
@@ -717,8 +761,69 @@ export default function ModelDetail() {
                 <Split size={14} />
                 {splitting ? "Splitting…" : "Split pack"}
               </button>
+              {model.has_group_override ? (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={openSetGroup}
+                    title="Change the group this model belongs to"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-900/50 hover:bg-indigo-800/60 border border-indigo-700 text-sm text-indigo-300 transition-colors"
+                  >
+                    <Tag size={14} />
+                    Group: {model.character ?? "none"}
+                  </button>
+                  <button
+                    onClick={clearGroup}
+                    title="Remove override and restore scanner-detected grouping on next rescan"
+                    className="px-2 py-1.5 rounded bg-gray-800 hover:bg-red-900/40 border border-gray-700 hover:border-red-600 text-xs text-gray-500 hover:text-red-400 transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={openSetGroup}
+                  title="Assign this model to a character group (persists across rescans)"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 text-sm text-gray-300 transition-colors"
+                >
+                  <Tag size={14} />
+                  Set group
+                </button>
+              )}
             </div>
           </div>
+
+          {/* ---- Set group inline form ---- */}
+          {settingGroup && (
+            <div className="flex items-center gap-2 px-1 py-2">
+              <Tag size={14} className="text-indigo-400 shrink-0" />
+              <input
+                autoFocus
+                type="text"
+                list="group-suggestions"
+                value={groupInput}
+                onChange={(e) => setGroupInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveGroup(); if (e.key === "Escape") setSettingGroup(false); }}
+                placeholder="Group name (leave blank to ungroup)"
+                className="flex-1 px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-sm text-gray-200 outline-none"
+              />
+              <datalist id="group-suggestions">
+                {groupSuggestions.map((s) => <option key={s} value={s} />)}
+              </datalist>
+              <button
+                onClick={saveGroup}
+                disabled={savingGroup}
+                className="px-3 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-sm text-white disabled:opacity-40"
+              >
+                {savingGroup ? "Saving…" : "Save"}
+              </button>
+              <button
+                onClick={() => setSettingGroup(false)}
+                className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sm text-gray-400"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
 
           {/* ---- Edit mode ---- */}
           {editing && (

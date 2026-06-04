@@ -71,6 +71,8 @@ class ModelDetail(ModelRead):
     stl_files: list[STLFileRead] = []
     creator: Optional[CreatorRead] = None
     collection_ids: list[int] = []
+    has_group_override: bool = False
+    group_override: Optional[str] = None  # the override value (None = explicitly ungrouped)
 
 
 class ModelList(BaseModel):
@@ -162,6 +164,10 @@ class BulkTagUpdate(BaseModel):
     ids: list[int]
     add_tags: list[str] = []
     remove_tags: list[str] = []
+
+
+class SetGroupBody(BaseModel):
+    character: Optional[str] = None  # None = explicitly ungroup; string = target group name
 
 
 class ScanRootCreate(BaseModel):

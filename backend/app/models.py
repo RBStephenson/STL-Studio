@@ -34,6 +34,20 @@ class PackOverride(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class GroupOverride(Base):
+    """A model the user has manually assigned to a specific character group.
+
+    Persisted so the assignment survives rescans. character=None means the model
+    is explicitly ungrouped (removed from any character group). Mirrors PackOverride
+    for the group dimension: the scanner applies this instead of the heuristic."""
+    __tablename__ = "group_overrides"
+
+    id = Column(Integer, primary_key=True)
+    path = Column(String, unique=True, nullable=False)  # model folder_path
+    character = Column(String, nullable=True)           # None = explicitly ungrouped
+    created_at = Column(DateTime, default=utcnow)
+
+
 class Creator(Base):
     __tablename__ = "creators"
 

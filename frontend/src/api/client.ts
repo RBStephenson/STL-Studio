@@ -2,7 +2,11 @@ const BASE = "/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    let detail: string | undefined;
+    try { detail = (await res.json()).detail; } catch { /* ignore */ }
+    throw new Error(detail || `${res.status} ${res.statusText}`);
+  }
   return res.json();
 }
 
@@ -61,6 +65,8 @@ export interface ModelDetail extends Model {
   stl_files: STLFile[];
   creator: { id: number; name: string; source_url: string | null } | null;
   collection_ids: number[];
+  has_group_override: boolean;
+  group_override: string | null;
 }
 
 export interface ModelList {
@@ -192,11 +198,23 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids, add_tags: addTags, remove_tags: removeTags }),
       }),
+    characters: (creatorId: number) =>
+      request<string[]>(`/models/characters?creator_id=${creatorId}`),
     variants: (creatorId: number, character: string) =>
       request<ModelList>(`/models/variants?creator_id=${creatorId}&character=${encodeURIComponent(character)}`),
     splitPack: (id: number) =>
       request<{ ok: boolean; created: number; message: string }>(`/models/${id}/split`, {
         method: "POST",
+      }),
+    setGroupOverride: (id: number, character: string | null) =>
+      request<{ ok: boolean; character: string | null }>(`/models/${id}/set-group`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ character }),
+      }),
+    clearGroupOverride: (id: number) =>
+      request<{ ok: boolean; deleted: boolean }>(`/models/${id}/set-group`, {
+        method: "DELETE",
       }),
     updateSTLFile: (fileId: number, body: Record<string, unknown>) =>
       request<{ ok: boolean }>(`/models/stl-files/${fileId}`, {

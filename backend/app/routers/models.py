@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, exists, text as _sql
+from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.models import Model, Creator, ModelTag, CollectionModel
+from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
     ModelUpdate, ThumbnailUpdate, FavoriteUpdate, QueueUpdate, QueueReorder, PrintedUpdate,
-    ExcludeUpdate, STLFileUpdate, BulkTagUpdate,
+    ExcludeUpdate, STLFileUpdate, BulkTagUpdate, SetGroupBody,
 )
 from app.services.tag_sync import sync_model_tags
 from app.services import scanner
@@ -221,6 +222,23 @@ def rebuild_tags(db: Session = Depends(get_db)):
     return {"ok": True, "rows": count}
 
 
+@router.get("/characters")
+def list_characters(creator_id: int = Query(...), db: Session = Depends(get_db)):
+    """Return sorted distinct character (group) names for a creator."""
+    rows = (
+        db.query(Model.character)
+        .filter(
+            Model.creator_id == creator_id,
+            Model.character != None,
+            Model.excluded == False,
+        )
+        .distinct()
+        .order_by(Model.character)
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
 @router.get("/variants", response_model=ModelList)
 def list_variants(
     creator_id: int = Query(...),
@@ -418,6 +436,51 @@ def split_pack(model_id: int, db: Session = Depends(get_db)):
     return result
 
 
+@router.post("/{model_id}/set-group")
+def set_group(model_id: int, body: SetGroupBody, db: Session = Depends(get_db)):
+    """Assign a model to a specific character group (or explicitly ungroup it).
+    The override is persisted so it survives rescans. Also updates model.character
+    immediately so the change takes effect without waiting for a rescan.
+    Returns 409 if a scan is running — the scan would overwrite character on commit."""
+    if scanner.get_status()["running"]:
+        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
+
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    character = body.character.strip() if body.character and body.character.strip() else None
+
+    # Atomic upsert — avoids a TOCTOU race if two requests arrive simultaneously.
+    stmt = (
+        _sqlite_insert(GroupOverride)
+        .values(path=model.folder_path, character=character)
+        .on_conflict_do_update(index_elements=["path"], set_={"character": character})
+    )
+    db.execute(stmt)
+
+    model.character = character
+    model.updated_at = utcnow()
+    db.commit()
+    return {"ok": True, "character": character}
+
+
+@router.delete("/{model_id}/set-group")
+def clear_group(model_id: int, db: Session = Depends(get_db)):
+    """Remove a group override, restoring heuristic grouping on the next rescan.
+    Clears model.character immediately so the UI reflects the removed override
+    (the heuristic value is unknown until the next scan)."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    deleted = db.query(GroupOverride).filter(GroupOverride.path == model.folder_path).delete()
+    model.character = None
+    model.updated_at = utcnow()
+    db.commit()
+    return {"ok": True, "deleted": deleted > 0}
+
+
 @router.get("/{model_id}", response_model=ModelDetail)
 def get_model(model_id: int, db: Session = Depends(get_db)):
     model = (
@@ -435,4 +498,8 @@ def get_model(model_id: int, db: Session = Depends(get_db)):
     result = ModelDetail.model_validate(model)
     result.native_folder_path = settings.to_native_path(model.folder_path)
     result.collection_ids = [link.collection_id for link in model.collection_links]
+    override = db.query(GroupOverride).filter(GroupOverride.path == model.folder_path).first()
+    if override:
+        result.has_group_override = True
+        result.group_override = override.character
     return result
