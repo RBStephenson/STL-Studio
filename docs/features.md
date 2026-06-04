@@ -38,7 +38,9 @@ filtered view.
   both the top and bottom of the grid so you can page without scrolling.
 
 Each card shows the thumbnail, name, tags, and small action icons (favorite ★
-and print-queue 🖨) that appear on hover.
+and print-queue 🖨) that appear on hover. You can also **drag a card by its
+hover grip onto another card to group them as variants** — see
+[Variant grouping](#variant-grouping).
 
 ## Variant grouping
 
@@ -55,6 +57,21 @@ The scanner infers the character group from folder names — it's accurate for
 most layouts but occasionally gets it wrong (typo'd folder, unusual nesting,
 inconsistent studio naming). You can fix any mis-grouping durably, so your
 correction survives future rescans:
+
+**Drag-to-group from the Library** (fastest for grouping loose models)
+
+In the main Library view, hover a model card and a small **grip handle**
+appears in its bottom-left corner. Drag the card onto another card from the
+**same creator** to group them:
+
+- Drop onto a card that's **already part of a group** → the dragged model joins
+  that group immediately.
+- Drop onto an **ungrouped** model → a prompt asks what to name the new group
+  (pre-filled with the target's name); both models are placed in it.
+
+Grouping only works within a single creator, and only in the default Library
+view (it's off in the favorites/queue/printed/excluded views, which show flat
+cards). Group cards themselves can be dropped onto but not dragged.
 
 **From the group view** (fastest for fixing a whole group at once)
 

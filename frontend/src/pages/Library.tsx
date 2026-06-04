@@ -1,11 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, Check, FolderPlus, ArrowRight, EyeOff } from "lucide-react";
+import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, Check, FolderPlus, ArrowRight, EyeOff, Package, GripVertical, Layers } from "lucide-react";
+import {
+  DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
+  useDraggable, useDroppable, pointerWithin,
+  DragStartEvent, DragEndEvent,
+} from "@dnd-kit/core";
 import { api, Model, Creator, ModelStats, Collection } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
 import BulkTagBar from "../components/BulkTagBar";
 import HelpLink from "../components/HelpLink";
+import { useToast } from "../context/ToastContext";
 
 const SITES = ["thingiverse", "printables", "myminifactory", "cults3d", "gumroad", "thangs", "makerworld", "other"];
 const PAGE_SIZE = 48;
@@ -85,8 +91,54 @@ function PaginationBar({ page, totalPages, onPage, className = "mt-8" }: { page:
   );
 }
 
+/** Wraps a library card so it can be dragged onto another card to form a variant
+ *  group. The drag listeners live on a small hover grip (bottom-left) so plain
+ *  clicks still navigate and the card's other hover controls keep working.
+ *  Group cards (variant_count > 1) can be dropped onto but not dragged — merging
+ *  whole groups is a separate follow-up. */
+function DraggableCard({ model, draggingCreatorId, children }: {
+  model: Model;
+  draggingCreatorId: number | null;
+  children: React.ReactNode;
+}) {
+  const isGroup = (model.variant_count ?? 1) > 1;
+  const { setNodeRef: dragRef, listeners, attributes, isDragging } =
+    useDraggable({ id: model.id, disabled: isGroup });
+  const { setNodeRef: dropRef, isOver } = useDroppable({ id: model.id });
+  const setRefs = useCallback((el: HTMLElement | null) => {
+    dragRef(el); dropRef(el);
+  }, [dragRef, dropRef]);
+
+  // Grouping is per-creator, so only same-creator cards are valid drop targets.
+  const sameCreator = draggingCreatorId != null && draggingCreatorId === (model.creator_id ?? -1);
+  const validTarget = isOver && sameCreator && !isDragging;
+
+  return (
+    <div
+      ref={setRefs}
+      className={`relative group/drag rounded-lg transition-shadow ${isDragging ? "opacity-40" : ""} ${
+        validTarget ? "ring-2 ring-indigo-400" : ""
+      }`}
+    >
+      {!isGroup && (
+        <button
+          {...listeners}
+          {...attributes}
+          title="Drag onto another model to group them as variants"
+          aria-label="Drag to group"
+          className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 hover:bg-black/90 text-gray-300 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/drag:opacity-100 transition-opacity"
+        >
+          <GripVertical size={14} />
+        </button>
+      )}
+      {children}
+    </div>
+  );
+}
+
 export default function Library() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { toast } = useToast();
 
   // All filter state lives in the URL
   const page         = Number(searchParams.get("page") ?? 1);
@@ -250,6 +302,76 @@ export default function Library() {
     setTotal((t) => Math.max(0, t - 1));
     refreshStats();
   }, [refreshStats]);
+
+  // --- Drag to group ---------------------------------------------------------
+  // Variant grouping is only on in the default view (favorites/queue/printed/
+  // excluded views show flat, ungrouped cards), so drag-to-group is too.
+  const dndEnabled = !favParam && !queueParam && !printedParam && !excludedParam;
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  // A pending merge of two ungrouped models, awaiting a group name from the user.
+  const [pendingMerge, setPendingMerge] = useState<{ draggedId: number; targetId: number } | null>(null);
+  const [mergeName, setMergeName] = useState("");
+  const [merging, setMerging] = useState(false);
+  const dndSensors = useSensors(
+    // Small threshold so a plain click on the grip still isn't treated as a drag,
+    // and ordinary card clicks never start one.
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+  const draggingModel = draggingId != null ? models.find((m) => m.id === draggingId) ?? null : null;
+
+  const onDragStart = (e: DragStartEvent) => setDraggingId(Number(e.active.id));
+
+  const onDragEnd = async (e: DragEndEvent) => {
+    setDraggingId(null);
+    const draggedId = Number(e.active.id);
+    if (!e.over) return;
+    const targetId = Number(e.over.id);
+    if (targetId === draggedId) return;
+
+    const dragged = models.find((m) => m.id === draggedId);
+    const target = models.find((m) => m.id === targetId);
+    if (!dragged || !target) return;
+
+    if (dragged.creator_id !== target.creator_id) {
+      toast("Models must be from the same creator to group them.", "error");
+      return;
+    }
+
+    // Target already has a character → join that group silently. Otherwise both
+    // are ungrouped, so ask the user what to name the new group.
+    if (target.character) {
+      try {
+        await api.models.setGroupOverride(dragged.id, target.character);
+        toast(`Added to "${target.character}".`, "success");
+        fetchModels();
+      } catch (err: any) {
+        toast(err?.message || "Couldn't group these models — try again.", "error");
+      }
+    } else {
+      setMergeName(target.title || target.name);
+      setPendingMerge({ draggedId: dragged.id, targetId: target.id });
+    }
+  };
+
+  const confirmMerge = async () => {
+    if (!pendingMerge || merging) return;
+    const name = mergeName.trim();
+    if (!name) return;
+    setMerging(true);
+    try {
+      // Anchor first, then the dragged model — if the second call fails, the
+      // anchor is just a harmless single-member group rather than a split pair.
+      await api.models.setGroupOverride(pendingMerge.targetId, name);
+      await api.models.setGroupOverride(pendingMerge.draggedId, name);
+      toast(`Grouped under "${name}".`, "success");
+      setPendingMerge(null);
+      fetchModels();
+    } catch (err: any) {
+      toast(err?.message || "Couldn't group these models — try again.", "error");
+    } finally {
+      setMerging(false);
+    }
+  };
 
   return (
     <div className="p-6">
@@ -570,7 +692,7 @@ export default function Library() {
           <p className="text-lg">No models found</p>
           <p className="text-sm mt-1">Try scanning your library or adjusting filters</p>
         </div>
-      ) : (
+      ) : !dndEnabled ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {models.map((m) => (
             <ModelCard
@@ -584,6 +706,52 @@ export default function Library() {
             />
           ))}
         </div>
+      ) : (
+        <DndContext
+          sensors={dndSensors}
+          collisionDetection={pointerWithin}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onDragCancel={() => setDraggingId(null)}
+        >
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {models.map((m) => (
+              <DraggableCard key={m.id} model={m} draggingCreatorId={draggingModel?.creator_id ?? null}>
+                <ModelCard
+                  model={m}
+                  selected={selection.has(m.id)}
+                  onSelect={toggleSelect}
+                  onMutate={refreshStats}
+                  excludedView={excludedParam}
+                  onRemoved={handleRemoved}
+                />
+              </DraggableCard>
+            ))}
+          </div>
+          <DragOverlay dropAnimation={null}>
+            {draggingModel ? (() => {
+              const thumb = draggingModel.thumbnail_path
+                ? api.fileUrl(draggingModel.thumbnail_path)
+                : draggingModel.thumbnail_url;
+              return (
+                <div className="w-32 rounded-lg overflow-hidden border-2 border-indigo-400 bg-gray-900 shadow-2xl shadow-black/60 rotate-2">
+                  <div className="aspect-square bg-gray-800">
+                    {thumb ? (
+                      <img src={thumb} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-600">
+                        <Package size={32} />
+                      </div>
+                    )}
+                  </div>
+                  <p className="p-1.5 text-xs font-medium truncate text-gray-100">
+                    {draggingModel.title || draggingModel.name}
+                  </p>
+                </div>
+              );
+            })() : null}
+          </DragOverlay>
+        </DndContext>
       )}
 
       {selection.size > 0 && (
@@ -600,6 +768,56 @@ export default function Library() {
       {/* Pagination (bottom) */}
       {totalPages > 1 && (
         <PaginationBar page={page} totalPages={totalPages} onPage={setPage} />
+      )}
+
+      {/* Name-the-group prompt when two ungrouped models are dragged together */}
+      {pendingMerge && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => !merging && setPendingMerge(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Layers size={18} className="text-indigo-400" />
+              <h2 className="text-lg font-semibold text-gray-100">Group as variants</h2>
+            </div>
+            <p className="text-sm text-gray-400 mb-3">
+              Name the variant group these two models will share. The grouping is
+              saved and survives rescans.
+            </p>
+            <input
+              autoFocus
+              type="text"
+              value={mergeName}
+              onChange={(e) => setMergeName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") confirmMerge();
+                if (e.key === "Escape" && !merging) setPendingMerge(null);
+              }}
+              placeholder="Group name"
+              className="w-full px-3 py-2 rounded bg-gray-950 border border-gray-700 focus:border-indigo-500 text-sm text-gray-100 outline-none mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPendingMerge(null)}
+                disabled={merging}
+                className="px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sm text-gray-300 disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmMerge}
+                disabled={merging || !mergeName.trim()}
+                className="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm text-white disabled:opacity-40"
+              >
+                {merging ? "Grouping…" : "Group"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
