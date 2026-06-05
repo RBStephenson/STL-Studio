@@ -222,6 +222,16 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
+    neighbors: (id: number, params: Record<string, string | number | boolean>) => {
+      const qs = new URLSearchParams(
+        Object.entries(params)
+          .filter(([, v]) => v !== "" && v !== undefined && v !== null)
+          .map(([k, v]) => [k, String(v)])
+      ).toString();
+      return request<{ prev_id: number | null; next_id: number | null }>(
+        `/models/${id}/neighbors${qs ? `?${qs}` : ""}`
+      );
+    },
   },
   files: {
     openFolder: (path: string) =>

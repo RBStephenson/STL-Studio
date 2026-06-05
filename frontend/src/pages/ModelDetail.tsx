@@ -157,13 +157,10 @@ type ViewMode = "images" | "3d";
 
 type NavTarget = { id: number; from: string };
 
-// Parse a model-detail origin URL into the params Library used to produce that
-// grid, so Prev/Next walks the exact same list/pagination. Returns null unless
-// the origin is the Library grid itself (path "/") — models reached from inside
-// a variant group (/groups/…), a collection, or a deep link have no Library
-// position to page through, so Prev/Next is hidden there.
-function parseLibraryOrigin(from: string | undefined):
-  { params: Record<string, string | number | boolean>; page: number } | null {
+// Parse a Library origin URL into the filter params needed for the neighbors
+// endpoint. Returns null when the origin isn't the Library grid (path "/") —
+// models reached from a variant group, collection, or deep link show no Prev/Next.
+function parseLibraryOrigin(from: string | undefined): Record<string, string | number | boolean> | null {
   if (!from) return null;
   const [path, search = ""] = from.split("?");
   if (path !== "/") return null;
@@ -188,23 +185,8 @@ function parseLibraryOrigin(from: string | undefined):
   if (queue) params.in_queue = true;
   if (printed) params.printed = true;
   if (excluded) params.excluded = true;
-  // Mirror Library.tsx's groupVariants so our pagination matches the grid's.
   params.group_variants = !fav && !queue && !printed && !excluded;
-  params.page_size = 48;
-  const p = parseInt(sp.get("page") ?? "1", 10);
-  const page = isNaN(p) || p < 1 ? 1 : p;
-  params.page = page;
-  return { params, page };
-}
-
-// Rebuild the Library URL pointing at a specific page (mirrors Library's
-// setPage: the page param is dropped for page 1).
-function libraryUrlForPage(from: string, page: number): string {
-  const [path, search = ""] = from.split("?");
-  const sp = new URLSearchParams(search);
-  if (page > 1) sp.set("page", String(page)); else sp.delete("page");
-  const qs = sp.toString();
-  return qs ? `${path}?${qs}` : path;
+  return params;
 }
 
 export default function ModelDetail() {
@@ -213,7 +195,7 @@ export default function ModelDetail() {
   const navigate = useNavigate();
   const rawFrom = (location.state as any)?.from as string | undefined;
   const backTo = rawFrom ?? "/";
-  const navOrigin = useMemo(() => parseLibraryOrigin(rawFrom), [rawFrom]); // null ⇒ hide Prev/Next
+  const navOrigin = useMemo(() => parseLibraryOrigin(rawFrom), [rawFrom]); // null = not from Library → hide Prev/Next
   const { showNSFW } = useNSFW();
   const { toast } = useToast();
   const [model, setModel] = useState<ModelDetailType | null>(null);
@@ -461,61 +443,23 @@ export default function ModelDetail() {
       setNextNav(null);
       return;
     }
-    const { params, page: originPage } = navOrigin;
     const currentId = Number(id);
     const navId = ++navFetchIdRef.current;
     setPrevNav(undefined);
     setNextNav(undefined);
 
-    api.models.list(params).then(async (data) => {
-      if (navId !== navFetchIdRef.current) return;
-
-      // The current model is present by its own id (group cards link to
-      // /groups/…, so a model reached from the grid is never a hidden variant).
-      // Fallback: a non-representative sibling reached via the variant switcher
-      // isn't in a grouped list itself — match its group's representative by
-      // (creator, character) so Prev/Next still pages around the group.
-      let idx = data.items.findIndex((m) => m.id === currentId);
-      if (idx === -1 && model?.character && model.creator_id != null) {
-        idx = data.items.findIndex(
-          (m) => m.creator_id === model.creator_id && m.character === model.character
-        );
-      }
-      if (idx === -1) {
+    api.models.neighbors(currentId, navOrigin)
+      .then((data) => {
+        if (navId !== navFetchIdRef.current) return;
+        setPrevNav(data.prev_id != null ? { id: data.prev_id, from: backTo } : null);
+        setNextNav(data.next_id != null ? { id: data.next_id, from: backTo } : null);
+      })
+      .catch(() => {
+        if (navId !== navFetchIdRef.current) return;
         setPrevNav(null);
         setNextNav(null);
-        return;
-      }
-
-      const totalPages = Math.ceil(data.total / data.page_size);
-
-      if (idx < data.items.length - 1) {
-        setNextNav({ id: data.items[idx + 1].id, from: libraryUrlForPage(backTo, originPage) });
-      } else if (originPage < totalPages) {
-        const nextPage = await api.models.list({ ...params, page: originPage + 1 });
-        if (navId !== navFetchIdRef.current) return;
-        const first = nextPage.items[0];
-        setNextNav(first ? { id: first.id, from: libraryUrlForPage(backTo, originPage + 1) } : null);
-      } else {
-        setNextNav(null);
-      }
-
-      if (idx > 0) {
-        setPrevNav({ id: data.items[idx - 1].id, from: libraryUrlForPage(backTo, originPage) });
-      } else if (originPage > 1) {
-        const prevPage = await api.models.list({ ...params, page: originPage - 1 });
-        if (navId !== navFetchIdRef.current) return;
-        const last = prevPage.items[prevPage.items.length - 1];
-        setPrevNav(last ? { id: last.id, from: libraryUrlForPage(backTo, originPage - 1) } : null);
-      } else {
-        setPrevNav(null);
-      }
-    }).catch(() => {
-      if (navId !== navFetchIdRef.current) return;
-      setPrevNav(null);
-      setNextNav(null);
-    });
-  }, [id, backTo, navOrigin, model?.creator_id, model?.character]);
+      });
+  }, [id, backTo, navOrigin]);
 
   if (loading) return <div className="p-8 text-gray-500 animate-pulse">Loading…</div>;
   if (!model) return <div className="p-8 text-gray-500">Model not found.</div>;
