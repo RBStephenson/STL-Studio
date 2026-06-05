@@ -14,6 +14,7 @@ Miniature note:
 """
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -261,7 +262,7 @@ _VARIANT_JUNK = re.compile(
 )
 
 
-def character_key(name: str) -> str:
+def character_key(name: str, creator_name: str | None = None) -> str:
     """Normalise a folder name to its product identity for variant grouping.
 
     Strips scale/type/modifier tokens (via _strip_signal_tokens) plus support-status,
@@ -271,6 +272,11 @@ def character_key(name: str) -> str:
     "Crimson Wings APC", and "1-9 scale Ada Wong CA3D" / "1-6 Ada Wong CA3D" both
     reduce to "Ada Wong CA3D". Returns "" when nothing product-identifying remains
     (a pure variant descriptor such as "75mm Unsupported" or "15").
+
+    When creator_name is supplied, trailing tokens that are the creator's own name or
+    any concatenation of consecutive creator-name words (e.g. "CA 3D Studios" → also
+    strips "CA3D") are removed, collapsing e.g. "Ada Wong CA3D" + "Ada Wong" for that
+    creator. The strip is guarded: if nothing would remain, the key is left unchanged.
     """
     # Normalise underscores/dashes to spaces FIRST so the \b-anchored token regexes
     # fire — names like "AleCask_32mm_UnSupported" glue tokens together with "_",
@@ -284,7 +290,44 @@ def character_key(name: str) -> str:
     base = _VARIANT_JUNK.sub(" ", base)
     # Treat brackets/parens as separators so "Captain Carl Jenkins (supported)"
     # reduces cleanly to "Captain Carl Jenkins" once the token inside is stripped.
-    return re.sub(r"[\s()\[\]]+", " ", base).strip(" -_()[]")
+    key = re.sub(r"[\s()\[\]]+", " ", base).strip(" -_()[]")
+
+    if creator_name and key:
+        key = _strip_creator_suffix(key, creator_name)
+
+    return key
+
+
+@lru_cache(maxsize=256)
+def _creator_suffix_pattern(creator_name: str) -> re.Pattern | None:
+    """Compile a regex matching creator name tokens (and consecutive concatenations)
+    as a trailing suffix.  "CA 3D Studios" generates tokens ["ca", "3d", "studios"]
+    plus all consecutive joins: "ca3d", "3dstudios", "ca3dstudios".
+    Cached per creator name so repeated calls during a scan are free.
+    """
+    tokens = [t for t in re.split(r"[\s\-_]+", creator_name.lower()) if t]
+    if not tokens:
+        return None
+    aliases: set[str] = set(tokens)
+    for length in range(2, len(tokens) + 1):
+        for i in range(len(tokens) - length + 1):
+            aliases.add("".join(tokens[i : i + length]))
+    # Longest first so the alternation prefers "ca3dstudios" over "ca3d" over "ca".
+    alts = "|".join(re.escape(a) for a in sorted(aliases, key=len, reverse=True))
+    # Require at least one leading space so we never strip the whole key when it
+    # is nothing but a creator tag (guard handled in _strip_creator_suffix).
+    return re.compile(r"(?:\s+\b(?:" + alts + r")\b)+\s*$", re.I)
+
+
+def _strip_creator_suffix(key: str, creator_name: str) -> str:
+    """Remove trailing creator-tag tokens from a grouping key.
+    Falls back to the original key when the result would be empty.
+    """
+    pattern = _creator_suffix_pattern(creator_name)
+    if not pattern:
+        return key
+    stripped = pattern.sub("", key).strip()
+    return stripped if stripped else key
 
 
 def is_structural_folder(name: str) -> bool:

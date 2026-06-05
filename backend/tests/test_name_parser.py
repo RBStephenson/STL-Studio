@@ -289,6 +289,37 @@ class TestCharacterKey:
         # "2B" (NieR: Automata) must survive — there is no word boundary in "2B".
         assert character_key("2B") == "2B"
 
+    # --- creator_name suffix stripping ---
+
+    def test_creator_full_name_token_stripped_as_suffix(self):
+        # Individual creator-name words stripped from the end.
+        assert character_key("Ada Wong Studios", "Some Studios") == "Ada Wong"
+
+    def test_creator_concatenated_abbreviation_stripped(self):
+        # "CA 3D Studios" → consecutive joins include "CA3D".
+        # Folders tagged "CA3D" (the studio's abbreviation) collapse with untagged ones.
+        assert character_key("Ada Wong CA3D", "CA 3D Studios") == "Ada Wong"
+        assert character_key("1-6 Ada Wong CA3D", "CA 3D Studios") == "Ada Wong"
+        assert character_key("Cyclops CA3D", "CA 3D Studios") == "Cyclops"
+
+    def test_creator_tag_after_scale_stripped(self):
+        # Scale tokens are removed first; the CA3D suffix is then stripped.
+        assert character_key("1,12 pre supports Jaina CA3D", "CA 3D Studios") == "Jaina"
+
+    def test_creator_tag_only_not_stripped_empty_guard(self):
+        # When the entire key is just the creator tag, leave it — empty key would
+        # wrongly make the folder inherit its parent's character.
+        assert character_key("CA3D", "CA 3D Studios") == "CA3D"
+
+    def test_creator_tag_not_stripped_from_middle(self):
+        # Creator token in the middle of a name is left alone; only trailing tokens
+        # are stripped to avoid clobbering real character names.
+        assert character_key("CA3D Dragon", "CA 3D Studios") == "CA3D Dragon"
+
+    def test_no_creator_name_unchanged(self):
+        # Without a creator_name, existing behaviour is preserved.
+        assert character_key("Ada Wong CA3D") == "Ada Wong CA3D"
+
 
 # ---------------------------------------------------------------------------
 # is_structural_folder — variant-grouping character must skip structural folders

@@ -528,7 +528,7 @@ def _walk_for_models(
     for c in child_dirs:
         if name_parser.parse(c.name).is_parts or name_parser.is_structural_folder(c.name):
             continue
-        keys[c.name] = name_parser.character_key(c.name)
+        keys[c.name] = name_parser.character_key(c.name, creator.name)
     nonempty = [k for k in keys.values() if k]
     distinct = set(nonempty)
     counts = Counter(nonempty)
@@ -542,7 +542,7 @@ def _walk_for_models(
     if (not is_creator_root
             and not signals.is_parts
             and not name_parser.is_structural_folder(folder.name)
-            and name_parser.character_key(folder.name)):
+            and name_parser.character_key(folder.name, creator.name)):
         own_character = folder.name
 
     #   strict-majority shared key → children are support/format/scale variants of one
@@ -571,7 +571,7 @@ def _walk_for_models(
     # raw folder name may still hold a support word ("…unsupported"). Computed once.
     common_label = common_key
     if strategy == "common" and own_character:
-        own_key = name_parser.character_key(own_character)
+        own_key = name_parser.character_key(own_character, creator.name)
         if (own_key and len(own_key) < len(common_key)
                 and common_key.lower().startswith(own_key.lower())):
             common_label = own_key
