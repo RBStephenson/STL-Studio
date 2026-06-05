@@ -11,7 +11,7 @@ import { Camera, Loader2, Maximize2, RotateCcw } from "lucide-react";
 function STLMesh({ url }: { url: string }) {
   const geometry = useLoader(STLLoader, url);
   const meshRef = useRef<Mesh>(null);
-  const { camera, invalidate } = useThree();
+  const { camera, controls, invalidate } = useThree();
 
   useEffect(() => {
     if (!geometry || !meshRef.current) return;
@@ -39,9 +39,13 @@ function STLMesh({ url }: { url: string }) {
     camera.lookAt(0, 0, 0);
     (camera as PerspectiveCamera).updateProjectionMatrix?.();
 
-    // Trigger an immediate render without waiting for user input
+    // Sync OrbitControls' internal spherical coordinates with the repositioned
+    // camera. Without this the controls cache the Canvas's initial position
+    // [4,3,4], leaving the polar (X-axis) orbit range incorrect.
+    (controls as any)?.update();
+
     invalidate();
-  }, [geometry]);
+  }, [geometry, controls]);
 
   return (
     <mesh ref={meshRef} geometry={geometry} castShadow receiveShadow>
@@ -225,6 +229,7 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured 
 
               <OrbitControls
                 ref={controlsRef}
+                makeDefault
                 enableDamping
                 dampingFactor={0.08}
                 minDistance={0.5}
