@@ -2,8 +2,8 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
 import { OrbitControls, Environment } from "@react-three/drei";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
-import { Box3, Vector3, Mesh, PerspectiveCamera } from "three";
-import { RotateCcw, Maximize2 } from "lucide-react";
+import { Box3, Vector3, Mesh, PerspectiveCamera, WebGLRenderer } from "three";
+import { Camera, Loader2, Maximize2, RotateCcw } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Inner mesh — loads the STL, auto-centers, auto-scales, fits camera
@@ -87,11 +87,13 @@ interface STLFile {
 interface Props {
   files: STLFile[];
   getUrl: (path: string) => string;
+  modelId?: number;
+  onThumbnailCaptured?: () => void;
 }
 
 const SIZE_WARN_MB = 50;
 
-export default function STLViewer({ files, getUrl }: Props) {
+export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured }: Props) {
   const stlFiles = files.filter((f) =>
     [".stl", ".STL"].some((ext) => f.filename.endsWith(ext))
   );
@@ -102,7 +104,25 @@ export default function STLViewer({ files, getUrl }: Props) {
   const [key, setKey] = useState(0); // force remount on file change
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const controlsRef = useRef<any>(null);
+  const glRef = useRef<WebGLRenderer | null>(null);
+
+  const handleCapture = () => {
+    if (!glRef.current || !modelId) return;
+    setCapturing(true);
+    glRef.current.domElement.toBlob(async (blob) => {
+      if (!blob) { setCapturing(false); return; }
+      try {
+        const form = new FormData();
+        form.append("file", blob, "capture.png");
+        await fetch(`/api/models/${modelId}/thumbnail/upload`, { method: "POST", body: form });
+        onThumbnailCaptured?.();
+      } finally {
+        setCapturing(false);
+      }
+    }, "image/png");
+  };
 
   if (stlFiles.length === 0) {
     return (
@@ -178,8 +198,9 @@ export default function STLViewer({ files, getUrl }: Props) {
               shadows
               frameloop="demand"
               camera={{ position: [4, 3, 4], fov: 45 }}
-              gl={{ antialias: true, powerPreference: "low-power" }}
+              gl={{ antialias: true, powerPreference: "low-power", preserveDrawingBuffer: true }}
               onCreated={({ gl }) => {
+                glRef.current = gl;
                 // Let the browser recover a lost context instead of leaving a
                 // dead canvas. Without preventDefault the context can't be
                 // restored, and rapid navigation between model pages exhausts
@@ -221,6 +242,18 @@ export default function STLViewer({ files, getUrl }: Props) {
             >
               <RotateCcw size={13} />
             </button>
+            {modelId && (
+              <button
+                onClick={handleCapture}
+                disabled={capturing}
+                title="Use current view as thumbnail"
+                className="p-1.5 rounded bg-black/50 hover:bg-black/70 text-gray-400 hover:text-gray-200 disabled:opacity-50 transition-colors"
+              >
+                {capturing
+                  ? <Loader2 size={13} className="animate-spin" />
+                  : <Camera size={13} />}
+              </button>
+            )}
             <button
               onClick={() => setFullscreen(!fullscreen)}
               title={fullscreen ? "Exit fullscreen" : "Fullscreen"}

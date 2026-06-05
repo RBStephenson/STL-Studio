@@ -617,6 +617,8 @@ export default function ModelDetail() {
               <STLViewer
                 files={model.stl_files}
                 getUrl={api.stlUrl}
+                modelId={model.id}
+                onThumbnailCaptured={load}
               />
             </Suspense>
           )}

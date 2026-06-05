@@ -10,9 +10,9 @@ Core UX gaps and scan accuracy improvements.
 
 | Issue | Item |
 |-------|------|
-| ~~[#101](https://github.com/RBStephenson/STL-Inventory/issues/101)~~ | ~~**Prev/Next navigation on model detail** — move through the library one model at a time without returning to the grid~~ |
+| [#101](https://github.com/RBStephenson/STL-Inventory/issues/101) | **Prev/Next navigation on model detail** — move through the library one model at a time without returning to the grid |
 | [#100](https://github.com/RBStephenson/STL-Inventory/issues/100) | **Capture thumbnail from the 3D viewer** — solves no-thumbnail for STL-only models by snapping the current view |
-| ~~[#106](https://github.com/RBStephenson/STL-Inventory/issues/106)~~ | ~~**Manual force-group override** — let users fix mis-grouped variants the heuristic can't resolve automatically~~ |
+| [#106](https://github.com/RBStephenson/STL-Inventory/issues/106) | **Manual force-group override** — let users fix mis-grouped variants the heuristic can't resolve automatically |
 | [#107](https://github.com/RBStephenson/STL-Inventory/issues/107) | **Strip creator tags from variant grouping keys** — cleans up studio-tag stragglers; bundle with #106 |
 | [#53](https://github.com/RBStephenson/STL-Inventory/issues/53) | **Prune stale models after full scan** — removes DB rows for folders the current walk no longer visits |
 | [#50](https://github.com/RBStephenson/STL-Inventory/issues/50) | **Per-creator rescan bootstrap** — currently silently does nothing when a creator has zero indexed models |

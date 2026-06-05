@@ -484,3 +484,63 @@ class TestGetNeighbors:
         # non_rep resolves to rep; rep is last, so prev=Zed, next=None.
         assert data["prev_id"] == zed.id
         assert data["next_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Thumbnail upload
+# ---------------------------------------------------------------------------
+
+class TestThumbnailUpload:
+    def test_upload_png_sets_thumbnail_path(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="NoThumb")
+        db.commit()
+
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16  # minimal fake PNG header
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("capture.png", png_bytes, "image/png")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+        db.refresh(model)
+        assert model.thumbnail_path is not None
+        assert model.thumbnail_path.endswith(".png")
+        assert model.thumbnail_url is None
+
+    def test_upload_clears_existing_url(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="HasURL")
+        model.thumbnail_url = "https://example.com/thumb.jpg"
+        db.commit()
+
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("capture.png", png_bytes, "image/png")},
+        )
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_url is None
+        assert model.thumbnail_path is not None
+
+    def test_upload_unknown_model_returns_404(self, client):
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+        resp = client.post(
+            "/models/99999/thumbnail/upload",
+            files={"file": ("capture.png", png_bytes, "image/png")},
+        )
+        assert resp.status_code == 404
+
+    def test_upload_rejects_non_image(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        db.commit()
+
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("bad.txt", b"not an image", "text/plain")},
+        )
+        assert resp.status_code == 400

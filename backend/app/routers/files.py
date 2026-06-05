@@ -51,6 +51,14 @@ def _allowed_roots() -> list[Path]:
     except Exception:
         logger.exception("Failed to load scan roots for the file-serving allowlist")
 
+    # Also allow the app data directory so captured thumbnails (stored next to
+    # the DB) can be served by the existing /files/image endpoint.
+    db_url = settings.database_url
+    if "sqlite:///" in db_url:
+        db_file = Path(db_url.split("sqlite:///", 1)[1])
+        if db_file.name != ":memory:":
+            roots.append(db_file.parent)
+
     # De-duplicate while preserving order.
     seen: set[str] = set()
     unique: list[Path] = []

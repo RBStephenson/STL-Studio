@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func, exists, text as _sql
 from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 from sqlalchemy.orm import Session, joinedload
@@ -374,6 +376,44 @@ def set_thumbnail(model_id: int, body: ThumbnailUpdate, db: Session = Depends(ge
         model.thumbnail_url = data["thumbnail_url"] or None
     db.commit()
     return {"ok": True}
+
+
+def _thumbnails_dir() -> Path:
+    """Return (and create) the captured-thumbnails directory next to the DB."""
+    import tempfile
+    db_url = settings.database_url
+    if "sqlite:///" in db_url:
+        db_file = Path(db_url.split("sqlite:///", 1)[1])
+    else:
+        db_file = Path(db_url.split("sqlite://", 1)[1])
+    if db_file.name == ":memory:":
+        d = Path(tempfile.gettempdir()) / "stl_inventory_thumbnails"
+    else:
+        d = db_file.parent / "thumbnails"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+@router.post("/{model_id}/thumbnail/upload")
+async def upload_thumbnail(
+    model_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Store a captured PNG from the 3D viewer as this model's thumbnail."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    if file.content_type not in ("image/png", "image/jpeg", "image/webp"):
+        raise HTTPException(status_code=400, detail="Only PNG/JPEG/WebP images are accepted")
+
+    out = _thumbnails_dir() / f"{model_id}.png"
+    out.write_bytes(await file.read())
+
+    model.thumbnail_path = str(out)
+    model.thumbnail_url = None
+    db.commit()
+    return {"ok": True, "path": str(out)}
 
 
 @router.patch("/{model_id}/favorite")
