@@ -19,6 +19,113 @@ from app.utils import utcnow
 router = APIRouter(prefix="/models", tags=["models"])
 
 
+def _apply_filters(
+    q,
+    *,
+    search: str = "",
+    creator_id: int | None = None,
+    source_site: str | None = None,
+    tag: str | None = None,
+    has_thumbnail: bool | None = None,
+    needs_review: bool | None = None,
+    nsfw: bool | None = None,
+    is_favorite: bool | None = None,
+    in_queue: bool | None = None,
+    printed: bool | None = None,
+    excluded: bool = False,
+):
+    """Apply standard Library filters to a Model query. Does not handle sort, page, or character."""
+    q = q.filter(Model.excluded == excluded)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            Model.title.ilike(like)
+            | Model.name.ilike(like)
+            | Model.description.ilike(like)
+            | Model.character.ilike(like)
+        )
+    if creator_id:
+        q = q.filter(Model.creator_id == creator_id)
+    if source_site:
+        q = q.filter(Model.source_site == source_site)
+    if tag:
+        tag_norm = tag.strip().lower()
+        q = q.filter(
+            exists().where(
+                (ModelTag.model_id == Model.id) & (ModelTag.tag == tag_norm)
+            )
+        )
+    if has_thumbnail is True:
+        q = q.filter((Model.thumbnail_path != None) | (Model.thumbnail_url != None))
+    if has_thumbnail is False:
+        q = q.filter((Model.thumbnail_path == None) & (Model.thumbnail_url == None))
+    if needs_review is not None:
+        q = q.filter(Model.needs_review == needs_review)
+    if nsfw is not None:
+        q = q.filter(Model.nsfw == nsfw)
+    if is_favorite is not None:
+        q = q.filter(Model.is_favorite == is_favorite)
+    if in_queue is not None:
+        q = q.filter(Model.in_queue == in_queue)
+    if printed is True:
+        q = q.filter(Model.printed_at != None)
+    if printed is False:
+        q = q.filter(Model.printed_at == None)
+    return q
+
+
+def _order_cols(sort: str) -> tuple:
+    """Return the SQLAlchemy order-by columns for the given sort key."""
+    if sort == "queue":
+        # Print queue order: favorited (unprinted) models always float to the top,
+        # then manual drag order (queue_position), then insertion time as a tiebreak.
+        # `is_(None)` sorts False(0) before True(1), so positioned items precede
+        # any legacy un-positioned ones.
+        return (
+            Model.is_favorite.desc(),
+            Model.queue_position.is_(None),
+            Model.queue_position.asc(),
+            Model.queued_at.asc(),
+        )
+    elif sort == "queued_at":
+        return (Model.queued_at.asc(),)
+    elif sort == "printed_at":
+        return (Model.printed_at.desc(),)
+    else:
+        return (Model.character, Model.name)
+
+
+def _collapse_variants(q) -> tuple:
+    """Apply variant grouping to a query.
+
+    Returns (filtered_query, rep_by_nonrep) where rep_by_nonrep maps each
+    non-representative model ID to its group representative's ID.
+    """
+    from collections import defaultdict
+    rows = q.with_entities(
+        Model.id, Model.creator_id, Model.character,
+        Model.thumbnail_path, Model.thumbnail_url,
+    ).all()
+    groups: dict[tuple, list] = defaultdict(list)
+    for row in rows:
+        if row.character and row.creator_id is not None:
+            groups[(row.creator_id, row.character)].append(row)
+    rep_by_nonrep: dict[int, int] = {}
+    non_rep_ids: list[int] = []
+    for group_rows in groups.values():
+        if len(group_rows) <= 1:
+            continue
+        with_thumb = [r for r in group_rows if r.thumbnail_path or r.thumbnail_url]
+        rep_id = min(with_thumb, key=lambda r: r.id).id if with_thumb else min(group_rows, key=lambda r: r.id).id
+        for r in group_rows:
+            if r.id != rep_id:
+                non_rep_ids.append(r.id)
+                rep_by_nonrep[r.id] = rep_id
+    if non_rep_ids:
+        q = q.filter(~Model.id.in_(non_rep_ids))
+    return q, rep_by_nonrep
+
+
 @router.get("", response_model=ModelList)
 def list_models(
     page: int = Query(1, ge=1),
@@ -39,98 +146,25 @@ def list_models(
     group_variants: bool = Query(True),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Model)
-
-    # User-excluded models are hidden from every view by default. The Excluded
-    # view passes excluded=true to list them so they can be restored.
-    q = q.filter(Model.excluded == excluded)
-
-    if search:
-        like = f"%{search}%"
-        q = q.filter(
-            Model.title.ilike(like)
-            | Model.name.ilike(like)
-            | Model.description.ilike(like)
-            | Model.character.ilike(like)
-        )
-    if creator_id:
-        q = q.filter(Model.creator_id == creator_id)
+    q = _apply_filters(
+        db.query(Model),
+        search=search, creator_id=creator_id, source_site=source_site,
+        tag=tag, has_thumbnail=has_thumbnail, needs_review=needs_review,
+        nsfw=nsfw, is_favorite=is_favorite, in_queue=in_queue,
+        printed=printed, excluded=excluded,
+    )
+    # character filter is list_models-only (not exposed via Library URL state)
     if character:
         q = q.filter(Model.character.ilike(f"%{character}%"))
-    if source_site:
-        q = q.filter(Model.source_site == source_site)
-    if tag:
-        tag_norm = tag.strip().lower()
-        q = q.filter(
-            exists().where(
-                (ModelTag.model_id == Model.id) & (ModelTag.tag == tag_norm)
-            )
-        )
-    if has_thumbnail is True:
-        q = q.filter(
-            (Model.thumbnail_path != None) | (Model.thumbnail_url != None)
-        )
-    if has_thumbnail is False:
-        q = q.filter(
-            (Model.thumbnail_path == None) & (Model.thumbnail_url == None)
-        )
-    if needs_review is not None:
-        q = q.filter(Model.needs_review == needs_review)
-    if nsfw is not None:
-        q = q.filter(Model.nsfw == nsfw)
-    if is_favorite is not None:
-        q = q.filter(Model.is_favorite == is_favorite)
-    if in_queue is not None:
-        q = q.filter(Model.in_queue == in_queue)
-    if printed is True:
-        q = q.filter(Model.printed_at != None)
-    if printed is False:
-        q = q.filter(Model.printed_at == None)
 
     # Variant grouping: collapse multi-variant characters to one representative card.
-    # The representative is the variant with a thumbnail (earliest ID), else the
-    # earliest ID overall. Models with no character, or a unique character, show as-is.
     # Non-reps are computed from the *filtered* set so a model that is the only match
     # under the current filters is never hidden by a sibling that doesn't match.
     if group_variants:
-        from collections import defaultdict
-        rows = q.with_entities(
-            Model.id, Model.creator_id, Model.character,
-            Model.thumbnail_path, Model.thumbnail_url,
-        ).all()
-        groups: dict[tuple, list] = defaultdict(list)
-        for row in rows:
-            if row.character and row.creator_id is not None:
-                groups[(row.creator_id, row.character)].append(row)
-        non_rep_ids: list[int] = []
-        for group_rows in groups.values():
-            if len(group_rows) <= 1:
-                continue
-            with_thumb = [r for r in group_rows if r.thumbnail_path or r.thumbnail_url]
-            rep_id = min(with_thumb, key=lambda r: r.id).id if with_thumb else min(group_rows, key=lambda r: r.id).id
-            non_rep_ids.extend(r.id for r in group_rows if r.id != rep_id)
-        if non_rep_ids:
-            q = q.filter(~Model.id.in_(non_rep_ids))
+        q, _ = _collapse_variants(q)
 
     total = q.count()
-    if sort == "queue":
-        # Print queue order: favorited (unprinted) models always float to the top,
-        # then manual drag order (queue_position), then insertion time as a tiebreak.
-        # `is_(None)` sorts False(0) before True(1), so positioned items precede
-        # any legacy un-positioned ones.
-        order = (
-            Model.is_favorite.desc(),
-            Model.queue_position.is_(None),
-            Model.queue_position.asc(),
-            Model.queued_at.asc(),
-        )
-    elif sort == "queued_at":
-        order = Model.queued_at.asc()
-    elif sort == "printed_at":
-        order = Model.printed_at.desc()
-    else:
-        order = (Model.character, Model.name)
-    order_cols = order if isinstance(order, tuple) else (order,)
+    order_cols = _order_cols(sort)
     items = q.order_by(*order_cols).offset((page - 1) * page_size).limit(page_size).all()
 
     # Build variant count map for annotating group representatives
@@ -479,6 +513,54 @@ def clear_group(model_id: int, db: Session = Depends(get_db)):
     model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "deleted": deleted > 0}
+
+
+@router.get("/{model_id}/neighbors")
+def get_neighbors(
+    model_id: int,
+    search: str = Query("", alias="q"),
+    creator_id: int | None = None,
+    source_site: str | None = None,
+    tag: str | None = None,
+    has_thumbnail: bool | None = None,
+    needs_review: bool | None = None,
+    nsfw: bool | None = None,
+    is_favorite: bool | None = None,
+    in_queue: bool | None = None,
+    printed: bool | None = None,
+    excluded: bool = False,
+    sort: str = Query("name"),
+    group_variants: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    """Return the prev/next model IDs adjacent to model_id in the filtered+sorted list.
+
+    Handles non-representative variants: if model_id is a grouped non-rep, its
+    group's representative is located instead, so Prev/Next still pages correctly.
+    """
+    q = _apply_filters(
+        db.query(Model),
+        search=search, creator_id=creator_id, source_site=source_site,
+        tag=tag, has_thumbnail=has_thumbnail, needs_review=needs_review,
+        nsfw=nsfw, is_favorite=is_favorite, in_queue=in_queue,
+        printed=printed, excluded=excluded,
+    )
+
+    target_id = model_id
+    if group_variants:
+        q, rep_by_nonrep = _collapse_variants(q)
+        target_id = rep_by_nonrep.get(model_id, model_id)
+
+    ids = [row[0] for row in q.with_entities(Model.id).order_by(*_order_cols(sort)).all()]
+    try:
+        idx = ids.index(target_id)
+    except ValueError:
+        return {"prev_id": None, "next_id": None}
+
+    return {
+        "prev_id": ids[idx - 1] if idx > 0 else None,
+        "next_id": ids[idx + 1] if idx < len(ids) - 1 else None,
+    }
 
 
 @router.get("/{model_id}", response_model=ModelDetail)

@@ -391,3 +391,96 @@ class TestQueueOrdering:
         client.patch(f"/models/{b.id}/favorite", json={"is_favorite": True})
 
         assert self._queue_names(client) == ["B", "A"]
+
+
+# ---------------------------------------------------------------------------
+# Neighbors endpoint
+# ---------------------------------------------------------------------------
+
+class TestGetNeighbors:
+    def test_middle_model_has_both_neighbors(self, client, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        b = make_model(db, creator, name="Beta")
+        c = make_model(db, creator, name="Gamma")
+        commit_all(db)
+
+        resp = client.get(f"/models/{b.id}/neighbors?group_variants=false")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["prev_id"] == a.id
+        assert data["next_id"] == c.id
+
+    def test_first_model_has_no_prev(self, client, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        make_model(db, creator, name="Beta")
+        commit_all(db)
+
+        resp = client.get(f"/models/{a.id}/neighbors?group_variants=false")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["prev_id"] is None
+        assert data["next_id"] is not None
+
+    def test_last_model_has_no_next(self, client, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="Alpha")
+        b = make_model(db, creator, name="Beta")
+        commit_all(db)
+
+        resp = client.get(f"/models/{b.id}/neighbors?group_variants=false")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["prev_id"] is not None
+        assert data["next_id"] is None
+
+    def test_only_model_has_no_neighbors(self, client, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Solo")
+        commit_all(db)
+
+        resp = client.get(f"/models/{a.id}/neighbors?group_variants=false")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["prev_id"] is None
+        assert data["next_id"] is None
+
+    def test_respects_search_filter(self, client, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha Dragon")
+        make_model(db, creator, name="Beta Goblin")
+        c = make_model(db, creator, name="Gamma Dragon")
+        commit_all(db)
+
+        # With "dragon" filter, only Alpha and Gamma are in the list.
+        resp = client.get(f"/models/{c.id}/neighbors?q=dragon&group_variants=false")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["prev_id"] == a.id
+        assert data["next_id"] is None
+
+    def test_unknown_model_returns_nulls(self, client):
+        resp = client.get("/models/99999/neighbors?group_variants=false")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["prev_id"] is None
+        assert data["next_id"] is None
+
+    def test_grouped_variant_resolved_to_representative(self, client, db):
+        creator = make_creator(db)
+        # Two standalone models (no character) and a variant group (Rep + NonRep).
+        ace = make_model(db, creator, name="Ace")
+        rep = make_model(db, creator, name="Rep", character="Hero")
+        non_rep = make_model(db, creator, name="NonRep", character="Hero")
+        zed = make_model(db, creator, name="Zed")
+        commit_all(db)
+
+        # Default sort: ORDER BY character, name. SQLite NULLs sort first (ASC),
+        # so the grouped visible list is: Ace, Zed (both NULL-character), then Rep.
+        resp = client.get(f"/models/{non_rep.id}/neighbors")
+        assert resp.status_code == 200
+        data = resp.json()
+        # non_rep resolves to rep; rep is last, so prev=Zed, next=None.
+        assert data["prev_id"] == zed.id
+        assert data["next_id"] is None
