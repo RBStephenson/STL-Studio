@@ -23,8 +23,11 @@ Run a **Rescan** on that creator from the
 for the app to see folders added since the last one. The per-creator rescan is
 the quickest way — it re-reads just that creator's folder.
 
-If the creator is brand new (didn't exist before), use a **full Scan Library**
-instead — per-creator rescan only works for creators already in the library.
+If the creator is **brand new** and isn't listed on the Creators page yet, run a
+**full Scan Library** — that's what first discovers the folder and creates the
+creator entry. Once a creator appears in your list (even showing **0 models**), a
+per-creator **Rescan** can index it: the rescan now resolves the folder by the
+creator's name when it has no models yet, so it bootstraps cleanly.
 
 ## A model has the wrong thumbnail
 
@@ -46,7 +49,8 @@ there genuinely aren't any images there, it can't show one. Options:
 | Situation | Do this |
 |-----------|---------|
 | Added/updated models for **one creator** | **Rescan** that creator |
-| Added a **brand-new creator** | **Full** Scan Library |
+| A creator is **listed but shows 0 models** | **Rescan** that creator (now bootstraps by name) |
+| Added a creator **not yet listed** anywhere | **Full** Scan Library |
 | Added models across **many creators** | **Full** Scan Library |
 | Want to refresh tags after an app update | Either — both refresh metadata |
 

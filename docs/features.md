@@ -62,12 +62,11 @@ correction survives future rescans:
 
 In the main Library view, hover a model card and a small **grip handle**
 appears in its bottom-left corner. Drag the card onto another card from the
-**same creator** to group them:
-
-- Drop onto a card that's **already part of a group** → the dragged model joins
-  that group immediately.
-- Drop onto an **ungrouped** model → a prompt asks what to name the new group
-  (pre-filled with the target's name); both models are placed in it.
+**same creator** to group them. A naming prompt opens, pre-filled with the
+target's existing group name (if it already belongs to one) or otherwise its
+display name — confirm or edit the name, and both models are placed in that
+group. (The prompt always appears so you can rename or back out, even when the
+target is already grouped.)
 
 Grouping only works within a single creator, and only in the default Library
 view (it's off in the favorites/queue/printed/excluded views, which show flat
@@ -124,7 +123,7 @@ Click a card to open the model. From here you can:
 
 On any model with STL files, switch to **3D View** to inspect the mesh:
 
-- Drag to rotate, scroll to zoom, right-drag to pan.
+- Drag to rotate freely in any direction, scroll to zoom, right-drag to pan.
 - The camera auto-fits the model on load, so it's framed correctly every time.
 - If a model has several STLs, use the file buttons to switch which one you're
   viewing.
@@ -272,7 +271,7 @@ never modified.**
   way to recover your tags, favorites, and queue if something goes wrong.
 - **Restore from Backup…** — pick a previously downloaded `.db` file to replace
   your current library with it. The file is validated first (it must be a real
-  STL Inventory backup), and an older backup's schema is brought up to date
+  STL Library backup), and an older backup's schema is brought up to date
   automatically.
 - **Delete All Data** — wipes the entire index back to empty. You'd then run a
   full scan to rebuild it.

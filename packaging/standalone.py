@@ -1,5 +1,5 @@
 """
-Standalone entry point for STL Inventory.
+Standalone entry point for STL Library.
 
 Serves the FastAPI backend + the pre-built Vite frontend in a single process.
 All API routes are mounted under /api to match the frontend's BASE = "/api".
@@ -57,7 +57,7 @@ from app.routers import models, scan, files, collections, scrape, enrich  # noqa
 # Create all tables (including any new columns — startup migration runs next)
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="STL Inventory")
+app = FastAPI(title="STL Library")
 
 app.add_middleware(
     CORSMiddleware,
@@ -129,7 +129,7 @@ def _open_browser():
 if __name__ == "__main__":
     import uvicorn
 
-    print(f"STL Inventory running at http://localhost:{PORT}")
+    print(f"STL Library running at http://localhost:{PORT}")
     print(f"Data stored in: {data_dir}")
     threading.Thread(target=_open_browser, daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")

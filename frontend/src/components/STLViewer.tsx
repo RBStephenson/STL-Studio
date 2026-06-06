@@ -1,8 +1,8 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
-import { OrbitControls, Environment, Bounds, useBounds } from "@react-three/drei";
+import { TrackballControls, Environment } from "@react-three/drei";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
-import { Box3, Vector3, Mesh, WebGLRenderer } from "three";
+import { Box3, Vector3, Mesh, PerspectiveCamera, WebGLRenderer } from "three";
 import { Camera, Loader2, Maximize2, RotateCcw } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -11,8 +11,7 @@ import { Camera, Loader2, Maximize2, RotateCcw } from "lucide-react";
 function STLMesh({ url }: { url: string }) {
   const geometry = useLoader(STLLoader, url);
   const meshRef = useRef<Mesh>(null);
-  const bounds = useBounds();
-  const { invalidate } = useThree();
+  const { camera, controls, invalidate } = useThree();
 
   useEffect(() => {
     if (!geometry || !meshRef.current) return;
@@ -30,10 +29,37 @@ function STLMesh({ url }: { url: string }) {
     const maxDim = Math.max(size.x, size.y, size.z);
     if (maxDim > 0) meshRef.current.scale.setScalar(2 / maxDim);
 
-    // Fit camera — Bounds handles the math and properly syncs OrbitControls
-    bounds.refresh().fit();
+    // Fit camera to the bounding sphere of the scaled mesh. Distance that makes
+    // the sphere exactly fill the vertical FOV, times a small margin for breathing
+    // room. Place the camera at EXACTLY `dist` along a normalized diagonal — a raw
+    // (0.8,0.6,1) offset is ~1.4x longer, which (with the margin) pushed the model
+    // ~2x too far away so it didn't fill the viewer.
+    meshRef.current.geometry.computeBoundingSphere();
+    const radius = (meshRef.current.geometry.boundingSphere?.radius ?? 1) *
+      (2 / maxDim);
+    const pc = camera as PerspectiveCamera;
+    const fitDist = radius / Math.sin(((pc.fov ?? 45) * Math.PI) / 360);
+    const dist = fitDist * 1.3;
+    camera.position.copy(new Vector3(0.8, 0.6, 1).normalize().multiplyScalar(dist));
+    pc.near = dist / 100;
+    pc.far = dist * 100;
+    camera.lookAt(0, 0, 0);
+    pc.updateProjectionMatrix();
+
+    // Center the controls on the model and give a generous, model-relative dolly
+    // range so zoom in/out always has room — a fixed maxDistance can sit right at
+    // the fit distance and silently block zoom-out. TrackballControls imposes no
+    // polar limit, so the model rotates freely in every direction.
+    if (controls) {
+      const c = controls as any;
+      c.target?.set?.(0, 0, 0);
+      c.minDistance = dist * 0.1;
+      c.maxDistance = dist * 25;
+      c.update?.();
+    }
+
     invalidate();
-  }, [geometry]);
+  }, [geometry, controls]);
 
   return (
     <mesh ref={meshRef} geometry={geometry} castShadow receiveShadow>
@@ -188,7 +214,12 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured 
             <Canvas
               key={key}
               shadows
-              frameloop="demand"
+              // TrackballControls update()s every frame and only invalidates on its
+              // 'change' event — its wheel handler dispatches start/end, not change,
+              // so under frameloop="demand" a scroll never schedules a render and
+              // zoom silently stalls. "always" lets the controls run as designed
+              // (reliable zoom + smooth damping) for this single mounted viewer.
+              frameloop="always"
               camera={{ position: [4, 3, 4], fov: 45 }}
               gl={{ antialias: true, powerPreference: "low-power", preserveDrawingBuffer: true }}
               onCreated={({ gl }) => {
@@ -208,20 +239,22 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured 
               <directionalLight position={[5, 10, 5]} intensity={1.2} castShadow />
               <directionalLight position={[-5, -5, -5]} intensity={0.3} />
 
-              <Bounds margin={1.4}>
-                <LoaderErrorBoundary onError={setError}>
-                  <Suspense fallback={null}>
-                    <STLMesh url={getUrl(selected.path)} />
-                    <Environment preset="city" />
-                  </Suspense>
-                </LoaderErrorBoundary>
-              </Bounds>
+              <LoaderErrorBoundary onError={setError}>
+                <Suspense fallback={null}>
+                  <STLMesh url={getUrl(selected.path)} />
+                  <Environment preset="city" />
+                </Suspense>
+              </LoaderErrorBoundary>
 
-              <OrbitControls
+              <TrackballControls
                 ref={controlsRef}
                 makeDefault
-                enableDamping
-                dampingFactor={0.08}
+                // Free-tumble rotation (no polar clamp, unlike OrbitControls).
+                // min/maxDistance are set imperatively from the fit distance in
+                // STLMesh so the dolly range scales with each model.
+                rotateSpeed={3}
+                zoomSpeed={1.2}
+                dynamicDampingFactor={0.15}
               />
             </Canvas>
           )}

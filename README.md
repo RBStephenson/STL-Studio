@@ -1,4 +1,4 @@
-# STL Inventory
+# STL Library
 
 [![Release](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml)
 [![Build Check](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml)
@@ -27,9 +27,9 @@ Local web app for cataloguing, browsing, and managing an STL file library.
 ### Standalone (recommended for most users — no Docker needed)
 
 1. Go to the [Releases page](https://github.com/RBStephenson/STL-Inventory/releases) and download the file for your OS:
-   - **Windows**: `stl-inventory-windows.exe`
-   - **macOS**: `stl-inventory-macos`
-   - **Linux**: `stl-inventory-linux`
+   - **Windows**: `stl-library-windows.exe`
+   - **macOS**: `stl-library-macos`
+   - **Linux**: `stl-library-linux`
 
 2. Run the file. Your browser will open automatically to `http://localhost:8484`.
 
@@ -48,10 +48,10 @@ Your library database is stored in your user data folder and survives app update
 
 ### Docker (for advanced users)
 
-1. Copy `.env.example` to `.env` and set your drive paths:
+1. Copy `.env.example` to `.env` and set your drive path (forward slashes, even
+   on Windows):
    ```
    STL_DRIVE_1=D:/3D STLs
-   STL_DRIVE_2=E:/3D STLs
    ```
 
 2. Start everything:
@@ -62,6 +62,10 @@ Your library database is stored in your user data folder and survives app update
 3. Open **http://localhost** in your browser.
 
 4. Click **Scan Library** to index your files.
+
+> Got models on more than one drive, or need to change mounts? See
+> [docs/docker.md](docs/docker.md) — Docker can't be configured purely from the
+> Settings page the way the standalone app can.
 
 ## Disk Structure Expected
 
@@ -81,6 +85,7 @@ A folder is only indexed as a model if it contains 3D files.
 - Grid view with search, filter by creator, site, tag, NSFW flag, thumbnail presence, and review status
 - Filter presets saved in localStorage; all filter state lives in the URL
 - **Variant grouping** — folders that share a parent character (e.g. `Full_cutted`, `No_cuts`, `Semi_cutted` under `Akuma/`) are collapsed into a single group card with a variant count badge; click to open the group and select individual variants
+- **Fix grouping** — drag a card onto another from the same creator to group them, or use **Set group** on a model / **Move to group** in a group view; overrides persist across rescans
 - Pagination with jump-to-page input (Prev / page / Next)
 
 ### Triage Queue (`/triage`)
@@ -111,6 +116,11 @@ A folder is only indexed as a model if it contains 3D files.
 - Checkbox-select multiple models in the Library grid
 - Floating bar to add or remove tags across the selection at once
 
+### Collections
+- Group models into named sets independent of tags/creators (projects, wishlists, etc.)
+- Create / rename / delete from the Collections page; add a model from its detail panel, or bulk-add from the Library selection bar
+- Stored in the database and included in every backup
+
 ### Storefront Enrichment
 - Paste a Gumroad, Cults3D, or MyMiniFactory creator URL
 - Fuzzy-matches scraped listings against local models and bulk-applies metadata (source URL, thumbnail, external ID)
@@ -121,6 +131,9 @@ A folder is only indexed as a model if it contains 3D files.
 - Cancel button; Library auto-refreshes on completion
 - On each rescan, `needs_review` is cleared for any model that already has indexed STL files (reduces false-positive review queue)
 - Tag index kept in sync via normalized `model_tags` table for fast filtering
+
+### In-app Help
+- A built-in **Help & Guide** page plus contextual "?" deep-links on each screen, mirroring the docs in [docs/](docs/README.md)
 
 ### Data Management
 - **Settings → Data Management** to back up, restore, or reset the catalog
@@ -190,3 +203,30 @@ Every PR to `main` runs **Build Check**, which compiles all three platform binar
 - **Backend**: Python 3.12 + FastAPI + SQLAlchemy + SQLite
 - **Frontend**: React 18 + Vite + TypeScript + TailwindCSS
 - **Proxy**: nginx
+
+## About & Support
+
+### Like STL Library?
+
+STL Library started because I had a problem: way too many STL files and no good
+way to keep track of them all. What began as a personal tool turned into
+something I thought other makers, painters, gamers, and hobbyists might find
+useful too.
+
+If STL Library has helped you organize your collection, rediscover forgotten
+models, or simply spend less time hunting through folders, please consider
+supporting the project through
+[Patreon](https://www.patreon.com/BrentStephenson) or
+[Buy Me a Coffee](https://www.buymeacoffee.com/brent_the_programmer).
+
+Your support helps fund continued development, but it also helps keep resin in
+the printer, paint on the hobby desk, and supports my family as I balance
+software development, creativity, and caregiving.
+
+There's absolutely no obligation—STL Library is, and will remain, a passion
+project. But every bit of support is deeply appreciated and helps me continue
+building tools and content for the community.
+
+Thank you for being here, and happy printing!
+
+— Brent the Programmer

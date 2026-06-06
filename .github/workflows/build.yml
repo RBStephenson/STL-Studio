@@ -69,16 +69,16 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: Build executable
-        run: pyinstaller packaging/stl-inventory.spec --distpath dist-standalone
+        run: pyinstaller packaging/stl-library.spec --distpath dist-standalone
 
       # ---- Rename artifact with platform label ----
       - name: Rename artifact (Windows)
         if: matrix.os == 'windows-latest'
-        run: mv dist-standalone/stl-inventory.exe dist-standalone/stl-inventory-${{ matrix.label }}.exe
+        run: mv dist-standalone/stl-library.exe dist-standalone/stl-library-${{ matrix.label }}.exe
 
       - name: Rename artifact (Unix)
         if: matrix.os != 'windows-latest'
-        run: mv dist-standalone/stl-inventory dist-standalone/stl-inventory-${{ matrix.label }}
+        run: mv dist-standalone/stl-library dist-standalone/stl-library-${{ matrix.label }}
 
       # ---- Upload to the DRAFT release (release.yml publishes it afterwards) OR
       #      keep as a CI artifact (build-check). Uploading to a draft keeps the
@@ -88,13 +88,13 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
-          files: dist-standalone/stl-inventory-${{ matrix.label }}*
+          files: dist-standalone/stl-library-${{ matrix.label }}*
           draft: true            # stay a draft; release.yml's publish job flips it
 
       - name: Upload build artifact
         if: ${{ !inputs.release }}
         uses: actions/upload-artifact@v7
         with:
-          name: stl-inventory-${{ matrix.label }}
-          path: dist-standalone/stl-inventory-${{ matrix.label }}*
+          name: stl-library-${{ matrix.label }}
+          path: dist-standalone/stl-library-${{ matrix.label }}*
           retention-days: 7

@@ -1,4 +1,4 @@
-# Contributing to STL Inventory
+# Contributing to STL Library
 
 Thanks for your interest in contributing!
 

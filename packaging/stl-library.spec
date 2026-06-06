@@ -1,14 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# PyInstaller spec for STL Inventory standalone build.
+# PyInstaller spec for STL Library standalone build.
 #
 # Run from the PROJECT ROOT (not this directory):
-#   pyinstaller packaging/stl-inventory.spec
+#   pyinstaller packaging/stl-library.spec
 #
 # The frontend must be built first:
 #   cd frontend && npm run build
 #
-# Output: dist/stl-inventory  (or dist/stl-inventory.exe on Windows)
+# Output: dist/stl-library  (or dist/stl-library.exe on Windows)
 
 from pathlib import Path
 
@@ -88,7 +88,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="stl-inventory",
+    name="stl-library",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

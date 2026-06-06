@@ -6,16 +6,18 @@ This roadmap is organized by planned release milestone. Items within a milestone
 
 ## v0.5 — Library polish & scan reliability
 
-Core UX gaps and scan accuracy improvements.
+Core UX gaps and scan accuracy improvements. **This milestone is complete** —
+the ✅ items are merged to `main`; the 🔜 items are implemented in
+[PR #159](https://github.com/RBStephenson/STL-Inventory/pull/159) and ship when it merges.
 
-| Issue | Item |
-|-------|------|
-| [#101](https://github.com/RBStephenson/STL-Inventory/issues/101) | **Prev/Next navigation on model detail** — move through the library one model at a time without returning to the grid |
-| [#100](https://github.com/RBStephenson/STL-Inventory/issues/100) | **Capture thumbnail from the 3D viewer** — solves no-thumbnail for STL-only models by snapping the current view |
-| [#106](https://github.com/RBStephenson/STL-Inventory/issues/106) | **Manual force-group override** — let users fix mis-grouped variants the heuristic can't resolve automatically |
-| [#107](https://github.com/RBStephenson/STL-Inventory/issues/107) | **Strip creator tags from variant grouping keys** — cleans up studio-tag stragglers; bundle with #106 |
-| [#53](https://github.com/RBStephenson/STL-Inventory/issues/53) | **Prune stale models after full scan** — removes DB rows for folders the current walk no longer visits |
-| [#50](https://github.com/RBStephenson/STL-Inventory/issues/50) | **Per-creator rescan bootstrap** — currently silently does nothing when a creator has zero indexed models |
+| Issue | Status | Item |
+|-------|--------|------|
+| [#101](https://github.com/RBStephenson/STL-Inventory/issues/101) | ✅ Shipped | **Prev/Next navigation on model detail** — move through the library one model at a time without returning to the grid |
+| [#100](https://github.com/RBStephenson/STL-Inventory/issues/100) | ✅ Shipped | **Capture thumbnail from the 3D viewer** — solves no-thumbnail for STL-only models by snapping the current view |
+| [#106](https://github.com/RBStephenson/STL-Inventory/issues/106) | ✅ Shipped | **Manual force-group override** — let users fix mis-grouped variants the heuristic can't resolve automatically |
+| [#107](https://github.com/RBStephenson/STL-Inventory/issues/107) | ✅ Shipped | **Strip creator tags from variant grouping keys** — cleans up studio-tag stragglers; bundled with #106 |
+| [#53](https://github.com/RBStephenson/STL-Inventory/issues/53) | 🔜 PR #159 | **Prune stale models after full scan** — removes DB rows for folders the current walk no longer visits |
+| [#50](https://github.com/RBStephenson/STL-Inventory/issues/50) | 🔜 PR #159 | **Per-creator rescan bootstrap** — resolve the folder by creator name so a 0-model creator can be rescanned |
 
 ---
 
@@ -29,7 +31,7 @@ Preference persistence (#32) is a prerequisite for several items here.
 | [#31](https://github.com/RBStephenson/STL-Inventory/issues/31) | **Configurable scan rules** — ignore patterns, custom parts-folder names, toggle auto-tag inference |
 | [#51](https://github.com/RBStephenson/STL-Inventory/issues/51) | **Optional Lychee / Chitubox slicer file support** — opt-in setting to index pre-sliced files alongside STLs |
 | [#102](https://github.com/RBStephenson/STL-Inventory/issues/102) | **Loot Studios storefront enrichment** — subscriber-gated; requires session/cookie auth flow and a Settings UI |
-| [#33](https://github.com/RBStephenson/STL-Inventory/issues/33) | **Document Docker drive-mount configuration** — a recurring stumbling block for new Docker users |
+| [#33](https://github.com/RBStephenson/STL-Inventory/issues/33) | **Document Docker drive-mount configuration** — a recurring stumbling block for new Docker users *(done early in [PR #159](https://github.com/RBStephenson/STL-Inventory/pull/159))* |
 
 ---
 

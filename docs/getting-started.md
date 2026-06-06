@@ -1,6 +1,6 @@
 # Getting Started
 
-There are two ways to run STL Inventory:
+There are two ways to run STL Library:
 
 - **[Standalone](#standalone-recommended)** — a single downloadable app. No Docker, no setup. Recommended for most people.
 - **[Docker](#docker-advanced)** — for people who already run Docker and want the containerized version.
@@ -16,9 +16,9 @@ and download the file for your operating system:
 
 | OS | File |
 |----|------|
-| Windows | `stl-inventory-windows.exe` |
-| macOS | `stl-inventory-macos` |
-| Linux | `stl-inventory-linux` |
+| Windows | `stl-library-windows.exe` |
+| macOS | `stl-library-macos` |
+| Linux | `stl-library-linux` |
 
 ### 2. Run it
 
@@ -57,14 +57,20 @@ survives app updates:
 
 If you prefer the containerized version:
 
-### 1. Configure your drives
+### 1. Configure your drive
 
-Copy `.env.example` to `.env` and set your drive paths:
+Copy `.env.example` to `.env` and set your drive path (use **forward slashes**,
+even on Windows):
 
 ```
 STL_DRIVE_1=D:/3D STLs
-STL_DRIVE_2=E:/3D STLs
 ```
+
+This mounts that folder into the container as the default library root. Got
+models on **more than one drive**, or need to change where things are mounted?
+See **[Docker — Drive Mounts & Configuration](docker.md)** for the full rundown
+(adding extra drives, why Settings paths must be mounted first, and host-path
+display).
 
 ### 2. Start everything
 
@@ -83,7 +89,8 @@ Go to **http://localhost** in your browser, then click **Scan Library**.
 | Frontend (Vite) | 3000 |
 
 > In Docker mode your drives are mounted read-only into the container — the app
-> can never modify your source files.
+> can never modify your source files. To add more drives or change mounts, see
+> **[Docker — Drive Mounts & Configuration](docker.md)**.
 
 ---
 

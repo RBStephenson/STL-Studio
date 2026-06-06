@@ -31,7 +31,7 @@ export default function Navbar() {
     <nav className="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-8">
       <Link to="/" className="flex items-center gap-2 text-indigo-400 font-bold text-lg shrink-0">
         <Box size={22} />
-        STL Inventory
+        STL Library
       </Link>
 
       <div className="flex items-center gap-1 ml-4">
