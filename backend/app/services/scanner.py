@@ -106,7 +106,9 @@ def scan_all_roots(db: Session | None = None):
             if cleared:
                 logger.info(f"Pre-scan: cleared needs_review on {cleared} previously-indexed models")
 
+            scan_start = utcnow()
             roots = _db.query(ScanRoot).filter(ScanRoot.enabled == True).all()
+            root_paths = [r.path for r in roots]
             for root in roots:
                 if _cancel_requested:
                     _scan_state["message"] = "cancelled"
@@ -117,6 +119,7 @@ def scan_all_roots(db: Session | None = None):
                 _db.commit()
 
             if not _cancel_requested:
+                _prune_stale_models(_db, scan_start, root_paths)
                 _prune_stale_paths(_db)
                 _prune_phantoms(_db)
                 _prune_empty_creators(_db)
@@ -152,6 +155,40 @@ def _prune_stale_paths(db: Session):
         db.query(Model).filter(Model.id.in_(chunk)).delete(synchronize_session=False)
     db.commit()
     logger.info(f"Post-scan: pruned {len(stale_ids)} models with missing folder paths")
+
+
+def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]):
+    """After a full scan, delete models under scanned roots that were not visited.
+
+    Any model whose updated_at predates the scan start was not walked this run —
+    either the folder was restructured, or the scanner logic evolved and it's no
+    longer a leaf. Safety cap: skip if >50% of models under the scanned roots
+    would be pruned (suggests an indexing failure rather than legitimate pruning).
+    """
+    from sqlalchemy import or_
+    if not root_paths:
+        return
+    root_filters = [Model.folder_path.like(p.rstrip("/\\") + "%") for p in root_paths]
+    base_q = db.query(Model.id).filter(or_(*root_filters))
+    total = base_q.count()
+    stale_ids = [row[0] for row in base_q.filter(Model.updated_at < scan_start)]
+    if not stale_ids:
+        return
+    if total and len(stale_ids) > total * 0.5:
+        logger.warning(
+            f"Stale-model prune skipped: {len(stale_ids)}/{total} models under "
+            "scanned roots were not visited — looks like an indexing failure, not stale data."
+        )
+        return
+
+    for i in range(0, len(stale_ids), 500):
+        chunk = stale_ids[i:i + 500]
+        db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
+        db.query(ModelTag).filter(ModelTag.model_id.in_(chunk)).delete(synchronize_session=False)
+        db.query(CollectionModel).filter(CollectionModel.model_id.in_(chunk)).delete(synchronize_session=False)
+        db.query(Model).filter(Model.id.in_(chunk)).delete(synchronize_session=False)
+    db.commit()
+    logger.info(f"Post-scan: pruned {len(stale_ids)} stale models (not visited this run)")
 
 
 def _prune_empty_creators(db: Session):
@@ -207,6 +244,22 @@ def _prune_phantoms(db: Session, creator_id: int | None = None):
         db.query(Model).filter(Model.id.in_(chunk)).delete(synchronize_session=False)
     db.commit()
     logger.info(f"Post-scan: pruned {len(ids)} phantom models (no STL files)")
+
+
+def _creator_dirs_by_name(name: str, db: Session) -> list[tuple[Path, list[str]]]:
+    """Locate creator directories under scan roots by matching the creator's name.
+
+    Used as a fallback when _creator_dirs_for returns nothing (zero indexed
+    models yet). Enables per-creator rescan to bootstrap a brand-new creator.
+    """
+    results: list[tuple[Path, list[str]]] = []
+    for root in db.query(ScanRoot).filter(ScanRoot.enabled == True).all():
+        root_path = Path(root.path)
+        roles = layout.roles_for(root.layout)
+        for creator_dir, layout_tags in layout.iter_creator_dirs(root_path, roles):
+            if creator_dir.name.lower() == name.lower() and creator_dir.exists():
+                results.append((creator_dir, layout_tags))
+    return results
 
 
 def _creator_dirs_for(creator: Creator, db: Session) -> list[tuple[Path, list[str]]]:
@@ -266,6 +319,8 @@ def scan_creator(creator_id: int):
             db.commit()
 
             dirs = _creator_dirs_for(creator, db)
+            if not dirs:
+                dirs = _creator_dirs_by_name(creator.name, db)
             if not dirs:
                 _scan_state["message"] = "no folders found for creator"
                 return

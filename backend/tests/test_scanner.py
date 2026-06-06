@@ -492,3 +492,146 @@ class TestPrunePhantoms:
 
         names = {m.name for m in db.query(Model).all()}
         assert names == {"real"}
+
+
+# ---------------------------------------------------------------------------
+# Stale-model prune (#53)
+# ---------------------------------------------------------------------------
+
+class TestPruneStaleModels:
+    def test_prunes_unvisited_models_under_scanned_root(self, db, tmp_path):
+        """Models under a scanned root whose updated_at predates the scan start
+        were not visited and must be pruned after a full scan."""
+        from datetime import timedelta
+        from app.utils import utcnow
+
+        root = str(tmp_path)
+        creator = make_creator(db, "Creator")
+        old_ts = utcnow() - timedelta(hours=1)
+        stale = Model(name="stale", folder_path=str(tmp_path / "stale"),
+                      creator_id=creator.id, updated_at=old_ts)
+        fresh = Model(name="fresh", folder_path=str(tmp_path / "fresh"),
+                      creator_id=creator.id, updated_at=utcnow())
+        db.add_all([stale, fresh])
+        db.flush()
+        db.add(STLFile(model_id=stale.id, path=str(tmp_path / "stale/a.stl"), filename="a.stl"))
+        db.add(STLFile(model_id=fresh.id, path=str(tmp_path / "fresh/a.stl"), filename="a.stl"))
+        db.commit()
+
+        scan_start = utcnow() - timedelta(minutes=30)
+        scanner._prune_stale_models(db, scan_start, [root])
+
+        names = {m.name for m in db.query(Model).all()}
+        assert "stale" not in names
+        assert "fresh" in names
+
+    def test_safety_cap_skips_when_most_models_stale(self, db, tmp_path):
+        """If >50% of models under the root were not visited, assume a failed scan
+        and skip pruning."""
+        from datetime import timedelta
+        from app.utils import utcnow
+
+        root = str(tmp_path)
+        creator = make_creator(db, "Creator")
+        old_ts = utcnow() - timedelta(hours=1)
+        scan_start = utcnow() - timedelta(minutes=30)
+
+        # 3 stale, 1 fresh → 75% stale → safety cap triggers
+        for i in range(3):
+            m = Model(name=f"stale{i}", folder_path=str(tmp_path / f"s{i}"),
+                      creator_id=creator.id, updated_at=old_ts)
+            db.add(m)
+        fresh = Model(name="fresh", folder_path=str(tmp_path / "fresh"),
+                      creator_id=creator.id, updated_at=utcnow())
+        db.add(fresh)
+        db.commit()
+
+        scanner._prune_stale_models(db, scan_start, [root])
+
+        assert db.query(Model).count() == 4   # nothing pruned
+
+    def test_models_outside_scanned_roots_are_not_touched(self, db, tmp_path):
+        """Models under a different root must never be pruned even if their
+        updated_at predates the scan start."""
+        from datetime import timedelta
+        from app.utils import utcnow
+
+        root_a = tmp_path / "rootA"
+        root_b = tmp_path / "rootB"
+        creator = make_creator(db, "Creator")
+        old_ts = utcnow() - timedelta(hours=1)
+        scan_start = utcnow() - timedelta(minutes=30)
+
+        # One stale + two fresh under root_a (33% stale → below safety cap)
+        stale1 = Model(name="stale1", folder_path=str(root_a / "s1"),
+                       creator_id=creator.id, updated_at=old_ts)
+        fresh1 = Model(name="fresh1", folder_path=str(root_a / "f1"),
+                       creator_id=creator.id, updated_at=utcnow())
+        fresh2 = Model(name="fresh2", folder_path=str(root_a / "f2"),
+                       creator_id=creator.id, updated_at=utcnow())
+        in_b = Model(name="in_b", folder_path=str(root_b / "model"),
+                     creator_id=creator.id, updated_at=old_ts)
+        db.add_all([stale1, fresh1, fresh2, in_b])
+        db.flush()
+        for m, rel in [(stale1, root_a / "s1"), (fresh1, root_a / "f1"),
+                       (fresh2, root_a / "f2"), (in_b, root_b / "model")]:
+            db.add(STLFile(model_id=m.id, path=str(rel / "a.stl"), filename="a.stl"))
+        db.commit()
+
+        # Only scanning root_a
+        scanner._prune_stale_models(db, scan_start, [str(root_a)])
+
+        names = {m.name for m in db.query(Model).all()}
+        assert "stale1" not in names    # under scanned root, not visited → pruned
+        assert "fresh1" in names        # visited → kept
+        assert "fresh2" in names
+        assert "in_b" in names          # outside scanned root → preserved
+
+
+# ---------------------------------------------------------------------------
+# Per-creator bootstrap (#50)
+# ---------------------------------------------------------------------------
+
+class TestCreatorDirsByName:
+    def test_finds_creator_folder_under_scan_root(self, db, tmp_path):
+        """_creator_dirs_by_name returns the matching creator directory when the
+        creator has zero indexed models (bootstrap case)."""
+        from app.models import ScanRoot
+
+        creator_dir = tmp_path / "Abe3D"
+        creator_dir.mkdir()
+        (creator_dir / "Cloud" / "STL").mkdir(parents=True)
+
+        root = ScanRoot(path=str(tmp_path), layout="{creator}", enabled=True)
+        db.add(root)
+        db.commit()
+
+        results = scanner._creator_dirs_by_name("Abe3D", db)
+        paths = [str(p) for p, _ in results]
+        assert str(creator_dir) in paths
+
+    def test_case_insensitive_name_match(self, db, tmp_path):
+        """Name matching is case-insensitive — 'abe3d' matches 'Abe3D' on disk."""
+        from app.models import ScanRoot
+
+        creator_dir = tmp_path / "Abe3D"
+        creator_dir.mkdir()
+
+        root = ScanRoot(path=str(tmp_path), layout="{creator}", enabled=True)
+        db.add(root)
+        db.commit()
+
+        results = scanner._creator_dirs_by_name("abe3d", db)
+        assert any(p == creator_dir for p, _ in results)
+
+    def test_no_match_returns_empty(self, db, tmp_path):
+        """Returns an empty list when no creator folder matches the name."""
+        from app.models import ScanRoot
+
+        (tmp_path / "SomeOtherCreator").mkdir()
+        root = ScanRoot(path=str(tmp_path), layout="{creator}", enabled=True)
+        db.add(root)
+        db.commit()
+
+        results = scanner._creator_dirs_by_name("NonExistent", db)
+        assert results == []
