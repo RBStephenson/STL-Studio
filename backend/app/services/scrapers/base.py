@@ -10,6 +10,7 @@ _SITE_DOMAINS = {
     "myminifactory.com": "myminifactory",
     "gumroad.com": "gumroad",
     "cults3d.com": "cults3d",
+    "lootstudios.com": "loot-studios",
 }
 
 

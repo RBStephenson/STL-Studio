@@ -3,12 +3,13 @@ Scraper dispatcher — routes URLs and search queries to the right site adapter.
 """
 from typing import Optional
 from app.services.scrapers.base import ScrapedModel, SearchResult, detect_site
-from app.services.scrapers import mmf, gumroad, cults3d
+from app.services.scrapers import mmf, gumroad, cults3d, loot_studios
 
 SITE_PATTERNS = [
     ("myminifactory", mmf),
     ("gumroad",       gumroad),
     ("cults3d",       cults3d),
+    ("loot-studios",  loot_studios),
 ]
 
 __all__ = ["detect_site", "ScrapedModel", "SearchResult"]
@@ -23,6 +24,8 @@ async def fetch_url(url: str) -> Optional[ScrapedModel]:
         return await gumroad.fetch(url)
     if site == "cults3d":
         return await cults3d.fetch(url)
+    if site == "loot-studios":
+        return await loot_studios.fetch(url)
     return None
 
 
@@ -34,4 +37,6 @@ async def search_site(site: str, query: str, limit: int = 12) -> list[SearchResu
         return await gumroad.search(query, limit)
     if site == "cults3d":
         return await cults3d.search(query, limit)
+    if site == "loot-studios":
+        return await loot_studios.search(query, limit)
     return []

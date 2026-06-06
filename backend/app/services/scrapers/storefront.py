@@ -6,6 +6,7 @@ Supported:
   MyMiniFactory  https://www.myminifactory.com/users/{username}
   Gumroad        https://{creator}.gumroad.com  or  gumroad.com/{creator}
   Cults3D        https://cults3d.com/en/users/{username}/creations
+  Loot Studios   https://app.lootstudios.com/bundle/{slug}/  (all miniatures in a bundle)
 """
 import re
 import json
@@ -49,6 +50,8 @@ async def scrape_storefront(url: str) -> list[StorefrontProduct]:
         return await _scrape_gumroad(url)
     if site == "cults3d":
         return await _scrape_cults(url)
+    if site == "loot-studios":
+        return await _scrape_loot_studios(url)
     return []
 
 
@@ -301,3 +304,41 @@ async def _scrape_cults(url: str) -> list[StorefrontProduct]:
             page += 1
 
     return products
+
+
+# ---------------------------------------------------------------------------
+# Loot Studios
+# ---------------------------------------------------------------------------
+
+async def _scrape_loot_studios(url: str) -> list[StorefrontProduct]:
+    """
+    Fetch all individual miniatures from a Loot Studios bundle page.
+
+    Paste a specific bundle URL (app.lootstudios.com/bundle/slug/).  The bundle
+    store listing is JS-rendered and cannot be walked — one bundle at a time.
+    """
+    from app.services.scrapers import loot_studios as ls
+
+    if ls.extract_id(url) is None:
+        logger.warning(
+            "Loot Studios: store listing is JS-rendered and cannot be scraped. "
+            "Paste an individual bundle URL (app.lootstudios.com/bundle/slug/) instead."
+        )
+        return []
+
+    minis = await ls.fetch_bundle_products(url)
+    if not minis:
+        logger.warning(f"Loot Studios: no miniatures found for {url}")
+        return []
+
+    bundle_slug = ls.extract_id(url) or ""
+    return [
+        StorefrontProduct(
+            title=m.name,
+            source_url=f"https://app.lootstudios.com/bundle/{bundle_slug}/",
+            source_site="loot-studios",
+            external_id=m.thumbnail_url.split("/")[-1].split(".")[0],
+            thumbnail_url=m.thumbnail_url,
+        )
+        for m in minis
+    ]
