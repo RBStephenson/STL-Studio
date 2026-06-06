@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, type LucideIcon,
 } from "lucide-react";
 
 /** A keyboard key, styled like the hints elsewhere in the app. */
@@ -415,6 +415,40 @@ const SECTIONS: Section[] = [
         <p>Auto-tags come from folder and file names. Check the scale appears in a recognizable form (<code>1:6</code>, <code>1_6</code>, <code>75mm</code>), then rescan that creator. You can always add or remove tags yourself.</p>
         <p className="font-medium text-gray-200 mt-4">The scan seems stuck or slow</p>
         <p>The first full scan of a large library takes a while, and a slow external/USB drive or NAS is limited by that drive's speed. You can <strong>Cancel</strong> at any time — already-indexed models are kept.</p>
+      </>
+    ),
+  },
+  {
+    id: "about",
+    title: "About & support",
+    icon: Heart,
+    body: (
+      <>
+        <p className="font-medium text-gray-200">Like STL Library?</p>
+        <p>
+          STL Library started because I had a problem: way too many STL files and no good
+          way to keep track of them all. What began as a personal tool turned into something
+          I thought other makers, painters, gamers, and hobbyists might find useful too.
+        </p>
+        <p>
+          If STL Library has helped you organize your collection, rediscover forgotten
+          models, or simply spend less time hunting through folders, please consider
+          supporting the project through{" "}
+          <a href="https://www.patreon.com/BrentStephenson" target="_blank" rel="noreferrer">Patreon</a> or{" "}
+          <a href="https://www.buymeacoffee.com/brent_the_programmer" target="_blank" rel="noreferrer">Buy Me a Coffee</a>.
+        </p>
+        <p>
+          Your support helps fund continued development, but it also helps keep resin in the
+          printer, paint on the hobby desk, and supports my family as I balance software
+          development, creativity, and caregiving.
+        </p>
+        <p>
+          There's absolutely no obligation—STL Library is, and will remain, a passion
+          project. But every bit of support is deeply appreciated and helps me continue
+          building tools and content for the community.
+        </p>
+        <p>Thank you for being here, and happy printing!</p>
+        <p className="text-gray-500">— Brent the Programmer</p>
       </>
     ),
   },

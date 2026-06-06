@@ -203,3 +203,30 @@ Every PR to `main` runs **Build Check**, which compiles all three platform binar
 - **Backend**: Python 3.12 + FastAPI + SQLAlchemy + SQLite
 - **Frontend**: React 18 + Vite + TypeScript + TailwindCSS
 - **Proxy**: nginx
+
+## About & Support
+
+### Like STL Library?
+
+STL Library started because I had a problem: way too many STL files and no good
+way to keep track of them all. What began as a personal tool turned into
+something I thought other makers, painters, gamers, and hobbyists might find
+useful too.
+
+If STL Library has helped you organize your collection, rediscover forgotten
+models, or simply spend less time hunting through folders, please consider
+supporting the project through
+[Patreon](https://www.patreon.com/BrentStephenson) or
+[Buy Me a Coffee](https://www.buymeacoffee.com/brent_the_programmer).
+
+Your support helps fund continued development, but it also helps keep resin in
+the printer, paint on the hobby desk, and supports my family as I balance
+software development, creativity, and caregiving.
+
+There's absolutely no obligation—STL Library is, and will remain, a passion
+project. But every bit of support is deeply appreciated and helps me continue
+building tools and content for the community.
+
+Thank you for being here, and happy printing!
+
+— Brent the Programmer
