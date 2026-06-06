@@ -1,8 +1,8 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
-import { OrbitControls, Environment } from "@react-three/drei";
+import { OrbitControls, Environment, Bounds, useBounds } from "@react-three/drei";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
-import { Box3, Vector3, Mesh, PerspectiveCamera, WebGLRenderer } from "three";
+import { Box3, Vector3, Mesh, WebGLRenderer } from "three";
 import { Camera, Loader2, Maximize2, RotateCcw } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -11,7 +11,8 @@ import { Camera, Loader2, Maximize2, RotateCcw } from "lucide-react";
 function STLMesh({ url }: { url: string }) {
   const geometry = useLoader(STLLoader, url);
   const meshRef = useRef<Mesh>(null);
-  const { camera, controls, invalidate } = useThree();
+  const bounds = useBounds();
+  const { invalidate } = useThree();
 
   useEffect(() => {
     if (!geometry || !meshRef.current) return;
@@ -29,23 +30,10 @@ function STLMesh({ url }: { url: string }) {
     const maxDim = Math.max(size.x, size.y, size.z);
     if (maxDim > 0) meshRef.current.scale.setScalar(2 / maxDim);
 
-    // Fit camera to bounding sphere of the scaled mesh
-    meshRef.current.geometry.computeBoundingSphere();
-    const radius = (meshRef.current.geometry.boundingSphere?.radius ?? 1) *
-      (2 / maxDim);
-    const fov = (camera as PerspectiveCamera).fov ?? 45;
-    const dist = (radius / Math.sin((fov * Math.PI) / 360)) * 1.5;
-    camera.position.set(dist * 0.8, dist * 0.6, dist);
-    camera.lookAt(0, 0, 0);
-    (camera as PerspectiveCamera).updateProjectionMatrix?.();
-
-    // Sync OrbitControls' internal spherical coordinates with the repositioned
-    // camera. Without this the controls cache the Canvas's initial position
-    // [4,3,4], leaving the polar (X-axis) orbit range incorrect.
-    (controls as any)?.update();
-
+    // Fit camera — Bounds handles the math and properly syncs OrbitControls
+    bounds.refresh().fit();
     invalidate();
-  }, [geometry, controls]);
+  }, [geometry]);
 
   return (
     <mesh ref={meshRef} geometry={geometry} castShadow receiveShadow>
@@ -220,18 +208,24 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured 
               <directionalLight position={[5, 10, 5]} intensity={1.2} castShadow />
               <directionalLight position={[-5, -5, -5]} intensity={0.3} />
 
-              <LoaderErrorBoundary onError={setError}>
-                <Suspense fallback={null}>
-                  <STLMesh url={getUrl(selected.path)} />
-                  <Environment preset="city" />
-                </Suspense>
-              </LoaderErrorBoundary>
+              <Bounds margin={1.4}>
+                <LoaderErrorBoundary onError={setError}>
+                  <Suspense fallback={null}>
+                    <STLMesh url={getUrl(selected.path)} />
+                    <Environment preset="city" />
+                  </Suspense>
+                </LoaderErrorBoundary>
+              </Bounds>
 
               <OrbitControls
                 ref={controlsRef}
                 makeDefault
                 enableDamping
                 dampingFactor={0.08}
+                // Clamp dolly: the mesh is normalized to ~2 units and Bounds frames
+                // it at ~3-4 units, so these bracket the fitted view. Without them
+                // the user can zoom through the model (origin) or out to a vanishing
+                // dot — Bounds only sets maxDistance via clip(), which we don't use.
                 minDistance={0.5}
                 maxDistance={50}
               />
