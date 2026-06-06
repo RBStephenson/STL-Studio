@@ -52,7 +52,7 @@ from fastapi.middleware.cors import CORSMiddleware              # noqa: E402
 from fastapi.staticfiles import StaticFiles                    # noqa: E402
 
 from app.database import Base, engine, SessionLocal            # noqa: E402
-from app.routers import models, scan, files, collections, scrape, enrich  # noqa: E402
+from app.routers import models, scan, files, collections, scrape, enrich, database  # noqa: E402
 
 # Create all tables (including any new columns — startup migration runs next)
 Base.metadata.create_all(bind=engine)
@@ -104,6 +104,7 @@ app.include_router(files.router,       prefix="/api")
 app.include_router(collections.router, prefix="/api")
 app.include_router(scrape.router,      prefix="/api")
 app.include_router(enrich.router,      prefix="/api")
+app.include_router(database.router,    prefix="/api")
 
 # Serve the built React frontend from /
 dist = _frontend_dist()

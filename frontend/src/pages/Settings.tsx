@@ -60,6 +60,7 @@ export default function Settings() {
   const [danger, setDanger] = useState<null | "restore" | "reset">(null);
   const [ack, setAck] = useState("");
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [dangerError, setDangerError] = useState<string | null>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
 
   const flash = (msg: string, type: "ok" | "err") => {
@@ -152,31 +153,33 @@ export default function Settings() {
     setDanger("restore");
   };
 
-  const closeDanger = () => { setDanger(null); setAck(""); setRestoreFile(null); };
+  const closeDanger = () => { setDanger(null); setAck(""); setRestoreFile(null); setDangerError(null); };
 
   const confirmDanger = async () => {
     if (ack.trim().toUpperCase() !== ACK_PHRASE) return;
     if (danger === "restore" && restoreFile) {
       setBusy("restore");
+      setDangerError(null);
       try {
         await api.database.restore(restoreFile);
         closeDanger();
         flash("Database restored — reloading…", "ok");
         setTimeout(() => window.location.reload(), 1200);
       } catch (e: any) {
-        flash(e.message || "Restore failed", "err");
+        setDangerError(e.message || "Restore failed");
       } finally {
         setBusy(null);
       }
     } else if (danger === "reset") {
       setBusy("reset");
+      setDangerError(null);
       try {
         await api.database.reset();
         closeDanger();
         flash("All data deleted — reloading…", "ok");
         setTimeout(() => window.location.reload(), 1200);
       } catch (e: any) {
-        flash(e.message || "Delete failed", "err");
+        setDangerError(e.message || "Delete failed");
       } finally {
         setBusy(null);
       }
@@ -479,6 +482,12 @@ export default function Settings() {
               placeholder={ACK_PHRASE}
               className="w-full bg-gray-950 border border-gray-700 focus:border-red-500 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-700 focus:outline-none font-mono tracking-wider mb-4"
             />
+
+            {dangerError && (
+              <div className="flex items-center gap-2 bg-red-950/60 border border-red-800 text-red-300 text-sm px-3 py-2 rounded-lg mb-4">
+                <AlertCircle size={14} className="shrink-0" /> {dangerError}
+              </div>
+            )}
 
             <div className="flex justify-end gap-2">
               <button
