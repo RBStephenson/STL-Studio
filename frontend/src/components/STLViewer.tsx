@@ -29,22 +29,33 @@ function STLMesh({ url }: { url: string }) {
     const maxDim = Math.max(size.x, size.y, size.z);
     if (maxDim > 0) meshRef.current.scale.setScalar(2 / maxDim);
 
-    // Fit camera to the bounding sphere of the scaled mesh.
+    // Fit camera to the bounding sphere of the scaled mesh. Distance that makes
+    // the sphere exactly fill the vertical FOV, times a small margin for breathing
+    // room. Place the camera at EXACTLY `dist` along a normalized diagonal — a raw
+    // (0.8,0.6,1) offset is ~1.4x longer, which (with the margin) pushed the model
+    // ~2x too far away so it didn't fill the viewer.
     meshRef.current.geometry.computeBoundingSphere();
     const radius = (meshRef.current.geometry.boundingSphere?.radius ?? 1) *
       (2 / maxDim);
-    const fov = (camera as PerspectiveCamera).fov ?? 45;
-    const dist = (radius / Math.sin((fov * Math.PI) / 360)) * 1.5;
-    camera.position.set(dist * 0.8, dist * 0.6, dist);
+    const pc = camera as PerspectiveCamera;
+    const fitDist = radius / Math.sin(((pc.fov ?? 45) * Math.PI) / 360);
+    const dist = fitDist * 1.3;
+    camera.position.copy(new Vector3(0.8, 0.6, 1).normalize().multiplyScalar(dist));
+    pc.near = dist / 100;
+    pc.far = dist * 100;
     camera.lookAt(0, 0, 0);
-    (camera as PerspectiveCamera).updateProjectionMatrix?.();
+    pc.updateProjectionMatrix();
 
-    // Re-center the controls on the model (origin) and resync so the next drag
-    // tumbles around the model, not a stale target. TrackballControls imposes no
+    // Center the controls on the model and give a generous, model-relative dolly
+    // range so zoom in/out always has room — a fixed maxDistance can sit right at
+    // the fit distance and silently block zoom-out. TrackballControls imposes no
     // polar limit, so the model rotates freely in every direction.
     if (controls) {
-      (controls as any).target?.set?.(0, 0, 0);
-      (controls as any).update?.();
+      const c = controls as any;
+      c.target?.set?.(0, 0, 0);
+      c.minDistance = dist * 0.1;
+      c.maxDistance = dist * 25;
+      c.update?.();
     }
 
     invalidate();
@@ -239,14 +250,11 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured 
                 ref={controlsRef}
                 makeDefault
                 // Free-tumble rotation (no polar clamp, unlike OrbitControls).
+                // min/maxDistance are set imperatively from the fit distance in
+                // STLMesh so the dolly range scales with each model.
                 rotateSpeed={3}
                 zoomSpeed={1.2}
                 dynamicDampingFactor={0.15}
-                // Dolly clamp only — wide bracket around the ~4-unit fit distance
-                // for the 2-unit normalized mesh, so zoom in/out stays usable
-                // without letting the model vanish or invert through the origin.
-                minDistance={0.2}
-                maxDistance={100}
               />
             </Canvas>
           )}
