@@ -135,6 +135,37 @@ def scan_all_roots(db: Session | None = None):
         _scan_lock.release()
 
 
+def _cascade_delete_models(db: Session, ids: list[int], chunk: int = 500) -> None:
+    """Delete the given models and all their dependent rows (STL files, tag links,
+    collection links) in batches, then commit.
+
+    Shared by every prune path (and the pack-split replace) so the set of child
+    tables that must be cleared alongside a Model lives in exactly one place — add
+    a new child table and only this helper needs updating, not three call sites.
+    """
+    for i in range(0, len(ids), chunk):
+        batch = ids[i:i + chunk]
+        db.query(STLFile).filter(STLFile.model_id.in_(batch)).delete(synchronize_session=False)
+        db.query(ModelTag).filter(ModelTag.model_id.in_(batch)).delete(synchronize_session=False)
+        db.query(CollectionModel).filter(CollectionModel.model_id.in_(batch)).delete(synchronize_session=False)
+        db.query(Model).filter(Model.id.in_(batch)).delete(synchronize_session=False)
+    db.commit()
+
+
+def _exceeds_prune_cap(stale_count: int, total: int, reason: str) -> bool:
+    """Safety net shared by the cap-guarded prunes: return True (and log a warning)
+    when deleting `stale_count` of `total` models would exceed 50% — that looks like
+    a botched indexing run rather than legitimate cleanup, so the caller should skip.
+    """
+    if total and stale_count > total * 0.5:
+        logger.warning(
+            f"Prune skipped ({reason}): {stale_count}/{total} models matched — "
+            "that looks like an indexing failure, not stale data."
+        )
+        return True
+    return False
+
+
 def _prune_stale_paths(db: Session):
     """Remove models whose folder_path no longer exists on disk.
 
@@ -148,13 +179,7 @@ def _prune_stale_paths(db: Session):
     if not stale_ids:
         return
 
-    for i in range(0, len(stale_ids), 500):
-        chunk = stale_ids[i:i + 500]
-        db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
-        db.query(ModelTag).filter(ModelTag.model_id.in_(chunk)).delete(synchronize_session=False)
-        db.query(CollectionModel).filter(CollectionModel.model_id.in_(chunk)).delete(synchronize_session=False)
-        db.query(Model).filter(Model.id.in_(chunk)).delete(synchronize_session=False)
-    db.commit()
+    _cascade_delete_models(db, stale_ids)
     logger.info(f"Post-scan: pruned {len(stale_ids)} models with missing folder paths")
 
 
@@ -195,20 +220,10 @@ def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]
     ]
     if not stale_ids:
         return
-    if total and len(stale_ids) > total * 0.5:
-        logger.warning(
-            f"Stale-model prune skipped: {len(stale_ids)}/{total} models under "
-            "scanned roots were not visited — looks like an indexing failure, not stale data."
-        )
+    if _exceeds_prune_cap(len(stale_ids), total, "not visited this run"):
         return
 
-    for i in range(0, len(stale_ids), 500):
-        chunk = stale_ids[i:i + 500]
-        db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
-        db.query(ModelTag).filter(ModelTag.model_id.in_(chunk)).delete(synchronize_session=False)
-        db.query(CollectionModel).filter(CollectionModel.model_id.in_(chunk)).delete(synchronize_session=False)
-        db.query(Model).filter(Model.id.in_(chunk)).delete(synchronize_session=False)
-    db.commit()
+    _cascade_delete_models(db, stale_ids)
     logger.info(f"Post-scan: pruned {len(stale_ids)} stale models (not visited this run)")
 
 
@@ -250,20 +265,10 @@ def _prune_phantoms(db: Session, creator_id: int | None = None):
     ]
     if not ids:
         return
-    if total and len(ids) > total * 0.5:
-        logger.warning(
-            f"Phantom prune skipped: {len(ids)}/{total} models have no STLs — "
-            "that looks like an indexing failure, not phantoms."
-        )
+    if _exceeds_prune_cap(len(ids), total, "no STL files"):
         return
 
-    for i in range(0, len(ids), 500):
-        chunk = ids[i:i + 500]
-        db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
-        db.query(ModelTag).filter(ModelTag.model_id.in_(chunk)).delete(synchronize_session=False)
-        db.query(CollectionModel).filter(CollectionModel.model_id.in_(chunk)).delete(synchronize_session=False)
-        db.query(Model).filter(Model.id.in_(chunk)).delete(synchronize_session=False)
-    db.commit()
+    _cascade_delete_models(db, ids)
     logger.info(f"Post-scan: pruned {len(ids)} phantom models (no STL files)")
 
 
@@ -422,11 +427,7 @@ def split_pack(model_id: int) -> dict:
             _load_pack_overrides(db)
 
             # Drop the collapsed model (and its dependents) so the re-walk starts clean.
-            db.query(ModelTag).filter(ModelTag.model_id == model_id).delete(synchronize_session=False)
-            db.query(CollectionModel).filter(CollectionModel.model_id == model_id).delete(synchronize_session=False)
-            db.query(STLFile).filter(STLFile.model_id == model_id).delete(synchronize_session=False)
-            db.query(Model).filter(Model.id == model_id).delete(synchronize_session=False)
-            db.commit()
+            _cascade_delete_models(db, [model_id])
             # Expunge just the deleted model so the re-walk's inserts (SQLite may
             # reuse the freed id) don't collide with it in the identity map. The
             # creator object stays attached for the walk below.
