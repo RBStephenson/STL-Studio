@@ -28,7 +28,6 @@ Local web app for cataloguing, browsing, and managing an STL file library.
 
 1. Go to the [Releases page](https://github.com/RBStephenson/STL-Inventory/releases) and download the file for your OS:
    - **Windows**: `stl-library-windows.exe`
-   - **macOS**: `stl-library-macos`
    - **Linux**: `stl-library-linux`
 
 2. Run the file. Your browser will open automatically to `http://localhost:8484`.
@@ -42,7 +41,7 @@ Your library database is stored in your user data folder and survives app update
 - **macOS**: `~/Library/Application Support/STL-Inventory/`
 - **Linux**: `~/.local/share/stl-inventory/`
 
-> **macOS note**: You may need to right-click → Open the first time to bypass Gatekeeper, since the binary isn't notarized.
+> **Linux note**: You may need to mark the binary as executable before running it: `chmod +x stl-library-linux`
 
 ---
 

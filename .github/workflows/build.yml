@@ -1,6 +1,6 @@
 name: Build
 
-# Reusable build of the standalone executables for all three platforms.
+# Reusable build of the standalone executables for Windows and Linux.
 # Called by release.yml (publishes a Release) and build-check.yml (CI only).
 on:
   workflow_call:
@@ -26,8 +26,6 @@ jobs:
         include:
           - os: windows-latest
             label: windows
-          - os: macos-latest
-            label: macos
           - os: ubuntu-latest
             label: linux
 

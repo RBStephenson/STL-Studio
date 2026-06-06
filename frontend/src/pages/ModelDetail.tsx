@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn } from "lucide-react";
 import { api, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
@@ -225,6 +225,24 @@ export default function ModelDetail() {
   const [prevNav, setPrevNav] = useState<NavTarget | null | undefined>(undefined);
   const [nextNav, setNextNav] = useState<NavTarget | null | undefined>(undefined);
   const navFetchIdRef = useRef(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setLightboxOpen(false); return; }
+      if (!activeImage) return;
+      const allImgs = [
+        model?.thumbnail_path ? api.fileUrl(model.thumbnail_path) : model?.thumbnail_url,
+        ...(model?.image_paths ?? []).map(api.fileUrl),
+      ].filter(Boolean) as string[];
+      const idx = allImgs.indexOf(activeImage);
+      if (e.key === "ArrowLeft" && idx > 0) setActiveImage(allImgs[idx - 1]);
+      if (e.key === "ArrowRight" && idx < allImgs.length - 1) setActiveImage(allImgs[idx + 1]);
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [lightboxOpen, activeImage, model]);
 
   // sync local state from loaded model
   useEffect(() => {
@@ -564,7 +582,8 @@ export default function ModelDetail() {
                   <img
                     src={activeImage}
                     alt={model.title ?? model.name}
-                    className={`w-full h-full object-contain transition-all ${
+                    onClick={() => setLightboxOpen(true)}
+                    className={`w-full h-full object-contain transition-all cursor-zoom-in ${
                       nsfw && !showNSFW ? "blur-2xl" : ""
                     }`}
                   />
@@ -584,6 +603,15 @@ export default function ModelDetail() {
                   </div>
                 )}
 
+                {activeImage && (
+                  <button
+                    onClick={() => setLightboxOpen(true)}
+                    className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-gray-300 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                    aria-label="View fullscreen"
+                  >
+                    <ZoomIn size={14} />
+                  </button>
+                )}
                 <button
                   onClick={() => setShowImagePicker(true)}
                   className="absolute bottom-3 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-gray-300 hover:text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1066,6 +1094,61 @@ export default function ModelDetail() {
           files={model.stl_files.map((f) => ({ ...f, part_type: partTypes[f.id] || f.part_type }))}
           onClose={() => setShowKitBuilder(false)}
         />
+      )}
+
+      {lightboxOpen && activeImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
+          onClick={() => setLightboxOpen(false)}
+        >
+          {/* Close */}
+          <button
+            onClick={() => setLightboxOpen(false)}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+            aria-label="Close"
+          >
+            <X size={20} />
+          </button>
+
+          {/* Prev */}
+          {allImages.length > 1 && allImages.indexOf(activeImage) > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setActiveImage(allImages[allImages.indexOf(activeImage) - 1]); }}
+              className="absolute left-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+              aria-label="Previous image"
+            >
+              <ChevronLeft size={28} />
+            </button>
+          )}
+
+          {/* Image */}
+          <img
+            src={activeImage}
+            alt={model.title ?? model.name}
+            onClick={(e) => e.stopPropagation()}
+            className={`max-w-[90vw] max-h-[90vh] object-contain rounded-lg ${
+              nsfw && !showNSFW ? "blur-2xl" : ""
+            }`}
+          />
+
+          {/* Next */}
+          {allImages.length > 1 && allImages.indexOf(activeImage) < allImages.length - 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setActiveImage(allImages[allImages.indexOf(activeImage) + 1]); }}
+              className="absolute right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+              aria-label="Next image"
+            >
+              <ChevronRight size={28} />
+            </button>
+          )}
+
+          {/* Image counter */}
+          {allImages.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/60 bg-black/40 px-3 py-1 rounded-full">
+              {allImages.indexOf(activeImage) + 1} / {allImages.length}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

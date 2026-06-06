@@ -30,6 +30,55 @@ const CONFIDENCE_STYLES = {
   low:    "bg-gray-800 text-gray-500 border-gray-700",
 };
 
+interface MatchCardProps {
+  m: MatchResult;
+  selected: Set<number>;
+  toggle: (id: number) => void;
+}
+
+function MatchCard({ m, selected, toggle }: MatchCardProps) {
+  return (
+    <div
+      onClick={() => toggle(m.local_model_id)}
+      className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+        selected.has(m.local_model_id)
+          ? "border-indigo-500 bg-indigo-950/30"
+          : "border-gray-800 bg-gray-900 hover:border-gray-600"
+      }`}
+    >
+      {/* Checkbox */}
+      <div className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${
+        selected.has(m.local_model_id) ? "bg-indigo-600 border-indigo-600" : "border-gray-600"
+      }`}>
+        {selected.has(m.local_model_id) && <Check size={12} />}
+      </div>
+
+      {/* Scraped thumbnail */}
+      <div className="w-12 h-12 rounded bg-gray-800 overflow-hidden shrink-0">
+        {m.product.thumbnail_url
+          ? <img src={m.product.thumbnail_url} alt="" className="w-full h-full object-cover" />
+          : <div className="w-full h-full bg-gray-800" />
+        }
+      </div>
+
+      {/* Names */}
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-gray-500 truncate" title={m.local_folder}>
+          Local: <span className="text-gray-300">{m.local_name}</span>
+        </p>
+        <p className="text-xs text-gray-500 truncate">
+          Match: <span className="text-gray-300">{m.product.title}</span>
+        </p>
+      </div>
+
+      {/* Score */}
+      <div className={`text-xs px-2 py-0.5 rounded border shrink-0 ${CONFIDENCE_STYLES[m.confidence]}`}>
+        {Math.round(m.score * 100)}%
+      </div>
+    </div>
+  );
+}
+
 export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Props) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -114,48 +163,6 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
   const medium = matches.filter((m) => m.confidence === "medium");
   const low    = matches.filter((m) => m.confidence === "low");
 
-  const MatchCard = ({ m }: { m: MatchResult }) => (
-    <div
-      key={m.local_model_id}
-      onClick={() => toggle(m.local_model_id)}
-      className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-        selected.has(m.local_model_id)
-          ? "border-indigo-500 bg-indigo-950/30"
-          : "border-gray-800 bg-gray-900 hover:border-gray-600"
-      }`}
-    >
-      {/* Checkbox */}
-      <div className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${
-        selected.has(m.local_model_id) ? "bg-indigo-600 border-indigo-600" : "border-gray-600"
-      }`}>
-        {selected.has(m.local_model_id) && <Check size={12} />}
-      </div>
-
-      {/* Scraped thumbnail */}
-      <div className="w-12 h-12 rounded bg-gray-800 overflow-hidden shrink-0">
-        {m.product.thumbnail_url
-          ? <img src={m.product.thumbnail_url} alt="" className="w-full h-full object-cover" />
-          : <div className="w-full h-full bg-gray-800" />
-        }
-      </div>
-
-      {/* Names */}
-      <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-500 truncate" title={m.local_folder}>
-          Local: <span className="text-gray-300">{m.local_name}</span>
-        </p>
-        <p className="text-xs text-gray-500 truncate">
-          Match: <span className="text-gray-300">{m.product.title}</span>
-        </p>
-      </div>
-
-      {/* Score */}
-      <div className={`text-xs px-2 py-0.5 rounded border shrink-0 ${CONFIDENCE_STYLES[m.confidence]}`}>
-        {Math.round(m.score * 100)}%
-      </div>
-    </div>
-  );
-
   return (
     <div className="flex flex-col gap-4 bg-gray-900 border border-gray-800 rounded-xl p-5">
       <div className="flex items-center gap-2">
@@ -214,7 +221,7 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
                   <p className="text-xs font-medium text-emerald-400">High confidence ({high.length})</p>
                   <button onClick={() => selectAll("high")} className="text-xs text-gray-600 hover:text-gray-400">Select all</button>
                 </div>
-                <div className="flex flex-col gap-2">{high.map((m) => <MatchCard key={m.local_model_id} m={m} />)}</div>
+                <div className="flex flex-col gap-2">{high.map((m) => <MatchCard key={m.local_model_id} m={m} selected={selected} toggle={toggle} />)}</div>
               </div>
             )}
             {medium.length > 0 && (
@@ -223,7 +230,7 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
                   <p className="text-xs font-medium text-yellow-400">Medium confidence ({medium.length})</p>
                   <button onClick={() => selectAll("medium")} className="text-xs text-gray-600 hover:text-gray-400">Select all</button>
                 </div>
-                <div className="flex flex-col gap-2">{medium.map((m) => <MatchCard key={m.local_model_id} m={m} />)}</div>
+                <div className="flex flex-col gap-2">{medium.map((m) => <MatchCard key={m.local_model_id} m={m} selected={selected} toggle={toggle} />)}</div>
               </div>
             )}
             {low.length > 0 && (
@@ -236,7 +243,7 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
                   Low confidence ({low.length}) — review carefully
                 </button>
                 {showLow && (
-                  <div className="flex flex-col gap-2">{low.map((m) => <MatchCard key={m.local_model_id} m={m} />)}</div>
+                  <div className="flex flex-col gap-2">{low.map((m) => <MatchCard key={m.local_model_id} m={m} selected={selected} toggle={toggle} />)}</div>
                 )}
               </div>
             )}
