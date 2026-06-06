@@ -1,6 +1,7 @@
 """Serve local image files and STL files from the mounted drives."""
 import io
 import os
+import string
 import time
 from urllib.parse import quote as _url_quote
 import logging
@@ -173,6 +174,57 @@ def open_folder(path: str):
         raise HTTPException(status_code=501, detail=f"Cannot open folder: {e}")
 
     return {"ok": True}
+
+
+@router.get("/browse-images")
+def browse_images(path: str = ""):
+    """List subdirectories and image files for the image-picker file browser.
+
+    With no path: Windows returns drive letters; other OSes start at home.
+    Otherwise returns immediate subdirs and image files inside `path`.
+    Restricted to configured scan roots (same allowlist as /files/image).
+    """
+    system = platform.system()
+
+    if not path:
+        if system == "Windows":
+            drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+            return {
+                "path": "",
+                "parent": None,
+                "is_drive_list": True,
+                "entries": [{"name": d, "path": d, "is_dir": True, "url": None} for d in drives],
+            }
+        path = str(Path.home())
+
+    p = Path(path)
+    if not p.exists() or not p.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found")
+    if not _is_safe_path(p):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    parent = str(p.parent) if p.parent != p else None
+
+    try:
+        entries = []
+        for entry in sorted(p.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
+            if entry.name.startswith("."):
+                continue
+            if entry.is_dir():
+                entries.append({"name": entry.name, "path": str(entry), "is_dir": True, "url": None})
+            elif entry.is_file() and entry.suffix.lower() in ALLOWED_IMAGE_EXTENSIONS:
+                entries.append({
+                    "name": entry.name,
+                    "path": str(entry),
+                    "is_dir": False,
+                    "url": f"/api/files/image?path={_url_quote(str(entry), safe='')}",
+                })
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied for this folder")
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f"Cannot read folder: {e}")
+
+    return {"path": str(p), "parent": parent, "is_drive_list": False, "entries": entries}
 
 
 @router.get("/model-images/{model_id}")

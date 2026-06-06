@@ -211,3 +211,71 @@ class TestDownloadZip:
         # Should not contain raw special chars
         assert "/" not in disposition.split("filename=")[-1]
         assert ":" not in disposition.split("filename=")[-1]
+
+
+# ---------------------------------------------------------------------------
+# /files/browse-images
+# ---------------------------------------------------------------------------
+
+class TestBrowseImages:
+    @pytest.fixture(autouse=True)
+    def _allow_tmp(self, monkeypatch):
+        import app.routers.files as files_module
+        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: True)
+
+    def test_lists_subdirs_and_images(self, client, tmp_path):
+        (tmp_path / "subfolder").mkdir()
+        (tmp_path / "cover.png").write_bytes(b"PNG")
+        (tmp_path / "render.jpg").write_bytes(b"JPEG")
+        (tmp_path / "readme.txt").write_bytes(b"text")  # must be excluded
+
+        resp = client.get("/files/browse-images", params={"path": str(tmp_path)})
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [e["name"] for e in data["entries"]]
+        assert "subfolder" in names
+        assert "cover.png" in names
+        assert "render.jpg" in names
+        assert "readme.txt" not in names
+
+    def test_dirs_sorted_before_files(self, client, tmp_path):
+        (tmp_path / "zzz_folder").mkdir()
+        (tmp_path / "aaa_image.png").write_bytes(b"PNG")
+
+        resp = client.get("/files/browse-images", params={"path": str(tmp_path)})
+        entries = resp.json()["entries"]
+        dir_indices = [i for i, e in enumerate(entries) if e["is_dir"]]
+        file_indices = [i for i, e in enumerate(entries) if not e["is_dir"]]
+        assert max(dir_indices) < min(file_indices)
+
+    def test_image_entries_include_url(self, client, tmp_path):
+        (tmp_path / "thumb.png").write_bytes(b"PNG")
+
+        resp = client.get("/files/browse-images", params={"path": str(tmp_path)})
+        entries = resp.json()["entries"]
+        img = next(e for e in entries if e["name"] == "thumb.png")
+        assert img["is_dir"] is False
+        assert img["url"] is not None
+        assert "thumb.png" in img["url"]
+
+    def test_hidden_entries_excluded(self, client, tmp_path):
+        (tmp_path / ".hidden").mkdir()
+        (tmp_path / ".hidden_img.png").write_bytes(b"PNG")
+        (tmp_path / "visible.png").write_bytes(b"PNG")
+
+        resp = client.get("/files/browse-images", params={"path": str(tmp_path)})
+        names = [e["name"] for e in resp.json()["entries"]]
+        assert ".hidden" not in names
+        assert ".hidden_img.png" not in names
+        assert "visible.png" in names
+
+    def test_missing_path_returns_404(self, client, tmp_path):
+        resp = client.get("/files/browse-images", params={"path": str(tmp_path / "nope")})
+        assert resp.status_code == 404
+
+    def test_path_outside_allowed_roots_returns_403(self, client, monkeypatch):
+        import app.routers.files as files_module
+        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: False)
+
+        resp = client.get("/files/browse-images", params={"path": "/etc"})
+        assert resp.status_code == 403

@@ -1,10 +1,24 @@
-import { useState, useEffect } from "react";
-import { X, Check, ImageOff, Loader2, Link2, Trash2 } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { X, Check, ImageOff, Loader2, Link2, Trash2, FolderOpen, ArrowUp, Folder, HardDrive, Image } from "lucide-react";
 
 interface ImageEntry {
   path: string;
   filename: string;
   url: string;
+}
+
+interface BrowseEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  url: string | null;
+}
+
+interface BrowseListing {
+  path: string;
+  parent: string | null;
+  is_drive_list: boolean;
+  entries: BrowseEntry[];
 }
 
 interface Props {
@@ -22,6 +36,21 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
   const [urlInput, setUrlInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<"local" | "url">("local");
+  const [browsing, setBrowsing] = useState(false);
+  const [browseListing, setBrowseListing] = useState<BrowseListing | null>(null);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+
+  const browseDir = useCallback((path?: string) => {
+    setBrowseLoading(true);
+    setBrowseError(null);
+    const url = `/api/files/browse-images${path ? `?path=${encodeURIComponent(path)}` : ""}`;
+    fetch(url)
+      .then((r) => { if (!r.ok) throw new Error("Cannot open folder"); return r.json(); })
+      .then(setBrowseListing)
+      .catch((e) => setBrowseError(e.message))
+      .finally(() => setBrowseLoading(false));
+  }, []);
 
   useEffect(() => {
     fetch(`/api/files/model-images/${modelId}`)
@@ -102,45 +131,129 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
                 />
               )}
             </div>
+          ) : browsing ? (
+            /* ── File browser ── */
+            <div className="flex flex-col gap-2">
+              {/* Toolbar */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => browseDir(browseListing?.parent ?? undefined)}
+                  disabled={browseLoading || browseListing?.parent == null}
+                  title="Up one level"
+                  className="p-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 disabled:opacity-30"
+                >
+                  <ArrowUp size={14} />
+                </button>
+                <span className="text-xs text-gray-400 font-mono truncate flex-1">
+                  {browseListing?.is_drive_list ? "This PC" : browseListing?.path ?? "…"}
+                </span>
+                <button
+                  onClick={() => setBrowsing(false)}
+                  className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                >
+                  ← Scan results
+                </button>
+              </div>
+
+              {/* Listing */}
+              {browseLoading ? (
+                <div className="flex items-center justify-center h-40 text-gray-600 gap-2">
+                  <Loader2 size={16} className="animate-spin" />
+                  <span className="text-sm">Loading…</span>
+                </div>
+              ) : browseError ? (
+                <div className="flex flex-col items-center justify-center h-40 text-gray-500 gap-2 text-center px-4">
+                  <ImageOff size={24} />
+                  <p className="text-sm">{browseError}</p>
+                </div>
+              ) : browseListing?.entries.length === 0 ? (
+                <div className="flex items-center justify-center h-40 text-gray-600 text-sm">
+                  Nothing here
+                </div>
+              ) : (
+                <div className="flex flex-col gap-0.5">
+                  {browseListing?.entries.map((entry) => (
+                    entry.is_dir ? (
+                      <button
+                        key={entry.path}
+                        onClick={() => browseDir(entry.path)}
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-gray-800 text-left text-sm text-gray-200 transition-colors"
+                      >
+                        {browseListing.is_drive_list
+                          ? <HardDrive size={14} className="text-indigo-400 shrink-0" />
+                          : <Folder size={14} className="text-indigo-400 shrink-0" />
+                        }
+                        <span className="truncate font-mono">{entry.name}</span>
+                      </button>
+                    ) : (
+                      <button
+                        key={entry.path}
+                        onClick={() => { setSelected(entry.path); setBrowsing(false); }}
+                        className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
+                          selected === entry.path
+                            ? "bg-indigo-950/50 border border-indigo-500/50 text-indigo-300"
+                            : "hover:bg-gray-800 text-gray-200"
+                        }`}
+                      >
+                        <Image size={14} className="text-gray-500 shrink-0" />
+                        <span className="truncate font-mono">{entry.name}</span>
+                        {selected === entry.path && <Check size={13} className="text-indigo-400 ml-auto shrink-0" />}
+                      </button>
+                    )
+                  ))}
+                </div>
+              )}
+            </div>
           ) : loading ? (
             <div className="flex items-center justify-center h-40 text-gray-600 gap-2">
               <Loader2 size={16} className="animate-spin" />
               <span className="text-sm">Loading images…</span>
             </div>
-          ) : images.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-gray-600 gap-2">
-              <ImageOff size={32} />
-              <p className="text-sm">No images found in this model's folder</p>
-            </div>
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-              {images.map((img) => (
-                <button
-                  key={img.path}
-                  onClick={() => setSelected(img.path)}
-                  className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-colors ${
-                    selected === img.path
-                      ? "border-indigo-500 ring-2 ring-indigo-500/30"
-                      : "border-gray-700 hover:border-gray-500"
-                  }`}
-                  title={img.filename}
-                >
-                  <img
-                    src={`/api/files/image?path=${encodeURIComponent(img.path)}`}
-                    alt={img.filename}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                  {selected === img.path && (
-                    <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
-                      <Check size={20} className="text-white drop-shadow" />
-                    </div>
-                  )}
-                  <p className="absolute bottom-0 inset-x-0 bg-black/60 text-xs text-gray-300 px-1 py-0.5 truncate">
-                    {img.filename}
-                  </p>
-                </button>
-              ))}
+            <div className="flex flex-col gap-3">
+              {images.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 text-gray-600 gap-2">
+                  <ImageOff size={32} />
+                  <p className="text-sm">No images found in this model's folder</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {images.map((img) => (
+                    <button
+                      key={img.path}
+                      onClick={() => setSelected(img.path)}
+                      className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-colors ${
+                        selected === img.path
+                          ? "border-indigo-500 ring-2 ring-indigo-500/30"
+                          : "border-gray-700 hover:border-gray-500"
+                      }`}
+                      title={img.filename}
+                    >
+                      <img
+                        src={`/api/files/image?path=${encodeURIComponent(img.path)}`}
+                        alt={img.filename}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                      {selected === img.path && (
+                        <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
+                          <Check size={20} className="text-white drop-shadow" />
+                        </div>
+                      )}
+                      <p className="absolute bottom-0 inset-x-0 bg-black/60 text-xs text-gray-300 px-1 py-0.5 truncate">
+                        {img.filename}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => { setBrowsing(true); browseDir(); }}
+                className="flex items-center gap-2 self-start px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                <FolderOpen size={13} />
+                Browse for image…
+              </button>
             </div>
           )}
         </div>
