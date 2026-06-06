@@ -221,6 +221,45 @@ _PAGE_WITH_BND_ID = '''
 '''
 
 
+class TestFetchStoreCatalog:
+    def test_returns_filtered_bundles(self):
+        from app.services.scrapers.loot_studios import fetch_store_catalog
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"bundleObjs": [
+            {"obj_type": "bundle", "obj_slug": "elemental-revenge", "obj_title": "Elemental Revenge",
+             "obj_image": "https://example.com/cover.jpg", "hide_library": "false", "obj_available": "true"},
+            {"obj_type": "bundle", "obj_slug": "hidden-bundle", "obj_title": "Hidden",
+             "obj_image": "", "hide_library": "true", "obj_available": "true"},
+            {"obj_type": "bundle", "obj_slug": "upcoming", "obj_title": "Upcoming",
+             "obj_image": "", "hide_library": "false", "obj_available": "false"},
+            {"obj_type": "extra", "obj_slug": "something", "obj_title": "Extra",
+             "obj_image": "", "hide_library": "false", "obj_available": "true"},
+        ]}
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_cls.return_value = mock_client
+            result = asyncio.run(fetch_store_catalog())
+
+        assert len(result) == 1
+        assert result[0]["obj_slug"] == "elemental-revenge"
+
+    def test_returns_empty_on_error(self):
+        from app.services.scrapers.loot_studios import fetch_store_catalog
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post.side_effect = Exception("timeout")
+            mock_cls.return_value = mock_client
+            result = asyncio.run(fetch_store_catalog())
+        assert result == []
+
+
 class TestFetchBundleProducts:
     def test_returns_empty_when_no_bnd_id(self):
         from app.services.scrapers.loot_studios import fetch_bundle_products

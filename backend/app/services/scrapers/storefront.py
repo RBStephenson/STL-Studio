@@ -6,7 +6,8 @@ Supported:
   MyMiniFactory  https://www.myminifactory.com/users/{username}
   Gumroad        https://{creator}.gumroad.com  or  gumroad.com/{creator}
   Cults3D        https://cults3d.com/en/users/{username}/creations
-  Loot Studios   https://app.lootstudios.com/bundle/{slug}/  (all miniatures in a bundle)
+  Loot Studios   https://app.lootstudios.com/bundle-store/    (full catalog, one entry per bundle)
+                 https://app.lootstudios.com/bundle/{slug}/  (one bundle, one entry per miniature)
 """
 import re
 import json
@@ -312,26 +313,40 @@ async def _scrape_cults(url: str) -> list[StorefrontProduct]:
 
 async def _scrape_loot_studios(url: str) -> list[StorefrontProduct]:
     """
-    Fetch all individual miniatures from a Loot Studios bundle page.
+    Two modes depending on the URL:
 
-    Paste a specific bundle URL (app.lootstudios.com/bundle/slug/).  The bundle
-    store listing is JS-rendered and cannot be walked — one bundle at a time.
+    - Bundle store URL (bundle-store/) → GetMyLootsCache → one product per bundle,
+      for matching against top-level bundle folders.
+    - Specific bundle URL (bundle/slug/) → Load_ObjectExplorer → one product per
+      miniature, for matching against individual model folders within a bundle.
     """
     from app.services.scrapers import loot_studios as ls
 
-    if ls.extract_id(url) is None:
-        logger.warning(
-            "Loot Studios: store listing is JS-rendered and cannot be scraped. "
-            "Paste an individual bundle URL (app.lootstudios.com/bundle/slug/) instead."
-        )
-        return []
+    bundle_slug = ls.extract_id(url)
 
+    if bundle_slug is None:
+        # Bundle store or other loot-studios URL — return the full catalog
+        bundles = await ls.fetch_store_catalog()
+        if not bundles:
+            logger.warning("Loot Studios: GetMyLootsCache returned no bundles")
+            return []
+        return [
+            StorefrontProduct(
+                title=b["obj_title"],
+                source_url=f"https://app.lootstudios.com/bundle/{b['obj_slug']}/",
+                source_site="loot-studios",
+                external_id=b["obj_slug"],
+                thumbnail_url=b.get("obj_image") or None,
+            )
+            for b in bundles
+        ]
+
+    # Specific bundle — return individual miniatures
     minis = await ls.fetch_bundle_products(url)
     if not minis:
         logger.warning(f"Loot Studios: no miniatures found for {url}")
         return []
 
-    bundle_slug = ls.extract_id(url) or ""
     return [
         StorefrontProduct(
             title=m.name,
