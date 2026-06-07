@@ -34,9 +34,10 @@ interface Props {
 }
 
 const SITES = [
-  { id: "myminifactory", label: "MyMiniFactory" },
-  { id: "gumroad",       label: "Gumroad" },
-  { id: "cults3d",       label: "Cults3D" },
+  { id: "myminifactory",  label: "MyMiniFactory", searchable: true },
+  { id: "gumroad",        label: "Gumroad",        searchable: true },
+  { id: "cults3d",        label: "Cults3D",        searchable: true },
+  { id: "loot-studios",   label: "Loot Studios",   searchable: false },
 ];
 
 type Tab = "url" | "search";
@@ -155,7 +156,7 @@ export default function FindOnWeb({ modelId, modelName, onApplied, onClose }: Pr
             <div className="flex gap-2">
               <input
                 type="url"
-                placeholder="https://www.myminifactory.com/object/…"
+                placeholder="https://www.myminifactory.com/object/… or app.lootstudios.com/bundle/…"
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && fetchUrl()}
@@ -185,21 +186,30 @@ export default function FindOnWeb({ modelId, modelName, onApplied, onClose }: Pr
                     <option key={s.id} value={s.id}>{s.label}</option>
                   ))}
                 </select>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && doSearch()}
-                  className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
-                />
-                <button
-                  onClick={doSearch}
-                  disabled={loading || !searchQuery.trim()}
-                  className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-sm flex items-center gap-1.5"
-                >
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-                  Search
-                </button>
+                {SITES.find((s) => s.id === site)?.searchable ? (
+                  <>
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && doSearch()}
+                      className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      onClick={doSearch}
+                      disabled={loading || !searchQuery.trim()}
+                      className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-sm flex items-center gap-1.5"
+                    >
+                      {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                      Search
+                    </button>
+                  </>
+                ) : (
+                  <p className="flex-1 text-sm text-gray-400 self-center px-1">
+                    {SITES.find((s) => s.id === site)?.label} doesn't support search —
+                    use the <button className="text-indigo-400 hover:text-indigo-300 underline" onClick={() => setTab("url")}>Paste URL</button> tab instead.
+                  </p>
+                )}
               </div>
 
               {searchResults.length > 0 && (

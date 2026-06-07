@@ -1,11 +1,17 @@
 """
-Loot Studios scraper — individual bundle pages at
-https://app.lootstudios.com/bundle/{slug}/
+Loot Studios scraper.
 
-Bundle pages are publicly accessible.  The miniature listing is loaded
-server-side via a WordPress AJAX endpoint (action=Load_ObjectExplorer) using
-the bundle's post ID, which is embedded in an inline script on the page.
+Two public WordPress AJAX endpoints power this:
+
+  GetMyLootsCache   — returns the full bundle catalog as JSON (no auth required).
+                      Used when the user pastes the bundle-store URL; returns one
+                      StorefrontProduct per bundle for top-level folder matching.
+
+  Load_ObjectExplorer — returns all miniatures in one bundle as an HTML fragment.
+                        Used when the user pastes a specific bundle URL; returns
+                        one StorefrontProduct per miniature for file-level matching.
 """
+import html
 import re
 import logging
 import httpx
@@ -143,6 +149,31 @@ async def fetch(url: str) -> Optional[ScrapedModel]:
             logger.error(f"Loot Studios fetch({url}) failed: {e}")
             return None
     return _parse_bundle(r.text, str(r.url))
+
+
+async def fetch_store_catalog() -> list[dict]:
+    """Call GetMyLootsCache to get all published bundles without authentication.
+
+    Returns a filtered list of bundle dicts with keys: obj_slug, obj_title,
+    obj_image.  Excludes bundles that are hidden from the library or not yet
+    available (upcoming releases, loot-coin rewards, etc.).
+    """
+    async with httpx.AsyncClient(timeout=30, headers=_HEADERS) as client:
+        try:
+            r = await client.post(_AJAX_URL, data={"action": "GetMyLootsCache"})
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            logger.error(f"Loot Studios GetMyLootsCache failed: {e}")
+            return []
+
+    return [
+        b for b in (data.get("bundleObjs") or [])
+        if b.get("obj_type") == "bundle"
+        and b.get("hide_library") == "false"
+        and b.get("obj_available") == "true"
+        and b.get("obj_slug")
+    ]
 
 
 async def fetch_bundle_products(url: str) -> list[BundleMiniature]:
