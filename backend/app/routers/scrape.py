@@ -8,6 +8,7 @@ from app.models import Model, Creator
 from app.services import scrapers
 from app.services.scanner import resolve_creator
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
+from app.services.variant_sync import propagate_source_url
 from app.utils import utcnow
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
@@ -140,6 +141,9 @@ async def apply_metadata(
     # Resolve or create creator
     if body.creator_name:
         model.creator_id = resolve_creator(body.creator_name, db).id
+
+    if body.source_url:
+        propagate_source_url(db, model)
 
     model.source_last_fetched = utcnow()
     model.needs_review = False  # user reviewed it, clear the flag

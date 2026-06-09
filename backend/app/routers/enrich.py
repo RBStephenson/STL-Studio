@@ -11,6 +11,7 @@ from app.utils import utcnow
 from app.models import Model, Creator
 from app.services.scrapers.storefront import scrape_storefront, StorefrontProduct
 from app.services.matcher import match_products_to_models, MatchCandidate
+from app.services.variant_sync import propagate_source_url
 
 router = APIRouter(prefix="/enrich", tags=["enrich"])
 
@@ -126,6 +127,9 @@ async def bulk_apply(
             model.external_id = item.external_id
         if item.title and not model.title:
             model.title = item.title
+
+        if item.source_url:
+            propagate_source_url(db, model)
 
         model.source_last_fetched = utcnow()
         model.needs_review = False

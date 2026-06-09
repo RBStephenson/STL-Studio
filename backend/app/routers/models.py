@@ -11,6 +11,7 @@ from app.schemas import (
     PrintedUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate, SetGroupBody,
 )
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail, store_thumbnail
+from app.services.variant_sync import propagate_source_url
 from app.services.tag_sync import sync_model_tags
 from app.services import scanner
 from app.services.scanner import resolve_creator
@@ -367,6 +368,9 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
 
     if data.get("creator_name"):
         model.creator_id = resolve_creator(data["creator_name"], db).id
+
+    if data.get("source_url"):
+        propagate_source_url(db, model)
 
     model.updated_at = utcnow()
     sync_model_tags(model, db)

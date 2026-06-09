@@ -660,17 +660,18 @@ export default function ModelDetail() {
 
         {/* Right column — Info */}
         <div className="flex flex-col gap-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          {/* Title above the action row — side-by-side overlapped on long names (#187) */}
+          <div className="flex flex-col gap-3">
+            <div className="min-w-0">
               {model.character && (
                 <p className="text-sm text-indigo-400 mb-1">{model.character}</p>
               )}
-              <h1 className="text-2xl font-bold text-gray-100">{model.title || model.name}</h1>
+              <h1 className="text-2xl font-bold text-gray-100 break-words">{model.title || model.name}</h1>
               {model.creator && (
                 <p className="text-gray-400 mt-1">by {model.creator.name}</p>
               )}
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={toggleFavorite}
                 title={favorite ? "Remove from favorites" : "Add to favorites"}
