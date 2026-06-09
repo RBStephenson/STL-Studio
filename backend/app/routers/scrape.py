@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models import Model, Creator
 from app.services import scrapers
 from app.services.scanner import resolve_creator
+from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
 from app.utils import utcnow
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
@@ -111,9 +112,18 @@ async def apply_metadata(
     if body.external_id:
         model.external_id = body.external_id
     if body.thumbnail_url:
-        model.thumbnail_url = body.thumbnail_url
-        # Clear local thumbnail so the remote one takes precedence in UI
-        # (keep local as fallback — don't delete it)
+        # Download the remote image to a local file — CDNs block hot-linking,
+        # and the UI gives thumbnail_path precedence over thumbnail_url.
+        try:
+            model.thumbnail_path = str(
+                await download_thumbnail(model.id, body.thumbnail_url)
+            )
+            model.thumbnail_url = None
+        except ThumbnailDownloadError:
+            # Fall back to the bare URL, clearing the local path so the new
+            # remote image actually takes display precedence.
+            model.thumbnail_url = body.thumbnail_url
+            model.thumbnail_path = None
     if body.tags:
         # Merge with existing tags, dedup
         existing = set(model.tags or [])

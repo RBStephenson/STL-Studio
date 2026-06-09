@@ -136,6 +136,10 @@ class ThumbnailUpdate(BaseModel):
     thumbnail_url: Optional[str] = None
 
 
+class ThumbnailFromUrl(BaseModel):
+    url: str
+
+
 class FavoriteUpdate(BaseModel):
     is_favorite: bool
 

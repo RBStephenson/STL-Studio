@@ -90,7 +90,11 @@ def serve_image(path: str):
         raise HTTPException(status_code=403, detail="Path not allowed")
     if not p.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(p)
+    # Captured/downloaded thumbnails are rewritten in place at a fixed path
+    # (thumbnails/{model_id}.png), so the URL never changes when the bytes do.
+    # no-cache forces revalidation; FileResponse's ETag/Last-Modified keep
+    # unchanged images as cheap 304s.
+    return FileResponse(p, headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/stl")

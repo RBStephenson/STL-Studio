@@ -136,7 +136,8 @@ If the auto-chosen thumbnail is wrong (or missing), open a model and click
 **Change image** on the preview. The **Set Thumbnail** dialog offers:
 
 - **From Folder** — every image found in that model's own folder, to pick from.
-- **From URL** — paste any image URL to use instead.
+- **From URL** — paste any image URL; the image is downloaded and stored
+  locally, so it keeps working even when the site blocks hot-linking.
 - **Clear** — remove the thumbnail entirely.
 
 ## Favorites, print queue & printed tracking

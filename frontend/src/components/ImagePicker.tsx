@@ -40,6 +40,7 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
   const [browseListing, setBrowseListing] = useState<BrowseListing | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseError, setBrowseError] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   const browseDir = useCallback((path?: string) => {
     setBrowseLoading(true);
@@ -61,19 +62,34 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
 
   const apply = async (clear = false) => {
     setSaving(true);
+    setApplyError(null);
     try {
-      const body = clear
-        ? { thumbnail_path: null, thumbnail_url: null }
-        : tab === "url"
-          ? { thumbnail_url: urlInput.trim(), thumbnail_path: null }
+      if (!clear && tab === "url") {
+        // The server downloads the image and stores it locally — remote CDNs
+        // block hot-linking, so saving the bare URL renders nothing.
+        const r = await fetch(`/api/models/${modelId}/thumbnail/from-url`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: urlInput.trim() }),
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(() => null);
+          throw new Error(e?.detail ?? "Could not fetch that image");
+        }
+      } else {
+        const body = clear
+          ? { thumbnail_path: null, thumbnail_url: null }
           : { thumbnail_path: selected, thumbnail_url: null };
-
-      await fetch(`/api/models/${modelId}/thumbnail`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+        const r = await fetch(`/api/models/${modelId}/thumbnail`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) throw new Error("Could not update the thumbnail");
+      }
       onApplied();
+    } catch (e: any) {
+      setApplyError(e.message);
     } finally {
       setSaving(false);
     }
@@ -111,7 +127,11 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
         <div className="flex-1 overflow-y-auto p-4">
           {tab === "url" ? (
             <div className="flex flex-col gap-3">
-              <p className="text-sm text-gray-500">Paste an image URL to use as the thumbnail.</p>
+              <p className="text-sm text-gray-500">
+                Paste an image URL to use as the thumbnail. The image is downloaded
+                and saved when you click Set as Thumbnail — it's fine if the preview
+                below doesn't load (many sites block previews).
+              </p>
               <div className="flex gap-2">
                 <Link2 size={16} className="text-gray-500 shrink-0 mt-2.5" />
                 <input
@@ -259,6 +279,11 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
         </div>
 
         {/* Footer */}
+        {applyError && (
+          <p className="mx-5 mb-0 mt-3 text-sm text-red-400 bg-red-950/40 border border-red-800 rounded px-3 py-2">
+            {applyError}
+          </p>
+        )}
         <div className="flex items-center justify-between px-5 py-4 border-t border-gray-800">
           <button
             onClick={() => apply(true)}

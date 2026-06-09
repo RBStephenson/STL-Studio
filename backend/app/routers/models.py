@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func, exists, text as _sql
 from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
@@ -9,9 +7,10 @@ from app.database import get_db
 from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
-    ModelUpdate, ThumbnailUpdate, FavoriteUpdate, QueueUpdate, QueueReorder, PrintedUpdate,
-    ExcludeUpdate, STLFileUpdate, BulkTagUpdate, SetGroupBody,
+    ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, FavoriteUpdate, QueueUpdate, QueueReorder,
+    PrintedUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate, SetGroupBody,
 )
+from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail, store_thumbnail
 from app.services.tag_sync import sync_model_tags
 from app.services import scanner
 from app.services.scanner import resolve_creator
@@ -336,7 +335,7 @@ def bulk_tag_models(body: BulkTagUpdate, db: Session = Depends(get_db)):
 
 
 @router.patch("/{model_id}")
-def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(get_db)):
+async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(get_db)):
     """Partial update of model metadata fields — only fields actually sent apply."""
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
@@ -348,6 +347,18 @@ def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(get_db)
         "license", "category", "tags", "custom_attributes", "nsfw",
         "needs_review", "thumbnail_url",
     }
+    # The metadata editor resubmits the whole form, so only treat thumbnail_url
+    # as "changed" when it differs from what's stored. A new remote URL is
+    # downloaded to a local file (remote CDNs block hot-linking in <img> tags);
+    # if that fails we keep the URL but clear the local path so the URL at
+    # least takes display precedence.
+    new_thumb_url = data.get("thumbnail_url")
+    if new_thumb_url and new_thumb_url != model.thumbnail_url:
+        try:
+            model.thumbnail_path = str(await download_thumbnail(model.id, new_thumb_url))
+            data["thumbnail_url"] = None
+        except ThumbnailDownloadError:
+            model.thumbnail_path = None
     for key, value in data.items():
         if key in allowed:
             if key == "tags" and isinstance(value, list):
@@ -378,20 +389,30 @@ def set_thumbnail(model_id: int, body: ThumbnailUpdate, db: Session = Depends(ge
     return {"ok": True}
 
 
-def _thumbnails_dir() -> Path:
-    """Return (and create) the captured-thumbnails directory next to the DB."""
-    import tempfile
-    db_url = settings.database_url
-    if "sqlite:///" in db_url:
-        db_file = Path(db_url.split("sqlite:///", 1)[1])
-    else:
-        db_file = Path(db_url.split("sqlite://", 1)[1])
-    if db_file.name == ":memory:":
-        d = Path(tempfile.gettempdir()) / "stl_inventory_thumbnails"
-    else:
-        d = db_file.parent / "thumbnails"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+@router.post("/{model_id}/thumbnail/from-url")
+async def set_thumbnail_from_url(
+    model_id: int,
+    body: ThumbnailFromUrl,
+    db: Session = Depends(get_db),
+):
+    """Download a remote image server-side and store it as the local thumbnail.
+
+    Remote CDNs commonly block hot-linking, so storing the bare URL in
+    thumbnail_url renders nothing in the UI — downloading is the reliable path.
+    """
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    try:
+        path = await download_thumbnail(model_id, body.url)
+    except ThumbnailDownloadError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    model.thumbnail_path = str(path)
+    model.thumbnail_url = None
+    model.updated_at = utcnow()
+    db.commit()
+    return {"ok": True, "path": str(path)}
 
 
 @router.post("/{model_id}/thumbnail/upload")
@@ -407,8 +428,7 @@ async def upload_thumbnail(
     if file.content_type not in ("image/png", "image/jpeg", "image/webp"):
         raise HTTPException(status_code=400, detail="Only PNG/JPEG/WebP images are accepted")
 
-    out = _thumbnails_dir() / f"{model_id}.png"
-    out.write_bytes(await file.read())
+    out = store_thumbnail(model_id, ".png", await file.read())
 
     model.thumbnail_path = str(out)
     model.thumbnail_url = None

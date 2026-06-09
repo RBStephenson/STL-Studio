@@ -200,6 +200,9 @@ export default function ModelDetail() {
   const { toast } = useToast();
   const [model, setModel] = useState<ModelDetailType | null>(null);
   const [variants, setVariants] = useState<Model[]>([]);
+  // Bumped on every load() so the variants effect refetches after in-place
+  // refreshes (e.g. thumbnail updates) that don't change creator/character.
+  const [variantVersion, setVariantVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [showFindOnWeb, setShowFindOnWeb] = useState(false);
@@ -426,6 +429,7 @@ export default function ModelDetail() {
     api.models.get(Number(id)).then((m) => {
       if (loadId !== loadIdRef.current) return; // stale — newer load in flight
       setModel(m);
+      setVariantVersion((v) => v + 1);
       const thumb = m.thumbnail_path
         ? api.fileUrl(m.thumbnail_path)
         : m.thumbnail_url ?? null;
@@ -443,7 +447,9 @@ export default function ModelDetail() {
   useEffect(() => { setLoading(true); }, [id]);
 
   // Fetch sibling variants for the variant switcher. Keyed on the (creator,
-  // character) group so navigating between siblings doesn't refetch needlessly.
+  // character) group plus a version counter bumped by load(), so in-place
+  // refreshes (thumbnail capture/picker, metadata save) update the switcher
+  // thumbnails even though creator/character are unchanged.
   useEffect(() => {
     if (model?.creator_id && model.character) {
       api.models
@@ -453,7 +459,7 @@ export default function ModelDetail() {
     } else {
       setVariants([]);
     }
-  }, [model?.creator_id, model?.character]);
+  }, [model?.creator_id, model?.character, variantVersion]);
 
   useEffect(() => {
     if (!navOrigin || !id) {

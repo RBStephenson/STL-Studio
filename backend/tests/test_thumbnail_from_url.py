@@ -1,0 +1,303 @@
+"""
+Tests for server-side thumbnail download: the thumbnails service, the
+/models/{id}/thumbnail/from-url endpoint, the thumbnail handling in
+/scrape/apply and PATCH /models/{id}, and image cache revalidation.
+"""
+import httpx
+import pytest
+
+from tests.conftest import make_creator, make_model
+
+import app.services.thumbnails as thumbnails
+from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\nfakepngdata"
+JPEG_BYTES = b"\xff\xd8\xff\xe0fakejpegdata"
+
+
+@pytest.fixture()
+def thumb_dir(tmp_path, monkeypatch):
+    """Isolate the thumbnails directory to this test."""
+    d = tmp_path / "thumbnails"
+    d.mkdir()
+    monkeypatch.setattr(thumbnails, "thumbnails_dir", lambda: d)
+    return d
+
+
+# Captured at import time so repeated mock_http calls in one test don't wrap
+# an already-patched factory (the service and this module share the httpx
+# module object).
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
+
+
+def mock_http(monkeypatch, handler):
+    """Route the service's httpx.AsyncClient through a MockTransport."""
+    def factory(**kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return _REAL_ASYNC_CLIENT(**kwargs)
+
+    monkeypatch.setattr(thumbnails.httpx, "AsyncClient", factory)
+
+
+# ---------------------------------------------------------------------------
+# download_thumbnail service
+# ---------------------------------------------------------------------------
+
+class TestDownloadThumbnail:
+    @pytest.mark.anyio
+    async def test_saves_png_from_content_type(self, thumb_dir, monkeypatch):
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
+
+        out = await download_thumbnail(42, "https://cdn.example.com/img")
+        assert out == thumb_dir / "42.png"
+        assert out.read_bytes() == PNG_BYTES
+
+    @pytest.mark.anyio
+    async def test_removes_stale_file_with_other_extension(self, thumb_dir, monkeypatch):
+        stale = thumb_dir / "42.png"
+        stale.write_bytes(b"old")
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}))
+
+        out = await download_thumbnail(42, "https://cdn.example.com/img")
+        assert out == thumb_dir / "42.jpg"
+        assert not stale.exists()
+
+    @pytest.mark.anyio
+    async def test_generic_content_type_without_image_extension_rejected(self, thumb_dir, monkeypatch):
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "application/octet-stream"}))
+
+        with pytest.raises(ThumbnailDownloadError):
+            await download_thumbnail(1, "https://cdn.example.com/download")
+
+    @pytest.mark.anyio
+    async def test_falls_back_to_url_extension(self, thumb_dir, monkeypatch):
+        """Some CDNs send a generic content type — trust the URL extension."""
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "application/octet-stream"}))
+
+        out = await download_thumbnail(1, "https://cdn.example.com/render.webp")
+        assert out.suffix == ".webp"
+
+    @pytest.mark.anyio
+    async def test_rejects_non_http_scheme(self, thumb_dir):
+        with pytest.raises(ThumbnailDownloadError, match="http"):
+            await download_thumbnail(1, "file:///etc/passwd")
+
+    @pytest.mark.anyio
+    async def test_rejects_html_response(self, thumb_dir, monkeypatch):
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=b"<html>", headers={"content-type": "text/html"}))
+        with pytest.raises(ThumbnailDownloadError, match="image"):
+            await download_thumbnail(1, "https://example.com/page")
+
+    @pytest.mark.anyio
+    async def test_rejects_http_error_status(self, thumb_dir, monkeypatch):
+        mock_http(monkeypatch, lambda req: httpx.Response(404))
+        with pytest.raises(ThumbnailDownloadError, match="404"):
+            await download_thumbnail(1, "https://example.com/gone.png")
+
+    @pytest.mark.anyio
+    async def test_rejects_oversize_body(self, thumb_dir, monkeypatch):
+        monkeypatch.setattr(thumbnails, "MAX_BYTES", 8)
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=b"x" * 64, headers={"content-type": "image/png"}))
+        with pytest.raises(ThumbnailDownloadError, match="large"):
+            await download_thumbnail(1, "https://example.com/huge.png")
+
+    @pytest.mark.anyio
+    async def test_network_error_wrapped(self, thumb_dir, monkeypatch):
+        def boom(req):
+            raise httpx.ConnectError("connection refused")
+        mock_http(monkeypatch, boom)
+        with pytest.raises(ThumbnailDownloadError, match="fetch"):
+            await download_thumbnail(1, "https://example.com/img.png")
+
+    @pytest.mark.anyio
+    async def test_rejects_empty_body(self, thumb_dir, monkeypatch):
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=b"", headers={"content-type": "image/png"}))
+        with pytest.raises(ThumbnailDownloadError, match="empty"):
+            await download_thumbnail(1, "https://example.com/img.png")
+
+
+# ---------------------------------------------------------------------------
+# POST /models/{id}/thumbnail/from-url
+# ---------------------------------------------------------------------------
+
+class TestFromUrlEndpoint:
+    def test_success_sets_path_and_clears_url(self, client, db, thumb_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        model.thumbnail_url = "https://old.example.com/old.png"
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
+
+        resp = client.post(f"/models/{model.id}/thumbnail/from-url",
+                           json={"url": "https://cdn.example.com/new.png"})
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_path == str(thumb_dir / f"{model.id}.png")
+        assert model.thumbnail_url is None
+
+    def test_download_failure_returns_422_and_keeps_model(self, client, db, thumb_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator, thumbnail_path="/somewhere/local.png")
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(403))
+
+        resp = client.post(f"/models/{model.id}/thumbnail/from-url",
+                           json={"url": "https://cdn.example.com/blocked.png"})
+        assert resp.status_code == 422
+        assert "403" in resp.json()["detail"]
+
+        db.refresh(model)
+        assert model.thumbnail_path == "/somewhere/local.png"
+
+    def test_unknown_model_returns_404(self, client, thumb_dir):
+        resp = client.post("/models/99999/thumbnail/from-url",
+                           json={"url": "https://cdn.example.com/img.png"})
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /models/{id}/thumbnail/upload — shares the same stale-file cleanup
+# ---------------------------------------------------------------------------
+
+class TestUploadThumbnailCleanup:
+    def test_upload_purges_stale_other_extension(self, client, db, thumb_dir):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        db.commit()
+
+        stale = thumb_dir / f"{model.id}.jpg"
+        stale.write_bytes(b"old downloaded thumb")
+
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("capture.png", PNG_BYTES, "image/png")},
+        )
+        assert resp.status_code == 200
+        assert (thumb_dir / f"{model.id}.png").exists()
+        assert not stale.exists()
+
+
+# ---------------------------------------------------------------------------
+# POST /scrape/apply/{id} — thumbnail handling
+# ---------------------------------------------------------------------------
+
+class TestScrapeApplyThumbnail:
+    def test_download_success_sets_local_path(self, client, db, thumb_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator, thumbnail_path="/somewhere/local.png")
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}))
+
+        resp = client.post(f"/scrape/apply/{model.id}",
+                           json={"thumbnail_url": "https://cdn.example.com/art.jpg"})
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_path == str(thumb_dir / f"{model.id}.jpg")
+        assert model.thumbnail_url is None
+
+    def test_download_failure_stores_url_and_clears_path(self, client, db, thumb_dir, monkeypatch):
+        """Regression for #189: the old code stored the URL but left the local
+        path in place, and the UI shows the path first — so applying web
+        metadata appeared to do nothing."""
+        creator = make_creator(db)
+        model = make_model(db, creator, thumbnail_path="/somewhere/local.png")
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(403))
+
+        resp = client.post(f"/scrape/apply/{model.id}",
+                           json={"thumbnail_url": "https://cdn.example.com/blocked.jpg"})
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_url == "https://cdn.example.com/blocked.jpg"
+        assert model.thumbnail_path is None
+
+
+# ---------------------------------------------------------------------------
+# PATCH /models/{id} — thumbnail_url handling in the metadata editor
+# ---------------------------------------------------------------------------
+
+class TestUpdateModelThumbnail:
+    def test_changed_url_is_downloaded(self, client, db, thumb_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator, thumbnail_path="/somewhere/local.png")
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
+
+        resp = client.patch(f"/models/{model.id}",
+                            json={"thumbnail_url": "https://cdn.example.com/new.png"})
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_path == str(thumb_dir / f"{model.id}.png")
+        assert model.thumbnail_url is None
+
+    def test_unchanged_url_leaves_path_alone(self, client, db, thumb_dir, monkeypatch):
+        """The editor resubmits the whole form — an unchanged thumbnail_url
+        must not re-download or clobber the local thumbnail."""
+        creator = make_creator(db)
+        model = make_model(db, creator, thumbnail_path="/somewhere/local.png")
+        model.thumbnail_url = "https://cdn.example.com/same.png"
+        db.commit()
+
+        def fail(req):
+            raise AssertionError("should not fetch an unchanged URL")
+        mock_http(monkeypatch, fail)
+
+        resp = client.patch(f"/models/{model.id}",
+                            json={"thumbnail_url": "https://cdn.example.com/same.png",
+                                  "title": "New Title"})
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_path == "/somewhere/local.png"
+        assert model.title == "New Title"
+
+    def test_download_failure_clears_path_keeps_url(self, client, db, thumb_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator, thumbnail_path="/somewhere/local.png")
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(500))
+
+        resp = client.patch(f"/models/{model.id}",
+                            json={"thumbnail_url": "https://cdn.example.com/flaky.png"})
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_url == "https://cdn.example.com/flaky.png"
+        assert model.thumbnail_path is None
+
+
+# ---------------------------------------------------------------------------
+# /files/image cache revalidation (#186)
+# ---------------------------------------------------------------------------
+
+class TestImageCacheControl:
+    def test_serve_image_sends_no_cache(self, client, tmp_path, monkeypatch):
+        import app.routers.files as files_module
+        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: True)
+
+        img = tmp_path / "thumb.png"
+        img.write_bytes(PNG_BYTES)
+
+        resp = client.get("/files/image", params={"path": str(img)})
+        assert resp.status_code == 200
+        assert resp.headers.get("cache-control") == "no-cache"

@@ -168,7 +168,7 @@ const SECTIONS: Section[] = [
         </p>
         <ul>
           <li><strong>From Folder</strong> — every image found in that model's own folder.</li>
-          <li><strong>From URL</strong> — paste any image URL to use instead.</li>
+          <li><strong>From URL</strong> — paste any image URL; the image is downloaded and stored locally, so it keeps working even when the site blocks hot-linking.</li>
           <li><strong>Clear</strong> — remove the thumbnail entirely.</li>
         </ul>
       </>
