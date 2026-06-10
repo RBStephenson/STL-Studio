@@ -2,7 +2,7 @@
 
 ## Product Requirements & Technical Design Document
 
-**Author:** Brent (<rbrent.stephenson@gmail.com>) **Status:** v1.0 — build-ready (review-complete) **Date:** 2026-06-07 **Codename:** *Valuesmith* (working title — "values first, color second") **Delivery decision:** Built as a **new module inside the existing** [**STL-Inventory**](https://github.com/RBStephenson/STL-Inventory) **app** — not a standalone product. It inherits that app's stack, Docker setup, packaging, backup/restore, settings, and CI, and gains a first-class link between a **painted figure's guide** and the **STL model it was printed from**. See Section 3.
+**Author:** Brent **Status:** v1.0 — build-ready (review-complete) **Date:** 2026-06-07 **Codename:** *Valuesmith* (working title — "values first, color second") **Delivery decision:** Built as a **new module inside the existing** [**STL-Inventory**](https://github.com/RBStephenson/STL-Inventory) **app** — not a standalone product. It inherits that app's stack, Docker setup, packaging, backup/restore, settings, and CI, and gains a first-class link between a **painted figure's guide** and the **STL model it was printed from**. See Section 3.
 
   
 
