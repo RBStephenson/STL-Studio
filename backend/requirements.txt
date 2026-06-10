@@ -10,3 +10,12 @@ beautifulsoup4==4.12.3
 python-multipart==0.0.32
 watchdog==6.0.0
 apscheduler==3.11.2
+
+# Painting module (#182). Color math + image handling are used from M1;
+# playwright's browser (Chromium) install is deferred to M3 — the pip
+# package does NOT bundle it.
+numpy==2.4.6
+scikit-image==0.26.0
+pillow==12.2.0
+playwright==1.60.0
+anthropic==0.109.1
