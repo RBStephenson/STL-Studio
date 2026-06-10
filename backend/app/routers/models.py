@@ -175,7 +175,7 @@ def list_models(
         count_rows = db.execute(_sql("""
             SELECT creator_id, character, COUNT(*) AS cnt
             FROM models
-            WHERE character IS NOT NULL
+            WHERE character IS NOT NULL AND excluded = 0
             GROUP BY creator_id, character
             HAVING COUNT(*) > 1
         """)).fetchall()

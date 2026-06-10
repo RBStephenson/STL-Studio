@@ -142,6 +142,17 @@ class TestVariantGrouping:
         assert data["total"] == 1
         assert data["items"][0]["variant_count"] == 1
 
+    def test_variant_count_skips_excluded_models(self, client, db):
+        # Excluding a variant must drop it from the badge count (#215),
+        # matching what the variant-group page shows.
+        _, variants = self._make_variant_group(db)
+        variants[2].excluded = True
+        commit_all(db)
+
+        resp = client.get("/models?group_variants=true")
+        item = resp.json()["items"][0]
+        assert item["variant_count"] == 2
+
     def test_group_representative_prefers_thumbnail(self, client, db):
         creator = make_creator(db, "Creator")
         # v1 has no thumbnail, v2 has one — v2 should be representative
