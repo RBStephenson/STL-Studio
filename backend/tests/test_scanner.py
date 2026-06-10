@@ -720,3 +720,37 @@ class TestCreatorDirsByName:
 
         results = scanner._creator_dirs_by_name("NonExistent", db)
         assert results == []
+
+
+# ---------------------------------------------------------------------------
+# resolve_creator (#217)
+# ---------------------------------------------------------------------------
+
+class TestResolveCreator:
+    def test_case_insensitive_match(self, db):
+        existing = make_creator(db, name="abe3d")
+        assert scanner.resolve_creator("Abe3D", db).id == existing.id
+
+    def test_underscore_is_not_a_wildcard(self, db):
+        # ilike treated _ as 'any char': 'My_Studio' matched 'MyXStudio' (#217)
+        decoy = make_creator(db, name="MyXStudio")
+        resolved = scanner.resolve_creator("My_Studio", db)
+        assert resolved.id != decoy.id
+        assert resolved.name == "My_Studio"
+
+    def test_percent_is_not_a_wildcard(self, db):
+        decoy = make_creator(db, name="Anything At All")
+        resolved = scanner.resolve_creator("%", db)
+        assert resolved.id != decoy.id
+        assert resolved.name == "%"
+
+    def test_distinct_rows_for_wildcard_lookalikes(self, db):
+        # Acceptance case from the issue: ab_cd and abXcd stay distinct.
+        a = scanner.resolve_creator("ab_cd", db)
+        b = scanner.resolve_creator("abXcd", db)
+        assert a.id != b.id
+
+    def test_creates_when_missing(self, db):
+        created = scanner.resolve_creator("Brand New", db)
+        assert created.id is not None
+        assert scanner.resolve_creator("brand new", db).id == created.id
