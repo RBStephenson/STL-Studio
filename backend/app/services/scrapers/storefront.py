@@ -238,11 +238,14 @@ _CULTS_CREATION_RE = re.compile(
     r"cults3d\.com/\w+/3d-(?:model|printing-file|modelling)/([\w/-]+)", re.I
 )
 
+_CULTS_MAX_PAGES = 50  # bound the ?page=N walk so a markup change can't loop forever (#218)
+
+
 async def _scrape_cults(url: str) -> list[StorefrontProduct]:
     """
     Scrape a Cults3D user creations page.
     Accepts any Cults3D profile URL — /3d-models, /creations, or bare profile.
-    Paginates via ?page=N.
+    Paginates via ?page=N, capped at _CULTS_MAX_PAGES.
     """
     # Strip any stale /creations suffix; the modern URL pattern is /3d-models
     base = url.rstrip("/")
@@ -301,6 +304,13 @@ async def _scrape_cults(url: str) -> list[StorefrontProduct]:
             # Next page: span.paginate.next > a
             next_btn = soup.select_one("span.paginate.next a, a[rel='next']")
             if not next_btn:
+                break
+            if page >= _CULTS_MAX_PAGES:
+                logger.warning(
+                    f"Cults3D: stopping at page cap ({_CULTS_MAX_PAGES}) with "
+                    f"{len(products)} products — next link still present, possible "
+                    "markup change or an unusually large store."
+                )
                 break
             page += 1
 
