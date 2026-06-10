@@ -898,8 +898,12 @@ def resolve_creator(name: str, db: Session) -> Creator:
     scraped name like 'Abe3d' doesn't create a duplicate alongside a
     folder-derived 'abe3d'. If no match exists, creates with the
     supplied casing.
+
+    Lowered equality, NOT ilike: % and _ are LIKE wildcards, and
+    underscores are common in creator names ('My_Studio' would
+    ilike-match 'MyXStudio') (#217).
     """
-    creator = db.query(Creator).filter(Creator.name.ilike(name)).first()
+    creator = db.query(Creator).filter(func.lower(Creator.name) == name.lower()).first()
     if not creator:
         creator = Creator(name=name)
         db.add(creator)
