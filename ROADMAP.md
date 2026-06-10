@@ -69,6 +69,24 @@ Remaining:
 
 ---
 
+## Painting M1 — Paint Shelf
+
+Next up after v0.6. The painting module follows its own M0–M5 milestone track
+from the [spec](docs/painting/spec.md) (see also the
+[kickoff brief](docs/painting/kickoff.md)). M0 — the module wiring — shipped in
+v0.6; M1 builds the Paint Shelf, the paint-inventory foundation the guide
+work (M2+) stands on.
+
+| Issue | Item |
+|-------|------|
+| [#240](https://github.com/RBStephenson/STL-Inventory/issues/240) | **Inventory data core** — `brand` / `paint_line` / `paint` models + CRUD endpoints, with the derived `matchable` flag |
+| [#241](https://github.com/RBStephenson/STL-Inventory/issues/241) | **Paint Shelf table UI** — grid/filter/pagination reusing Library patterns, color chips from `paint.hex` |
+| [#242](https://github.com/RBStephenson/STL-Inventory/issues/242) | **PaintRack CSV import with diff preview** — added/removed/changed, confirm-to-apply, never a blind overwrite |
+| [#243](https://github.com/RBStephenson/STL-Inventory/issues/243) | **PaintRack CSV export** — lossless round-trip with the importer |
+| [#244](https://github.com/RBStephenson/STL-Inventory/issues/244) | **Paint code validation** — per-line `code_pattern` checks on entry and import |
+
+---
+
 ## v0.7 — Configuration, scan features & advanced UX
 
 | Issue | Item |
@@ -125,7 +143,7 @@ Large features that are well-defined but each represent a significant project.
 
 | Issue | Item |
 |-------|------|
-| | **Painting module (beyond M0)** — paint inventory, guide authoring, and recipe tracking built on the v0.6 groundwork; milestones will be filed as the design firms up |
+| | **Painting module M2–M5** — guide data model + renderer + print view (M2), authoring + validation + PDF export (M3), AI drafts + color match (M4), full-corpus import (M5); see the [spec](docs/painting/spec.md) §15. Issues will be filed milestone by milestone as each phase starts |
 | [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs |
 | [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize library on disk** — preview → apply with manifest/undo; standalone-only (Docker mounts are read-only) |
 
