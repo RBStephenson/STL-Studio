@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine, SessionLocal
@@ -71,25 +71,44 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="STL Library", version="0.1.0", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:80", "http://localhost"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(models.router)
-app.include_router(scan.router)
-app.include_router(files.router)
-app.include_router(collections.router)
-app.include_router(scrape.router)
-app.include_router(enrich.router)
-app.include_router(database.router)
-app.include_router(painting_router)
+_health_router = APIRouter()
 
 
-@app.get("/health")
+@_health_router.get("/health")
 def health():
     return {"status": "ok"}
+
+
+def create_app(api_prefix: str = "") -> FastAPI:
+    """Build the STL Library API app.
+
+    Single source of truth for routers, middleware, and startup migrations —
+    used by both the Docker deployment (no prefix; nginx adds /api) and the
+    standalone binary (api_prefix="/api", frontend served from the same app).
+    """
+    app = FastAPI(title="STL Library", version="0.1.0", lifespan=lifespan)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://localhost:80", "http://localhost"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    for router in (
+        models.router,
+        scan.router,
+        files.router,
+        collections.router,
+        scrape.router,
+        enrich.router,
+        database.router,
+        painting_router,
+        _health_router,
+    ):
+        app.include_router(router, prefix=api_prefix)
+
+    return app
+
+
+app = create_app()

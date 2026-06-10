@@ -4,6 +4,13 @@ Standalone entry point for STL Library.
 Serves the FastAPI backend + the pre-built Vite frontend in a single process.
 All API routes are mounted under /api to match the frontend's BASE = "/api".
 The SQLite database and config are stored in the platform-appropriate user data dir.
+
+The app itself (routers, middleware, startup migrations) comes from
+app.main.create_app — the same factory the Docker deployment uses — so the
+standalone build cannot drift from it. This file only handles:
+  - pointing DATABASE_URL at the user data dir (before any app import),
+  - serving the bundled frontend as static files,
+  - launching uvicorn and opening the browser.
 """
 import os
 import sys
@@ -47,64 +54,12 @@ os.environ.setdefault("STL_ROOTS", "")
 # Build the FastAPI app
 # ---------------------------------------------------------------------------
 
-from fastapi import FastAPI                                    # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware              # noqa: E402
-from fastapi.staticfiles import StaticFiles                    # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-from app.database import Base, engine, SessionLocal            # noqa: E402
-from app.routers import models, scan, files, collections, scrape, enrich, database  # noqa: E402
-
-# Create all tables (including any new columns — startup migration runs next)
-Base.metadata.create_all(bind=engine)
-
-app = FastAPI(title="STL Library")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.on_event("startup")
-def _migrate():
-    """Add columns that didn't exist in earlier DB versions."""
-    from sqlalchemy import text
-    with engine.connect() as conn:
-        cols = {r[1] for r in conn.execute(text("PRAGMA table_info(stl_files)"))}
-        if "part_type" not in cols:
-            conn.execute(text("ALTER TABLE stl_files ADD COLUMN part_type TEXT"))
-            conn.commit()
-        root_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(scan_roots)"))}
-        if "layout" not in root_cols:
-            conn.execute(text("ALTER TABLE scan_roots ADD COLUMN layout VARCHAR NOT NULL DEFAULT '{creator}'"))
-            conn.commit()
-
-
-@app.on_event("startup")
-def _seed_tags():
-    """Rebuild model_tags index if it's empty but models exist (first run)."""
-    from sqlalchemy import func, text
-    from app.models import Model, ModelTag
-    from app.services.tag_sync import rebuild_all_tags
-    db = SessionLocal()
-    try:
-        if db.query(func.count(ModelTag.id)).scalar() == 0 and \
-           db.query(func.count(Model.id)).scalar() > 0:
-            rebuild_all_tags(db)
-    finally:
-        db.close()
-
+from app.main import create_app  # noqa: E402
 
 # All API routes under /api (the React frontend calls BASE = "/api")
-app.include_router(models.router,      prefix="/api")
-app.include_router(scan.router,        prefix="/api")
-app.include_router(files.router,       prefix="/api")
-app.include_router(collections.router, prefix="/api")
-app.include_router(scrape.router,      prefix="/api")
-app.include_router(enrich.router,      prefix="/api")
-app.include_router(database.router,    prefix="/api")
+app = create_app(api_prefix="/api")
 
 # Serve the built React frontend from /
 dist = _frontend_dist()
