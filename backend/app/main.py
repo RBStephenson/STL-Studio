@@ -30,6 +30,8 @@ def _migrate_schema():
         ("models", "queue_position", "INTEGER"),
         ("models", "excluded", "BOOLEAN DEFAULT 0"),
         ("scan_roots", "layout", "VARCHAR NOT NULL DEFAULT '{creator}'"),
+        ("paints", "size", "TEXT"),
+        ("paints", "count", "INTEGER DEFAULT 1"),
     ]
     with engine.connect() as conn:
         table_cols: dict[str, set[str]] = {}
@@ -38,6 +40,10 @@ def _migrate_schema():
                 table_cols[table] = {
                     r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))
                 }
+            if not table_cols[table]:
+                # Table doesn't exist at all (DB predates the feature module);
+                # create_all owns table creation, so there's nothing to alter.
+                continue
             if column not in table_cols[table]:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {coldef}"))
                 conn.commit()

@@ -60,6 +60,10 @@ class Paint(Base):
     substitute_for = Column(JSON, default=list)    # paint ids this can sub for
     notes = Column(Text, nullable=True)
     source = Column(String, nullable=True)         # "PaintRack 2026-05-29" | "manual"
+    # PaintRack passthrough fields — preserved verbatim so CSV export
+    # round-trips losslessly (#242/#243).
+    size = Column(String, nullable=True)           # "18 ml", "17|18 ml", "1 oz"
+    count = Column(Integer, default=1)             # bottles owned
 
     line = relationship("PaintLine", back_populates="paints")
 

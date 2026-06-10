@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Palette, Plus, Search, Pencil, Trash2, X } from "lucide-react";
+import { Palette, Plus, Search, Pencil, Trash2, X, Upload, Download } from "lucide-react";
 import {
-  api, Paint, PaintBrand, PaintCreate, PaintFinish, PAINT_FINISHES,
+  api, ImportDiff, Paint, PaintBrand, PaintCreate, PaintFinish, PAINT_FINISHES,
 } from "../api/client";
 import { useToast } from "../context/ToastContext";
 
@@ -157,6 +157,40 @@ export default function PaintShelfPage() {
   const [formMode, setFormMode] = useState<"hidden" | "add" | number>("hidden"); // number = editing that paint id
   const [busy, setBusy] = useState(false);
   const fetchIdRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Pending CSV import: the picked file + its server-computed diff preview.
+  const [pendingImport, setPendingImport] = useState<{ file: File; diff: ImportDiff } | null>(null);
+  const [applyRemoved, setApplyRemoved] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  const startImport = async (file: File) => {
+    try {
+      const diff = await api.painting.inventory.importPreview(file);
+      setApplyRemoved(false);
+      setPendingImport({ file, diff });
+    } catch (e: any) {
+      toast(e?.message || "Could not read the CSV.", "error");
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!pendingImport) return;
+    setImporting(true);
+    try {
+      const result = await api.painting.inventory.importConfirm(pendingImport.file, {
+        added: true, changed: true, removed: applyRemoved,
+      });
+      const { added, changed, removed } = result.applied;
+      toast(`Import applied: ${added} added, ${changed} updated, ${removed} removed.`, "success");
+      setPendingImport(null);
+      loadBrands();
+      fetchPaints();
+    } catch (e: any) {
+      toast(e?.message || "Import failed — nothing was changed.", "error");
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const loadBrands = useCallback(() => {
     api.painting.brands.list().then(setBrands).catch(() => {});
@@ -238,12 +272,40 @@ export default function PaintShelfPage() {
           <Palette size={22} className="text-indigo-400" />
           Paint Shelf
         </h1>
-        <button
-          onClick={() => setFormMode(formMode === "add" ? "hidden" : "add")}
-          className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-3 py-1.5 rounded transition-colors"
-        >
-          <Plus size={15} /> Add paint
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            data-testid="csv-file-input"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) startImport(f);
+              e.target.value = ""; // allow re-selecting the same file
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            title="Import a PaintRack CSV export — you'll see a diff preview before anything is applied"
+            className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+          >
+            <Upload size={15} /> Import CSV
+          </button>
+          <button
+            onClick={() => api.painting.inventory.exportCsv().catch((e) => toast(e?.message || "Export failed.", "error"))}
+            title="Download the shelf as a PaintRack-format CSV"
+            className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+          >
+            <Download size={15} /> Export CSV
+          </button>
+          <button
+            onClick={() => setFormMode(formMode === "add" ? "hidden" : "add")}
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-3 py-1.5 rounded transition-colors"
+          >
+            <Plus size={15} /> Add paint
+          </button>
+        </div>
       </div>
       <p className="text-sm text-gray-500 mb-6">
         {total.toLocaleString()} paints — guides will only ever reference paints from your shelf.
@@ -355,7 +417,7 @@ export default function PaintShelfPage() {
               <tr>
                 <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-600">
                   {total === 0 && !q && !brandId && !lineId && !finish && !ownedParam
-                    ? "Your shelf is empty — add a paint, or import your PaintRack CSV (coming next)."
+                    ? "Your shelf is empty — add a paint, or use Import CSV with a PaintRack export."
                     : "No paints match the current filters."}
                 </td>
               </tr>
@@ -382,6 +444,80 @@ export default function PaintShelfPage() {
           >
             Next
           </button>
+        </div>
+      )}
+
+      {/* Import diff preview modal — nothing is applied until Confirm */}
+      {pendingImport && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" data-testid="import-diff-modal">
+          <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">Import preview</h2>
+              <button onClick={() => setPendingImport(null)} className="text-gray-500 hover:text-gray-300">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="px-5 py-4 overflow-y-auto flex-1">
+              <p className="text-sm text-gray-400 mb-4">
+                {pendingImport.diff.summary.rows.toLocaleString()} rows in the file:{" "}
+                <span className="text-emerald-400">{pendingImport.diff.summary.added} new</span>,{" "}
+                <span className="text-amber-400">{pendingImport.diff.summary.changed} changed</span>,{" "}
+                <span className="text-rose-400">{pendingImport.diff.summary.removed} missing from the file</span>.
+                Nothing is written until you confirm.
+              </p>
+
+              {(["added", "changed", "removed"] as const).map((section) => {
+                const rows = pendingImport.diff[section];
+                if (rows.length === 0) return null;
+                const color = section === "added" ? "text-emerald-400" : section === "changed" ? "text-amber-400" : "text-rose-400";
+                return (
+                  <details key={section} className="mb-3" open={rows.length <= 15}>
+                    <summary className={`cursor-pointer text-sm font-medium ${color}`}>
+                      {section} ({rows.length})
+                    </summary>
+                    <ul className="mt-1.5 ml-4 text-xs text-gray-400 space-y-0.5 max-h-48 overflow-y-auto">
+                      {rows.slice(0, 200).map((r, i) => (
+                        <li key={i}>
+                          {r.brand} {r.code && <span className="font-mono">{r.code}</span>} — {r.name}
+                          {r.changes && (
+                            <span className="text-gray-600">
+                              {" "}({Object.entries(r.changes).map(([f, d]) => `${f}: ${d.from} → ${d.to}`).join(", ")})
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                      {rows.length > 200 && <li className="text-gray-600">…and {rows.length - 200} more</li>}
+                    </ul>
+                  </details>
+                );
+              })}
+
+              {pendingImport.diff.summary.removed > 0 && (
+                <label className="flex items-center gap-2 text-sm text-gray-300 mt-2 bg-rose-950/30 border border-rose-900/50 rounded px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={applyRemoved}
+                    onChange={(e) => setApplyRemoved(e.target.checked)}
+                    className="h-4 w-4 accent-rose-500"
+                  />
+                  Also delete the {pendingImport.diff.summary.removed} previously-imported paint(s) missing from this file
+                  <span className="text-xs text-gray-600">(manually added paints are never touched)</span>
+                </label>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-800 flex justify-end gap-2">
+              <button onClick={() => setPendingImport(null)} className="text-sm text-gray-400 hover:text-gray-200 px-3 py-1.5">
+                Cancel
+              </button>
+              <button
+                onClick={confirmImport}
+                disabled={importing || (pendingImport.diff.summary.added === 0 && pendingImport.diff.summary.changed === 0 && !applyRemoved)}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm px-4 py-1.5 rounded transition-colors"
+              >
+                {importing ? "Applying…" : "Apply import"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

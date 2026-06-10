@@ -1,4 +1,4 @@
-"""Paint Shelf (inventory) endpoints — brands, lines, and paints (M1, #240).
+﻿"""Paint Shelf (inventory) endpoints — brands, lines, and paints (M1, #240).
 
 `matchable` is always derived from `finish` server-side (spec §8.6); the
 create/update schemas don't expose it. Code-pattern validation against
@@ -20,7 +20,7 @@ router = APIRouter()
 
 # Fields where an explicit JSON null is a valid "clear this" request; the
 # rest are non-nullable columns, so null means "leave unchanged" and is dropped.
-_NULLABLE_PAINT_FIELDS = {"hex", "value_pct", "notes", "source"}
+_NULLABLE_PAINT_FIELDS = {"hex", "value_pct", "notes", "source", "size"}
 
 
 def _get_or_404(db: Session, model, id_: int, label: str):

@@ -85,6 +85,8 @@ class PaintCreate(BaseModel):
     substitute_for: list[int] = []
     notes: Optional[str] = None
     source: Optional[str] = None
+    size: Optional[str] = None
+    count: int = Field(1, ge=0)
 
     model_config = {"extra": "forbid"}
 
@@ -103,6 +105,8 @@ class PaintUpdate(BaseModel):
     substitute_for: Optional[list[int]] = None
     notes: Optional[str] = None
     source: Optional[str] = None
+    size: Optional[str] = None
+    count: Optional[int] = Field(None, ge=0)
 
     model_config = {"extra": "forbid"}
 
@@ -121,6 +125,8 @@ class PaintRead(BaseModel):
     substitute_for: list[int] = []
     notes: Optional[str] = None
     source: Optional[str] = None
+    size: Optional[str] = None
+    count: int = 1
 
     model_config = {"from_attributes": True}
 
