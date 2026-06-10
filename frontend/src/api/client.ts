@@ -91,8 +91,16 @@ export interface ScanRoot {
   last_scanned: string | null;
 }
 
+export interface FilterPreset {
+  name: string;
+  qs: string;
+}
+
 export interface AppSettings {
   painting_guides_enabled: boolean;
+  show_nsfw: boolean;
+  library_page_size: number;
+  filter_presets: FilterPreset[];
 }
 
 export interface DirEntry {

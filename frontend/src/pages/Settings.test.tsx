@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Settings from "./Settings";
 import { AppSettingsProvider } from "../context/AppSettingsContext";
+import { mkSettings } from "../test/settings";
 
 vi.mock("../api/client", () => ({
   api: {
@@ -11,8 +12,18 @@ vi.mock("../api/client", () => ({
       addRoot: vi.fn().mockResolvedValue({}),
     },
     settings: {
-      get: vi.fn().mockResolvedValue({ painting_guides_enabled: false }),
-      update: vi.fn().mockResolvedValue({ painting_guides_enabled: true }),
+      get: vi.fn().mockResolvedValue({
+        painting_guides_enabled: false,
+        show_nsfw: false,
+        library_page_size: 48,
+        filter_presets: [],
+      }),
+      update: vi.fn().mockResolvedValue({
+        painting_guides_enabled: true,
+        show_nsfw: false,
+        library_page_size: 48,
+        filter_presets: [],
+      }),
     },
   },
 }));
@@ -109,8 +120,8 @@ describe("Settings – Painting Guides toggle (#180)", () => {
 
   it("renders unchecked by default and persists enabling via the API", async () => {
     const { api } = await import("../api/client");
-    vi.mocked(api.settings.get).mockResolvedValue({ painting_guides_enabled: false });
-    vi.mocked(api.settings.update).mockResolvedValue({ painting_guides_enabled: true });
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: false }));
+    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
 
@@ -126,8 +137,8 @@ describe("Settings – Painting Guides toggle (#180)", () => {
 
   it("reflects an already-enabled server setting and can disable it", async () => {
     const { api } = await import("../api/client");
-    vi.mocked(api.settings.get).mockResolvedValue({ painting_guides_enabled: true });
-    vi.mocked(api.settings.update).mockResolvedValue({ painting_guides_enabled: false });
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
+    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ painting_guides_enabled: false }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
 
@@ -142,7 +153,7 @@ describe("Settings – Painting Guides toggle (#180)", () => {
 
   it("surfaces the backend error and stays unchecked when the update fails", async () => {
     const { api } = await import("../api/client");
-    vi.mocked(api.settings.get).mockResolvedValue({ painting_guides_enabled: false });
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: false }));
     vi.mocked(api.settings.update).mockRejectedValueOnce(new Error("DB locked"));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
@@ -152,5 +163,21 @@ describe("Settings – Painting Guides toggle (#180)", () => {
 
     expect(await screen.findByText("DB locked")).toBeInTheDocument();
     expect(checkbox).not.toBeChecked();
+  });
+});
+
+describe("Settings – Library page size (#32)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("highlights the server value and PATCHes a new size", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ library_page_size: 48 }));
+    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ library_page_size: 96 }));
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: "96" }));
+
+    expect(api.settings.update).toHaveBeenCalledWith({ library_page_size: 96 });
   });
 });

@@ -1,10 +1,14 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { api, AppSettings } from "../api/client";
+import { collectLegacyPreferences, clearLegacyPreferences } from "../utils/legacyPreferences";
 
 // Mirrors the backend DEFAULTS in routers/settings.py — used until the
 // server responds, so gated UI stays hidden during the initial fetch.
 const DEFAULTS: AppSettings = {
   painting_guides_enabled: false,
+  show_nsfw: false,
+  library_page_size: 48,
+  filter_presets: [],
 };
 
 interface AppSettingsContextValue {
@@ -21,7 +25,24 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULTS);
 
   useEffect(() => {
-    api.settings.get().then(setSettings).catch(() => {});
+    api.settings
+      .get()
+      .then(async (server) => {
+        // One-time migration of preferences that used to live in
+        // localStorage (#32). Only pushed when they differ from the
+        // server defaults, so a migrated browser can't clobber values
+        // another browser already saved.
+        const patch = collectLegacyPreferences(server);
+        if (Object.keys(patch).length > 0) {
+          const updated = await api.settings.update(patch);
+          clearLegacyPreferences();
+          setSettings(updated);
+        } else {
+          clearLegacyPreferences();
+          setSettings(server);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const update = async (patch: Partial<AppSettings>) => {

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CreatorBase(BaseModel):
@@ -192,10 +192,21 @@ class DownloadZipRequest(BaseModel):
         from_attributes = True
 
 
+class FilterPreset(BaseModel):
+    """A saved Library filter: a display name plus the filter querystring."""
+    name: str
+    qs: str
+
+    model_config = {"extra": "forbid"}
+
+
 class AppSettingsRead(BaseModel):
     """Every known app setting with its default — the single source of truth
     for the store's whitelist (routers/settings.py derives DEFAULTS from it)."""
     painting_guides_enabled: bool = False
+    show_nsfw: bool = False
+    library_page_size: int = 48
+    filter_presets: list[FilterPreset] = []
 
 
 class AppSettingsUpdate(BaseModel):
@@ -203,5 +214,8 @@ class AppSettingsUpdate(BaseModel):
     whitelist tight: unknown keys are a 422, never silently stored. None
     means "leave unchanged" — the router skips None values on write."""
     painting_guides_enabled: Optional[bool] = None
+    show_nsfw: Optional[bool] = None
+    library_page_size: Optional[int] = Field(None, ge=12, le=200)
+    filter_presets: Optional[list[FilterPreset]] = None
 
     model_config = {"extra": "forbid"}

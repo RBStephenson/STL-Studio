@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import {
   HardDrive, Plus, Trash2, AlertCircle, CheckCircle, FolderSearch,
-  Database, Download, Upload, ShieldAlert, Paintbrush,
+  Database, Download, Upload, ShieldAlert, Paintbrush, SlidersHorizontal,
 } from "lucide-react";
 import { api, ScanRoot } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -184,6 +184,14 @@ export default function Settings() {
       } finally {
         setBusy(null);
       }
+    }
+  };
+
+  const setPageSize = async (n: number) => {
+    try {
+      await updateAppSettings({ library_page_size: n });
+    } catch (e: any) {
+      flash(e?.message || "Could not update setting", "err");
     }
   };
 
@@ -393,6 +401,35 @@ export default function Settings() {
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Preferences */}
+      <section className="mt-12 pt-8 border-t border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+          <SlidersHorizontal size={14} /> Preferences
+        </h2>
+        <p className="text-xs text-gray-600 mb-4">
+          Preferences are stored server-side, so they follow you across browsers and devices.
+          The NSFW toggle in the navbar and your saved Library filter presets are persisted the same way.
+        </p>
+        <div className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 self-start">
+          <span className="text-sm text-gray-200">Library page size</span>
+          <div className="flex rounded overflow-hidden border border-gray-700">
+            {[24, 48, 96].map((n) => (
+              <button
+                key={n}
+                onClick={() => setPageSize(n)}
+                className={`px-3 py-1 text-xs transition-colors ${
+                  appSettings.library_page_size === n
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 

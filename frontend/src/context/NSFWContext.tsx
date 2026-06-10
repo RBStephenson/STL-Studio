@@ -1,37 +1,15 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { useAppSettings } from "./AppSettingsContext";
 
-interface NSFWContextValue {
-  showNSFW: boolean;
-  toggle: () => void;
-}
-
-const NSFWContext = createContext<NSFWContextValue>({
-  showNSFW: false,
-  toggle: () => {},
-});
-
-export function NSFWProvider({ children }: { children: ReactNode }) {
-  const [showNSFW, setShowNSFW] = useState(() => {
-    try {
-      return localStorage.getItem("showNSFW") === "true";
-    } catch {
-      return false;
-    }
-  });
-
-  const toggle = () => {
-    setShowNSFW((prev) => {
-      const next = !prev;
-      localStorage.setItem("showNSFW", String(next));
-      return next;
-    });
+// The NSFW preference lives in the server-side app_settings store (#32).
+// This hook keeps the original useNSFW interface so consumers don't care
+// where the value is persisted. The old localStorage value is migrated
+// once by AppSettingsProvider.
+export function useNSFW() {
+  const { settings, update } = useAppSettings();
+  return {
+    showNSFW: settings.show_nsfw,
+    toggle: () => {
+      void update({ show_nsfw: !settings.show_nsfw });
+    },
   };
-
-  return (
-    <NSFWContext.Provider value={{ showNSFW, toggle }}>
-      {children}
-    </NSFWContext.Provider>
-  );
 }
-
-export const useNSFW = () => useContext(NSFWContext);

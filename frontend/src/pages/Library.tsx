@@ -6,7 +6,8 @@ import {
   useDraggable, useDroppable, pointerWithin,
   DragStartEvent, DragEndEvent,
 } from "@dnd-kit/core";
-import { api, Model, Creator, ModelStats, Collection } from "../api/client";
+import { api, Model, Creator, ModelStats, Collection, FilterPreset } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
 import BulkTagBar from "../components/BulkTagBar";
@@ -15,17 +16,6 @@ import { useToast } from "../context/ToastContext";
 import { nextTagParams } from "../utils/tagFilter";
 
 const SITES = ["thingiverse", "printables", "myminifactory", "cults3d", "gumroad", "thangs", "makerworld", "other"];
-const PAGE_SIZE = 48;
-const PRESETS_KEY = "stl_filter_presets";
-
-interface Preset { name: string; qs: string; }
-
-function loadPresets(): Preset[] {
-  try { return JSON.parse(localStorage.getItem(PRESETS_KEY) ?? "[]"); } catch { return []; }
-}
-function savePresets(presets: Preset[]) {
-  localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
-}
 
 // Compact tri-state toggle: "all" | "1" | "0"
 function TriToggle({ label, value, onChange }: {
@@ -192,7 +182,9 @@ export default function Library() {
     !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || nsfwParam || thumbParam)
   );
   const [selection, setSelection] = useState<Set<number>>(new Set());
-  const [presets, setPresets] = useState<Preset[]>(loadPresets);
+  const { settings, update: updateSettings } = useAppSettings();
+  const presets = settings.filter_presets;
+  const pageSize = settings.library_page_size;
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
   const presetInputRef = useRef<HTMLInputElement>(null);
@@ -211,7 +203,7 @@ export default function Library() {
       // favorites/queue/printed (which apply to individual variants), disable grouping
       // so a flagged non-representative variant isn't hidden behind its group.
       const groupVariants = !favParam && !queueParam && !printedParam && !excludedParam;
-      const params: Record<string, string | number | boolean> = { page, page_size: PAGE_SIZE, group_variants: groupVariants };
+      const params: Record<string, string | number | boolean> = { page, page_size: pageSize, group_variants: groupVariants };
       if (search)      params.q             = search;
       if (creatorId)   params.creator_id    = creatorId;
       if (excludeCreatorId) params.exclude_creator_id = excludeCreatorId;
@@ -232,7 +224,7 @@ export default function Library() {
     } finally {
       if (fetchId === fetchIdRef.current) setLoading(false);
     }
-  }, [page, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam, excludedParam]);
+  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam, excludedParam]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);
@@ -257,7 +249,7 @@ export default function Library() {
     if (savingPreset) presetInputRef.current?.focus();
   }, [savingPreset]);
 
-  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const totalPages = Math.ceil(total / pageSize);
   const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || queueParam || printedParam);
 
   const visibleTags = allTags.filter(({ tag }) =>
@@ -271,24 +263,21 @@ export default function Library() {
     return p.toString();
   })();
 
-  const applyPreset = (preset: Preset) => {
+  const applyPreset = (preset: FilterPreset) => {
     const p = new URLSearchParams(preset.qs);
     p.delete("page");
     setSearchParams(p);
   };
 
   const deletePreset = (name: string) => {
-    const next = presets.filter(p => p.name !== name);
-    setPresets(next);
-    savePresets(next);
+    void updateSettings({ filter_presets: presets.filter(p => p.name !== name) });
   };
 
   const confirmSavePreset = () => {
     const name = presetName.trim();
     if (!name) return;
     const next = [...presets.filter(p => p.name !== name), { name, qs: currentQS }];
-    setPresets(next);
-    savePresets(next);
+    void updateSettings({ filter_presets: next });
     setSavingPreset(false);
     setPresetName("");
   };

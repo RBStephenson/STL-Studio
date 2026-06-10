@@ -1,0 +1,10 @@
+import { AppSettings } from "../api/client";
+
+/** Full AppSettings object for test mocks — override only what the test cares about. */
+export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
+  painting_guides_enabled: false,
+  show_nsfw: false,
+  library_page_size: 48,
+  filter_presets: [],
+  ...over,
+});

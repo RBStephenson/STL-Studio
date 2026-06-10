@@ -64,7 +64,8 @@ const SECTIONS: Section[] = [
           </li>
           <li>
             <strong>Saved presets:</strong> dial in a set of filters, then save it as a
-            named preset (stored in your browser) and re-apply it with one click.
+            named preset and re-apply it with one click. Presets are stored server-side,
+            so they follow you across browsers and devices.
           </li>
           <li>
             <strong>Pagination</strong> appears at both the top and bottom of the grid,
