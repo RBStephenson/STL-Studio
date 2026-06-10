@@ -167,6 +167,7 @@ export interface ImportDiffRow {
   paint_class: string;
   size?: string;
   count?: number;
+  color?: string;
   paint_id?: number;
   changes?: Record<string, { from: string | number; to: string | number }>;
 }

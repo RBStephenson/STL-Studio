@@ -17,17 +17,22 @@ only a separate confirm call applies it. "Removed" only ever targets paints
 whose source starts with "PaintRack" — manually added paints are never
 deleted by an import.
 """
+import colorsys
 import csv
 import io
+import re
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
 from app.painting.models import Paint, PaintBrand, PaintLine
-from app.painting.schemas import derive_matchable
+from app.painting.schemas import HEX_PATTERN, derive_matchable
 from app.painting.services.validation import validate_code
 
 EXPECTED_HEADER = ["Brand", "SKU", "Paint Name", "Paint Class", "Size", "Count"]
+# Our extension (#255): an optional swatch color. Real PaintRack exports are
+# 6-column; ours are 7. The importer accepts both.
+EXTENDED_HEADER = EXPECTED_HEADER + ["Color"]
 
 IMPORT_SOURCE_PREFIX = "PaintRack"
 
@@ -44,6 +49,7 @@ class CsvRow:
     paint_class: str   # maps to PaintLine.name verbatim; may be ""
     size: str
     count: int
+    color: str = ""    # normalized "#rrggbb" or "" (6-col files / empty cell)
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -53,32 +59,70 @@ class CsvRow:
         return (self.brand.lower(), self.paint_class.lower(), code)
 
 
+_HEX_RE = re.compile(HEX_PATTERN)  # same contract as the paint.hex schema field
+_RGB_RE = re.compile(r"^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$", re.IGNORECASE)
+_HSV_RE = re.compile(
+    r"^hsv\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)$", re.IGNORECASE
+)
+
+
+def parse_color(value: str) -> str:
+    """Normalize a Color cell to "#rrggbb". Accepts #RRGGBB, rgb(0-255,..),
+    or hsv(0-360, 0-100, 0-100); "" passes through (no swatch). Raises
+    ValueError on anything else."""
+    value = value.strip()
+    if not value:
+        return ""
+    if _HEX_RE.match(value):
+        return value.lower()
+    if m := _RGB_RE.match(value):
+        r, g, b = (int(x) for x in m.groups())
+        if max(r, g, b) > 255:
+            raise ValueError(f"rgb() components must be 0-255: {value!r}")
+        return f"#{r:02x}{g:02x}{b:02x}"
+    if m := _HSV_RE.match(value):
+        h, s, v = (float(x) for x in m.groups())
+        if h > 360 or s > 100 or v > 100:
+            raise ValueError(f"hsv() expects H 0-360, S/V 0-100: {value!r}")
+        r, g, b = colorsys.hsv_to_rgb(h / 360, s / 100, v / 100)
+        return f"#{round(r * 255):02x}{round(g * 255):02x}{round(b * 255):02x}"
+    raise ValueError(f"Color {value!r} is not #RRGGBB, rgb(r,g,b), or hsv(h,s,v)")
+
+
 def parse_paintrack_csv(text: str) -> list[CsvRow]:
     reader = csv.reader(io.StringIO(text.lstrip("﻿")))  # strip BOM if present
     try:
         header = next(reader)
     except StopIteration:
         raise PaintRackFormatError("The file is empty")
-    if [h.strip() for h in header] != EXPECTED_HEADER:
+    header = [h.strip() for h in header]
+    if header not in (EXPECTED_HEADER, EXTENDED_HEADER):
         raise PaintRackFormatError(
             f"Unexpected header {header!r} — expected {EXPECTED_HEADER!r}"
+            f" (optionally + ['Color'])"
         )
+    width = len(header)
 
     rows: list[CsvRow] = []
     for n, raw in enumerate(reader, start=2):
         if not raw or not any(cell.strip() for cell in raw):
             continue
-        if len(raw) != len(EXPECTED_HEADER):
-            raise PaintRackFormatError(f"Line {n}: expected 6 columns, got {len(raw)}")
-        brand, sku, name, paint_class, size, count = (cell.strip() for cell in raw)
+        if len(raw) != width:
+            raise PaintRackFormatError(f"Line {n}: expected {width} columns, got {len(raw)}")
+        brand, sku, name, paint_class, size, count = (cell.strip() for cell in raw[:6])
         if not brand or not name:
             raise PaintRackFormatError(f"Line {n}: Brand and Paint Name are required")
         try:
             count_n = int(count) if count else 1
         except ValueError:
             raise PaintRackFormatError(f"Line {n}: Count {count!r} is not a number")
+        try:
+            color = parse_color(raw[6]) if width == 7 else ""
+        except ValueError as e:
+            raise PaintRackFormatError(f"Line {n}: {e}")
         rows.append(CsvRow(brand=brand, code=sku, name=name,
-                           paint_class=paint_class, size=size, count=count_n))
+                           paint_class=paint_class, size=size, count=count_n,
+                           color=color))
     return rows
 
 
@@ -145,6 +189,7 @@ def _row_dict(row: CsvRow) -> dict:
     return {
         "brand": row.brand, "code": row.code, "name": row.name,
         "paint_class": row.paint_class, "size": row.size, "count": row.count,
+        "color": row.color,
     }
 
 
@@ -197,6 +242,10 @@ def compute_diff(db: Session, rows: list[CsvRow]) -> dict:
             deltas["size"] = {"from": paint.size or "", "to": row.size}
         if (paint.count if paint.count is not None else 1) != row.count:
             deltas["count"] = {"from": paint.count or 1, "to": row.count}
+        # An empty color never clears a swatch (real PaintRack files carry no
+        # color); compare case-insensitively so a stored #2A2A2A round-trips.
+        if row.color and (paint.hex or "").lower() != row.color:
+            deltas["color"] = {"from": paint.hex or "", "to": row.color}
         if deltas:
             changed.append({**_row_dict(row), "paint_id": paint.id, "changes": deltas})
 
@@ -270,6 +319,7 @@ def apply_diff(
                 paint_line_id=line.id,
                 code=row.code or f"name:{row.name}",
                 name=row.name,
+                hex=row.color or None,
                 finish=finish,
                 matchable=derive_matchable(finish),
                 owned=True,
@@ -289,6 +339,8 @@ def apply_diff(
             paint.name = row.name
             paint.size = row.size or None
             paint.count = row.count
+            if row.color:  # empty color leaves an existing swatch alone
+                paint.hex = row.color
             paint.source = source_label
             counts["changed"] += 1
 
@@ -308,8 +360,9 @@ def apply_diff(
 # ---------------------------------------------------------------------------
 
 def export_csv(db: Session) -> str:
-    """PaintRack-format export. Writes PaintLine.name verbatim as Paint Class
-    (including empty), so export → import yields an empty diff (#243)."""
+    """PaintRack-format export plus the Color extension column (#255).
+    Writes PaintLine.name verbatim as Paint Class (including empty) and the
+    stored hex as Color, so export → import yields an empty diff (#243)."""
     rows = (
         db.query(Paint, PaintLine, PaintBrand)
         .join(PaintLine, Paint.paint_line_id == PaintLine.id)
@@ -319,11 +372,12 @@ def export_csv(db: Session) -> str:
     )
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
-    writer.writerow(EXPECTED_HEADER)
+    writer.writerow(EXTENDED_HEADER)
     for paint, line, brand in rows:
         code = "" if paint.code.startswith("name:") else paint.code
         writer.writerow([
             brand.name, code, paint.name, line.name,
             paint.size or "", paint.count if paint.count is not None else 1,
+            paint.hex or "",
         ])
     return buf.getvalue()
