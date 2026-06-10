@@ -93,6 +93,9 @@ class TestRouter:
         assert client.get("/painting/guides").status_code == 501
         assert client.post("/painting/guides").status_code == 501
 
-    def test_paints_stub_returns_501(self, client):
-        assert client.get("/painting/paints").status_code == 501
-        assert client.post("/painting/paints").status_code == 501
+    def test_paints_endpoints_live(self, client):
+        """The Paint Shelf stubs were replaced by real endpoints in M1 (#240) —
+        full coverage lives in test_painting_inventory.py."""
+        resp = client.get("/painting/paints")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
