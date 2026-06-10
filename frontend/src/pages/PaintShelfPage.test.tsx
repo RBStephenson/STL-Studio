@@ -35,6 +35,11 @@ vi.mock("../api/client", async (importOriginal) => {
           create: vi.fn(),
         },
         lines: { create: vi.fn() },
+        inventory: {
+          importPreview: vi.fn(),
+          importConfirm: vi.fn(),
+          exportCsv: vi.fn().mockResolvedValue(undefined),
+        },
         paints: {
           list: vi.fn().mockResolvedValue({ total: 2, page: 1, page_size: 48, items: PAINTS }),
           create: vi.fn(),
@@ -142,5 +147,67 @@ describe("PaintShelfPage", () => {
         })
       );
     });
+  });
+});
+
+describe("PaintShelfPage - PaintRack CSV import (#242)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const DIFF = {
+    added: [{ brand: "Pro Acryl", code: "MPA-018", name: "Light Umber", paint_class: "" }],
+    changed: [{
+      brand: "Pro Acryl", code: "MPA-002", name: "Coal Black v2", paint_class: "",
+      paint_id: 1, changes: { name: { from: "Coal Black", to: "Coal Black v2" } },
+    }],
+    removed: [{ brand: "Dirty Down", code: "", name: "Rust", paint_class: "", paint_id: 9 }],
+    summary: { rows: 2, added: 1, changed: 1, removed: 1 },
+  };
+
+  async function pickFile() {
+    const { api } = await import("../api/client");
+    vi.mocked(api.painting.inventory.importPreview).mockResolvedValue(DIFF);
+    renderPage();
+    await screen.findByText("Coal Black");
+    const file = new File(["Brand,SKU,Paint Name,Paint Class,Size,Count\n"], "paintRack.csv", { type: "text/csv" });
+    await userEvent.upload(screen.getByTestId("csv-file-input"), file);
+    return { api, file };
+  }
+
+  it("shows the diff preview without applying anything", async () => {
+    const { api } = await pickFile();
+
+    expect(await screen.findByTestId("import-diff-modal")).toBeInTheDocument();
+    expect(screen.getByText(/1 new/)).toBeInTheDocument();
+    expect(screen.getByText(/1 changed/)).toBeInTheDocument();
+    expect(screen.getByText("added (1)")).toBeInTheDocument();
+    expect(api.painting.inventory.importConfirm).not.toHaveBeenCalled();
+  });
+
+  it("confirm applies adds+changes, and removals only when opted in", async () => {
+    const { api, file } = await pickFile();
+    vi.mocked(api.painting.inventory.importConfirm).mockResolvedValue({
+      ok: true, applied: { added: 1, changed: 1, removed: 1 },
+    });
+    await screen.findByTestId("import-diff-modal");
+
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.click(screen.getByRole("button", { name: /apply import/i }));
+
+    await waitFor(() => {
+      expect(api.painting.inventory.importConfirm).toHaveBeenCalledWith(
+        file, { added: true, changed: true, removed: true }
+      );
+    });
+    expect(screen.queryByTestId("import-diff-modal")).toBeNull();
+  });
+
+  it("cancel closes the modal without applying", async () => {
+    const { api } = await pickFile();
+    await screen.findByTestId("import-diff-modal");
+
+    await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(screen.queryByTestId("import-diff-modal")).toBeNull();
+    expect(api.painting.inventory.importConfirm).not.toHaveBeenCalled();
   });
 });

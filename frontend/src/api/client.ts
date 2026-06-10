@@ -160,6 +160,24 @@ export interface PaintList {
   items: Paint[];
 }
 
+export interface ImportDiffRow {
+  brand: string;
+  code: string;
+  name: string;
+  paint_class: string;
+  size?: string;
+  count?: number;
+  paint_id?: number;
+  changes?: Record<string, { from: string | number; to: string | number }>;
+}
+
+export interface ImportDiff {
+  added: ImportDiffRow[];
+  changed: ImportDiffRow[];
+  removed: ImportDiffRow[];
+  summary: { rows: number; added: number; changed: number; removed: number };
+}
+
 export interface DirEntry {
   name: string;
   path: string;
@@ -368,6 +386,45 @@ export const api = {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         }),
+    },
+    inventory: {
+      importPreview: async (file: File) => {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch(`${BASE}/painting/inventory/import`, { method: "POST", body: form });
+        if (!res.ok) {
+          let detail = `${res.status} ${res.statusText}`;
+          try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+          throw new Error(detail);
+        }
+        return res.json() as Promise<ImportDiff>;
+      },
+      importConfirm: async (file: File, opts: { added: boolean; changed: boolean; removed: boolean }) => {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("apply_added", String(opts.added));
+        form.append("apply_changed", String(opts.changed));
+        form.append("apply_removed", String(opts.removed));
+        const res = await fetch(`${BASE}/painting/inventory/import/confirm`, { method: "POST", body: form });
+        if (!res.ok) {
+          let detail = `${res.status} ${res.statusText}`;
+          try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+          throw new Error(detail);
+        }
+        return res.json() as Promise<{ ok: boolean; applied: { added: number; changed: number; removed: number } }>;
+      },
+      exportCsv: async () => {
+        const res = await fetch(`${BASE}/painting/inventory/export.csv`);
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        const blob = await res.blob();
+        const stamp = new Date().toISOString().slice(0, 10);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `paintRack_export_${stamp}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      },
     },
     paints: {
       list: (params: Record<string, string | number | boolean>) => {
