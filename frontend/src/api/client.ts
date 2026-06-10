@@ -104,6 +104,62 @@ export interface AppSettings {
   recent_days: number;
 }
 
+// --- Painting module (Paint Shelf, M1) ---
+
+export const PAINT_FINISHES = [
+  "matte", "satin", "gloss", "metallic", "ink", "wash",
+  "fluor", "primer", "medium", "pigment", "texture",
+] as const;
+export type PaintFinish = (typeof PAINT_FINISHES)[number];
+
+export interface PaintLine {
+  id: number;
+  brand_id: number;
+  name: string;
+  code_pattern: string | null;
+}
+
+export interface PaintBrand {
+  id: number;
+  name: string;
+  lines: PaintLine[];
+}
+
+export interface Paint {
+  id: number;
+  paint_line_id: number;
+  code: string;
+  name: string;
+  hex: string | null;
+  value_pct: number | null;
+  finish: string;
+  matchable: boolean;
+  owned: boolean;
+  handling_flags: string[];
+  substitute_for: number[];
+  notes: string | null;
+  source: string | null;
+}
+
+export interface PaintCreate {
+  paint_line_id: number;
+  code: string;
+  name: string;
+  hex?: string | null;
+  value_pct?: number | null;
+  finish: PaintFinish;
+  owned?: boolean;
+  notes?: string | null;
+  source?: string | null;
+}
+
+export interface PaintList {
+  total: number;
+  page: number;
+  page_size: number;
+  items: Paint[];
+}
+
 export interface DirEntry {
   name: string;
   path: string;
@@ -294,6 +350,49 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       }),
+  },
+  painting: {
+    brands: {
+      list: () => request<PaintBrand[]>("/painting/brands"),
+      create: (name: string) =>
+        request<PaintBrand>("/painting/brands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        }),
+    },
+    lines: {
+      create: (body: { brand_id: number; name: string; code_pattern?: string | null }) =>
+        request<PaintLine>("/painting/lines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+    },
+    paints: {
+      list: (params: Record<string, string | number | boolean>) => {
+        const qs = new URLSearchParams(
+          Object.entries(params)
+            .filter(([, v]) => v !== "" && v !== undefined && v !== null)
+            .map(([k, v]) => [k, String(v)])
+        ).toString();
+        return request<PaintList>(`/painting/paints${qs ? `?${qs}` : ""}`);
+      },
+      create: (body: PaintCreate) =>
+        request<Paint>("/painting/paints", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      update: (id: number, patch: Partial<PaintCreate>) =>
+        request<Paint>(`/painting/paints/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        }),
+      delete: (id: number) =>
+        request<{ ok: boolean }>(`/painting/paints/${id}`, { method: "DELETE" }),
+    },
   },
   database: {
     backup: async () => {
