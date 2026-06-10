@@ -43,6 +43,18 @@ def _migrate_schema():
                 conn.commit()
                 logger.info(f"Migrated: added {table}.{column}")
 
+        # One-time cleanup of collection_models rows orphaned by collection
+        # deletes from before the manual cascade existed (#214). Left in
+        # place, they attach to any new collection that reuses the rowid.
+        result = conn.execute(text(
+            "DELETE FROM collection_models WHERE "
+            "collection_id NOT IN (SELECT id FROM collections) "
+            "OR model_id NOT IN (SELECT id FROM models)"
+        ))
+        conn.commit()
+        if result.rowcount:
+            logger.info(f"Migrated: removed {result.rowcount} orphaned collection_models rows")
+
 
 def _seed_tag_index():
     """Populate model_tags from JSON columns if the table is empty (one-time migration)."""

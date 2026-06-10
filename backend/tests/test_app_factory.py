@@ -51,6 +51,11 @@ def test_migrate_schema_upgrades_old_db(monkeypatch):
         conn.execute(text("CREATE TABLE models (id INTEGER PRIMARY KEY, name VARCHAR)"))
         conn.execute(text("CREATE TABLE stl_files (id INTEGER PRIMARY KEY, path VARCHAR)"))
         conn.execute(text("CREATE TABLE scan_roots (id INTEGER PRIMARY KEY, path VARCHAR)"))
+        conn.execute(text("CREATE TABLE collections (id INTEGER PRIMARY KEY, name VARCHAR)"))
+        conn.execute(text(
+            "CREATE TABLE collection_models "
+            "(id INTEGER PRIMARY KEY, collection_id INTEGER, model_id INTEGER)"
+        ))
         conn.commit()
 
     monkeypatch.setattr(main_module, "engine", engine)
@@ -67,4 +72,35 @@ def test_migrate_schema_upgrades_old_db(monkeypatch):
     } <= model_cols
     assert "part_type" in file_cols
     assert "layout" in root_cols
+    engine.dispose()
+
+
+def test_migrate_schema_prunes_orphaned_collection_models(monkeypatch):
+    """Link rows orphaned by pre-#214 collection deletes are cleaned up."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE models (id INTEGER PRIMARY KEY, name VARCHAR)"))
+        conn.execute(text("CREATE TABLE stl_files (id INTEGER PRIMARY KEY, path VARCHAR)"))
+        conn.execute(text("CREATE TABLE scan_roots (id INTEGER PRIMARY KEY, path VARCHAR)"))
+        conn.execute(text("CREATE TABLE collections (id INTEGER PRIMARY KEY, name VARCHAR)"))
+        conn.execute(text(
+            "CREATE TABLE collection_models "
+            "(id INTEGER PRIMARY KEY, collection_id INTEGER, model_id INTEGER)"
+        ))
+        conn.execute(text("INSERT INTO models (id, name) VALUES (1, 'm1')"))
+        conn.execute(text("INSERT INTO collections (id, name) VALUES (1, 'kept')"))
+        # Row 1 is valid; row 2 points at a deleted collection; row 3 at a deleted model.
+        conn.execute(text("INSERT INTO collection_models VALUES (1, 1, 1), (2, 99, 1), (3, 1, 99)"))
+        conn.commit()
+
+    monkeypatch.setattr(main_module, "engine", engine)
+    main_module._migrate_schema()
+
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT id FROM collection_models")).fetchall()
+    assert [r[0] for r in rows] == [1]
     engine.dispose()

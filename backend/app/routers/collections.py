@@ -94,6 +94,12 @@ def delete_collection(collection_id: int, db: Session = Depends(get_db)):
     col = db.query(Collection).filter(Collection.id == collection_id).first()
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
+    # Manual cascade: PRAGMA foreign_keys is off, so without this the link
+    # rows linger and a future collection that reuses the rowid inherits
+    # the deleted collection's members (#214).
+    db.query(CollectionModel).filter(
+        CollectionModel.collection_id == collection_id
+    ).delete(synchronize_session=False)
     db.delete(col)
     db.commit()
 
