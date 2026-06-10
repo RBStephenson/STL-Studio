@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.database import Base, engine, SessionLocal
 from app.routers import models, scan, files, collections, scrape, enrich, database
@@ -71,6 +73,49 @@ async def lifespan(app: FastAPI):
     yield
 
 
+# --- Localhost CSRF protection (#213) -------------------------------------
+# The server binds to 127.0.0.1, but any web page the user visits can still
+# fire requests at http://localhost:<port>. Browsers attach an Origin header
+# to cross-site requests, and a DNS-rebinding page arrives with a non-local
+# Host header — so state-changing requests must present local values for both.
+
+_LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _is_local_hostname(hostname: str | None) -> bool:
+    return hostname is not None and hostname.lower() in _LOCAL_HOSTNAMES
+
+
+def _origin_is_local(origin: str) -> bool:
+    return _is_local_hostname(urlsplit(origin).hostname)
+
+
+def _host_is_local(host: str) -> bool:
+    # Host is "name[:port]" or "[v6addr][:port]" — parse as a netloc.
+    try:
+        return _is_local_hostname(urlsplit(f"//{host}").hostname)
+    except ValueError:
+        return False
+
+
+async def _block_cross_origin_writes(request, call_next):
+    if request.method in _UNSAFE_METHODS:
+        origin = request.headers.get("origin")
+        # No Origin header = not a browser cross-site request (curl, scripts).
+        if origin is not None and not _origin_is_local(origin):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Cross-origin request blocked"},
+            )
+        if not _host_is_local(request.headers.get("host", "")):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Request Host not allowed"},
+            )
+    return await call_next(request)
+
+
 _health_router = APIRouter()
 
 
@@ -87,6 +132,8 @@ def create_app(api_prefix: str = "") -> FastAPI:
     standalone binary (api_prefix="/api", frontend served from the same app).
     """
     app = FastAPI(title="STL Library", version="0.1.0", lifespan=lifespan)
+
+    app.middleware("http")(_block_cross_origin_writes)
 
     app.add_middleware(
         CORSMiddleware,

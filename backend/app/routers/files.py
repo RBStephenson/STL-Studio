@@ -149,12 +149,15 @@ def download_zip(body: DownloadZipRequest):
     )
 
 
-@router.get("/open-folder")
+@router.post("/open-folder")
 def open_folder(path: str):
     """
     Open a folder in the native file manager.
     Only works when the backend is running directly on the host (standalone mode).
     In Docker mode the container has no GUI so this returns 501.
+
+    POST, not GET: it has a side effect, and a GET could be triggered by a
+    plain <img> tag on a malicious page (#213).
     """
     p = Path(path)
     if not _is_safe_path(p):

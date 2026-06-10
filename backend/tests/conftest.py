@@ -63,7 +63,9 @@ def client(db):
         yield db
 
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
+    # base_url must look local: the CSRF middleware (#213) rejects writes
+    # whose Host header isn't localhost (TestClient defaults to "testserver").
+    with TestClient(app, base_url="http://localhost") as c:
         yield c
     app.dependency_overrides.clear()
 

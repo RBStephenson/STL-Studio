@@ -235,7 +235,9 @@ export const api = {
   },
   files: {
     openFolder: (path: string) =>
-      request<{ ok: boolean }>(`/files/open-folder?path=${encodeURIComponent(path)}`),
+      request<{ ok: boolean }>(`/files/open-folder?path=${encodeURIComponent(path)}`, {
+        method: "POST",
+      }),
   },
   scrape: {
     fetchUrl: (url: string) =>
