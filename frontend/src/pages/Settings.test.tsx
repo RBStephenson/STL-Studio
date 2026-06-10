@@ -57,3 +57,44 @@ describe("Settings – Add Folder button", () => {
     expect(screen.queryByTestId("folder-picker")).toBeNull();
   });
 });
+
+describe("Settings – backend error details surfaced (#216)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("shows the backend detail when adding a duplicate root", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.scan.addRoot).mockRejectedValueOnce(new Error("Root already exists"));
+    render(<Settings />);
+
+    await userEvent.type(screen.getByPlaceholderText(/full path/i), "/dup/path");
+    await userEvent.click(await screen.findByRole("button", { name: /add folder/i }));
+
+    expect(await screen.findByText("Root already exists")).toBeInTheDocument();
+  });
+
+  it("shows the backend's layout validation message", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.scan.addRoot).mockRejectedValueOnce(
+      new Error("Layout must contain the {creator} placeholder")
+    );
+    render(<Settings />);
+
+    await userEvent.type(screen.getByPlaceholderText(/full path/i), "/new/path");
+    await userEvent.click(await screen.findByRole("button", { name: /add folder/i }));
+
+    expect(
+      await screen.findByText("Layout must contain the {creator} placeholder")
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to a generic message when the error has no detail", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.scan.addRoot).mockRejectedValueOnce(new Error(""));
+    render(<Settings />);
+
+    await userEvent.type(screen.getByPlaceholderText(/full path/i), "/new/path");
+    await userEvent.click(await screen.findByRole("button", { name: /add folder/i }));
+
+    expect(await screen.findByText("Could not add drive")).toBeInTheDocument();
+  });
+});

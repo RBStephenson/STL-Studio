@@ -87,10 +87,9 @@ export default function Settings() {
       load();
       flash("Drive added — run a scan to index it", "ok");
     } catch (e: any) {
-      const msg = e.message || "";
-      if (msg.includes("409")) flash("That path is already in the list", "err");
-      else if (msg.includes("400")) flash("Invalid layout template — check the format", "err");
-      else flash("Could not add drive", "err");
+      // request() throws the backend's detail string ("Root already exists",
+      // "Path does not exist", layout validation errors) — show it (#216).
+      flash(e?.message || "Could not add drive", "err");
     }
   };
 
@@ -111,8 +110,8 @@ export default function Settings() {
       clearEdit();
       load();
       flash("Layout updated — rescan to apply it", "ok");
-    } catch {
-      flash("Invalid layout template — check the format", "err");
+    } catch (e: any) {
+      flash(e?.message || "Invalid layout template — check the format", "err");
     }
   };
 
@@ -122,8 +121,8 @@ export default function Settings() {
       await api.scan.removeRoot(id);
       load();
       flash("Drive removed", "ok");
-    } catch {
-      flash("Could not remove drive", "err");
+    } catch (e: any) {
+      flash(e?.message || "Could not remove drive", "err");
     }
   };
 
