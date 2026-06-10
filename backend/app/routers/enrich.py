@@ -1,6 +1,9 @@
 """
 Bulk enrichment endpoints — storefront scrape + fuzzy match + batch apply.
 """
+import asyncio
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -11,9 +14,16 @@ from app.utils import utcnow
 from app.models import Model, Creator
 from app.services.scrapers.storefront import scrape_storefront, StorefrontProduct
 from app.services.matcher import match_products_to_models, MatchCandidate
+from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
 from app.services.variant_sync import propagate_source_url
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/enrich", tags=["enrich"])
+
+# A creator run can carry hundreds of thumbnails — bound the parallelism so we
+# neither hammer the CDN nor serialize the whole batch (#208).
+_THUMBNAIL_CONCURRENCY = 5
 
 
 # ---------------------------------------------------------------------------
@@ -114,11 +124,40 @@ async def bulk_apply(
     applied = 0
     item_map = {item.model_id: item for item in body.items}
     models = db.query(Model).filter(Model.id.in_(item_map.keys())).all()
+
+    # Download thumbnails server-side like /scrape/apply does — CDNs block
+    # hot-linked <img> requests, so a stored bare URL often renders nothing
+    # (#208). Only models without a local thumbnail get one (fill, never
+    # overwrite); a failed download falls back to storing the URL.
+    sem = asyncio.Semaphore(_THUMBNAIL_CONCURRENCY)
+
+    async def _fetch(model_id: int, url: str):
+        async with sem:
+            try:
+                return model_id, str(await download_thumbnail(model_id, url))
+            except ThumbnailDownloadError as e:
+                logger.warning(f"Bulk enrich: thumbnail download failed for model {model_id}: {e}")
+                return model_id, None
+
+    wanted = [
+        (m.id, item_map[m.id].thumbnail_url)
+        for m in models
+        if item_map[m.id].thumbnail_url and not m.thumbnail_path
+    ]
+    downloaded: dict[int, str | None] = dict(
+        await asyncio.gather(*(_fetch(mid, url) for mid, url in wanted))
+    )
+
     for model in models:
         item = item_map[model.id]
 
-        if item.thumbnail_url and not model.thumbnail_path:
-            model.thumbnail_url = item.thumbnail_url
+        if model.id in downloaded:
+            path = downloaded[model.id]
+            if path:
+                model.thumbnail_path = path
+                model.thumbnail_url = None
+            else:
+                model.thumbnail_url = item.thumbnail_url
         if item.source_url:
             model.source_url = item.source_url
         if item.source_site:
@@ -137,4 +176,10 @@ async def bulk_apply(
         applied += 1
 
     db.commit()
-    return {"ok": True, "applied": applied}
+    downloaded_ok = sum(1 for p in downloaded.values() if p)
+    return {
+        "ok": True,
+        "applied": applied,
+        "thumbnails_downloaded": downloaded_ok,
+        "thumbnails_failed": len(downloaded) - downloaded_ok,
+    }
