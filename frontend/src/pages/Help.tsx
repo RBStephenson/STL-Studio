@@ -340,8 +340,8 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          An opt-in module for tracking your paint inventory — the foundation for
-          the upcoming painting-guides feature. Turn it on under{" "}
+          An opt-in module for tracking your paint inventory and reading
+          step-by-step painting guides. Turn it on under{" "}
           <strong>Settings → Painting Guides</strong>; the nav then gains{" "}
           <strong>Guides</strong> and <strong>Paint Shelf</strong> entries.
         </p>
@@ -386,6 +386,20 @@ const SECTIONS: Section[] = [
           commas, those cells must be <strong>quoted</strong>. Files without the column
           (like real PaintRack exports) import exactly as before, and an empty color
           cell never clears a swatch you've already set.
+        </p>
+        <p className="font-medium text-gray-200">Painting guides</p>
+        <p>
+          The <strong>Guides</strong> page lists your guides; open one to read it
+          in-app — a tabbed, step-by-step recipe with value maps, numbered steps,
+          <strong> paint swatches</strong> drawn from your shelf, and a shared
+          Thinning Reference. <strong>Print</strong> expands every tab into one
+          print-styled document. A model with a guide shows a <strong>Guide</strong>{" "}
+          badge on its Library card and a <strong>Painting guide</strong> button on
+          its detail page, and the guide links back to its model.
+        </p>
+        <p>
+          Authoring or importing guides from the UI isn't built yet — for now guides
+          come in through the API or the HTML importer.
         </p>
       </>
     ),

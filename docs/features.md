@@ -261,9 +261,9 @@ can:
 
 ## Paint Shelf (Painting Guides)
 
-An opt-in module for tracking your paint inventory — the foundation for the
-upcoming painting-guides feature. Enable it under **Settings → Painting
-Guides**; the nav then gains **Guides** and **Paint Shelf** entries.
+An opt-in module for tracking your paint inventory and reading step-by-step
+painting guides. Enable it under **Settings → Painting Guides**; the nav then
+gains **Guides** and **Paint Shelf** entries.
 
 The **Paint Shelf** is a table of every paint you own (or want): search by name
 or code, filter by brand, line, finish, or owned state, and see a **color
@@ -303,6 +303,26 @@ contain commas, those cells must be **quoted** in the CSV. Files without the
 column (like real PaintRack exports) import exactly as before, and an **empty
 color cell never clears** a swatch you've already set — only a different,
 non-empty color shows up as a change in the preview.
+
+### Painting guides
+
+The **Guides** page lists your painting guides; open one to read it in-app. A
+guide is a tabbed, step-by-step recipe: per-tab **value maps**, numbered
+**steps** with technique tags, **paint swatches** drawn from your Paint Shelf
+(every guide only references paints you own), method cards, and a shared
+**Thinning Reference**. Each guide carries its own theme, so it looks the same
+as the standalone HTML version.
+
+- **Print** (button, top-right of a guide) expands *every* tab and sub-tab into
+  one continuous, print-styled document — the whole guide in one pass.
+- **Model links** tie guides to your library both ways: a model that has a guide
+  shows a **Guide** badge on its Library card and a **Painting guide** button on
+  its detail page, and the guide links back to its model.
+
+> **Getting guides in:** authoring and importing guides from the UI isn't built
+> yet — today guides are created through the API (`POST /painting/guides`) or the
+> HTML importer (`POST /painting/guides/import`). An in-app import/authoring
+> screen is tracked separately, and AI-assisted generation is a later milestone.
 
 ## Settings
 
