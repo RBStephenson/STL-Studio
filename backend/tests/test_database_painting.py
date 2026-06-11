@@ -63,6 +63,50 @@ def test_backup_includes_painting_tables(file_db_client, tmp_path):
     assert not missing, f"painting tables missing from backup: {sorted(missing)}"
 
 
+# The columns M2 #268 added to guide tables that M0/#258 had already created.
+# A DB built before #268 is missing these and create_all won't add them, so
+# _migrate_schema must (regression for the guides list/reader 500).
+PRE268_GUIDE_COLUMNS = [
+    ("guides", "title_lead"), ("guides", "subtitle"), ("guides", "category_label"),
+    ("guides", "quote"), ("guides", "head_style"),
+    ("guide_tabs", "dom_id"), ("guide_tabs", "subtabs"), ("guide_tabs", "method_block"),
+    ("guide_phases", "subtab_key"), ("guide_steps", "technique_label"),
+]
+
+
+def _columns(path, table) -> set[str]:
+    conn = sqlite3.connect(str(path))
+    try:
+        return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    finally:
+        conn.close()
+
+
+def test_migrate_schema_backfills_pre268_guide_columns(tmp_path, monkeypatch):
+    db_path = tmp_path / "stl_inventory.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(engine)
+
+    # Simulate a pre-#268 DB by dropping the columns those migrations add.
+    conn = sqlite3.connect(str(db_path))
+    try:
+        for table, col in PRE268_GUIDE_COLUMNS:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+        conn.commit()
+    finally:
+        conn.close()
+    for table, col in PRE268_GUIDE_COLUMNS:
+        assert col not in _columns(db_path, table)
+
+    import app.main as main_module
+    monkeypatch.setattr(main_module, "engine", engine)
+    main_module._migrate_schema()  # idempotent; the live app runs this at startup
+
+    for table, col in PRE268_GUIDE_COLUMNS:
+        assert col in _columns(db_path, table), f"{table}.{col} was not re-added"
+    engine.dispose()
+
+
 def test_restore_of_pre_painting_backup_creates_painting_tables(file_db_client, tmp_path):
     """Restoring a backup from before the painting module must come back up
     with the painting schema — restore runs create_all + migrations."""
