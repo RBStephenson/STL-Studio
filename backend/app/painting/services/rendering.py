@@ -153,6 +153,30 @@ def _paint_lookup(db: Session, guide: Guide) -> dict[int, PaintInfo]:
     }
 
 
+def attach_resolved_paints(db: Session, guide: Guide) -> Guide:
+    """Attach a transient ``.paint`` summary to every swatch/mix component so the
+    API read schema surfaces resolved name/code/hex/brand. The relational spine
+    stores only ``paint_id``; the React reader (#259) needs the display fields
+    that the static exporter resolves the same way (``_paint_lookup``). The
+    attribute is unmapped, so it is never persisted."""
+    from app.painting.schemas import PaintSummary
+
+    paints = _paint_lookup(db, guide)
+
+    def summary(paint_id: int) -> PaintSummary | None:
+        info = paints.get(paint_id)
+        if info is None:
+            return None
+        return PaintSummary(name=info.name, code=info.code, brand=info.brand, hex=info.hex)
+
+    for tab in guide.tabs:
+        for phase in tab.phases:
+            for step in phase.steps:
+                for node in (*step.swatches, *step.mix_components):
+                    node.paint = summary(node.paint_id)
+    return guide
+
+
 def _tab_dom_id(tab) -> str:
     return tab.dom_id or _slugify(tab.name)
 

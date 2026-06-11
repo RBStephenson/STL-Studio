@@ -188,6 +188,186 @@ export interface ImportDiff {
   summary: { rows: number; added: number; changed: number; removed: number; warnings: number };
 }
 
+// --- Painting guides (M2 reader, #259) ------------------------------------
+// Mirrors the backend GuideRead tree (app/painting/schemas). Swatch/mix reads
+// carry a resolved `paint` summary the reader draws (the spine stores paint_id).
+
+export interface PaintSummary {
+  name: string;
+  code: string;
+  brand: string;
+  hex: string | null;
+}
+
+export interface GuideSwatch {
+  id: number;
+  paint_id: number;
+  value_pct: number | null;
+  role_label: string | null;
+  sort_order: number;
+  paint: PaintSummary | null;
+}
+
+export interface GuideMixComponent {
+  id: number;
+  paint_id: number;
+  parts: number;
+  sort_order: number;
+  paint: PaintSummary | null;
+}
+
+export interface GuideStep {
+  id: number;
+  title: string;
+  technique_tag: string | null;
+  technique_label: string | null;
+  body: string | null;
+  value_intent: string | null;
+  tip: string | null;
+  warning: string | null;
+  ratio_box: string | null;
+  sort_order: number;
+  swatches: GuideSwatch[];
+  mix_components: GuideMixComponent[];
+}
+
+export interface GuidePhase {
+  id: number;
+  label: string;
+  subtab_key: string | null;
+  sort_order: number;
+  steps: GuideStep[];
+}
+
+export interface ValueChip {
+  hex: string;
+  value_pct: number;
+  zone_label: string;
+}
+
+export interface GuideTabSection {
+  heading: string;
+  intro: string | null;
+}
+
+export interface SubTabDef {
+  key: string;
+  label: string;
+  css_class: string | null;
+  sort_order: number;
+}
+
+export interface MethodCard {
+  title: string;
+  body: string | null;
+  pros: string | null;
+  cons: string | null;
+  best: string | null;
+  recommended: boolean;
+  badge: string | null;
+}
+
+export interface MethodBlock {
+  recommendation: string | null;
+  cards: MethodCard[];
+  freckle_note: string | null;
+}
+
+export interface GuideTab {
+  id: number;
+  name: string;
+  dom_id: string | null;
+  sort_order: number;
+  has_expert_subtab: boolean;
+  section: GuideTabSection | null;
+  value_map: { label: string | null; chips: ValueChip[] } | null;
+  subtabs: SubTabDef[];
+  method_block: MethodBlock | null;
+  phases: GuidePhase[];
+}
+
+export interface GuideTheme {
+  bg?: string | null;
+  surface?: string | null;
+  surface2?: string | null;
+  surface3?: string | null;
+  border?: string | null;
+  text?: string | null;
+  text_muted?: string | null;
+  text_dim?: string | null;
+  accent?: string | null;
+  hero_gradient?: string | null;
+}
+
+export interface PaintPill {
+  name: string;
+  color?: string | null;
+}
+
+export interface CreatorCredit {
+  name: string | null;
+  url: string | null;
+  link_text: string | null;
+}
+
+export interface ThinningConfig {
+  airbrush_rows: { technique: string; nozzle?: string | null; ratio: string; behavior?: string | null }[];
+  brush_rows: { technique: string; ratio: string; behavior?: string | null }[];
+  thinning_cards: { title: string; body: string }[];
+}
+
+export interface Guide {
+  id: number;
+  slug: string;
+  title: string;
+  title_lead: string | null;
+  subtitle: string | null;
+  category_id: number | null;
+  category_label: string | null;
+  series_id: number | null;
+  model_id: number | null;
+  scale: string | null;
+  status: string;
+  franchise: string | null;
+  quote: string | null;
+  creator_credit: CreatorCredit | null;
+  light_source: string | null;
+  philosophy_note: string | null;
+  paint_lines_used: PaintPill[];
+  technique_tags: string[];
+  character_brief: { philosophy?: string | null; [k: string]: unknown } | null;
+  theme: GuideTheme | null;
+  head_style: string | null;
+  thinning_config: ThinningConfig | null;
+  tabs: GuideTab[];
+  created_at: string | null;
+  updated_at: string | null;
+  published_at: string | null;
+}
+
+export interface GuideListItem {
+  id: number;
+  slug: string;
+  title: string;
+  category_id: number | null;
+  series_id: number | null;
+  model_id: number | null;
+  scale: string | null;
+  status: string;
+  franchise: string | null;
+  technique_tags: string[];
+  paint_lines_used: PaintPill[];
+  updated_at: string | null;
+  published_at: string | null;
+}
+
+export interface GuideList {
+  total: number;
+  page: number;
+  page_size: number;
+  items: GuideListItem[];
+}
+
 export interface DirEntry {
   name: string;
   path: string;
@@ -459,6 +639,17 @@ export const api = {
         }),
       delete: (id: number) =>
         request<{ ok: boolean }>(`/painting/paints/${id}`, { method: "DELETE" }),
+    },
+    guides: {
+      list: (params: Record<string, string | number | boolean> = {}) => {
+        const qs = new URLSearchParams(
+          Object.entries(params)
+            .filter(([, v]) => v !== "" && v !== undefined && v !== null)
+            .map(([k, v]) => [k, String(v)])
+        ).toString();
+        return request<GuideList>(`/painting/guides${qs ? `?${qs}` : ""}`);
+      },
+      get: (id: number) => request<Guide>(`/painting/guides/${id}`),
     },
   },
   database: {
