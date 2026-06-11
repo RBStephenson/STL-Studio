@@ -7,6 +7,7 @@ replaces the entire content spine. The renderer (#259), exporter (#260),
 importer (#261), and model-link UI (#263) build on these.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ from app.painting.schemas import (
     SeriesCreate, SeriesRead,
 )
 from app.painting.services.guides import build_tabs, collect_paint_ids, missing_paint_ids
+from app.painting.services.rendering import render_guide_html
 from app.utils import utcnow
 
 router = APIRouter()
@@ -169,6 +171,20 @@ def list_guides(
 @router.get("/guides/{guide_id}", response_model=GuideRead)
 def get_guide(guide_id: int, db: Session = Depends(get_db)):
     return _get_or_404(db, Guide, guide_id, "Guide")
+
+
+@router.get("/guides/{guide_id}/export", response_class=Response)
+def export_guide_html(guide_id: int, db: Session = Depends(get_db)):
+    """Serialize a guide to the legacy self-contained HTML file (spec §9.5).
+
+    The download target for the importer's round-trip golden test (#261)."""
+    guide = _get_or_404(db, Guide, guide_id, "Guide")
+    html = render_guide_html(db, guide)
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{guide.slug}.html"'},
+    )
 
 
 @router.post("/guides", response_model=GuideRead, status_code=201)
