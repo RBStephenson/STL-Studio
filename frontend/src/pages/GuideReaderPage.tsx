@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Printer } from "lucide-react";
 import { api, Guide } from "../api/client";
 import GuideReader from "../components/guide/GuideReader";
+import ModelLink from "../components/guide/ModelLink";
 
 export default function GuideReaderPage() {
   const { id } = useParams<{ id: string }>();
@@ -25,9 +26,12 @@ export default function GuideReaderPage() {
   return (
     <div>
       <div className="max-w-5xl mx-auto px-4 pt-4 flex items-center justify-between print:hidden">
-        <Link to="/painting/guides" className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300">
-          <ArrowLeft size={14} /> All guides
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link to="/painting/guides" className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300">
+            <ArrowLeft size={14} /> All guides
+          </Link>
+          {guide?.model_id != null && <ModelLink modelId={guide.model_id} />}
+        </div>
         {guide && (
           <button
             onClick={() => window.print()}

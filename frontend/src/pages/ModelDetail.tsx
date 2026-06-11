@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush } from "lucide-react";
 import { api, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
@@ -8,6 +8,7 @@ import ImagePicker from "../components/ImagePicker";
 import MetadataEditor from "../components/MetadataEditor";
 import KitBuilder from "../components/KitBuilder";
 import { useNSFW } from "../context/NSFWContext";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 
 function CollectionsSection({ modelId, initialIds }: { modelId: number; initialIds: number[] }) {
@@ -204,7 +205,10 @@ export default function ModelDetail() {
   const backTo = rawFrom ?? "/";
   const navOrigin = useMemo(() => parseLibraryOrigin(rawFrom), [rawFrom]); // null = not from Library → hide Prev/Next
   const { showNSFW } = useNSFW();
+  const { settings } = useAppSettings();
   const { toast } = useToast();
+  // The painting guide for this model, if one exists (#263). null = none/unknown.
+  const [guideId, setGuideId] = useState<number | null>(null);
   const [model, setModel] = useState<ModelDetailType | null>(null);
   const [variants, setVariants] = useState<Model[]>([]);
   // Bumped on every load() so the variants effect refetches after in-place
@@ -447,6 +451,16 @@ export default function ModelDetail() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Resolve whether this model has a painting guide (#263), gated on the module.
+  useEffect(() => {
+    if (!settings.painting_guides_enabled || !id) { setGuideId(null); return; }
+    let alive = true;
+    api.painting.guides.list({ model_id: Number(id), page_size: 1 })
+      .then((r) => { if (alive) setGuideId(r.items[0]?.id ?? null); })
+      .catch(() => { if (alive) setGuideId(null); });
+    return () => { alive = false; };
+  }, [id, settings.painting_guides_enabled]);
+
   // Show the loading state when switching to a different model so the previous
   // model's data (collections, tags, etc.) never bleeds into the new view while
   // the fetch is in flight. Keyed on id only, so in-place refreshes that call
@@ -679,6 +693,16 @@ export default function ModelDetail() {
               )}
             </div>
             <div className="flex flex-wrap gap-2">
+              {settings.painting_guides_enabled && guideId != null && (
+                <Link
+                  to={`/painting/guides/${guideId}`}
+                  title="Open the painting guide for this model"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm transition-colors bg-fuchsia-950/60 border-fuchsia-800 text-fuchsia-300 hover:bg-fuchsia-900/60"
+                >
+                  <Paintbrush size={14} />
+                  Painting guide
+                </Link>
+              )}
               <button
                 onClick={toggleFavorite}
                 title={favorite ? "Remove from favorites" : "Add to favorites"}

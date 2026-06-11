@@ -192,6 +192,9 @@ export default function Library() {
   // null = unknown/loading; number = how many scan folders are configured
   const [scanRootCount, setScanRootCount] = useState<number | null>(null);
   const [collections, setCollections] = useState<Collection[]>([]);
+  // Model ids that have a painting guide → "Guide" badge (#263). Only fetched
+  // when the painting module is enabled.
+  const [guideModelIds, setGuideModelIds] = useState<Set<number>>(new Set());
 
   const scrollRestoredRef = useRef(false);
   const fetchIdRef = useRef(0);
@@ -235,6 +238,12 @@ export default function Library() {
   useEffect(() => { refreshStats(); }, [refreshStats]);
   useEffect(() => { api.models.tags().then(setAllTags).catch(() => {}); }, []);
   useEffect(() => { api.collections.list().then(setCollections).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!settings.painting_guides_enabled) { setGuideModelIds(new Set()); return; }
+    api.painting.guides.modelIds()
+      .then((r) => setGuideModelIds(new Set(r.model_ids)))
+      .catch(() => {});
+  }, [settings.painting_guides_enabled]);
 
   // Restore scroll position when navigating back from a model detail page
   useEffect(() => {
@@ -736,6 +745,7 @@ export default function Library() {
               onMutate={refreshStats}
               excludedView={excludedParam}
               onRemoved={handleRemoved}
+              hasGuide={guideModelIds.has(m.id)}
             />
           ))}
         </div>
@@ -757,6 +767,7 @@ export default function Library() {
                   onMutate={refreshStats}
                   excludedView={excludedParam}
                   onRemoved={handleRemoved}
+                  hasGuide={guideModelIds.has(m.id)}
                 />
               </DraggableCard>
             ))}
