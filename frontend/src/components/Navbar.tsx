@@ -34,7 +34,7 @@ export default function Navbar() {
   ];
 
   return (
-    <nav className="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-8">
+    <nav className="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-8 print:hidden">
       <Link to="/" className="flex items-center gap-2 text-indigo-400 font-bold text-lg shrink-0">
         <Box size={22} />
         STL Library

@@ -5,6 +5,7 @@ import {
 import ThinningReference from "./ThinningReference";
 import { AirbrushSkills, BrushSkills } from "./SkillsTabs";
 import "./guide-reader.css";
+import "./guide-print.css"; // @media print: expands all tabs, applies print.css (#262)
 
 // The three shared tabs (mirrors the static guides' skills-reference.js tabs).
 const SKILLS_TABS = [

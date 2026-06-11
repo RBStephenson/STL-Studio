@@ -1,0 +1,163 @@
+/* ═══════════════════════════════════════════════════════════
+   guide-print.css — the legacy print.css, scoped under .guide-reader
+   and wrapped in @media print so it only affects the guide reader at
+   print time (the M3 PDF wraps this same layout — single source of truth,
+   spec §9.4). Ported from painting-guides/assets/print.css; keep in sync.
+   Every tab and sub-tab is forced visible so the printout is the COMPLETE
+   guide. App chrome (navbar, back link, print button, back-to-top) is hidden
+   with Tailwind `print:hidden` at the call sites, not here.
+   ═══════════════════════════════════════════════════════════ */
+@media print {
+  /* Page setup */
+  @page { margin: 15mm 12mm; size: A4 portrait; }
+
+  /* Reset screen chrome on the reader */
+  .guide-reader {
+    background: #fff !important;
+    color: #111 !important;
+    font-family: Georgia, serif;
+    font-size: 10pt;
+    line-height: 1.5;
+  }
+  .guide-reader * { box-shadow: none !important; text-shadow: none !important; }
+
+  /* Hide interactive / nav elements */
+  .guide-reader .guide-nav,
+  .guide-reader .tabs,
+  .guide-reader .tab,
+  .guide-reader .tab-btn,
+  .guide-reader .sub-tabs,
+  .guide-reader .sub-tab,
+  .guide-reader .paint-bar,
+  .guide-reader .series-badge { display: none !important; }
+
+  /* Show ALL tab + sub-tab content (screen CSS hides the inactive ones) */
+  .guide-reader .tab-content,
+  .guide-reader .sub-content { display: block !important; }
+
+  /* Page break between major tabs */
+  .guide-reader .tab-content + .tab-content {
+    page-break-before: always;
+    padding-top: 8mm;
+  }
+
+  /* Hero / title area */
+  .guide-reader .hero {
+    background: none !important;
+    border: none !important;
+    border-bottom: 2pt solid #333 !important;
+    padding: 8mm 0 4mm !important;
+    margin-bottom: 6mm;
+    text-align: left !important;
+  }
+  .guide-reader .hero h1 { font-size: 18pt !important; color: #111 !important; }
+  .guide-reader .hero h1 span { color: #111 !important; }
+  .guide-reader .hero .subtitle,
+  .guide-reader .hero .film-ref { font-size: 9pt !important; color: #444 !important; }
+  .guide-reader .category,
+  .guide-reader .creator-credit { color: #444 !important; }
+
+  /* Section + phase headers */
+  .guide-reader .section-header h2 {
+    font-size: 13pt !important; font-weight: bold; color: #111 !important;
+    border-bottom: 1pt solid #999; margin: 6mm 0 3mm; padding-bottom: 1mm;
+  }
+  .guide-reader .section-header p,
+  .guide-reader .char-brief { color: #333 !important; }
+  .guide-reader .phase-label { color: #333 !important; border-bottom-color: #999 !important; }
+
+  /* Step cards */
+  .guide-reader .step {
+    background: #fff !important;
+    border: 0.5pt solid #bbb !important;
+    border-left: 3pt solid #555 !important;
+    page-break-inside: avoid;
+    margin: 3mm 0; padding: 3mm 4mm;
+  }
+  .guide-reader .step h3 { font-size: 10pt !important; color: #111 !important; margin-bottom: 2mm; }
+  .guide-reader .step p { color: #222 !important; }
+  .guide-reader .step-number {
+    font-size: 7pt !important; background: #eee !important; color: #333 !important;
+    border: none !important; padding: 1mm 2mm; border-radius: 2pt;
+    display: inline-block; margin-bottom: 1.5mm;
+  }
+
+  /* Paint swatches — preserve colour for reference */
+  .guide-reader .swatch,
+  .guide-reader .value-chip {
+    page-break-inside: avoid;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    background: #fff !important;
+  }
+  .guide-reader .swatch-dot,
+  .guide-reader .chip-swatch {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    border: 0.5pt solid #666 !important;
+  }
+  .guide-reader .swatch-name { color: #111 !important; }
+  .guide-reader .swatch-brand,
+  .guide-reader .swatch-value,
+  .guide-reader .chip-val,
+  .guide-reader .chip-label { color: #333 !important; }
+
+  /* Callouts */
+  .guide-reader .tip,
+  .guide-reader .warn,
+  .guide-reader .warning {
+    background: #f5f5f5 !important;
+    border: 0.5pt solid #999 !important;
+    border-left: 3pt solid #555 !important;
+    color: #222 !important;
+    page-break-inside: avoid;
+    margin: 2mm 0; padding: 2mm 3mm; font-size: 9pt;
+  }
+  .guide-reader .tip strong,
+  .guide-reader .warn strong,
+  .guide-reader .warning strong { color: #111 !important; }
+
+  /* Method cards + ratio box */
+  .guide-reader .method-card,
+  .guide-reader .method-rec-block,
+  .guide-reader .freckle-note,
+  .guide-reader .ratio-box {
+    background: #fff !important; color: #222 !important;
+    border: 0.5pt solid #bbb !important; page-break-inside: avoid;
+  }
+  .guide-reader .method-card h4 { color: #111 !important; }
+
+  /* Thinning reference */
+  .guide-reader .thinning-card {
+    background: #f9f9f9 !important; border: 0.5pt solid #ccc !important;
+    page-break-inside: avoid; padding: 2mm 3mm; margin: 1.5mm 0;
+  }
+  .guide-reader .thinning-card h4 { color: #222 !important; font-size: 9pt !important; margin-bottom: 1mm; }
+  .guide-reader .thinning-card p { color: #333 !important; font-size: 8.5pt !important; }
+  .guide-reader .nozzle-callout {
+    background: #f5f5f5 !important; border: 0.5pt solid #999 !important; page-break-inside: avoid;
+  }
+  .guide-reader .nozzle-callout h4, .guide-reader .nozzle-callout p { color: #222 !important; }
+
+  .guide-reader .thin-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+  .guide-reader .thin-table th,
+  .guide-reader .thin-table td {
+    border: 0.5pt solid #bbb !important; padding: 1mm 2mm;
+    color: #111 !important; background: #fff !important;
+  }
+  .guide-reader .thin-table th {
+    background: #eee !important; font-weight: bold;
+    -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+  }
+
+  /* Trouble grid */
+  .guide-reader .trouble-card {
+    background: #f9f9f9 !important; border: 0.5pt solid #ccc !important; page-break-inside: avoid;
+  }
+  .guide-reader .trouble-card h4, .guide-reader .trouble-card p { color: #222 !important; }
+
+  /* General cleanup */
+  .guide-reader a { color: #111 !important; text-decoration: none !important; }
+  .guide-reader img { max-width: 100% !important; }
+  .guide-reader .guide-footer { color: #444 !important; }
+}
