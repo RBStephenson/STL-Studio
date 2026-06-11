@@ -259,6 +259,51 @@ can:
 - **Enrich from web** — match a creator's online storefront listings against
   your local models and bulk-apply metadata (source URLs, thumbnails, IDs).
 
+## Paint Shelf (Painting Guides)
+
+An opt-in module for tracking your paint inventory — the foundation for the
+upcoming painting-guides feature. Enable it under **Settings → Painting
+Guides**; the nav then gains **Guides** and **Paint Shelf** entries.
+
+The **Paint Shelf** is a table of every paint you own (or want): search by name
+or code, filter by brand, line, finish, or owned state, and see a **color
+chip** for any paint with a swatch color set. Add or edit paints inline with
+the **Add paint** form.
+
+A paint line can declare a **code pattern** (a regex like `^MPA-\d{3}$`); paint
+codes are then validated on entry, so typos like `MPA-12` get caught with a
+clear message instead of polluting the shelf.
+
+### PaintRack CSV import & export
+
+If you track paints in **PaintRack**, import its CSV export directly:
+
+- **Import CSV** shows a **diff preview** first — what would be added, changed,
+  or removed — and writes nothing until you confirm. Removals are off by
+  default behind a separate checkbox, and only ever touch paints that came from
+  a previous import; paints you added by hand are never deleted.
+- Codes that don't match a line's code pattern are listed as **warnings** in
+  the preview — informational only, the rows still import.
+- **Export CSV** downloads your shelf in the same format, and an export
+  re-imports as an empty diff (a lossless round-trip).
+
+### Swatch colors in the CSV
+
+The CSV has an optional seventh **Color** column so an import can pre-populate
+swatch colors, and your stored swatches are included in every export:
+
+| Format | Example |
+|--------|---------|
+| Hex | `#2A2A2A` |
+| RGB | `"rgb(176,48,48)"` |
+| HSV | `"hsv(120,50,80)"` (H 0–360, S/V 0–100) |
+
+All three are normalized to hex on import. Because `rgb()`/`hsv()` values
+contain commas, those cells must be **quoted** in the CSV. Files without the
+column (like real PaintRack exports) import exactly as before, and an **empty
+color cell never clears** a swatch you've already set — only a different,
+non-empty color shows up as a change in the preview.
+
 ## Settings
 
 At **/settings** you manage your **scan roots** — the top-level folder paths the

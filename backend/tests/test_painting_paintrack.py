@@ -215,6 +215,107 @@ class TestImportCodeWarnings:
         assert preview["summary"]["warnings"] == 0
 
 
+class TestColorColumn:
+    """#255: optional 7th Color column pre-populates swatches on import and
+    carries stored hex on export. Empty/missing color never clears a swatch."""
+
+    HEADER7 = HEADER + ",Color"
+
+    @pytest.mark.parametrize("value,expected", [
+        ("#2A2A2A", "#2a2a2a"),
+        ("#ff00aa", "#ff00aa"),
+        ("rgb(255, 0, 0)", "#ff0000"),
+        ("RGB(0,128,255)", "#0080ff"),
+        ("hsv(0,100,100)", "#ff0000"),
+        ("hsv(120, 50, 80)", "#66cc66"),
+        ("  #2A2A2A  ", "#2a2a2a"),
+        ("", ""),
+    ])
+    def test_parse_color(self, value, expected):
+        assert inventory.parse_color(value) == expected
+
+    @pytest.mark.parametrize("value", [
+        "2A2A2A", "#2A2A", "#GGGGGG", "rgb(300,0,0)", "rgb(1,2)",
+        "hsv(361,0,0)", "hsv(0,101,0)", "red", "rgba(1,2,3,0.5)",
+    ])
+    def test_parse_color_rejects(self, value):
+        with pytest.raises(ValueError):
+            inventory.parse_color(value)
+
+    def test_bad_color_cell_rejected_with_line_number(self, client):
+        csv = self.HEADER7 + "\nPro Acryl,MPA-002,Coal Black,,22 ml,1,teal\n"
+        r = _upload(client, "/painting/inventory/import", csv)
+        assert r.status_code == 422
+        assert "Line 2" in r.json()["detail"]
+
+    def test_import_populates_swatch(self, client, db):
+        # rgb()/hsv() values contain commas, so the cell must be quoted.
+        csv = self.HEADER7 + '\nPro Acryl,MPA-002,Coal Black,,22 ml,1,"hsv(0,0,16)"\n'
+        preview = _upload(client, "/painting/inventory/import", csv).json()
+        assert preview["added"][0]["color"] == "#292929"
+
+        _import_all(client, csv)
+        paint = db.query(Paint).filter(Paint.code == "MPA-002").one()
+        assert paint.hex == "#292929"
+
+    def test_color_change_previewed_and_applied(self, client, db):
+        csv = self.HEADER7 + "\nPro Acryl,MPA-002,Coal Black,,22 ml,1,#2a2a2a\n"
+        _import_all(client, csv)
+
+        v2 = csv.replace("#2a2a2a", '"rgb(176,48,48)"')
+        preview = _upload(client, "/painting/inventory/import", v2).json()
+        assert preview["summary"]["changed"] == 1
+        assert preview["changed"][0]["changes"]["color"] == {
+            "from": "#2a2a2a", "to": "#b03030",
+        }
+
+        _import_all(client, v2)
+        assert db.query(Paint).filter(Paint.code == "MPA-002").one().hex == "#b03030"
+
+    def test_six_column_reimport_never_clears_swatch(self, client, db):
+        csv7 = self.HEADER7 + "\nPro Acryl,MPA-002,Coal Black,,22 ml,1,#2a2a2a\n"
+        _import_all(client, csv7)
+
+        # The same row as a real PaintRack file (no Color column) and as a
+        # 7-col file with an empty cell: both are a no-op for the swatch.
+        csv6 = HEADER + "\nPro Acryl,MPA-002,Coal Black,,22 ml,1\n"
+        csv7_empty = self.HEADER7 + "\nPro Acryl,MPA-002,Coal Black,,22 ml,1,\n"
+        for body in (csv6, csv7_empty):
+            preview = _upload(client, "/painting/inventory/import", body).json()
+            assert preview["summary"]["changed"] == 0
+            _import_all(client, body)
+        assert db.query(Paint).filter(Paint.code == "MPA-002").one().hex == "#2a2a2a"
+
+    def test_uppercase_stored_hex_round_trips(self, client, db):
+        # Manually entered swatches may be uppercase; export writes them
+        # verbatim and re-import must not flag a phantom color change.
+        _import_all(client, HEADER + "\nPro Acryl,MPA-002,Coal Black,,22 ml,1\n")
+        paint = db.query(Paint).filter(Paint.code == "MPA-002").one()
+        paint.hex = "#2A2A2A"
+        db.commit()
+
+        exported = client.get("/painting/inventory/export.csv").text
+        assert "#2A2A2A" in exported
+        preview = _upload(client, "/painting/inventory/import", exported).json()
+        assert preview["summary"]["changed"] == 0
+
+    def test_export_round_trips_swatch_mix(self, client, db):
+        csv = self.HEADER7 + "\n".join([
+            "",
+            "Pro Acryl,MPA-002,Coal Black,,22 ml,1,#2a2a2a",
+            "Dirty Down,,Rust,,25 ml,1,",
+        ]) + "\n"
+        _import_all(client, csv)
+
+        exported = client.get("/painting/inventory/export.csv").text
+        assert "Pro Acryl,MPA-002,Coal Black,,22 ml,1,#2a2a2a" in exported
+        assert "Dirty Down,,Rust,,25 ml,1," in exported
+        preview = _upload(client, "/painting/inventory/import", exported).json()
+        assert preview["summary"]["added"] == 0
+        assert preview["summary"]["changed"] == 0
+        assert preview["summary"]["removed"] == 0
+
+
 class TestExport:
     def test_export_round_trips_to_empty_diff(self, client, db):
         _import_all(client)
@@ -222,7 +323,7 @@ class TestExport:
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/csv")
         exported = r.text
-        assert exported.splitlines()[0] == HEADER
+        assert exported.splitlines()[0] == HEADER + ",Color"
 
         preview = _upload(client, "/painting/inventory/import", exported).json()
         assert preview["summary"]["added"] == 0
