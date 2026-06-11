@@ -124,6 +124,12 @@ A folder is only indexed as a model if it contains 3D files.
 - Paste a Gumroad, Cults3D, or MyMiniFactory creator URL
 - Fuzzy-matches scraped listings against local models and bulk-applies metadata (source URL, thumbnail, external ID)
 
+### Paint Shelf (Painting Guides module)
+- Opt-in paint inventory (enable under **Settings → Painting Guides**): search/filter your paints by brand, line, finish, and owned state, with color chips for swatches
+- Per-line **code patterns** (regex) validate paint codes on entry
+- **PaintRack CSV import/export** — import shows an added/changed/removed diff preview (confirm-to-apply, never a blind overwrite; manually added paints are never removed); export is a lossless round-trip
+- Optional **Color column** in the CSV (`#RRGGBB`, quoted `"rgb(r,g,b)"` or `"hsv(h,s,v)"`) pre-populates swatches on import; stored swatches are included in exports, and an empty color never clears one
+
 ### Scan
 - **Parallel** — scans up to 4 creator directories concurrently for faster indexing on large libraries
 - Incremental — skips unchanged folders (mtime check), caches STL file walks
