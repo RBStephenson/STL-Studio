@@ -18,10 +18,11 @@ from app.painting.models import (
 )
 from app.painting.schemas import (
     CategoryCreate, CategoryRead,
-    GuideCreate, GuideList, GuideListItem, GuideRead, GuideUpdate,
-    SeriesCreate, SeriesRead,
+    GuideCreate, GuideImportRequest, GuideImportResult, GuideList, GuideListItem,
+    GuideRead, GuideUpdate, SeriesCreate, SeriesRead,
 )
 from app.painting.services.guides import build_tabs, collect_paint_ids, missing_paint_ids
+from app.painting.services.importing import import_guide_html, make_db_resolver
 from app.painting.services.rendering import render_guide_html
 from app.utils import utcnow
 
@@ -228,6 +229,20 @@ def create_guide(body: GuideCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(guide)
     return guide
+
+
+@router.post("/guides/import", response_model=GuideImportResult, status_code=201)
+def import_guide(body: GuideImportRequest, db: Session = Depends(get_db)):
+    """Parse a legacy guide HTML file into a draft guide + import report (#261).
+
+    Resolves swatch paints against the Paint Shelf; unresolved ones are dropped
+    from the draft and listed in the report (the inventory-gap list, §9.7).
+    Lands as draft for human review — never auto-published."""
+    draft, report = import_guide_html(
+        body.html, slug=body.slug, resolve_paint=make_db_resolver(db)
+    )
+    guide = create_guide(GuideCreate.model_validate(draft), db)
+    return {"guide": guide, "report": report.as_dict()}
 
 
 @router.patch("/guides/{guide_id}", response_model=GuideRead)

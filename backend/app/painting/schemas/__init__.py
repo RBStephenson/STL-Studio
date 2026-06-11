@@ -556,6 +556,18 @@ class GuideList(BaseModel):
     items: list[GuideListItem]
 
 
+class GuideImportRequest(BaseModel):
+    html: str = Field(min_length=1)
+    slug: str = Field(min_length=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class GuideImportResult(BaseModel):
+    guide: GuideRead
+    report: dict
+
+
 # --- Categories & series ---------------------------------------------------
 
 class CategoryCreate(BaseModel):
