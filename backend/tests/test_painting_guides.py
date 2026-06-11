@@ -91,6 +91,20 @@ class TestCreateAndRead:
         got = client.get(f"/painting/guides/{g['id']}").json()
         assert got["tabs"][0]["phases"][0]["steps"][0]["title"] == "Gloss black base"
 
+    def test_swatch_and_mix_embed_resolved_paint(self, client, paint):
+        """The reader (#259) needs name/code/hex/brand the spine stores only by
+        id; create and GET both embed a resolved `paint` summary."""
+        created = client.post("/painting/guides", json=guide_body(paint["id"])).json()
+        got = client.get(f"/painting/guides/{created['id']}").json()
+        for g in (created, got):
+            step = g["tabs"][0]["phases"][0]["steps"][0]
+            sw = step["swatches"][0]["paint"]
+            assert sw == {
+                "name": "Coal Black", "code": "002",
+                "brand": "Monument Hobbies", "hex": "#2A2A2A",
+            }
+            assert step["mix_components"][0]["paint"]["name"] == "Coal Black"
+
     def test_get_missing_guide_404(self, client):
         assert client.get("/painting/guides/999").status_code == 404
 

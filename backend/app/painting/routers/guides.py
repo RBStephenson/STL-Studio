@@ -23,7 +23,7 @@ from app.painting.schemas import (
 )
 from app.painting.services.guides import build_tabs, collect_paint_ids, missing_paint_ids
 from app.painting.services.importing import import_guide_html, make_db_resolver
-from app.painting.services.rendering import render_guide_html
+from app.painting.services.rendering import attach_resolved_paints, render_guide_html
 from app.utils import utcnow
 
 router = APIRouter()
@@ -171,7 +171,7 @@ def list_guides(
 
 @router.get("/guides/{guide_id}", response_model=GuideRead)
 def get_guide(guide_id: int, db: Session = Depends(get_db)):
-    return _get_or_404(db, Guide, guide_id, "Guide")
+    return attach_resolved_paints(db, _get_or_404(db, Guide, guide_id, "Guide"))
 
 
 @router.get("/guides/{guide_id}/export", response_class=Response)
@@ -228,7 +228,7 @@ def create_guide(body: GuideCreate, db: Session = Depends(get_db)):
     db.add(guide)
     db.commit()
     db.refresh(guide)
-    return guide
+    return attach_resolved_paints(db, guide)
 
 
 @router.post("/guides/import", response_model=GuideImportResult, status_code=201)
@@ -291,7 +291,7 @@ def update_guide(guide_id: int, body: GuideUpdate, db: Session = Depends(get_db)
 
     db.commit()
     db.refresh(guide)
-    return guide
+    return attach_resolved_paints(db, guide)
 
 
 @router.delete("/guides/{guide_id}")

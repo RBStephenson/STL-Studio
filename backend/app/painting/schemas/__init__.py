@@ -323,6 +323,18 @@ class CreatorCredit(BaseModel):
 
 # --- Relational spine: Swatch / MixComponent / Step / Phase / Tab ----------
 
+class PaintSummary(BaseModel):
+    """Resolved paint display data embedded in swatch/mix reads so the React
+    reader (#259) can draw swatch dots/names — the relational spine itself
+    stores only paint_id. Populated transiently by the guide endpoints."""
+    name: str
+    code: str
+    brand: str
+    hex: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
 class SwatchIn(BaseModel):
     paint_id: int
     value_pct: Optional[int] = Field(None, ge=0, le=100)
@@ -334,6 +346,7 @@ class SwatchIn(BaseModel):
 
 class SwatchRead(SwatchIn):
     id: int
+    paint: Optional[PaintSummary] = None
 
     model_config = {"from_attributes": True}
 
@@ -348,6 +361,7 @@ class MixComponentIn(BaseModel):
 
 class MixComponentRead(MixComponentIn):
     id: int
+    paint: Optional[PaintSummary] = None
 
     model_config = {"from_attributes": True}
 
