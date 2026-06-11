@@ -650,6 +650,8 @@ export const api = {
         return request<GuideList>(`/painting/guides${qs ? `?${qs}` : ""}`);
       },
       get: (id: number) => request<Guide>(`/painting/guides/${id}`),
+      // The set of model ids that have at least one guide (Library badge, #263).
+      modelIds: () => request<{ model_ids: number[] }>("/painting/guides/model-ids"),
     },
   },
   database: {

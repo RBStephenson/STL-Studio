@@ -127,6 +127,16 @@ class TestCreateAndRead:
         assert client.get(f"/painting/guides?model_id={model.id}").json()["total"] == 1
         assert client.get("/painting/guides?q=robo").json()["total"] == 1
 
+    def test_model_ids_lists_linked_models_only(self, client, paint, db):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        client.post("/painting/guides", json=guide_body(paint["id"]))  # no model_id
+        client.post("/painting/guides", json=guide_body(
+            paint["id"], slug="batman", title="Batman", model_id=model.id))
+
+        ids = client.get("/painting/guides/model-ids").json()["model_ids"]
+        assert ids == [model.id]  # the unlinked guide contributes nothing
+
 
 class TestValidation:
     def test_duplicate_slug_409(self, client, paint):

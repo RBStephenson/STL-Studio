@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles } from "lucide-react";
+import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush } from "lucide-react";
 import { Model, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -21,6 +21,8 @@ interface Props {
   /** Called after the model is excluded (or restored) so the parent can drop the
    *  card from the current list optimistically. */
   onRemoved?: (id: number) => void;
+  /** True when a painting guide exists for this model — shows a "Guide" badge. */
+  hasGuide?: boolean;
 }
 
 const SITE_LABELS: Record<string, string> = {
@@ -42,7 +44,7 @@ const TAG_COLORS: Record<string, string> = {
   "figure":        "bg-indigo-900 text-indigo-300",
 };
 
-export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved }: Props) {
+export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false }: Props) {
   const location = useLocation();
   const { showNSFW } = useNSFW();
   const { settings } = useAppSettings();
@@ -218,6 +220,15 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
             <span className="flex items-center gap-1 bg-indigo-600/90 text-white text-xs px-1.5 py-0.5 rounded font-medium">
               <Layers size={10} />
               {variantCount} variants
+            </span>
+          )}
+          {hasGuide && (
+            <span
+              title="Has a painting guide"
+              className="flex items-center gap-1 bg-fuchsia-600/90 text-white text-xs px-1.5 py-0.5 rounded font-medium"
+            >
+              <Paintbrush size={10} />
+              Guide
             </span>
           )}
         </div>

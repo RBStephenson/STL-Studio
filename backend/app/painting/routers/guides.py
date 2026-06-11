@@ -169,6 +169,15 @@ def list_guides(
     }
 
 
+@router.get("/guides/model-ids")
+def guide_model_ids(db: Session = Depends(get_db)):
+    """The distinct model ids that have at least one guide — drives the Library
+    'has guide' badge (#263) without coupling the core models endpoint to the
+    painting module. Declared before /guides/{guide_id} so it isn't shadowed."""
+    rows = db.query(Guide.model_id).filter(Guide.model_id.isnot(None)).distinct().all()
+    return {"model_ids": [r[0] for r in rows]}
+
+
 @router.get("/guides/{guide_id}", response_model=GuideRead)
 def get_guide(guide_id: int, db: Session = Depends(get_db)):
     return attach_resolved_paints(db, _get_or_404(db, Guide, guide_id, "Guide"))

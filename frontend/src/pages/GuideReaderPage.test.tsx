@@ -48,6 +48,19 @@ describe("GuideReaderPage", () => {
     printSpy.mockRestore();
   });
 
+  it("shows a View-model link only when the guide is linked to a model (#263)", async () => {
+    const { api } = await import("../api/client");
+    // default fixture has model_id null → no link
+    renderAt("1");
+    await screen.findByRole("heading", { level: 1, name: /RoboCop/ });
+    expect(screen.queryByRole("link", { name: /view model/i })).toBeNull();
+
+    vi.mocked(api.painting.guides.get).mockResolvedValueOnce({ ...GUIDE, model_id: 42 });
+    renderAt("1");
+    const link = await screen.findByRole("link", { name: /view model/i });
+    expect(link).toHaveAttribute("href", "/models/42");
+  });
+
   it("surfaces a load error", async () => {
     const { api } = await import("../api/client");
     vi.mocked(api.painting.guides.get).mockRejectedValueOnce(new Error("boom"));
