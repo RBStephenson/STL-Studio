@@ -3,6 +3,7 @@
 [![Release](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml)
 [![Build Check](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml)
 [![Tests](https://github.com/RBStephenson/STL-Inventory/actions/workflows/tests.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/tests.yml)
+[![Wiki](https://img.shields.io/badge/docs-Wiki-2496ED?logo=github&logoColor=white)](https://github.com/RBStephenson/STL-Inventory/wiki)
 &nbsp;
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -13,14 +14,16 @@
 
 Local web app for cataloguing, browsing, and managing an STL file library.
 
-📖 **User documentation:** see the **[docs/](docs/README.md)** folder —
+📖 **User documentation:** the **[STL Library Wiki](https://github.com/RBStephenson/STL-Inventory/wiki)** is the canonical user guide.
 🗺️ **What's coming next:** [ROADMAP.md](ROADMAP.md)
 
 
-[Getting Started](docs/getting-started.md) ·
-[Feature Guide](docs/features.md) ·
-[Scanning & Folder Structure](docs/scanning-and-folders.md) ·
-[Troubleshooting](docs/troubleshooting.md).
+[Getting Started](https://github.com/RBStephenson/STL-Inventory/wiki/Getting-Started) ·
+[Feature Guide](https://github.com/RBStephenson/STL-Inventory/wiki/Feature-Guide) ·
+[Scanning & Folder Structure](https://github.com/RBStephenson/STL-Inventory/wiki/Scanning-and-Folder-Structure) ·
+[Troubleshooting](https://github.com/RBStephenson/STL-Inventory/wiki/Troubleshooting-and-FAQ)
+
+> The in-repo [`docs/`](docs/README.md) folder mirrors the wiki and backs the in-app **Help** page.
 
 ## Installation
 
