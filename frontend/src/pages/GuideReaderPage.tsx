@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Printer } from "lucide-react";
 import { api, Guide } from "../api/client";
 import GuideReader from "../components/guide/GuideReader";
 
@@ -24,10 +24,19 @@ export default function GuideReaderPage() {
 
   return (
     <div>
-      <div className="max-w-5xl mx-auto px-4 pt-4">
+      <div className="max-w-5xl mx-auto px-4 pt-4 flex items-center justify-between print:hidden">
         <Link to="/painting/guides" className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300">
           <ArrowLeft size={14} /> All guides
         </Link>
+        {guide && (
+          <button
+            onClick={() => window.print()}
+            title="Print this guide — every tab and sub-tab expands into one document"
+            className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+          >
+            <Printer size={15} /> Print
+          </button>
+        )}
       </div>
 
       {loading && <p className="max-w-5xl mx-auto px-4 py-8 text-sm text-gray-500">Loading…</p>}

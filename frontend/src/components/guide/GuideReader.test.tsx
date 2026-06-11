@@ -152,6 +152,15 @@ describe("GuideReader", () => {
     expect(within(thin).getByText("Flow Improver")).toBeInTheDocument();    // static card
   });
 
+  it("renders every tab panel in the DOM so the print view can expand them", () => {
+    // 2 authored tabs + 3 shared skills tabs; all present (print.css unhides them).
+    const { container } = render(<GuideReader guide={GUIDE} />);
+    expect(container.querySelectorAll(".tab-content")).toHaveLength(5);
+    for (const id of ["metals", "skin", "airbrush-skills", "brush-skills", "thinning-ref"]) {
+      expect(panel(container, id)).toBeInTheDocument();
+    }
+  });
+
   it("scopes the per-guide head_style to .guide-reader", () => {
     const { container } = render(<GuideReader guide={GUIDE} />);
     const style = container.querySelector("style");
