@@ -32,6 +32,19 @@ def _migrate_schema():
         ("scan_roots", "layout", "VARCHAR NOT NULL DEFAULT '{creator}'"),
         ("paints", "size", "TEXT"),
         ("paints", "count", "INTEGER DEFAULT 1"),
+        # Painting M2 #268 added these to guide tables that M0/#258 had already
+        # created, so create_all never adds them to a pre-#268 DB (#279 follow-up:
+        # guides list/reader 500 with "no such column: guides.title_lead").
+        ("guides", "title_lead", "TEXT"),
+        ("guides", "subtitle", "TEXT"),
+        ("guides", "category_label", "TEXT"),
+        ("guides", "quote", "TEXT"),
+        ("guides", "head_style", "TEXT"),
+        ("guide_tabs", "dom_id", "TEXT"),
+        ("guide_tabs", "subtabs", "JSON DEFAULT '[]'"),
+        ("guide_tabs", "method_block", "JSON"),
+        ("guide_phases", "subtab_key", "TEXT"),
+        ("guide_steps", "technique_label", "TEXT"),
     ]
     with engine.connect() as conn:
         table_cols: dict[str, set[str]] = {}
