@@ -89,9 +89,12 @@ class TestRouter:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
-    def test_guides_stub_returns_501(self, client):
-        assert client.get("/painting/guides").status_code == 501
-        assert client.post("/painting/guides").status_code == 501
+    def test_guides_endpoints_live(self, client):
+        """The guide stubs were replaced by real CRUD in M2 (#258) —
+        full coverage lives in test_painting_guides.py."""
+        resp = client.get("/painting/guides")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
 
     def test_paints_endpoints_live(self, client):
         """The Paint Shelf stubs were replaced by real endpoints in M1 (#240) —

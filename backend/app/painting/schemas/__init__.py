@@ -7,7 +7,8 @@ Paint Shelf inventory schemas (M1, #240). The GuideDraft contract
 derived from `finish` (spec §8.6 — a flat hex is only honest for opaque
 color paints), so the API computes it and clients can never set it.
 """
-from typing import Literal, Optional
+from datetime import datetime
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -136,3 +137,380 @@ class PaintList(BaseModel):
     page: int
     page_size: int
     items: list[PaintRead]
+
+
+# ===========================================================================
+# Guides (M2, #258)
+#
+# The Tab -> Phase -> Step -> Swatch/MixComponent spine is relational (the
+# validator walks every swatch; the editor swaps paints in place). The
+# fixed-shape display furniture (character_brief, theme, value_map,
+# skin_config, metals_config, thinning_config) rides along as JSON blocks on
+# its owning row (spec §6.1/§6.4).
+#
+# Block-embedded "display steps" (inside skin/metals methods) are kept as
+# opaque dicts so they round-trip losslessly — the *relational* spine is the
+# validated path, and the full paint-id/value validator is M3 (spec §8.4).
+# ===========================================================================
+
+GuideScale = Literal["1:6", "1:12", "75mm", "28mm", "bust", "other"]
+GuideStatus = Literal["draft", "in_review", "published", "archived"]
+StepTechnique = Literal["airbrush", "brush", "wash", "finish", "effects", "filter"]
+
+
+# --- JSON display blocks (spec §6.4) ---------------------------------------
+
+class CharacterBrief(BaseModel):
+    philosophy: str = ""
+    light_source: str = ""
+    priority_materials: list[str] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class GuideTheme(BaseModel):
+    """Per-guide :root vars + hero gradient, injected as inline custom props.
+    All optional — a partial theme falls back to the app defaults in guide.css."""
+    bg: Optional[str] = None
+    surface: Optional[str] = None
+    surface2: Optional[str] = None
+    surface3: Optional[str] = None
+    border: Optional[str] = None
+    text: Optional[str] = None
+    text_muted: Optional[str] = None
+    text_dim: Optional[str] = None
+    accent: Optional[str] = None
+    hero_gradient: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+class ValueChip(BaseModel):
+    hex: str = Field(pattern=HEX_PATTERN)
+    value_pct: int = Field(ge=0, le=100)
+    zone_label: str
+
+    model_config = {"extra": "forbid"}
+
+
+class ValueMap(BaseModel):
+    chips: list[ValueChip] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class SkinMethod(BaseModel):
+    key: str
+    title: str
+    recommended: bool = False
+    steps: list[dict[str, Any]] = []   # display steps — opaque, see module note
+
+    model_config = {"extra": "forbid"}
+
+
+class SkinConfig(BaseModel):
+    recommended: Optional[str] = None          # "basic" | "pinkle" | "wash_tinting"
+    anchor_paint_id: Optional[int] = None
+    complexion_band: Optional[str] = None
+    freckling_note: Optional[str] = None
+    methods: list[SkinMethod] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class MetalsApproach(BaseModel):
+    approach: Optional[str] = None             # "gloss_black_1to6" | "standard_small"
+    steps: list[dict[str, Any]] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class MetalsConfig(BaseModel):
+    tmm: Optional[MetalsApproach] = None
+    nmm: Optional[MetalsApproach] = None       # present only when an NMM sub-tab is added
+
+    model_config = {"extra": "forbid"}
+
+
+class ThinningAirbrushRow(BaseModel):
+    technique: str
+    nozzle: Optional[str] = None
+    ratio: str
+    behavior: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+class ThinningBrushRow(BaseModel):
+    technique: str
+    ratio: str
+    behavior: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+class ThinningCard(BaseModel):
+    title: str
+    body: str
+
+    model_config = {"extra": "forbid"}
+
+
+class ThinningConfig(BaseModel):
+    airbrush_rows: list[ThinningAirbrushRow] = []
+    brush_rows: list[ThinningBrushRow] = []
+    thinning_cards: list[ThinningCard] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class CreatorCredit(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+# --- Relational spine: Swatch / MixComponent / Step / Phase / Tab ----------
+
+class SwatchIn(BaseModel):
+    paint_id: int
+    value_pct: Optional[int] = Field(None, ge=0, le=100)
+    role_label: Optional[str] = None
+    sort_order: int = 0
+
+    model_config = {"extra": "forbid"}
+
+
+class SwatchRead(SwatchIn):
+    id: int
+
+    model_config = {"from_attributes": True}
+
+
+class MixComponentIn(BaseModel):
+    paint_id: int
+    parts: float = Field(gt=0)
+    sort_order: int = 0
+
+    model_config = {"extra": "forbid"}
+
+
+class MixComponentRead(MixComponentIn):
+    id: int
+
+    model_config = {"from_attributes": True}
+
+
+class StepIn(BaseModel):
+    title: str = Field(min_length=1)
+    technique_tag: Optional[StepTechnique] = None
+    body: Optional[str] = None
+    value_intent: Optional[str] = None
+    tip: Optional[str] = None
+    warning: Optional[str] = None
+    ratio_box: Optional[str] = None
+    sort_order: int = 0
+    swatches: list[SwatchIn] = []
+    mix_components: list[MixComponentIn] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class StepRead(BaseModel):
+    id: int
+    title: str
+    technique_tag: Optional[str] = None
+    body: Optional[str] = None
+    value_intent: Optional[str] = None
+    tip: Optional[str] = None
+    warning: Optional[str] = None
+    ratio_box: Optional[str] = None
+    sort_order: int = 0
+    swatches: list[SwatchRead] = []
+    mix_components: list[MixComponentRead] = []
+
+    model_config = {"from_attributes": True}
+
+
+class PhaseIn(BaseModel):
+    label: str = Field(min_length=1)
+    sort_order: int = 0
+    steps: list[StepIn] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class PhaseRead(BaseModel):
+    id: int
+    label: str
+    sort_order: int = 0
+    steps: list[StepRead] = []
+
+    model_config = {"from_attributes": True}
+
+
+class TabIn(BaseModel):
+    name: str = Field(min_length=1)
+    sort_order: int = 0
+    has_expert_subtab: bool = False
+    value_map: Optional[ValueMap] = None
+    skin_config: Optional[SkinConfig] = None
+    metals_config: Optional[MetalsConfig] = None
+    phases: list[PhaseIn] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class TabRead(BaseModel):
+    id: int
+    name: str
+    sort_order: int = 0
+    has_expert_subtab: bool = False
+    value_map: Optional[ValueMap] = None
+    skin_config: Optional[SkinConfig] = None
+    metals_config: Optional[MetalsConfig] = None
+    phases: list[PhaseRead] = []
+
+    model_config = {"from_attributes": True}
+
+
+# --- Guide header / create / update / read ---------------------------------
+
+class GuideCreate(BaseModel):
+    slug: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    category_id: Optional[int] = None
+    series_id: Optional[int] = None
+    model_id: Optional[int] = None
+    scale: Optional[GuideScale] = None
+    status: GuideStatus = "draft"
+    franchise: Optional[str] = None
+    creator_credit: Optional[CreatorCredit] = None
+    reference_image_id: Optional[int] = None
+    light_source: Optional[str] = None
+    philosophy_note: Optional[str] = None
+    paint_lines_used: list[str] = []
+    technique_tags: list[str] = []
+    character_brief: Optional[CharacterBrief] = None
+    theme: Optional[GuideTheme] = None
+    thinning_config: Optional[ThinningConfig] = None
+    tabs: list[TabIn] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class GuideUpdate(BaseModel):
+    """Partial update. Scalar/JSON fields use exclude_unset (omitted = unchanged).
+    If `tabs` is provided, the entire tab subtree is REPLACED (the natural save
+    shape for the structured editor); omit it to leave the content spine alone."""
+    slug: Optional[str] = Field(None, min_length=1)
+    title: Optional[str] = Field(None, min_length=1)
+    category_id: Optional[int] = None
+    series_id: Optional[int] = None
+    model_id: Optional[int] = None
+    scale: Optional[GuideScale] = None
+    status: Optional[GuideStatus] = None
+    franchise: Optional[str] = None
+    creator_credit: Optional[CreatorCredit] = None
+    reference_image_id: Optional[int] = None
+    light_source: Optional[str] = None
+    philosophy_note: Optional[str] = None
+    paint_lines_used: Optional[list[str]] = None
+    technique_tags: Optional[list[str]] = None
+    character_brief: Optional[CharacterBrief] = None
+    theme: Optional[GuideTheme] = None
+    thinning_config: Optional[ThinningConfig] = None
+    tabs: Optional[list[TabIn]] = None
+
+    model_config = {"extra": "forbid"}
+
+
+class GuideRead(BaseModel):
+    id: int
+    slug: str
+    title: str
+    category_id: Optional[int] = None
+    series_id: Optional[int] = None
+    model_id: Optional[int] = None
+    scale: Optional[str] = None
+    status: str
+    franchise: Optional[str] = None
+    creator_credit: Optional[CreatorCredit] = None
+    reference_image_id: Optional[int] = None
+    light_source: Optional[str] = None
+    philosophy_note: Optional[str] = None
+    paint_lines_used: list[str] = []
+    technique_tags: list[str] = []
+    character_brief: Optional[CharacterBrief] = None
+    theme: Optional[GuideTheme] = None
+    thinning_config: Optional[ThinningConfig] = None
+    tabs: list[TabRead] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class GuideListItem(BaseModel):
+    """Lightweight card for the guide grid — no content spine."""
+    id: int
+    slug: str
+    title: str
+    category_id: Optional[int] = None
+    series_id: Optional[int] = None
+    model_id: Optional[int] = None
+    scale: Optional[str] = None
+    status: str
+    franchise: Optional[str] = None
+    technique_tags: list[str] = []
+    paint_lines_used: list[str] = []
+    updated_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class GuideList(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[GuideListItem]
+
+
+# --- Categories & series ---------------------------------------------------
+
+class CategoryCreate(BaseModel):
+    slug: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    sort_order: int = 0
+    description: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+class CategoryRead(BaseModel):
+    id: int
+    slug: str
+    display_name: str
+    sort_order: int = 0
+    description: Optional[str] = None
+    guide_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class SeriesCreate(BaseModel):
+    slug: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class SeriesRead(BaseModel):
+    id: int
+    slug: str
+    display_name: str
+
+    model_config = {"from_attributes": True}

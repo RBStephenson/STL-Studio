@@ -122,7 +122,10 @@ class Guide(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     published_at = Column(DateTime, nullable=True)
 
-    tabs = relationship("GuideTab", back_populates="guide", order_by="GuideTab.sort_order")
+    tabs = relationship(
+        "GuideTab", back_populates="guide", order_by="GuideTab.sort_order",
+        cascade="all, delete-orphan",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +147,10 @@ class GuideTab(Base):
     metals_config = Column(JSON, nullable=True)      # TMM + optional NMM (Metals tab)
 
     guide = relationship("Guide", back_populates="tabs")
-    phases = relationship("GuidePhase", back_populates="tab", order_by="GuidePhase.sort_order")
+    phases = relationship(
+        "GuidePhase", back_populates="tab", order_by="GuidePhase.sort_order",
+        cascade="all, delete-orphan",
+    )
 
 
 class GuidePhase(Base):
@@ -156,7 +162,10 @@ class GuidePhase(Base):
     sort_order = Column(Integer, default=0)
 
     tab = relationship("GuideTab", back_populates="phases")
-    steps = relationship("GuideStep", back_populates="phase", order_by="GuideStep.sort_order")
+    steps = relationship(
+        "GuideStep", back_populates="phase", order_by="GuideStep.sort_order",
+        cascade="all, delete-orphan",
+    )
 
 
 class GuideStep(Base):
@@ -175,9 +184,13 @@ class GuideStep(Base):
     sort_order = Column(Integer, default=0)
 
     phase = relationship("GuidePhase", back_populates="steps")
-    swatches = relationship("GuideSwatch", back_populates="step", order_by="GuideSwatch.sort_order")
+    swatches = relationship(
+        "GuideSwatch", back_populates="step", order_by="GuideSwatch.sort_order",
+        cascade="all, delete-orphan",
+    )
     mix_components = relationship(
-        "GuideMixComponent", back_populates="step", order_by="GuideMixComponent.sort_order"
+        "GuideMixComponent", back_populates="step", order_by="GuideMixComponent.sort_order",
+        cascade="all, delete-orphan",
     )
 
 
