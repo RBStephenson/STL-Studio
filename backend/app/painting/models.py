@@ -104,18 +104,26 @@ class Guide(Base):
     scale = Column(String, nullable=True)            # 1:6|1:12|75mm|28mm|bust|other
     status = Column(String, nullable=False, default="draft")  # draft|in_review|published|archived
     franchise = Column(String, nullable=True)
-    creator_credit = Column(JSON, default=dict)      # {name, url} — sculptor, not the author
+    creator_credit = Column(JSON, default=dict)      # {name, url, link_text} — sculptor, not the author
     # Real FK lives here; guide_reference_images.guide_id stays a plain int to
     # avoid a circular FK pair (resolved in code).
     reference_image_id = Column(Integer, ForeignKey("guide_reference_images.id"), nullable=True)
     light_source = Column(String, nullable=True)     # temperature/direction note
     philosophy_note = Column(Text, nullable=True)    # value-first brief
-    paint_lines_used = Column(JSON, default=list)    # denormalized for paint bar + filtering
+    paint_lines_used = Column(JSON, default=list)    # paint-bar pills: [{name, color}] (also filtering)
     technique_tags = Column(JSON, default=list)      # ["OSL","NMM","TMM",…]
+
+    # Hero / header furniture matching the legacy DOM (M2 #268). The hero
+    # category line is per-guide free text, distinct from category.display_name.
+    title_lead = Column(String, nullable=True)       # <h1><span>…</span> lead word
+    subtitle = Column(String, nullable=True)         # .subtitle descriptor line
+    category_label = Column(String, nullable=True)   # .hero .category text
+    quote = Column(Text, nullable=True)              # .film-ref <em> quote
+    head_style = Column(Text, nullable=True)         # verbatim <style> body (theme vars + custom rules)
 
     # JSON display blocks (spec §6.4)
     character_brief = Column(JSON, nullable=True)    # {philosophy, light_source, priority_materials}
-    theme = Column(JSON, nullable=True)              # :root vars + hero gradient
+    theme = Column(JSON, nullable=True)              # legacy structured :root vars (head_style is canonical)
     thinning_config = Column(JSON, nullable=True)    # GUIDE_THINNING analog
 
     created_at = Column(DateTime, default=utcnow)
@@ -138,12 +146,19 @@ class GuideTab(Base):
     id = Column(Integer, primary_key=True)
     guide_id = Column(Integer, ForeignKey("guides.id"), nullable=False, index=True)
     name = Column(String, nullable=False)            # "Skin", "Armor", "Metals", …
+    dom_id = Column(String, nullable=True)           # authored tab id ("punk-clothing"); !slugifiable
     sort_order = Column(Integer, default=0)
     has_expert_subtab = Column(Boolean, default=False)
 
     # JSON display blocks owned by a tab (spec §6.4)
-    value_map = Column(JSON, nullable=True)          # 5-chip greyscale ladder
-    skin_config = Column(JSON, nullable=True)        # 3 method cards (Skin tab)
+    section = Column(JSON, nullable=True)            # {heading, intro} — .section-header (heading != name)
+    value_map = Column(JSON, nullable=True)          # {label, chips[]} greyscale ladder
+    # Ordered sub-tab definitions ([{key, label, css_class}]); a phase with a
+    # matching subtab_key renders inside that .sub-content (M2 #268). Always a
+    # list (never null) so the read schema's list field validates.
+    subtabs = Column(JSON, default=list)
+    method_block = Column(JSON, nullable=True)       # Skin "Method Selection": rec + cards + freckle_note
+    skin_config = Column(JSON, nullable=True)        # (legacy, superseded by method_block)
     metals_config = Column(JSON, nullable=True)      # TMM + optional NMM (Metals tab)
 
     guide = relationship("Guide", back_populates="tabs")
@@ -159,6 +174,7 @@ class GuidePhase(Base):
     id = Column(Integer, primary_key=True)
     tab_id = Column(Integer, ForeignKey("guide_tabs.id"), nullable=False, index=True)
     label = Column(String, nullable=False)           # "Zenithal Sequence" (.phase-label)
+    subtab_key = Column(String, nullable=True)       # which tab.subtabs entry this lives in (None = direct)
     sort_order = Column(Integer, default=0)
 
     tab = relationship("GuideTab", back_populates="phases")
@@ -174,12 +190,15 @@ class GuideStep(Base):
     id = Column(Integer, primary_key=True)
     phase_id = Column(Integer, ForeignKey("guide_phases.id"), nullable=False, index=True)
     title = Column(String, nullable=False)
-    # airbrush|brush|wash|finish|effects|filter — the colored pill
+    # airbrush|brush|wash|finish|effects|filter — drives the .step-number CSS class
     technique_tag = Column(String, nullable=True)
-    body = Column(Text, nullable=True)               # instructions incl. value intent
+    # post-"·" label on the step-number pill ("Airbrush", "Brush — Wet Blend");
+    # defaults to technique_tag titlecased when None.
+    technique_label = Column(String, nullable=True)
+    body = Column(Text, nullable=True)               # instructions (may carry inline <strong>/<em>/<a>)
     value_intent = Column(String, nullable=True)     # 'should read ~85% value'
-    tip = Column(Text, nullable=True)                # .tip green callout
-    warning = Column(Text, nullable=True)            # .warning red callout
+    tip = Column(Text, nullable=True)                # .tip callout — inner HTML verbatim
+    warning = Column(Text, nullable=True)            # .warning callout — inner HTML verbatim
     ratio_box = Column(String, nullable=True)        # "4:1 Bold Pyrrole Red 003 to Orange 007"
     sort_order = Column(Integer, default=0)
 

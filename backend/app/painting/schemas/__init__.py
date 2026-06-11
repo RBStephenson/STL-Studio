@@ -168,6 +168,14 @@ class CharacterBrief(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class PaintPill(BaseModel):
+    """One chip in the paint-bar (.paint-pill + .pill-dot color)."""
+    name: str
+    color: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
 class GuideTheme(BaseModel):
     """Per-guide :root vars + hero gradient, injected as inline custom props.
     All optional — a partial theme falls back to the app defaults in guide.css."""
@@ -194,7 +202,48 @@ class ValueChip(BaseModel):
 
 
 class ValueMap(BaseModel):
+    label: Optional[str] = None          # the .phase-label above the map (may vary per material)
     chips: list[ValueChip] = []
+
+    model_config = {"extra": "forbid"}
+
+
+class TabSection(BaseModel):
+    """.section-header at the top of a tab — heading differs from the tab name."""
+    heading: str = ""
+    intro: Optional[str] = None          # may carry inline HTML
+
+    model_config = {"extra": "forbid"}
+
+
+class SubTabDef(BaseModel):
+    """One sub-tab (e.g. 'Pro Acryl' vs 'Expert Acrylics'); phases with a
+    matching subtab_key render inside its .sub-content."""
+    key: str                             # dom suffix: id = f"{tab.dom_id}-{key}"
+    label: str                           # button text (may include a ✦ marker)
+    css_class: Optional[str] = None      # extra class, e.g. "expert-tab" / "folk-art-tab"
+    sort_order: int = 0
+
+    model_config = {"extra": "forbid"}
+
+
+class MethodCard(BaseModel):
+    title: str
+    body: Optional[str] = None
+    pros: Optional[str] = None           # .mc-pros
+    cons: Optional[str] = None           # .mc-cons
+    best: Optional[str] = None           # .mc-best
+    recommended: bool = False
+    badge: Optional[str] = None          # .method-card-badge text ("★ Recommended")
+
+    model_config = {"extra": "forbid"}
+
+
+class MethodBlock(BaseModel):
+    """The Skin tab's 'Method Selection' furniture (spec §9.6 .method-* )."""
+    recommendation: Optional[str] = None  # .method-rec-block (inline HTML)
+    cards: list[MethodCard] = []
+    freckle_note: Optional[str] = None    # .freckle-note (inline HTML)
 
     model_config = {"extra": "forbid"}
 
@@ -265,8 +314,9 @@ class ThinningConfig(BaseModel):
 
 
 class CreatorCredit(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = None           # studio/sculptor (bolded in .creator-credit)
     url: Optional[str] = None
+    link_text: Optional[str] = None      # anchor text ("@handle", "Studio — Patreon")
 
     model_config = {"extra": "forbid"}
 
@@ -305,6 +355,7 @@ class MixComponentRead(MixComponentIn):
 class StepIn(BaseModel):
     title: str = Field(min_length=1)
     technique_tag: Optional[StepTechnique] = None
+    technique_label: Optional[str] = None
     body: Optional[str] = None
     value_intent: Optional[str] = None
     tip: Optional[str] = None
@@ -321,6 +372,7 @@ class StepRead(BaseModel):
     id: int
     title: str
     technique_tag: Optional[str] = None
+    technique_label: Optional[str] = None
     body: Optional[str] = None
     value_intent: Optional[str] = None
     tip: Optional[str] = None
@@ -335,6 +387,7 @@ class StepRead(BaseModel):
 
 class PhaseIn(BaseModel):
     label: str = Field(min_length=1)
+    subtab_key: Optional[str] = None
     sort_order: int = 0
     steps: list[StepIn] = []
 
@@ -344,6 +397,7 @@ class PhaseIn(BaseModel):
 class PhaseRead(BaseModel):
     id: int
     label: str
+    subtab_key: Optional[str] = None
     sort_order: int = 0
     steps: list[StepRead] = []
 
@@ -352,9 +406,13 @@ class PhaseRead(BaseModel):
 
 class TabIn(BaseModel):
     name: str = Field(min_length=1)
+    dom_id: Optional[str] = None
     sort_order: int = 0
     has_expert_subtab: bool = False
+    section: Optional[TabSection] = None
     value_map: Optional[ValueMap] = None
+    subtabs: list[SubTabDef] = []
+    method_block: Optional[MethodBlock] = None
     skin_config: Optional[SkinConfig] = None
     metals_config: Optional[MetalsConfig] = None
     phases: list[PhaseIn] = []
@@ -365,9 +423,13 @@ class TabIn(BaseModel):
 class TabRead(BaseModel):
     id: int
     name: str
+    dom_id: Optional[str] = None
     sort_order: int = 0
     has_expert_subtab: bool = False
+    section: Optional[TabSection] = None
     value_map: Optional[ValueMap] = None
+    subtabs: list[SubTabDef] = []
+    method_block: Optional[MethodBlock] = None
     skin_config: Optional[SkinConfig] = None
     metals_config: Optional[MetalsConfig] = None
     phases: list[PhaseRead] = []
@@ -380,20 +442,25 @@ class TabRead(BaseModel):
 class GuideCreate(BaseModel):
     slug: str = Field(min_length=1)
     title: str = Field(min_length=1)
+    title_lead: Optional[str] = None
+    subtitle: Optional[str] = None
     category_id: Optional[int] = None
+    category_label: Optional[str] = None
     series_id: Optional[int] = None
     model_id: Optional[int] = None
     scale: Optional[GuideScale] = None
     status: GuideStatus = "draft"
     franchise: Optional[str] = None
+    quote: Optional[str] = None
     creator_credit: Optional[CreatorCredit] = None
     reference_image_id: Optional[int] = None
     light_source: Optional[str] = None
     philosophy_note: Optional[str] = None
-    paint_lines_used: list[str] = []
+    paint_lines_used: list[PaintPill] = []
     technique_tags: list[str] = []
     character_brief: Optional[CharacterBrief] = None
     theme: Optional[GuideTheme] = None
+    head_style: Optional[str] = None
     thinning_config: Optional[ThinningConfig] = None
     tabs: list[TabIn] = []
 
@@ -406,20 +473,25 @@ class GuideUpdate(BaseModel):
     shape for the structured editor); omit it to leave the content spine alone."""
     slug: Optional[str] = Field(None, min_length=1)
     title: Optional[str] = Field(None, min_length=1)
+    title_lead: Optional[str] = None
+    subtitle: Optional[str] = None
     category_id: Optional[int] = None
+    category_label: Optional[str] = None
     series_id: Optional[int] = None
     model_id: Optional[int] = None
     scale: Optional[GuideScale] = None
     status: Optional[GuideStatus] = None
     franchise: Optional[str] = None
+    quote: Optional[str] = None
     creator_credit: Optional[CreatorCredit] = None
     reference_image_id: Optional[int] = None
     light_source: Optional[str] = None
     philosophy_note: Optional[str] = None
-    paint_lines_used: Optional[list[str]] = None
+    paint_lines_used: Optional[list[PaintPill]] = None
     technique_tags: Optional[list[str]] = None
     character_brief: Optional[CharacterBrief] = None
     theme: Optional[GuideTheme] = None
+    head_style: Optional[str] = None
     thinning_config: Optional[ThinningConfig] = None
     tabs: Optional[list[TabIn]] = None
 
@@ -430,20 +502,25 @@ class GuideRead(BaseModel):
     id: int
     slug: str
     title: str
+    title_lead: Optional[str] = None
+    subtitle: Optional[str] = None
     category_id: Optional[int] = None
+    category_label: Optional[str] = None
     series_id: Optional[int] = None
     model_id: Optional[int] = None
     scale: Optional[str] = None
     status: str
     franchise: Optional[str] = None
+    quote: Optional[str] = None
     creator_credit: Optional[CreatorCredit] = None
     reference_image_id: Optional[int] = None
     light_source: Optional[str] = None
     philosophy_note: Optional[str] = None
-    paint_lines_used: list[str] = []
+    paint_lines_used: list[PaintPill] = []
     technique_tags: list[str] = []
     character_brief: Optional[CharacterBrief] = None
     theme: Optional[GuideTheme] = None
+    head_style: Optional[str] = None
     thinning_config: Optional[ThinningConfig] = None
     tabs: list[TabRead] = []
     created_at: Optional[datetime] = None
@@ -465,7 +542,7 @@ class GuideListItem(BaseModel):
     status: str
     franchise: Optional[str] = None
     technique_tags: list[str] = []
-    paint_lines_used: list[str] = []
+    paint_lines_used: list[PaintPill] = []
     updated_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
 

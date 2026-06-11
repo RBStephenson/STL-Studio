@@ -31,6 +31,7 @@ _NULLABLE_GUIDE_FIELDS = {
     "category_id", "series_id", "model_id", "scale", "franchise",
     "reference_image_id", "light_source", "philosophy_note",
     "creator_credit", "character_brief", "theme", "thinning_config",
+    "title_lead", "subtitle", "category_label", "quote", "head_style",
 }
 # JSON-block fields that arrive as Pydantic models and must be stored as dicts.
 _BLOCK_FIELDS = {"creator_credit", "character_brief", "theme", "thinning_config"}
@@ -183,20 +184,25 @@ def create_guide(body: GuideCreate, db: Session = Depends(get_db)):
     guide = Guide(
         slug=body.slug,
         title=body.title,
+        title_lead=body.title_lead,
+        subtitle=body.subtitle,
         category_id=body.category_id,
+        category_label=body.category_label,
         series_id=body.series_id,
         model_id=body.model_id,
         scale=body.scale,
         status=body.status,
         franchise=body.franchise,
+        quote=body.quote,
         creator_credit=body.creator_credit.model_dump() if body.creator_credit else None,
         reference_image_id=body.reference_image_id,
         light_source=body.light_source,
         philosophy_note=body.philosophy_note,
-        paint_lines_used=body.paint_lines_used,
+        paint_lines_used=[p.model_dump() for p in body.paint_lines_used],
         technique_tags=body.technique_tags,
         character_brief=body.character_brief.model_dump() if body.character_brief else None,
         theme=body.theme.model_dump() if body.theme else None,
+        head_style=body.head_style,
         thinning_config=body.thinning_config.model_dump() if body.thinning_config else None,
         tabs=build_tabs(body.tabs),
     )

@@ -45,18 +45,27 @@ def _block(value) -> dict | None:
 def build_tab(tab_in: TabIn) -> GuideTab:
     tab = GuideTab(
         name=tab_in.name,
+        dom_id=tab_in.dom_id,
         sort_order=tab_in.sort_order,
         has_expert_subtab=tab_in.has_expert_subtab,
+        section=_block(tab_in.section),
         value_map=_block(tab_in.value_map),
+        subtabs=[s.model_dump() for s in tab_in.subtabs],
+        method_block=_block(tab_in.method_block),
         skin_config=_block(tab_in.skin_config),
         metals_config=_block(tab_in.metals_config),
     )
     for phase_in in tab_in.phases:
-        phase = GuidePhase(label=phase_in.label, sort_order=phase_in.sort_order)
+        phase = GuidePhase(
+            label=phase_in.label,
+            subtab_key=phase_in.subtab_key,
+            sort_order=phase_in.sort_order,
+        )
         for step_in in phase_in.steps:
             step = GuideStep(
                 title=step_in.title,
                 technique_tag=step_in.technique_tag,
+                technique_label=step_in.technique_label,
                 body=step_in.body,
                 value_intent=step_in.value_intent,
                 tip=step_in.tip,
