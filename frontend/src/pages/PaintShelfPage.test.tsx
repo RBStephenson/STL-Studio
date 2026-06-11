@@ -154,6 +154,41 @@ describe("PaintShelfPage", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("opens the edit form pre-filled when the row Edit button is clicked (#273)", async () => {
+    renderPage();
+    await screen.findByText("Coal Black");
+
+    // Two rows, each with an Edit button (always in the DOM, hover-revealed).
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+
+    // The form mounts pre-filled with the clicked paint's values.
+    expect(screen.getByPlaceholderText("002")).toHaveValue("002");
+    expect(screen.getByPlaceholderText("Coal Black")).toHaveValue("Coal Black");
+  });
+
+  it("edits a paint without overwriting its source (#273)", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.painting.paints.update).mockResolvedValue(PAINTS[0]);
+    renderPage();
+    await screen.findByText("Coal Black");
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const nameInput = screen.getByPlaceholderText("Coal Black");
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "Coal Black v2");
+    await userEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => {
+      expect(api.painting.paints.update).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ name: "Coal Black v2" })
+      );
+    });
+    // `source` must NOT be sent on edit — it would un-mark imported paints.
+    const body = vi.mocked(api.painting.paints.update).mock.calls[0][1];
+    expect(body).not.toHaveProperty("source");
+  });
+
   it("creates a paint through the add form", async () => {
     const { api } = await import("../api/client");
     vi.mocked(api.painting.paints.create).mockResolvedValue(PAINTS[0]);

@@ -170,6 +170,9 @@ export default function PaintShelfPage() {
   const [busy, setBusy] = useState(false);
   const fetchIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // The add/edit form renders at the top of the page; clicking Edit on a
+  // scrolled-down row would otherwise open it off-screen (#273).
+  const formRef = useRef<HTMLDivElement>(null);
   // Pending CSV import: the picked file + its server-computed diff preview.
   const [pendingImport, setPendingImport] = useState<{ file: File; diff: ImportDiff } | null>(null);
   const [applyRemoved, setApplyRemoved] = useState(false);
@@ -234,7 +237,11 @@ export default function PaintShelfPage() {
   );
 
   const submitForm = async (form: PaintFormState) => {
-    const body: PaintCreate = {
+    // Fields the edit form doesn't expose (source, size, count, value_pct,
+    // handling_flags, substitute_for) are left off the body so the PATCH's
+    // exclude_unset preserves them — notably `source`, where forcing "manual"
+    // would un-mark an imported paint and exempt it from CSV import sync.
+    const body: Partial<PaintCreate> = {
       paint_line_id: Number(form.paint_line_id),
       code: form.code.trim(),
       name: form.name.trim(),
@@ -242,13 +249,12 @@ export default function PaintShelfPage() {
       finish: form.finish,
       owned: form.owned,
       notes: form.notes.trim() || null,
-      source: "manual",
     };
     setBusy(true);
     setFormError(null);
     try {
       if (formMode === "add") {
-        await api.painting.paints.create(body);
+        await api.painting.paints.create({ ...body, source: "manual" } as PaintCreate);
         toast("Paint added to the shelf.", "success");
       } else if (typeof formMode === "number") {
         await api.painting.paints.update(formMode, body);
@@ -276,6 +282,15 @@ export default function PaintShelfPage() {
   };
 
   const editingPaint = typeof formMode === "number" ? paints.find((p) => p.id === formMode) : undefined;
+
+  // Bring the form into view when it opens — Edit fires from rows that may be
+  // scrolled well below the form's fixed position near the top (#273).
+  useEffect(() => {
+    if (formMode === "add" || editingPaint) {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [formMode, editingPaint]);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const selectCls = "bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-indigo-500";
 
@@ -326,28 +341,30 @@ export default function PaintShelfPage() {
         {total.toLocaleString()} paints — guides will only ever reference paints from your shelf.
       </p>
 
-      {formMode === "add" && (
-        <PaintForm brands={brands} initial={EMPTY_FORM} onSubmit={submitForm} onCancel={() => setFormMode("hidden")} busy={busy} error={formError} />
-      )}
-      {editingPaint && (
-        <PaintForm
-          key={editingPaint.id}
-          brands={brands}
-          initial={{
-            paint_line_id: String(editingPaint.paint_line_id),
-            code: editingPaint.code,
-            name: editingPaint.name,
-            hex: editingPaint.hex ?? "",
-            finish: editingPaint.finish as PaintFinish,
-            owned: editingPaint.owned,
-            notes: editingPaint.notes ?? "",
-          }}
-          onSubmit={submitForm}
-          onCancel={() => setFormMode("hidden")}
-          busy={busy}
-          error={formError}
-        />
-      )}
+      <div ref={formRef} className="scroll-mt-4">
+        {formMode === "add" && (
+          <PaintForm brands={brands} initial={EMPTY_FORM} onSubmit={submitForm} onCancel={() => setFormMode("hidden")} busy={busy} error={formError} />
+        )}
+        {editingPaint && (
+          <PaintForm
+            key={editingPaint.id}
+            brands={brands}
+            initial={{
+              paint_line_id: String(editingPaint.paint_line_id),
+              code: editingPaint.code,
+              name: editingPaint.name,
+              hex: editingPaint.hex ?? "",
+              finish: editingPaint.finish as PaintFinish,
+              owned: editingPaint.owned,
+              notes: editingPaint.notes ?? "",
+            }}
+            onSubmit={submitForm}
+            onCancel={() => setFormMode("hidden")}
+            busy={busy}
+            error={formError}
+          />
+        )}
+      </div>
 
       {/* Filter bar */}
       <div className="flex flex-wrap gap-2 mb-4">
@@ -417,7 +434,7 @@ export default function PaintShelfPage() {
                   </td>
                   <td className="px-2 py-2 text-xs">{p.owned ? <span className="text-emerald-400">yes</span> : <span className="text-gray-600">no</span>}</td>
                   <td className="px-2 py-2">
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                       <button onClick={() => setFormMode(p.id)} title="Edit" className="p-1 rounded text-gray-400 hover:text-indigo-300 hover:bg-gray-800">
                         <Pencil size={13} />
                       </button>
