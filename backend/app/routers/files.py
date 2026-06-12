@@ -1,7 +1,7 @@
 """Serve local image files and STL files from the mounted drives."""
-import io
 import os
 import string
+import tempfile
 import time
 from urllib.parse import quote as _url_quote
 import logging
@@ -9,8 +9,8 @@ import platform
 import subprocess
 import zipfile
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse
 from app.config import settings
 from app.schemas import DownloadZipRequest
 
@@ -109,9 +109,32 @@ def serve_stl(path: str):
     return FileResponse(p, media_type="application/octet-stream")
 
 
+def _unique_arcname(filename: str, used: set[str]) -> str:
+    """Return an archive name for `filename` that doesn't collide with one already
+    used in this zip. A model can hold several files with the same basename in
+    different sub-folders (e.g. `base.stl` under Body/ and Base/); writing them all
+    as `base.stl` silently drops all but the last on extraction (#219). On a clash,
+    suffix `name (2).stl`, `name (3).stl`, … keeping the extension intact."""
+    if filename not in used:
+        used.add(filename)
+        return filename
+    stem, ext = os.path.splitext(filename)
+    i = 2
+    while f"{stem} ({i}){ext}" in used:
+        i += 1
+    arc = f"{stem} ({i}){ext}"
+    used.add(arc)
+    return arc
+
+
 @router.post("/download-zip")
-def download_zip(body: DownloadZipRequest):
-    """Build a zip archive from a list of STL file IDs and stream it to the client."""
+def download_zip(body: DownloadZipRequest, background_tasks: BackgroundTasks):
+    """Build a zip archive from a list of STL file IDs and stream it to the client.
+
+    The archive is written to a temp file (not an in-memory BytesIO) so a
+    multi-GB kit doesn't have to fit in RAM (#219); the temp file is removed after
+    the response is sent, the same way /database/backup cleans up its snapshot.
+    """
     from app.database import SessionLocal
     from app.models import STLFile
 
@@ -130,23 +153,41 @@ def download_zip(body: DownloadZipRequest):
     if not files:
         raise HTTPException(status_code=404, detail="No matching files found")
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in files:
-            p = Path(f.path)
-            if not _is_safe_path(p) or not p.exists():
-                continue
-            zf.write(p, arcname=f.filename)
-    buf.seek(0)
+    fd, tmp_name = tempfile.mkstemp(prefix="stl_zip_", suffix=".zip")
+    os.close(fd)
+    tmp = Path(tmp_name)
+
+    used_arcnames: set[str] = set()
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in files:
+                p = Path(f.path)
+                if not _is_safe_path(p) or not p.exists():
+                    continue
+                zf.write(p, arcname=_unique_arcname(f.filename, used_arcnames))
+    except Exception:
+        _safe_unlink(tmp)
+        raise
 
     safe_name = "".join(c if c.isalnum() or c in " .-_()" else "_" for c in zip_name).strip()
     filename = f"{safe_name}.zip"
 
-    return StreamingResponse(
-        buf,
+    background_tasks.add_task(_safe_unlink, tmp)
+    # Set Content-Disposition explicitly (rather than FileResponse's filename=,
+    # which percent-encodes spaces into a filename*=utf-8'' form) to keep the
+    # plain `filename="…"` header the client and tests expect.
+    return FileResponse(
+        tmp,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _safe_unlink(path: Path):
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 @router.post("/open-folder")
