@@ -10,6 +10,7 @@ import KitBuilder from "../components/KitBuilder";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
+import { useConfirm } from "../context/ConfirmContext";
 
 function CollectionsSection({ modelId, initialIds }: { modelId: number; initialIds: number[] }) {
   const { toast } = useToast();
@@ -207,6 +208,7 @@ export default function ModelDetail() {
   const { showNSFW } = useNSFW();
   const { settings } = useAppSettings();
   const { toast } = useToast();
+  const confirm = useConfirm();
   // The painting guide for this model, if one exists (#263). null = none/unknown.
   const [guideId, setGuideId] = useState<number | null>(null);
   const [model, setModel] = useState<ModelDetailType | null>(null);
@@ -315,12 +317,15 @@ export default function ModelDetail() {
 
   const splitPack = async () => {
     if (!model || splitting) return;
-    const ok = window.confirm(
-      `Split "${model.title || model.name}" into one model per sub-folder?\n\n` +
-      "Use this when a folder is actually a pack of separate models (e.g. a " +
-      "multi-character set). This replaces the current model and is remembered " +
-      "across rescans."
-    );
+    const ok = await confirm({
+      title: "Split into separate models?",
+      message:
+        `Split "${model.title || model.name}" into one model per sub-folder?\n\n` +
+        "Use this when a folder is actually a pack of separate models (e.g. a " +
+        "multi-character set). This replaces the current model and is remembered " +
+        "across rescans.",
+      confirmLabel: "Split",
+    });
     if (!ok) return;
     setSplitting(true);
     try {
@@ -359,9 +364,11 @@ export default function ModelDetail() {
 
   const clearGroup = async () => {
     if (!model) return;
-    const ok = window.confirm(
-      "Clear the group override?\n\nThe model will return to its scanner-detected group on the next rescan."
-    );
+    const ok = await confirm({
+      title: "Clear the group override?",
+      message: "The model will return to its scanner-detected group on the next rescan.",
+      confirmLabel: "Clear override",
+    });
     if (!ok) return;
     try {
       await api.models.clearGroupOverride(model.id);
