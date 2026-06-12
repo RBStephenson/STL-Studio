@@ -25,6 +25,7 @@ vi.mock("../api/client", async (importOriginal) => {
         ...actual.api.models,
         setPrintStatus: vi.fn(async () => ({ ok: true, print_status: "queued", print_count: 0 })),
         setFavorite: vi.fn(async () => ({ ok: true, is_favorite: false })),
+        setRating: vi.fn(async () => ({ ok: true, user_rating: 4 })),
         setQueue: vi.fn(async () => ({ ok: true, in_queue: false })),
         setNSFW: vi.fn(async () => ({ ok: true })),
         setExcluded: vi.fn(async () => ({ ok: true, excluded: false })),
@@ -104,5 +105,26 @@ describe("ModelCard print-status cycle (#166)", () => {
     await waitFor(() =>
       expect(vi.mocked(api.models.setPrintStatus)).toHaveBeenCalledWith(7, "queued")
     );
+  });
+});
+
+describe("ModelCard inline star rating (#167)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("reflects the model's user_rating", () => {
+    renderCard({ user_rating: 3 } as any);
+    expect(screen.getByRole("radio", { name: "3 stars" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("calls setRating when a star is clicked", async () => {
+    renderCard({ user_rating: null } as any);
+    fireEvent.click(screen.getByRole("radio", { name: "4 stars" }));
+    await waitFor(() => expect(vi.mocked(api.models.setRating)).toHaveBeenCalledWith(7, 4));
+  });
+
+  it("clears the rating when the active star is clicked again", async () => {
+    renderCard({ user_rating: 2 } as any);
+    fireEvent.click(screen.getByRole("radio", { name: "2 stars" }));
+    await waitFor(() => expect(vi.mocked(api.models.setRating)).toHaveBeenCalledWith(7, null));
   });
 });

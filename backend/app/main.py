@@ -47,6 +47,7 @@ def _migrate_schema():
         ("guide_steps", "technique_label", "TEXT"),
         ("models", "print_status", "VARCHAR NOT NULL DEFAULT 'none'"),
         ("models", "print_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("models", "user_rating", "INTEGER"),
     ]
     with engine.connect() as conn:
         table_cols: dict[str, set[str]] = {}

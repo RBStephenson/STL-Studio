@@ -7,6 +7,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 import { isRecentlyAdded } from "../utils/recentlyAdded";
 import QuickAssignPopover from "./QuickAssignPopover";
+import StarRating from "./StarRating";
 
 interface Props {
   model: Model;
@@ -60,9 +61,22 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
   const [printStatus, setPrintStatus] = useState<PrintStatus>(model.print_status ?? "none");
   const [localTags, setLocalTags] = useState<string[]>(model.tags ?? []);
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [rating, setRating] = useState<number | null>(model.user_rating ?? null);
 
   const variantCount = model.variant_count ?? 1;
   const isGroup = variantCount > 1;
+
+  const changeRating = async (next: number | null) => {
+    const prev = rating;
+    setRating(next);
+    try {
+      await api.models.setRating(model.id, next);
+      onMutate?.();
+    } catch {
+      setRating(prev);  // revert on failure
+      toast("Couldn't update rating — try again.", "error");
+    }
+  };
 
   const toggleNSFW = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -345,25 +359,31 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
         )}
 
         <div className="mt-auto flex items-center justify-between pt-1">
-          {model.rating != null && (
-            <span className="flex items-center gap-0.5 text-xs text-yellow-400">
-              <Star size={11} fill="currentColor" />
-              {model.rating.toFixed(1)}
-            </span>
-          )}
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPopoverOpen((o) => !o); }}
-            onFocus={(e) => e.stopPropagation()}
-            title="Quick assign tags / collections"
-            aria-label="Quick assign tags and collections"
-            className={`ml-auto p-1 rounded transition-all ${
-              popoverOpen
-                ? "text-indigo-400 bg-indigo-900/40 opacity-100"
-                : "text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 focus:opacity-100"
-            }`}
-          >
-            <MoreHorizontal size={13} />
-          </button>
+          {/* User star rating — hidden until hover when unrated, to keep the grid calm */}
+          <div className={`-ml-0.5 transition-opacity ${rating != null ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
+            <StarRating value={rating} onChange={changeRating} size={13} />
+          </div>
+          <div className="flex items-center gap-1.5 ml-auto">
+            {model.rating != null && (
+              <span title="Rating from the source site" className="flex items-center gap-0.5 text-xs text-gray-500">
+                <Star size={11} fill="currentColor" />
+                {model.rating.toFixed(1)}
+              </span>
+            )}
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPopoverOpen((o) => !o); }}
+              onFocus={(e) => e.stopPropagation()}
+              title="Quick assign tags / collections"
+              aria-label="Quick assign tags and collections"
+              className={`p-1 rounded transition-all ${
+                popoverOpen
+                  ? "text-indigo-400 bg-indigo-900/40 opacity-100"
+                  : "text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 focus:opacity-100"
+              }`}
+            >
+              <MoreHorizontal size={13} />
+            </button>
+          </div>
         </div>
       </div>
     </Link>

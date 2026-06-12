@@ -98,6 +98,7 @@ class Model(Base):
 
     # User curation — independent flags
     is_favorite = Column(Boolean, default=False, index=True)
+    user_rating = Column(Integer, nullable=True, index=True)  # 1–5 stars; NULL = unrated (#167)
     in_queue = Column(Boolean, default=False, index=True)   # queued to print next
     queued_at = Column(DateTime, nullable=True)              # when added (tiebreak ordering)
     queue_position = Column(Integer, nullable=True)          # manual drag-to-reorder order

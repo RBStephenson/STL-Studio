@@ -39,6 +39,7 @@ export interface Model {
   nsfw: boolean;
   excluded: boolean;
   is_favorite: boolean;
+  user_rating: number | null;
   in_queue: boolean;
   queued_at: string | null;
   printed_at: string | null;
@@ -116,7 +117,7 @@ export interface AppSettings {
   library_sort: LibrarySort;
 }
 
-export type LibrarySort = "name" | "added" | "creator";
+export type LibrarySort = "name" | "added" | "creator" | "rating";
 
 // --- Painting module (Paint Shelf, M1) ---
 
@@ -475,6 +476,12 @@ export const api = {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_favorite }),
+      }),
+    setRating: (id: number, rating: number | null) =>
+      request<{ ok: boolean; user_rating: number | null }>(`/models/${id}/rating`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating }),
       }),
     setQueue: (id: number, in_queue: boolean) =>
       request<{ ok: boolean; in_queue: boolean }>(`/models/${id}/queue`, {

@@ -148,6 +148,7 @@ export default function Library() {
   const printedParam    = searchParams.get("printed") === "1";
   const printStatusParam = searchParams.get("print_status") ?? "";
   const excludedParam = searchParams.get("excluded") === "1";
+  const minRating    = searchParams.get("min_rating") ?? "";  // "" | "1".."5" (#167)
   const addedDays    = searchParams.get("added_days") ?? ""; // "Recently added" window (#170)
   const sortParam    = searchParams.get("sort") ?? "";       // "" | "name" | "added" | "creator" (#247)
 
@@ -278,6 +279,7 @@ export default function Library() {
       if (printedParam)     params.printed       = true;
       if (printStatusParam) params.print_status  = printStatusParam;
       if (excludedParam) params.excluded    = true;
+      if (minRating)   params.min_rating   = minRating;
       if (addedDays)   params.added_within_days = addedDays;
       if (effectiveSort && effectiveSort !== "name") params.sort = effectiveSort;
       const data = await api.models.list(params);
@@ -287,7 +289,7 @@ export default function Library() {
     } finally {
       if (fetchId === fetchIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam, printStatusParam, excludedParam, addedDays, effectiveSort]);
+  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam, printStatusParam, excludedParam, minRating, addedDays, effectiveSort]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);
@@ -319,7 +321,7 @@ export default function Library() {
   }, [savingPreset]);
 
   const totalPages = Math.ceil(total / pageSize);
-  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || queueParam || printedParam || printStatusParam || addedDays);
+  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || queueParam || printedParam || printStatusParam || minRating || addedDays);
 
   const visibleTags = allTags.filter(({ tag }) =>
     !tagSearch || tag.includes(tagSearch.toLowerCase())
@@ -602,6 +604,7 @@ export default function Library() {
               <option value="name">Name</option>
               <option value="added">Date added</option>
               <option value="creator">Creator</option>
+              <option value="rating">Rating</option>
             </select>
           </label>
           <ScanButton onScanComplete={fetchModels} />
@@ -762,6 +765,20 @@ export default function Library() {
 
             <TriToggle label="NSFW" value={nsfwParam} onChange={(v) => setParam("nsfw", v)} />
             <TriToggle label="Has image" value={thumbParam} onChange={(v) => setParam("has_thumbnail", v)} />
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-500">Min rating</span>
+              <select
+                value={minRating}
+                onChange={(e) => setParam("min_rating", e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">Any</option>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n}>{"★".repeat(n)}{n < 5 ? "+" : ""}</option>
+                ))}
+              </select>
+            </div>
 
             <label className="flex items-center gap-1.5 text-sm text-gray-400 cursor-pointer">
               <input

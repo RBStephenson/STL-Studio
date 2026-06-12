@@ -51,6 +51,7 @@ class ModelRead(ModelBase):
     nsfw: bool = False
     excluded: bool = False
     is_favorite: bool = False
+    user_rating: Optional[int] = None
     in_queue: bool = False
     queued_at: Optional[datetime] = None
     printed_at: Optional[datetime] = None
@@ -144,6 +145,11 @@ class ThumbnailFromUrl(BaseModel):
 
 class FavoriteUpdate(BaseModel):
     is_favorite: bool
+
+
+class RatingUpdate(BaseModel):
+    # 1–5 sets the star rating; None clears it back to unrated (#167).
+    rating: Optional[int] = Field(None, ge=1, le=5)
 
 
 class QueueUpdate(BaseModel):
@@ -245,6 +251,6 @@ class AppSettingsUpdate(BaseModel):
     recent_days: Optional[int] = Field(None, ge=1, le=90)
     # Only the three user-facing Library sorts are persistable defaults; the
     # queue/queued_at/printed_at keys are page-specific, not a Library default.
-    library_sort: Optional[str] = Field(None, pattern="^(name|added|creator)$")
+    library_sort: Optional[str] = Field(None, pattern="^(name|added|creator|rating)$")
 
     model_config = {"extra": "forbid"}

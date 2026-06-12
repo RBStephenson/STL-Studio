@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
-    ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, FavoriteUpdate, QueueUpdate, QueueReorder,
+    ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, FavoriteUpdate, RatingUpdate, QueueUpdate, QueueReorder,
     PrintedUpdate, PrintStatusUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate,
     BulkExcludeUpdate, BulkReviewUpdate, SetGroupBody,
 )
@@ -40,6 +40,7 @@ def _apply_filters(
     in_queue: bool | None = None,
     printed: bool | None = None,
     print_status: str | None = None,
+    min_rating: int | None = None,
     excluded: bool = False,
     added_within_days: int | None = None,
 ):
@@ -92,6 +93,8 @@ def _apply_filters(
         q = q.filter(Model.printed_at == None)
     if print_status is not None:
         q = q.filter(Model.print_status == print_status)
+    if min_rating is not None:
+        q = q.filter(Model.user_rating != None, Model.user_rating >= min_rating)
     if added_within_days is not None:
         q = q.filter(Model.created_at >= utcnow() - timedelta(days=added_within_days))
     return q
@@ -117,6 +120,9 @@ def _order_cols(sort: str) -> tuple:
     elif sort == "added":
         # Newest first; id breaks ties within a scan batch (#170).
         return (Model.created_at.desc(), Model.id.desc())
+    elif sort == "rating":
+        # Highest-rated first; unrated (NULL) sinks to the bottom, then name (#167).
+        return (Model.user_rating.is_(None), Model.user_rating.desc(), Model.name)
     else:
         return (Model.character, Model.name)
 
@@ -186,9 +192,10 @@ def list_models(
     in_queue: bool | None = None,
     printed: bool | None = None,
     print_status: str | None = None,
+    min_rating: int | None = Query(None, ge=1, le=5),
     excluded: bool = False,  # default: hide user-excluded models; pass true for the Excluded view
     added_within_days: int | None = Query(None, ge=1, le=365),  # "Recently added" window (#170)
-    sort: str = Query("name"),  # "name" | "added" | "creator" | "queue" | "queued_at" | "printed_at"
+    sort: str = Query("name"),  # "name" | "added" | "creator" | "rating" | "queue" | "queued_at" | "printed_at"
     group_variants: bool = Query(True),
     db: Session = Depends(get_db),
 ):
@@ -198,7 +205,8 @@ def list_models(
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
         has_thumbnail=has_thumbnail, needs_review=needs_review,
         nsfw=nsfw, is_favorite=is_favorite, in_queue=in_queue,
-        printed=printed, print_status=print_status, excluded=excluded, added_within_days=added_within_days,
+        printed=printed, print_status=print_status, min_rating=min_rating,
+        excluded=excluded, added_within_days=added_within_days,
     )
     # character filter is list_models-only (not exposed via Library URL state)
     if character:
@@ -625,6 +633,18 @@ def set_favorite(model_id: int, body: FavoriteUpdate, db: Session = Depends(get_
     return {"ok": True, "is_favorite": model.is_favorite}
 
 
+@router.patch("/{model_id}/rating")
+def set_rating(model_id: int, body: RatingUpdate, db: Session = Depends(get_db)):
+    """Set a model's 1–5 star rating, or clear it (rating=null) back to unrated (#167)."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    model.user_rating = body.rating
+    model.updated_at = utcnow()
+    db.commit()
+    return {"ok": True, "user_rating": model.user_rating}
+
+
 @router.patch("/{model_id}/queue")
 def set_queue(model_id: int, body: QueueUpdate, db: Session = Depends(get_db)):
     """Add/remove a model from the print queue. New items append to the end of the
@@ -804,6 +824,7 @@ def get_neighbors(
     in_queue: bool | None = None,
     printed: bool | None = None,
     print_status: str | None = None,
+    min_rating: int | None = Query(None, ge=1, le=5),
     excluded: bool = False,
     added_within_days: int | None = Query(None, ge=1, le=365),
     sort: str = Query("name"),
@@ -821,7 +842,8 @@ def get_neighbors(
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
         has_thumbnail=has_thumbnail, needs_review=needs_review,
         nsfw=nsfw, is_favorite=is_favorite, in_queue=in_queue,
-        printed=printed, print_status=print_status, excluded=excluded, added_within_days=added_within_days,
+        printed=printed, print_status=print_status, min_rating=min_rating,
+        excluded=excluded, added_within_days=added_within_days,
     )
 
     target_id = model_id

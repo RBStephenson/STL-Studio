@@ -7,6 +7,7 @@ const STLViewer = lazy(() => import("../components/STLViewer"));
 import ImagePicker from "../components/ImagePicker";
 import MetadataEditor from "../components/MetadataEditor";
 import KitBuilder from "../components/KitBuilder";
+import StarRating from "../components/StarRating";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
@@ -227,6 +228,7 @@ export default function ModelDetail() {
   const [viewMode, setViewMode] = useState<ViewMode>("images");
   const [nsfw, setNsfw] = useState(false);
   const [favorite, setFavorite] = useState(false);
+  const [rating, setRating] = useState<number | null>(null);
   const [queued, setQueued] = useState(false);
   const [printedAt, setPrintedAt] = useState<string | null>(null);
   const [printStatus, setPrintStatus] = useState<import("../api/client").PrintStatus>("none");
@@ -270,6 +272,7 @@ export default function ModelDetail() {
     if (model) {
       setNsfw(model.nsfw);
       setFavorite(model.is_favorite);
+      setRating(model.user_rating ?? null);
       setQueued(model.in_queue);
       setPrintedAt(model.printed_at);
       setPrintStatus(model.print_status ?? "none");
@@ -418,6 +421,17 @@ export default function ModelDetail() {
     } catch {
       setFavorite(!next);  // revert on failure
       toast("Couldn't update favorite — try again.", "error");
+    }
+  };
+
+  const changeRating = async (next: number | null) => {
+    const prev = rating;
+    setRating(next);
+    try {
+      await api.models.setRating(Number(id), next);
+    } catch {
+      setRating(prev);  // revert on failure
+      toast("Couldn't update rating — try again.", "error");
     }
   };
 
@@ -746,6 +760,12 @@ export default function ModelDetail() {
                 <Star size={14} fill={favorite ? "currentColor" : "none"} />
                 Favorite
               </button>
+              <div
+                className="flex items-center gap-1 px-2 py-1 rounded border bg-gray-800 border-gray-700"
+                title={rating ? `Rated ${rating}/5 — click a star to change, or the same star to clear` : "Rate this model"}
+              >
+                <StarRating value={rating} onChange={changeRating} size={16} />
+              </div>
               <button
                 onClick={toggleQueue}
                 title={queued ? "Remove from print queue" : "Add to print queue"}
