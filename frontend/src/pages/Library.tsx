@@ -818,6 +818,7 @@ export default function Library() {
               excludedView={excludedParam}
               onRemoved={handleRemoved}
               hasGuide={guideModelIds.has(m.id)}
+              allTagSuggestions={allTags}
             />
           ))}
         </div>

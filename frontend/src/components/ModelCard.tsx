@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush } from "lucide-react";
+import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal } from "lucide-react";
 import { Model, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 import { isRecentlyAdded } from "../utils/recentlyAdded";
+import QuickAssignPopover from "./QuickAssignPopover";
 
 interface Props {
   model: Model;
@@ -23,6 +24,8 @@ interface Props {
   onRemoved?: (id: number) => void;
   /** True when a painting guide exists for this model — shows a "Guide" badge. */
   hasGuide?: boolean;
+  /** All tags with counts for the quick-assign popover typeahead. */
+  allTagSuggestions?: { tag: string; count: number }[];
 }
 
 const SITE_LABELS: Record<string, string> = {
@@ -44,7 +47,7 @@ const TAG_COLORS: Record<string, string> = {
   "figure":        "bg-indigo-900 text-indigo-300",
 };
 
-export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false }: Props) {
+export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false, allTagSuggestions = [] }: Props) {
   const location = useLocation();
   const { showNSFW } = useNSFW();
   const { settings } = useAppSettings();
@@ -54,6 +57,8 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
 
   const [favorite, setFavorite] = useState(model.is_favorite);
   const [queued, setQueued] = useState(model.in_queue);
+  const [localTags, setLocalTags] = useState<string[]>(model.tags ?? []);
+  const [popoverOpen, setPopoverOpen] = useState(false);
 
   const variantCount = model.variant_count ?? 1;
   const isGroup = variantCount > 1;
@@ -127,8 +132,8 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
   const displayName = isGroup && model.character
     ? model.character
     : (model.title || model.name);
-  const allTags = [...(model.auto_tags ?? []), ...(model.tags ?? [])];
-  const uniqueTags = [...new Set(allTags)];
+  const allTagsDisplay = [...(model.auto_tags ?? []), ...localTags];
+  const uniqueTags = [...new Set(allTagsDisplay)];
 
   const handleCardClick = () => {
     sessionStorage.setItem("library_scroll", String(window.scrollY));
@@ -139,6 +144,7 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
     : `/models/${model.id}`;
 
   return (
+    <div className="relative">
     <Link
       to={linkTo}
       state={{ from: backTo ?? location.pathname + location.search }}
@@ -313,8 +319,32 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
               {model.rating.toFixed(1)}
             </span>
           )}
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPopoverOpen((o) => !o); }}
+            onFocus={(e) => e.stopPropagation()}
+            title="Quick assign tags / collections"
+            aria-label="Quick assign tags and collections"
+            className={`ml-auto p-1 rounded transition-all ${
+              popoverOpen
+                ? "text-indigo-400 bg-indigo-900/40 opacity-100"
+                : "text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 focus:opacity-100"
+            }`}
+          >
+            <MoreHorizontal size={13} />
+          </button>
         </div>
       </div>
     </Link>
+
+    {popoverOpen && (
+      <QuickAssignPopover
+        modelId={model.id}
+        initialTags={localTags}
+        allTags={allTagSuggestions}
+        onTagsChange={(next) => setLocalTags(next)}
+        onClose={() => setPopoverOpen(false)}
+      />
+    )}
+    </div>
   );
 }
