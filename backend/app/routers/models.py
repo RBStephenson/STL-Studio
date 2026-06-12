@@ -425,8 +425,14 @@ async def set_thumbnail_from_url(
 ):
     """Download a remote image server-side and store it as the local thumbnail.
 
-    Remote CDNs commonly block hot-linking, so storing the bare URL in
-    thumbnail_url renders nothing in the UI — downloading is the reliable path.
+    Remote CDNs commonly block hot-linking, so downloading to a local file is
+    the reliable path. When the server-side download fails we *don't* dead-end
+    with a 422 (the model is left unchanged and the picker shows nothing usable);
+    instead we fall back to storing the bare URL and clearing the local path —
+    the same graceful degradation PATCH /models/{id} and /scrape/apply use, so
+    the UI can still try to render the image directly (#285). The response's
+    `downloaded` flag lets the caller warn that it may not load if the host
+    blocks embedding.
     """
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
@@ -434,13 +440,17 @@ async def set_thumbnail_from_url(
     try:
         path = await download_thumbnail(model_id, body.url)
     except ThumbnailDownloadError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        model.thumbnail_path = None
+        model.thumbnail_url = body.url
+        model.updated_at = utcnow()
+        db.commit()
+        return {"ok": True, "path": None, "downloaded": False, "detail": str(e)}
 
     model.thumbnail_path = str(path)
     model.thumbnail_url = None
     model.updated_at = utcnow()
     db.commit()
-    return {"ok": True, "path": str(path)}
+    return {"ok": True, "path": str(path), "downloaded": True}
 
 
 @router.post("/{model_id}/thumbnail/upload")

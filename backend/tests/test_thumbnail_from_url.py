@@ -140,12 +140,16 @@ class TestFromUrlEndpoint:
         resp = client.post(f"/models/{model.id}/thumbnail/from-url",
                            json={"url": "https://cdn.example.com/new.png"})
         assert resp.status_code == 200
+        assert resp.json()["downloaded"] is True
 
         db.refresh(model)
         assert model.thumbnail_path == str(thumb_dir / f"{model.id}.png")
         assert model.thumbnail_url is None
 
-    def test_download_failure_returns_422_and_keeps_model(self, client, db, thumb_dir, monkeypatch):
+    def test_download_failure_falls_back_to_storing_url(self, client, db, thumb_dir, monkeypatch):
+        """#285: a failed server-side download must not dead-end. Mirroring the
+        edit screen (PATCH /models/{id}), it stores the bare URL and clears the
+        stale path so the UI can still try to render it, and flags downloaded=False."""
         creator = make_creator(db)
         model = make_model(db, creator, thumbnail_path="/somewhere/local.png")
         db.commit()
@@ -154,11 +158,14 @@ class TestFromUrlEndpoint:
 
         resp = client.post(f"/models/{model.id}/thumbnail/from-url",
                            json={"url": "https://cdn.example.com/blocked.png"})
-        assert resp.status_code == 422
-        assert "403" in resp.json()["detail"]
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["downloaded"] is False
+        assert "403" in body["detail"]
 
         db.refresh(model)
-        assert model.thumbnail_path == "/somewhere/local.png"
+        assert model.thumbnail_url == "https://cdn.example.com/blocked.png"
+        assert model.thumbnail_path is None
 
     def test_unknown_model_returns_404(self, client, thumb_dir):
         resp = client.post("/models/99999/thumbnail/from-url",

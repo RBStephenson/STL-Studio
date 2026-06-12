@@ -75,4 +75,27 @@ describe("ImagePicker – From URL tab", () => {
     expect(await screen.findByText("Server returned HTTP 403")).toBeInTheDocument();
     expect(onApplied).not.toHaveBeenCalled();
   });
+
+  it("warns (but keeps the save) when the server falls back to storing the URL", async () => {
+    const onApplied = renderPicker();
+
+    await userEvent.click(screen.getByRole("button", { name: /from url/i }));
+    await userEvent.type(
+      screen.getByPlaceholderText("https://…"),
+      "https://cdn.example.com/blocked.png"
+    );
+
+    // 200 OK but the server couldn't download it (#285 graceful fallback).
+    fetchMock.mockImplementationOnce(() =>
+      jsonResponse({ ok: true, downloaded: false, detail: "Server returned HTTP 403" })
+    );
+    await userEvent.click(screen.getByRole("button", { name: /set as thumbnail/i }));
+
+    // Modal stays open with a warning; the parent isn't refreshed until "Done".
+    expect(await screen.findByText(/saved as a direct link/i)).toBeInTheDocument();
+    expect(onApplied).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: /done/i }));
+    expect(onApplied).toHaveBeenCalled();
+  });
 });

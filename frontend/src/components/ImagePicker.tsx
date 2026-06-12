@@ -41,6 +41,11 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseError, setBrowseError] = useState<string | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
+  // Set when the server couldn't download the image and fell back to storing the
+  // bare URL (#285) — the thumbnail IS saved, but may not render if the host
+  // blocks embedding. We keep the modal open to tell the user rather than
+  // silently close.
+  const [savedAsLink, setSavedAsLink] = useState<string | null>(null);
 
   const browseDir = useCallback((path?: string) => {
     setBrowseLoading(true);
@@ -63,18 +68,29 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
   const apply = async (clear = false) => {
     setSaving(true);
     setApplyError(null);
+    setSavedAsLink(null);
     try {
       if (!clear && tab === "url") {
         // The server downloads the image and stores it locally — remote CDNs
-        // block hot-linking, so saving the bare URL renders nothing.
+        // block hot-linking, so a successful download is the reliable path.
         const r = await fetch(`/api/models/${modelId}/thumbnail/from-url`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: urlInput.trim() }),
         });
+        const data = await r.json().catch(() => null);
         if (!r.ok) {
-          const e = await r.json().catch(() => null);
-          throw new Error(e?.detail ?? "Could not fetch that image");
+          throw new Error(data?.detail ?? "Could not fetch that image");
+        }
+        if (data?.downloaded === false) {
+          // Saved, but the server couldn't download it — keep the modal open and
+          // tell the user it may not render. The thumbnail (the bare URL) is set.
+          setSavedAsLink(
+            data.detail
+              ? `Saved as a direct link — the server couldn't download it (${data.detail}). It may not display if the site blocks embedding.`
+              : "Saved as a direct link — it may not display if the site blocks embedding.",
+          );
+          return;
         }
       } else {
         const body = clear
@@ -138,7 +154,7 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
                   type="url"
                   placeholder="https://…"
                   value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
+                  onChange={(e) => { setUrlInput(e.target.value); setSavedAsLink(null); }}
                   className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -149,6 +165,11 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
                   className="w-48 h-48 object-cover rounded-lg border border-gray-700"
                   onError={(e) => (e.currentTarget.style.display = "none")}
                 />
+              )}
+              {savedAsLink && (
+                <p role="status" className="text-sm text-amber-300 bg-amber-950/40 border border-amber-800 rounded px-3 py-2">
+                  {savedAsLink}
+                </p>
               )}
             </div>
           ) : browsing ? (
@@ -298,14 +319,24 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
             <button onClick={onClose} className="px-4 py-2 rounded bg-gray-800 hover:bg-gray-700 text-sm text-gray-300">
               Cancel
             </button>
-            <button
-              onClick={() => apply(false)}
-              disabled={saving || (tab === "local" ? !selected : !urlInput.trim())}
-              className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-sm flex items-center gap-1.5 transition-colors"
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-              Set as Thumbnail
-            </button>
+            {savedAsLink ? (
+              <button
+                onClick={onApplied}
+                className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm flex items-center gap-1.5 transition-colors"
+              >
+                <Check size={14} />
+                Done
+              </button>
+            ) : (
+              <button
+                onClick={() => apply(false)}
+                disabled={saving || (tab === "local" ? !selected : !urlInput.trim())}
+                className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-sm flex items-center gap-1.5 transition-colors"
+              >
+                {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                Set as Thumbnail
+              </button>
+            )}
           </div>
         </div>
       </div>
