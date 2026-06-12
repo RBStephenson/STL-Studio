@@ -117,6 +117,22 @@ def _order_cols(sort: str) -> tuple:
         return (Model.character, Model.name)
 
 
+def _apply_sort(q, sort: str):
+    """Order a Model query by the given sort key, handling joins where needed.
+
+    Centralized so list_models and neighbors stay in lockstep (Prev/Next must
+    walk the same order the grid shows). `creator` sorts alphabetically by the
+    related Creator name — models with no creator sort last — then falls back to
+    the default character/name order within a creator. Everything else delegates
+    to the column-only `_order_cols`.
+    """
+    if sort == "creator":
+        return q.outerjoin(Creator, Model.creator_id == Creator.id).order_by(
+            Creator.name.is_(None), Creator.name, Model.character, Model.name
+        )
+    return q.order_by(*_order_cols(sort))
+
+
 def _collapse_variants(q) -> tuple:
     """Apply variant grouping to a query.
 
@@ -167,7 +183,7 @@ def list_models(
     printed: bool | None = None,
     excluded: bool = False,  # default: hide user-excluded models; pass true for the Excluded view
     added_within_days: int | None = Query(None, ge=1, le=365),  # "Recently added" window (#170)
-    sort: str = Query("name"),  # "name" | "queued_at" | "printed_at" | "added"
+    sort: str = Query("name"),  # "name" | "added" | "creator" | "queue" | "queued_at" | "printed_at"
     group_variants: bool = Query(True),
     db: Session = Depends(get_db),
 ):
@@ -190,8 +206,7 @@ def list_models(
         q, _ = _collapse_variants(q)
 
     total = q.count()
-    order_cols = _order_cols(sort)
-    items = q.order_by(*order_cols).offset((page - 1) * page_size).limit(page_size).all()
+    items = _apply_sort(q, sort).offset((page - 1) * page_size).limit(page_size).all()
 
     # Build variant count map for annotating group representatives
     vc_map: dict[tuple[int, str], int] = {}
@@ -643,7 +658,7 @@ def get_neighbors(
         q, rep_by_nonrep = _collapse_variants(q)
         target_id = rep_by_nonrep.get(model_id, model_id)
 
-    ids = [row[0] for row in q.with_entities(Model.id).order_by(*_order_cols(sort)).all()]
+    ids = [row[0] for row in _apply_sort(q.with_entities(Model.id), sort).all()]
     try:
         idx = ids.index(target_id)
     except ValueError:

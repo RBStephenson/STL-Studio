@@ -6,6 +6,7 @@ DEFAULTS = {
     "library_page_size": 48,
     "filter_presets": [],
     "recent_days": 7,
+    "library_sort": "name",
 }
 
 
@@ -112,3 +113,16 @@ def test_recent_days_bounds_rejected(client):
     assert client.patch("/settings", json={"recent_days": 0}).status_code == 422
     assert client.patch("/settings", json={"recent_days": 91}).status_code == 422
     assert client.get("/settings").json()["recent_days"] == 7
+
+
+def test_library_sort_round_trips(client):
+    r = client.patch("/settings", json={"library_sort": "creator"})
+    assert r.status_code == 200
+    assert client.get("/settings").json()["library_sort"] == "creator"
+
+
+def test_library_sort_invalid_value_rejected(client):
+    # queue/queued_at exist on the API but aren't persistable Library defaults.
+    assert client.patch("/settings", json={"library_sort": "queue"}).status_code == 422
+    assert client.patch("/settings", json={"library_sort": "bogus"}).status_code == 422
+    assert client.get("/settings").json()["library_sort"] == "name"

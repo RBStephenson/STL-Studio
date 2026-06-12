@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Users, Zap, X, RefreshCw, Loader2 } from "lucide-react";
-import { api, Creator } from "../api/client";
+import { api, Creator, ScanStatus } from "../api/client";
 import StorefrontEnrich from "../components/StorefrontEnrich";
+import { useToast } from "../context/ToastContext";
 
 export default function Creators() {
   const [creators, setCreators] = useState<Creator[]>([]);
@@ -10,6 +11,7 @@ export default function Creators() {
   const [search, setSearch] = useState("");
   const [scanningId, setScanningId] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState<"name" | "models">("name");
+  const { toast } = useToast();
 
   const loadCreators = () => api.models.creators().then(setCreators).catch(() => {});
   useEffect(() => { loadCreators(); }, []);
@@ -20,12 +22,15 @@ export default function Creators() {
     try {
       await api.scan.startCreator(c.id);
       // Poll until the scan finishes, then refresh the model counts.
+      let last: ScanStatus | null = null;
       for (;;) {
         await new Promise((r) => setTimeout(r, 1500));
-        const s = await api.scan.status();
-        if (!s.running) break;
+        last = await api.scan.status();
+        if (!last.running) break;
       }
       await loadCreators();
+      // Announce the backend's completion summary (#283).
+      toast(last?.message || `Rescanned ${c.name}.`, "success");
     } catch {
       /* ignore — e.g. another scan started elsewhere */
     } finally {

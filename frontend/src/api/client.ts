@@ -102,7 +102,10 @@ export interface AppSettings {
   library_page_size: number;
   filter_presets: FilterPreset[];
   recent_days: number;
+  library_sort: LibrarySort;
 }
+
+export type LibrarySort = "name" | "added" | "creator";
 
 // --- Painting module (Paint Shelf, M1) ---
 

@@ -22,8 +22,11 @@ export default function ScanButton({ onScanComplete }: Props) {
       wasRunningRef.current = true;
       setCancelling(false);
     } else {
+      // running → idle: announce the backend's completion summary (#283).
+      // `status.message` carries "done — N models, M files[, P removed]" (#223).
       if (wasRunningRef.current) {
         wasRunningRef.current = false;
+        toast(status?.message || "Scan complete.", "success");
         onScanComplete?.();
       }
       return;

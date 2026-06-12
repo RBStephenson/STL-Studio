@@ -7,5 +7,6 @@ export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
   library_page_size: 48,
   filter_presets: [],
   recent_days: 7,
+  library_sort: "name",
   ...over,
 });

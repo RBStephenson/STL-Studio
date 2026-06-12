@@ -32,6 +32,11 @@ filtered view.
   or use the quick chips in the header (e.g. "*N* favorites", "*N* queued",
   "*N* printed") — so you can see both what you want to print and what you've
   already printed.
+- **Sort:** the **Sort** dropdown in the header orders the grid by **Name**,
+  **Date added** (newest first), or **Creator**. The choice is captured in saved
+  presets and remembered as your default across browsers; Prev/Next on a model's
+  detail page walks the library in the same order. (The Recently added chip
+  forces newest-first while it's on.)
 - **Recently added:** a quick chip in the header filters to models added in the
   last *N* days, newest first, and cards inside that window carry a **New**
   badge. The window (3 / 7 / 14 / 30 days) is configurable under

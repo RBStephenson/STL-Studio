@@ -208,6 +208,7 @@ class AppSettingsRead(BaseModel):
     library_page_size: int = 48
     filter_presets: list[FilterPreset] = []
     recent_days: int = 7  # "Recently added" window in days (#170)
+    library_sort: str = "name"  # default Library order: name | added | creator (#247)
 
 
 class AppSettingsUpdate(BaseModel):
@@ -219,5 +220,8 @@ class AppSettingsUpdate(BaseModel):
     library_page_size: Optional[int] = Field(None, ge=12, le=200)
     filter_presets: Optional[list[FilterPreset]] = None
     recent_days: Optional[int] = Field(None, ge=1, le=90)
+    # Only the three user-facing Library sorts are persistable defaults; the
+    # queue/queued_at/printed_at keys are page-specific, not a Library default.
+    library_sort: Optional[str] = Field(None, pattern="^(name|added|creator)$")
 
     model_config = {"extra": "forbid"}

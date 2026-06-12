@@ -6,7 +6,7 @@ import {
   useDraggable, useDroppable, pointerWithin,
   DragStartEvent, DragEndEvent,
 } from "@dnd-kit/core";
-import { api, Model, Creator, ModelStats, Collection, FilterPreset } from "../api/client";
+import { api, Model, Creator, ModelStats, Collection, FilterPreset, LibrarySort } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
@@ -147,6 +147,7 @@ export default function Library() {
   const printedParam = searchParams.get("printed") === "1";
   const excludedParam = searchParams.get("excluded") === "1";
   const addedDays    = searchParams.get("added_days") ?? ""; // "Recently added" window (#170)
+  const sortParam    = searchParams.get("sort") ?? "";       // "" | "name" | "added" | "creator" (#247)
 
   // Update one or more filter params in a single history entry and reset to
   // page 1. Multi-key form serves the mutually exclusive pairs
@@ -218,6 +219,27 @@ export default function Library() {
   const { settings, update: updateSettings } = useAppSettings();
   const presets = settings.filter_presets;
   const pageSize = settings.library_page_size;
+
+  // Sort (#247): the URL is canonical, but when it carries no `sort` the persisted
+  // default applies. addedDays ("Recently added") forces newest-first regardless.
+  const effectiveSort = addedDays ? "added" : (sortParam || settings.library_sort);
+  // Mirror a non-default persisted sort into the URL so presets capture it and the
+  // detail-page Prev/Next (which only sees the origin URL) walks the same order.
+  useEffect(() => {
+    if (!sortParam && !addedDays && settings.library_sort && settings.library_sort !== "name") {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("sort", settings.library_sort);
+        return next;
+      }, { replace: true });
+    }
+  }, [sortParam, addedDays, settings.library_sort, setSearchParams]);
+
+  // Changing the dropdown drives the URL and persists the new default server-side.
+  const changeSort = (value: LibrarySort) => {
+    void updateSettings({ library_sort: value });
+    setParam("sort", value);
+  };
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
   const presetInputRef = useRef<HTMLInputElement>(null);
@@ -253,7 +275,8 @@ export default function Library() {
       if (queueParam)  params.in_queue      = true;
       if (printedParam) params.printed      = true;
       if (excludedParam) params.excluded    = true;
-      if (addedDays)   { params.added_within_days = addedDays; params.sort = "added"; }
+      if (addedDays)   params.added_within_days = addedDays;
+      if (effectiveSort && effectiveSort !== "name") params.sort = effectiveSort;
       const data = await api.models.list(params);
       if (fetchId !== fetchIdRef.current) return; // stale response — a newer fetch is in flight
       setModels(data.items);
@@ -261,7 +284,7 @@ export default function Library() {
     } finally {
       if (fetchId === fetchIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam, excludedParam, addedDays]);
+  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam, excludedParam, addedDays, effectiveSort]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);
@@ -523,7 +546,24 @@ export default function Library() {
             )}
           </div>
         </div>
-        <ScanButton onScanComplete={fetchModels} />
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-sm text-gray-400">
+            Sort
+            <select
+              aria-label="Sort models"
+              value={effectiveSort}
+              disabled={!!addedDays}
+              title={addedDays ? "Sorted by date added while the Recently added filter is on" : undefined}
+              onChange={(e) => changeSort(e.target.value as LibrarySort)}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50"
+            >
+              <option value="name">Name</option>
+              <option value="added">Date added</option>
+              <option value="creator">Creator</option>
+            </select>
+          </label>
+          <ScanButton onScanComplete={fetchModels} />
+        </div>
       </div>
 
       {/* Search + filter bar */}

@@ -193,6 +193,9 @@ function parseLibraryOrigin(from: string | undefined): Record<string, string | n
   if (addedDays) {
     params.added_within_days = addedDays;
     params.sort = "added";
+  } else if (sp.get("sort")) {
+    // Chosen Library sort (#247): walk Prev/Next in the same order as the grid.
+    params.sort = sp.get("sort")!;
   }
   params.group_variants = !fav && !queue && !printed && !excluded;
   return params;

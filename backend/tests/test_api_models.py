@@ -703,3 +703,35 @@ class TestRecentlyAdded:
         body = resp.json()
         assert body["prev_id"] is None
         assert body["next_id"] == models[2].id
+
+
+class TestSortByCreator:
+    def _seed(self, db):
+        """Models across creators Zeta/Alpha plus one orphan (no creator)."""
+        zeta = make_creator(db, "Zeta Studio")
+        alpha = make_creator(db, "Alpha Forge")
+        make_model(db, zeta, name="z-model")
+        make_model(db, alpha, name="a-model")
+        orphan = make_model(db, zeta, name="orphan")
+        orphan.creator_id = None
+        commit_all(db)
+
+    def test_sort_creator_orders_alphabetically_orphan_last(self, client, db):
+        self._seed(db)
+
+        resp = client.get("/models?sort=creator&group_variants=false")
+        assert resp.status_code == 200
+        names = [i["name"] for i in resp.json()["items"]]
+        # Alpha Forge before Zeta Studio; the creatorless model sorts last.
+        assert names == ["a-model", "z-model", "orphan"]
+
+    def test_neighbors_follow_creator_sort(self, client, db):
+        self._seed(db)
+        a_model = next(i for i in client.get("/models?sort=creator").json()["items"]
+                       if i["name"] == "a-model")
+
+        resp = client.get(f"/models/{a_model['id']}/neighbors?sort=creator&group_variants=false")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["prev_id"] is None  # first in creator order
+        assert body["next_id"] is not None

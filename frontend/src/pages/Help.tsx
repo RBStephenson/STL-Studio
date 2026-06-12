@@ -63,6 +63,12 @@ const SECTIONS: Section[] = [
             panel for the full set, or use the quick chips in the header.
           </li>
           <li>
+            <strong>Sort:</strong> the header dropdown orders the grid by Name, Date
+            added (newest first), or Creator. Your choice is saved in presets and
+            remembered as the default across browsers, and Prev/Next on a model walks
+            the library in the same order.
+          </li>
+          <li>
             <strong>Recently added:</strong> the header chip filters to models added in
             the last few days, newest first; those cards also carry a <strong>New</strong>{" "}
             badge. Configure the window in Settings → Preferences.
