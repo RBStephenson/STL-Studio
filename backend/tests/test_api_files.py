@@ -189,6 +189,34 @@ class TestDownloadZip:
         z = zipfile.ZipFile(io.BytesIO(resp.content))
         assert z.namelist() == []
 
+    def test_duplicate_filenames_are_deduplicated(self, client, db, tmp_path, monkeypatch):
+        """Two files sharing a basename in different folders must both survive in
+        the archive — the second is suffixed, not silently overwritten (#219)."""
+        import app.routers.files as files_module
+        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: True)
+
+        creator = make_creator(db)
+        model = make_model(db, creator)
+
+        file_ids = []
+        for sub in ("Body", "Base"):
+            p = tmp_path / sub / "base.stl"
+            p.parent.mkdir(parents=True)
+            p.write_bytes(b"solid\nendsolid\n")
+            row = make_stl_file(db, model, filename="base.stl", path=str(p))
+            file_ids.append(row.id)
+        db.commit()
+
+        resp = client.post(
+            "/files/download-zip",
+            json={"file_ids": file_ids, "zip_name": "Dupes"},
+        )
+        assert resp.status_code == 200
+        names = zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
+        assert len(names) == 2
+        assert "base.stl" in names
+        assert "base (2).stl" in names
+
     def test_zip_name_sanitized(self, client, db, tmp_path, monkeypatch):
         """Special characters in zip_name are sanitized in the filename header."""
         import app.routers.files as files_module

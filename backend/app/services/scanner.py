@@ -74,7 +74,8 @@ _group_overrides: dict[str, str | None] = {}
 
 
 def get_status() -> dict:
-    return dict(_scan_state)
+    with _state_lock:
+        return dict(_scan_state)
 
 
 def _load_pack_overrides(db: Session) -> None:
@@ -97,7 +98,8 @@ def scan_all_roots(db: Session | None = None):
     if not _scan_lock.acquire(blocking=False):
         return
     _cancel_requested = False
-    _scan_state.update(running=True, message="starting", models_found=0, files_found=0, cancelled=False)
+    with _state_lock:
+        _scan_state.update(running=True, message="starting", models_found=0, files_found=0, cancelled=False)
     try:
         _db = db or SessionLocal()
         own_db = db is None
@@ -124,29 +126,43 @@ def scan_all_roots(db: Session | None = None):
             root_paths = [r.path for r in roots]
             for root in roots:
                 if _cancel_requested:
-                    _scan_state["message"] = "cancelled"
-                    _scan_state["cancelled"] = True
+                    with _state_lock:
+                        _scan_state["message"] = "cancelled"
+                        _scan_state["cancelled"] = True
                     break
                 _scan_root(root, _db)
                 root.last_scanned = utcnow()
                 _db.commit()
 
             if not _cancel_requested:
-                _prune_stale_models(_db, scan_start, root_paths)
-                _prune_stale_paths(_db)
+                removed = _prune_stale_models(_db, scan_start, root_paths)
+                removed += _prune_stale_paths(_db)
                 # Slicer rows must go before the phantom prune so a model whose
                 # only "STL" was a slicer project is removed in the same scan.
                 _prune_slicer_files(_db)
-                _prune_phantoms(_db)
+                removed += _prune_phantoms(_db)
                 _prune_empty_creators(_db)
+
+                # Replace the in-progress "scanning <creator>" message with a
+                # summary the UI can show once the run finishes (#223).
+                with _state_lock:
+                    summary = (
+                        f"done — {_scan_state['models_found']} models, "
+                        f"{_scan_state['files_found']} files"
+                    )
+                    if removed:
+                        summary += f", {removed} removed"
+                    _scan_state["message"] = summary
         finally:
             if own_db:
                 _db.close()
     except Exception as e:
         logger.exception(f"Scan failed: {e}")
-        _scan_state["message"] = f"error: {e}"
+        with _state_lock:
+            _scan_state["message"] = f"error: {e}"
     finally:
-        _scan_state["running"] = False
+        with _state_lock:
+            _scan_state["running"] = False
         _scan_lock.release()
 
 
@@ -188,14 +204,17 @@ def _prune_stale_paths(db: Session):
     renamed (e.g. 'polyminds studios' → 'PolyMind Studios'). The scanner
     never visits the old path again, so the rows survive the phantom prune.
     After removal, orphaned Creator rows (no remaining models) are also deleted.
+
+    Returns the number of models pruned (for the scan completion summary, #223).
     """
     all_models = db.query(Model.id, Model.folder_path, Model.creator_id).all()
     stale_ids = [m.id for m in all_models if m.folder_path and not Path(m.folder_path).exists()]
     if not stale_ids:
-        return
+        return 0
 
     _cascade_delete_models(db, stale_ids)
     logger.info(f"Post-scan: pruned {len(stale_ids)} models with missing folder paths")
+    return len(stale_ids)
 
 
 def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]):
@@ -215,9 +234,11 @@ def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]
     User-EXCLUDED models are never pruned: the walk returns before bumping their
     updated_at (so it always predates scan_start), and deleting them would let a
     later scan resurrect the folder as a brand-new, non-excluded model.
+
+    Returns the number of models pruned (for the scan completion summary, #223).
     """
     if not root_paths:
-        return
+        return 0
     roots_norm = [os.path.normcase(os.path.normpath(p)) for p in root_paths]
 
     def _under_root(folder_path: str | None) -> bool:
@@ -234,12 +255,13 @@ def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]
         if not r.excluded and r.updated_at is not None and r.updated_at < scan_start
     ]
     if not stale_ids:
-        return
+        return 0
     if _exceeds_prune_cap(len(stale_ids), total, "not visited this run"):
-        return
+        return 0
 
     _cascade_delete_models(db, stale_ids)
     logger.info(f"Post-scan: pruned {len(stale_ids)} stale models (not visited this run)")
+    return len(stale_ids)
 
 
 def _prune_empty_creators(db: Session):
@@ -269,6 +291,8 @@ def _prune_phantoms(db: Session, creator_id: int | None = None):
 
     Pass creator_id to restrict pruning to a single creator (used after per-creator
     rescans so we don't touch creators that haven't been walked yet).
+
+    Returns the number of models pruned (for the scan completion summary, #223).
     """
     base_q = db.query(Model.id)
     if creator_id is not None:
@@ -279,12 +303,13 @@ def _prune_phantoms(db: Session, creator_id: int | None = None):
         base_q.filter(~Model.id.in_(db.query(STLFile.model_id).distinct()))
     ]
     if not ids:
-        return
+        return 0
     if _exceeds_prune_cap(len(ids), total, "no STL files"):
-        return
+        return 0
 
     _cascade_delete_models(db, ids)
     logger.info(f"Post-scan: pruned {len(ids)} phantom models (no STL files)")
+    return len(ids)
 
 
 def _prune_slicer_files(db: Session):
@@ -353,13 +378,15 @@ def scan_creator(creator_id: int):
     if not _scan_lock.acquire(blocking=False):
         return
     _cancel_requested = False
-    _scan_state.update(running=True, message="starting", models_found=0, files_found=0, cancelled=False)
+    with _state_lock:
+        _scan_state.update(running=True, message="starting", models_found=0, files_found=0, cancelled=False)
     try:
         db = SessionLocal()
         try:
             creator = db.get(Creator, creator_id)
             if not creator:
-                _scan_state["message"] = "creator not found"
+                with _state_lock:
+                    _scan_state["message"] = "creator not found"
                 return
 
             _load_pack_overrides(db)
@@ -379,7 +406,8 @@ def scan_creator(creator_id: int):
             if not dirs:
                 dirs = _creator_dirs_by_name(creator.name, db)
             if not dirs:
-                _scan_state["message"] = "no folders found for creator"
+                with _state_lock:
+                    _scan_state["message"] = "no folders found for creator"
                 return
 
             # Clear all STL rows for this creator's models before re-walking.
@@ -394,8 +422,9 @@ def scan_creator(creator_id: int):
 
             for creator_dir, layout_tags in dirs:
                 if _cancel_requested:
-                    _scan_state["message"] = "cancelled"
-                    _scan_state["cancelled"] = True
+                    with _state_lock:
+                        _scan_state["message"] = "cancelled"
+                        _scan_state["cancelled"] = True
                     break
                 with _state_lock:
                     _scan_state["message"] = f"scanning {creator_dir.name}"
@@ -411,14 +440,24 @@ def scan_creator(creator_id: int):
                 )
 
             if not _cancel_requested:
-                _prune_phantoms(db, creator_id=creator_id)
+                removed = _prune_phantoms(db, creator_id=creator_id)
+                with _state_lock:
+                    summary = (
+                        f"done — {_scan_state['models_found']} models, "
+                        f"{_scan_state['files_found']} files"
+                    )
+                    if removed:
+                        summary += f", {removed} removed"
+                    _scan_state["message"] = summary
         finally:
             db.close()
     except Exception as e:
         logger.exception(f"Creator scan failed: {e}")
-        _scan_state["message"] = f"error: {e}"
+        with _state_lock:
+            _scan_state["message"] = f"error: {e}"
     finally:
-        _scan_state["running"] = False
+        with _state_lock:
+            _scan_state["running"] = False
         _scan_lock.release()
 
 
@@ -506,7 +545,8 @@ def _scan_root(root: ScanRoot, db: Session):
     root_path = Path(root.path)
     if not root_path.exists():
         logger.warning(f"Scan root not found: {root.path}")
-        _scan_state["message"] = f"path not found: {root.path}"
+        with _state_lock:
+            _scan_state["message"] = f"path not found: {root.path}"
         return
 
     # Resolve creator-level folders via the root's layout template. Each entry is

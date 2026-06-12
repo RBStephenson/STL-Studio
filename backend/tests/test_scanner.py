@@ -826,3 +826,62 @@ class TestSlicerFileExclusion:
 
         names = {m.name for m in db.query(Model).all()}
         assert names == {"real"}
+
+
+# ---------------------------------------------------------------------------
+# Scan completion summary + prune return counts (#223)
+# ---------------------------------------------------------------------------
+
+class TestScanCompletionSummary:
+    def test_prune_phantoms_returns_count(self, db):
+        from tests.conftest import make_model, make_stl_file
+        creator = make_creator(db, "Creator")
+        # Two real models (with STL rows) keep us under the 50% safety cap so the
+        # single phantom is actually pruned and counted.
+        for i in range(2):
+            m = make_model(db, creator, name=f"real{i}")
+            make_stl_file(db, m, filename=f"real{i}.stl", path=f"/tmp/real{i}.stl")
+        make_model(db, creator, name="phantom")  # no STL files
+        db.commit()
+
+        assert scanner._prune_phantoms(db) == 1
+
+    def test_prune_returns_zero_when_nothing_removed(self, db):
+        from tests.conftest import make_model, make_stl_file
+        creator = make_creator(db, "Creator")
+        m = make_model(db, creator, name="real")
+        make_stl_file(db, m)
+        db.commit()
+
+        assert scanner._prune_phantoms(db) == 0
+
+    def _run_with_stubs(self, db, tmp_path, monkeypatch, *, models, files, removed):
+        """Run scan_all_roots with the root walk and prunes stubbed out, so we can
+        assert the completion-summary message without touching the real DB engine
+        the worker threads would otherwise use."""
+        from app.models import ScanRoot
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+
+        def fake_scan_root(root, _db):
+            scanner._scan_state["models_found"] = models
+            scanner._scan_state["files_found"] = files
+
+        monkeypatch.setattr(scanner, "_scan_root", fake_scan_root)
+        monkeypatch.setattr(scanner, "_prune_stale_models", lambda *a, **k: removed)
+        monkeypatch.setattr(scanner, "_prune_stale_paths", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_slicer_files", lambda *a, **k: None)
+        monkeypatch.setattr(scanner, "_prune_phantoms", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_empty_creators", lambda *a, **k: None)
+
+        scanner.scan_all_roots(db)
+        return scanner.get_status()
+
+    def test_summary_includes_removed_count(self, db, tmp_path, monkeypatch):
+        status = self._run_with_stubs(db, tmp_path, monkeypatch, models=5, files=12, removed=3)
+        assert status["message"] == "done — 5 models, 12 files, 3 removed"
+        assert status["running"] is False
+
+    def test_summary_omits_removed_when_zero(self, db, tmp_path, monkeypatch):
+        status = self._run_with_stubs(db, tmp_path, monkeypatch, models=4, files=9, removed=0)
+        assert status["message"] == "done — 4 models, 9 files"

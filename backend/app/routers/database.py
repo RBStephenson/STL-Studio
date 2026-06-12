@@ -22,6 +22,10 @@ from app.services import scanner
 
 router = APIRouter(prefix="/database", tags=["database"])
 
+# How many pre-restore / pre-reset snapshots to keep per reason before the oldest
+# are pruned. Bounds disk use while still giving a few levels of undo (#222).
+SNAPSHOT_KEEP = 3
+
 
 def _db_path() -> Path:
     """Resolve the on-disk path of the SQLite database from its URL."""
@@ -41,6 +45,52 @@ def _db_path() -> Path:
 def _require_idle():
     if scanner.get_status()["running"]:
         raise HTTPException(409, "A scan is currently running — wait for it to finish or cancel it first")
+
+
+def _snapshot_db(reason: str) -> Path | None:
+    """Snapshot the live DB to <data_dir>/backups/pre_<reason>_<stamp>.db before a
+    destructive operation, so even a mis-clicked restore/reset is one file-copy
+    away from recovery (#222). Uses the same online-backup API as /backup (folds in
+    WAL). Keeps the newest SNAPSHOT_KEEP snapshots per reason, prunes older ones.
+
+    Returns the snapshot path, or None if the DB can't be snapshotted (no file yet
+    on a fresh install, or a non-file/in-memory DB). A snapshot is a best-effort
+    safety net — its absence must not block the destructive op the caller is about
+    to perform.
+    """
+    try:
+        db_path = _db_path()
+    except HTTPException:
+        return None
+    if not db_path.exists():
+        return None
+
+    backups = db_path.parent / "backups"
+    backups.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = backups / f"pre_{reason}_{stamp}.db"
+    # Guard against two snapshots landing in the same wall-clock second.
+    n = 2
+    while dest.exists():
+        dest = backups / f"pre_{reason}_{stamp}_{n}.db"
+        n += 1
+
+    src = sqlite3.connect(str(db_path))
+    dst = sqlite3.connect(str(dest))
+    try:
+        with dst:
+            src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+
+    # Prune older snapshots for this reason, keeping the newest SNAPSHOT_KEEP.
+    # Timestamped names sort chronologically, so lexical order is age order.
+    snaps = sorted(backups.glob(f"pre_{reason}_*.db"))
+    for old in snaps[:-SNAPSHOT_KEEP]:
+        _safe_unlink(old)
+
+    return dest
 
 
 @router.get("/backup")
@@ -101,6 +151,11 @@ async def restore_database(file: UploadFile = File(...)):
         _safe_unlink(tmp)
         raise HTTPException(400, f"Invalid backup file: {e}")
 
+    # Snapshot the current library before we overwrite it, so a wrong-file restore
+    # is recoverable (#222). Done after validation passes (no point snapshotting
+    # for a restore we're about to reject).
+    snapshot = _snapshot_db("restore")
+
     # Drop pooled connections so the file isn't held open, then swap it in and
     # clear the stale WAL/SHM sidecars that belonged to the old database.
     engine.dispose()
@@ -112,18 +167,20 @@ async def restore_database(file: UploadFile = File(...)):
     Base.metadata.create_all(bind=engine)
     from app.main import _migrate_schema
     _migrate_schema()
-    return {"ok": True}
+    return {"ok": True, "snapshot": str(snapshot) if snapshot else None}
 
 
 @router.post("/reset")
 def reset_database():
     """Delete all data and recreate an empty schema."""
     _require_idle()
+    # Snapshot before wiping so a mis-clicked reset is recoverable (#222).
+    snapshot = _snapshot_db("reset")
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     from app.main import _migrate_schema
     _migrate_schema()
-    return {"ok": True}
+    return {"ok": True, "snapshot": str(snapshot) if snapshot else None}
 
 
 def _safe_unlink(path: Path):

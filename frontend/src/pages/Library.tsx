@@ -163,6 +163,38 @@ export default function Library() {
     });
   };
   const setParam = (key: string, value: string) => setParams({ [key]: value });
+
+  // Search is debounced (#220): the input binds to local state for instant
+  // feedback, and the `q` URL param is written ~250 ms after the last keystroke
+  // with { replace: true } so typing doesn't fire a fetch per character or push
+  // a history entry per character (Back used to step through "a", "ak", …).
+  const [searchInput, setSearchInput] = useState(search);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep the input in sync when `q` changes from outside the box (clear-filters,
+  // back/forward navigation, applying a preset). While typing, `q` is stale
+  // between debounce flushes so this effect doesn't fight the local state. Any
+  // pending debounce is dropped here too: an external `q` change supersedes a
+  // half-typed value, so a late timer mustn't resurrect it (e.g. type then Back).
+  useEffect(() => {
+    setSearchInput(search);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+  }, [search]);
+  useEffect(() => () => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+  }, []);
+  const onSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set("q", value); else next.delete("q");
+        next.delete("page");
+        return next;
+      }, { replace: true });
+    }, 250);
+  };
+
   const setPage = (p: number) => {
     window.scrollTo({ top: 0, behavior: "smooth" });
     setSearchParams((prev) => {
@@ -501,8 +533,8 @@ export default function Library() {
           <input
             type="text"
             placeholder="Search models…"
-            value={search}
-            onChange={(e) => setParam("q", e.target.value)}
+            value={searchInput}
+            onChange={(e) => onSearchChange(e.target.value)}
             className="w-full bg-gray-900 border border-gray-700 rounded pl-9 pr-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
           />
         </div>
@@ -660,7 +692,7 @@ export default function Library() {
             </label>
             {hasFilters && (
               <button
-                onClick={() => setSearchParams(search ? { q: search } : {})}
+                onClick={() => setSearchParams(searchInput ? { q: searchInput } : {})}
                 className="text-xs text-gray-500 hover:text-gray-300 px-2 ml-auto"
               >
                 Clear all
