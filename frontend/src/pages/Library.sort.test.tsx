@@ -8,6 +8,8 @@ import { AppSettings } from "../api/client";
 const listMock = vi.fn().mockResolvedValue({ items: [], total: 0 });
 
 vi.mock("../api/client", () => ({
+  PRINT_STATUS_LABELS: { none: "Not printed", queued: "Queued", printing: "Printing", printed: "Printed" },
+  PRINT_STATUS_CYCLE: ["none", "queued", "printing", "printed"],
   api: {
     models: {
       list: (...args: unknown[]) => listMock(...args),

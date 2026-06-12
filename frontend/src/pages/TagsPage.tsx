@@ -80,7 +80,7 @@ export default function TagsPage() {
       title: "Merge tags?",
       message: `All models tagged "${sourceTag}" will also get "${target}", and "${sourceTag}" will be removed. This cannot be undone.`,
       confirmLabel: "Merge",
-      danger: true,
+      destructive: true,
     });
     if (!ok) return;
     setMergeSaving(true);
@@ -101,7 +101,7 @@ export default function TagsPage() {
       title: `Delete tag "${tag}"?`,
       message: `This will remove "${tag}" from ${count} model(s). This cannot be undone.`,
       confirmLabel: "Delete",
-      danger: true,
+      destructive: true,
     });
     if (!ok) return;
     setDeleting(tag);

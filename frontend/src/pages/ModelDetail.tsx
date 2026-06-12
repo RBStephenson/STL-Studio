@@ -229,6 +229,8 @@ export default function ModelDetail() {
   const [favorite, setFavorite] = useState(false);
   const [queued, setQueued] = useState(false);
   const [printedAt, setPrintedAt] = useState<string | null>(null);
+  const [printStatus, setPrintStatus] = useState<import("../api/client").PrintStatus>("none");
+  const [printCount, setPrintCount] = useState(0);
   const [tags, setTags] = useState<string[]>([]);
   const [partTypes, setPartTypes] = useState<Record<number, string>>({});
   const [showKitBuilder, setShowKitBuilder] = useState(false);
@@ -270,6 +272,8 @@ export default function ModelDetail() {
       setFavorite(model.is_favorite);
       setQueued(model.in_queue);
       setPrintedAt(model.printed_at);
+      setPrintStatus(model.print_status ?? "none");
+      setPrintCount(model.print_count ?? 0);
       setTags(model.tags ?? []);
       const pts: Record<number, string> = {};
       model.stl_files.forEach((f) => { if (f.part_type) pts[f.id] = f.part_type; });
@@ -440,6 +444,23 @@ export default function ModelDetail() {
       setPrintedAt(prevPrinted);  // revert both on failure
       setQueued(prevQueued);
       toast("Couldn't update printed status — try again.", "error");
+    }
+  };
+
+  const cyclePrintStatus = async () => {
+    const { PRINT_STATUS_CYCLE } = await import("../api/client");
+    const idx = PRINT_STATUS_CYCLE.indexOf(printStatus);
+    const next = PRINT_STATUS_CYCLE[(idx + 1) % PRINT_STATUS_CYCLE.length];
+    const prev = printStatus;
+    const prevCount = printCount;
+    setPrintStatus(next);
+    try {
+      const res = await api.models.setPrintStatus(Number(id), next);
+      setPrintCount(res.print_count);
+    } catch {
+      setPrintStatus(prev);
+      setPrintCount(prevCount);
+      toast("Couldn't update print status — try again.", "error");
     }
   };
 
@@ -748,6 +769,26 @@ export default function ModelDetail() {
               >
                 <Check size={14} />
                 {printedAt ? "Printed" : "Mark printed"}
+              </button>
+              <button
+                onClick={cyclePrintStatus}
+                title={`Print status: ${printStatus} — click to advance`}
+                aria-label={`Print status ${printStatus}`}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm transition-colors ${
+                  printStatus === "queued"
+                    ? "bg-sky-950/60 border-sky-800 text-sky-400 hover:bg-sky-900/60"
+                    : printStatus === "printing"
+                    ? "bg-amber-950/60 border-amber-800 text-amber-400 hover:bg-amber-900/60"
+                    : printStatus === "printed"
+                    ? "bg-emerald-950/60 border-emerald-800 text-emerald-400 hover:bg-emerald-900/60"
+                    : "bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <Printer size={14} />
+                {printStatus === "none" ? "Set status" : printStatus.charAt(0).toUpperCase() + printStatus.slice(1)}
+                {printStatus === "printed" && printCount > 0 && (
+                  <span className="ml-1 text-xs opacity-70">×{printCount}</span>
+                )}
               </button>
               <button
                 onClick={toggleNSFW}

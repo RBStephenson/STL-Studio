@@ -103,6 +103,10 @@ class Model(Base):
     queue_position = Column(Integer, nullable=True)          # manual drag-to-reorder order
     printed_at = Column(DateTime, nullable=True)             # marked printed (clears queue)
 
+    # Print-status lifecycle: none → queued → printing → printed
+    print_status = Column(String, nullable=False, default="none", server_default="none", index=True)
+    print_count = Column(Integer, nullable=False, default=0, server_default="0")
+
     # Images
     thumbnail_path = Column(String, nullable=True)   # local path
     thumbnail_url = Column(String, nullable=True)    # remote URL

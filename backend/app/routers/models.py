@@ -10,7 +10,7 @@ from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
     ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, FavoriteUpdate, QueueUpdate, QueueReorder,
-    PrintedUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate, SetGroupBody,
+    PrintedUpdate, PrintStatusUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate, SetGroupBody,
 )
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail, store_thumbnail
 from app.services.variant_sync import propagate_source_url
@@ -38,6 +38,7 @@ def _apply_filters(
     is_favorite: bool | None = None,
     in_queue: bool | None = None,
     printed: bool | None = None,
+    print_status: str | None = None,
     excluded: bool = False,
     added_within_days: int | None = None,
 ):
@@ -88,6 +89,8 @@ def _apply_filters(
         q = q.filter(Model.printed_at != None)
     if printed is False:
         q = q.filter(Model.printed_at == None)
+    if print_status is not None:
+        q = q.filter(Model.print_status == print_status)
     if added_within_days is not None:
         q = q.filter(Model.created_at >= utcnow() - timedelta(days=added_within_days))
     return q
@@ -181,6 +184,7 @@ def list_models(
     is_favorite: bool | None = None,
     in_queue: bool | None = None,
     printed: bool | None = None,
+    print_status: str | None = None,
     excluded: bool = False,  # default: hide user-excluded models; pass true for the Excluded view
     added_within_days: int | None = Query(None, ge=1, le=365),  # "Recently added" window (#170)
     sort: str = Query("name"),  # "name" | "added" | "creator" | "queue" | "queued_at" | "printed_at"
@@ -193,7 +197,7 @@ def list_models(
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
         has_thumbnail=has_thumbnail, needs_review=needs_review,
         nsfw=nsfw, is_favorite=is_favorite, in_queue=in_queue,
-        printed=printed, excluded=excluded, added_within_days=added_within_days,
+        printed=printed, print_status=print_status, excluded=excluded, added_within_days=added_within_days,
     )
     # character filter is list_models-only (not exposed via Library URL state)
     if character:
@@ -637,6 +641,41 @@ def set_printed(model_id: int, body: PrintedUpdate, db: Session = Depends(get_db
     return {"ok": True, "printed_at": model.printed_at}
 
 
+@router.patch("/{model_id}/print-status")
+def set_print_status(model_id: int, body: PrintStatusUpdate, db: Session = Depends(get_db)):
+    """Set a model's print lifecycle status (none|queued|printing|printed).
+
+    Keeps legacy in_queue / printed_at fields in sync so existing Queue/History
+    views continue to work unchanged.
+    """
+    from app.schemas import PRINT_STATUSES
+    if body.status not in PRINT_STATUSES:
+        raise HTTPException(status_code=422, detail=f"status must be one of {sorted(PRINT_STATUSES)}")
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    model.print_status = body.status
+
+    if body.status == "queued":
+        if not model.in_queue:
+            model.in_queue = True
+            model.queued_at = utcnow()
+            max_pos = db.query(func.max(Model.queue_position)).filter(Model.in_queue == True).scalar()
+            model.queue_position = (max_pos or 0) + 1
+    elif body.status == "printed":
+        model.printed_at = model.printed_at or utcnow()
+        model.in_queue = False
+        model.queued_at = None
+        model.print_count = (model.print_count or 0) + 1
+    elif body.status in ("none", "printing"):
+        model.in_queue = False
+        model.queued_at = None
+
+    db.commit()
+    return {"ok": True, "print_status": model.print_status, "print_count": model.print_count}
+
+
 @router.patch("/{model_id}/exclude")
 def set_excluded(model_id: int, body: ExcludeUpdate, db: Session = Depends(get_db)):
     """Hide a model from the viewer (or restore it). Files on disk are untouched;
@@ -729,6 +768,7 @@ def get_neighbors(
     is_favorite: bool | None = None,
     in_queue: bool | None = None,
     printed: bool | None = None,
+    print_status: str | None = None,
     excluded: bool = False,
     added_within_days: int | None = Query(None, ge=1, le=365),
     sort: str = Query("name"),
@@ -746,7 +786,7 @@ def get_neighbors(
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
         has_thumbnail=has_thumbnail, needs_review=needs_review,
         nsfw=nsfw, is_favorite=is_favorite, in_queue=in_queue,
-        printed=printed, excluded=excluded, added_within_days=added_within_days,
+        printed=printed, print_status=print_status, excluded=excluded, added_within_days=added_within_days,
     )
 
     target_id = model_id

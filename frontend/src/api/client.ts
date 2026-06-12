@@ -10,6 +10,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export type PrintStatus = "none" | "queued" | "printing" | "printed";
+export const PRINT_STATUS_CYCLE: PrintStatus[] = ["none", "queued", "printing", "printed"];
+export const PRINT_STATUS_LABELS: Record<PrintStatus, string> = {
+  none: "Not printed",
+  queued: "Queued",
+  printing: "Printing",
+  printed: "Printed",
+};
+
 export interface Model {
   id: number;
   name: string;
@@ -33,6 +42,8 @@ export interface Model {
   in_queue: boolean;
   queued_at: string | null;
   printed_at: string | null;
+  print_status: PrintStatus;
+  print_count: number;
   thumbnail_path: string | null;
   thumbnail_url: string | null;
   image_paths: string[];
@@ -488,6 +499,12 @@ export const api = {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ printed }),
+      }),
+    setPrintStatus: (id: number, status: PrintStatus) =>
+      request<{ ok: boolean; print_status: PrintStatus; print_count: number }>(`/models/${id}/print-status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
       }),
     bulkTag: (ids: number[], addTags: string[], removeTags: string[]) =>
       request<{ ok: boolean; updated: number }>("/models/bulk", {

@@ -6,7 +6,7 @@ import {
   useDraggable, useDroppable, pointerWithin,
   DragStartEvent, DragEndEvent,
 } from "@dnd-kit/core";
-import { api, Model, Creator, ModelStats, Collection, FilterPreset, LibrarySort } from "../api/client";
+import { api, Model, Creator, ModelStats, Collection, FilterPreset, LibrarySort, PRINT_STATUS_LABELS } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
@@ -143,8 +143,9 @@ export default function Library() {
   const nsfwParam    = searchParams.get("nsfw") ?? "";        // "" | "1" | "0"
   const thumbParam   = searchParams.get("has_thumbnail") ?? ""; // "" | "1" | "0"
   const favParam     = searchParams.get("is_favorite") === "1";
-  const queueParam   = searchParams.get("in_queue") === "1";
-  const printedParam = searchParams.get("printed") === "1";
+  const queueParam      = searchParams.get("in_queue") === "1";
+  const printedParam    = searchParams.get("printed") === "1";
+  const printStatusParam = searchParams.get("print_status") ?? "";
   const excludedParam = searchParams.get("excluded") === "1";
   const addedDays    = searchParams.get("added_days") ?? ""; // "Recently added" window (#170)
   const sortParam    = searchParams.get("sort") ?? "";       // "" | "name" | "added" | "creator" (#247)
@@ -260,7 +261,7 @@ export default function Library() {
       // Variant grouping collapses non-representative variants. When filtering by
       // favorites/queue/printed (which apply to individual variants), disable grouping
       // so a flagged non-representative variant isn't hidden behind its group.
-      const groupVariants = !favParam && !queueParam && !printedParam && !excludedParam;
+      const groupVariants = !favParam && !queueParam && !printedParam && !printStatusParam && !excludedParam;
       const params: Record<string, string | number | boolean> = { page, page_size: pageSize, group_variants: groupVariants };
       if (search)      params.q             = search;
       if (creatorId)   params.creator_id    = creatorId;
@@ -272,8 +273,9 @@ export default function Library() {
       if (nsfwParam)   params.nsfw          = nsfwParam === "1";
       if (thumbParam)  params.has_thumbnail = thumbParam === "1";
       if (favParam)    params.is_favorite   = true;
-      if (queueParam)  params.in_queue      = true;
-      if (printedParam) params.printed      = true;
+      if (queueParam)       params.in_queue      = true;
+      if (printedParam)     params.printed       = true;
+      if (printStatusParam) params.print_status  = printStatusParam;
       if (excludedParam) params.excluded    = true;
       if (addedDays)   params.added_within_days = addedDays;
       if (effectiveSort && effectiveSort !== "name") params.sort = effectiveSort;
@@ -284,7 +286,7 @@ export default function Library() {
     } finally {
       if (fetchId === fetchIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam, excludedParam, addedDays, effectiveSort]);
+  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, queueParam, printedParam, printStatusParam, excludedParam, addedDays, effectiveSort]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);
@@ -316,7 +318,7 @@ export default function Library() {
   }, [savingPreset]);
 
   const totalPages = Math.ceil(total / pageSize);
-  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || queueParam || printedParam || addedDays);
+  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || queueParam || printedParam || printStatusParam || addedDays);
 
   const visibleTags = allTags.filter(({ tag }) =>
     !tagSearch || tag.includes(tagSearch.toLowerCase())
@@ -373,7 +375,7 @@ export default function Library() {
   // --- Drag to group ---------------------------------------------------------
   // Variant grouping is only on in the default view (favorites/queue/printed/
   // excluded views show flat, ungrouped cards), so drag-to-group is too.
-  const dndEnabled = !favParam && !queueParam && !printedParam && !excludedParam;
+  const dndEnabled = !favParam && !queueParam && !printedParam && !printStatusParam && !excludedParam;
   const [draggingId, setDraggingId] = useState<number | null>(null);
   // A pending merge of two ungrouped models, awaiting a group name from the user.
   const [pendingMerge, setPendingMerge] = useState<{ draggedId: number; targetId: number } | null>(null);
@@ -518,6 +520,42 @@ export default function Library() {
                 <Check size={11} />
                 {stats.printed} printed
               </button>
+            )}
+            {(["queued", "printing", "printed"] as const).map((s) => (
+              printStatusParam === s ? (
+                <button
+                  key={s}
+                  onClick={() => setParam("print_status", "")}
+                  className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded font-medium transition-colors ${
+                    s === "queued" ? "bg-sky-500 text-sky-950" :
+                    s === "printing" ? "bg-amber-500 text-amber-950" :
+                    "bg-emerald-500 text-emerald-950"
+                  }`}
+                >
+                  <Printer size={11} />
+                  {PRINT_STATUS_LABELS[s]}
+                  <X size={10} />
+                </button>
+              ) : null
+            ))}
+            {!printStatusParam && (
+              <div className="flex gap-1">
+                {(["queued", "printing", "printed"] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setParam("print_status", s)}
+                    title={`Show only ${PRINT_STATUS_LABELS[s]} models`}
+                    className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
+                      s === "queued" ? "bg-sky-950/50 text-sky-400 hover:bg-sky-900/50" :
+                      s === "printing" ? "bg-amber-950/50 text-amber-400 hover:bg-amber-900/50" :
+                      "bg-emerald-950/50 text-emerald-400 hover:bg-emerald-900/50"
+                    }`}
+                  >
+                    <Printer size={11} />
+                    {PRINT_STATUS_LABELS[s]}
+                  </button>
+                ))}
+              </div>
             )}
             <button
               onClick={() => setParam("added_days", addedDays ? "" : String(settings.recent_days))}

@@ -54,6 +54,8 @@ class ModelRead(ModelBase):
     in_queue: bool = False
     queued_at: Optional[datetime] = None
     printed_at: Optional[datetime] = None
+    print_status: str = "none"
+    print_count: int = 0
     thumbnail_path: Optional[str] = None
     thumbnail_url: Optional[str] = None
     image_paths: list = []
@@ -154,6 +156,17 @@ class QueueReorder(BaseModel):
 
 class PrintedUpdate(BaseModel):
     printed: bool
+
+
+PRINT_STATUSES = {"none", "queued", "printing", "printed"}
+
+
+class PrintStatusUpdate(BaseModel):
+    status: str
+
+    def validate_status(self):
+        if self.status not in PRINT_STATUSES:
+            raise ValueError(f"status must be one of {sorted(PRINT_STATUSES)}")
 
 
 class ExcludeUpdate(BaseModel):

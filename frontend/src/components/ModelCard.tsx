@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush } from "lucide-react";
-import { Model, api } from "../api/client";
+import { Model, PrintStatus, PRINT_STATUS_CYCLE, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
@@ -54,6 +54,7 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
 
   const [favorite, setFavorite] = useState(model.is_favorite);
   const [queued, setQueued] = useState(model.in_queue);
+  const [printStatus, setPrintStatus] = useState<PrintStatus>(model.print_status ?? "none");
 
   const variantCount = model.variant_count ?? 1;
   const isGroup = variantCount > 1;
@@ -96,6 +97,21 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
     } catch {
       setQueued(!next);  // revert on failure
       toast("Couldn't update the print queue — try again.", "error");
+    }
+  };
+
+  const cyclePrintStatus = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const idx = PRINT_STATUS_CYCLE.indexOf(printStatus);
+    const next = PRINT_STATUS_CYCLE[(idx + 1) % PRINT_STATUS_CYCLE.length];
+    setPrintStatus(next);
+    try {
+      await api.models.setPrintStatus(model.id, next);
+      onMutate?.();
+    } catch {
+      setPrintStatus(printStatus);  // revert on failure
+      toast("Couldn't update print status — try again.", "error");
     }
   };
 
@@ -255,6 +271,22 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
                 queued
                   ? "text-sky-400 opacity-100"
                   : "text-gray-400 hover:text-sky-300 opacity-0 group-hover:opacity-100"
+              }`}
+            >
+              <Printer size={13} />
+            </button>
+            <button
+              onClick={cyclePrintStatus}
+              title={`Print status: ${printStatus} — click to advance`}
+              aria-label={`Print status ${printStatus}`}
+              className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
+                printStatus === "queued"
+                  ? "text-sky-400 opacity-100"
+                  : printStatus === "printing"
+                  ? "text-amber-400 opacity-100"
+                  : printStatus === "printed"
+                  ? "text-emerald-400 opacity-100"
+                  : "text-gray-400 opacity-0 group-hover:opacity-100"
               }`}
             >
               <Printer size={13} />
