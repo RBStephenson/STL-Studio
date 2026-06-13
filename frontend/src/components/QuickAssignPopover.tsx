@@ -139,7 +139,7 @@ export default function QuickAssignPopover({
   return (
     <div
       ref={popoverRef}
-      className="absolute bottom-full left-0 mb-1 z-50 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl"
+      className="absolute top-full right-0 mt-1 z-50 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl"
       // stop clicks inside from bubbling to the Link
       onClick={(e) => e.preventDefault()}
       onMouseDown={(e) => e.stopPropagation()}
