@@ -161,7 +161,7 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
     : `/models/${model.id}`;
 
   return (
-    <div className="relative group">
+    <div className="relative">
     <Link
       to={linkTo}
       state={{ from: backTo ?? location.pathname + location.search }}
@@ -335,40 +335,40 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
           <div className={`-ml-0.5 transition-opacity ${rating != null ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
             <StarRating value={rating} onChange={changeRating} size={13} />
           </div>
-          {model.rating != null && (
-            <span title="Rating from the source site" className="flex items-center gap-0.5 text-xs text-gray-500 ml-auto">
-              <Star size={11} fill="currentColor" />
-              {model.rating.toFixed(1)}
-            </span>
-          )}
+          <div className="flex items-center gap-1.5 ml-auto">
+            {model.rating != null && (
+              <span title="Rating from the source site" className="flex items-center gap-0.5 text-xs text-gray-500">
+                <Star size={11} fill="currentColor" />
+                {model.rating.toFixed(1)}
+              </span>
+            )}
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPopoverOpen((o) => !o); }}
+              onFocus={(e) => e.stopPropagation()}
+              title="Quick assign tags / collections"
+              aria-label="Quick assign tags and collections"
+              className={`p-1 rounded transition-all ${
+                popoverOpen
+                  ? "text-indigo-400 bg-indigo-900/40 opacity-100"
+                  : "text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 focus:opacity-100"
+              }`}
+            >
+              <MoreHorizontal size={13} />
+            </button>
+          </div>
         </div>
       </div>
     </Link>
 
-    {/* ⋯ button + popover — outside the Link so clicks don't navigate */}
-    <div className="absolute bottom-3 right-3 z-10 relative">
-      <button
-        onClick={(e) => { e.stopPropagation(); setPopoverOpen((o) => !o); }}
-        title="Quick assign tags / collections"
-        aria-label="Quick assign tags and collections"
-        className={`p-1 rounded transition-all ${
-          popoverOpen
-            ? "text-indigo-400 bg-indigo-900/40 opacity-100"
-            : "text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 focus:opacity-100"
-        }`}
-      >
-        <MoreHorizontal size={13} />
-      </button>
-      {popoverOpen && (
-        <QuickAssignPopover
-          modelId={model.id}
-          initialTags={localTags}
-          allTags={allTagSuggestions}
-          onTagsChange={(next) => setLocalTags(next)}
-          onClose={() => setPopoverOpen(false)}
-        />
-      )}
-    </div>
+    {popoverOpen && (
+      <QuickAssignPopover
+        modelId={model.id}
+        initialTags={localTags}
+        allTags={allTagSuggestions}
+        onTagsChange={(next) => setLocalTags(next)}
+        onClose={() => setPopoverOpen(false)}
+      />
+    )}
     </div>
   );
 }
