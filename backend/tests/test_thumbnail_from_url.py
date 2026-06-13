@@ -87,10 +87,68 @@ class TestDownloadThumbnail:
             await download_thumbnail(1, "file:///etc/passwd")
 
     @pytest.mark.anyio
-    async def test_rejects_html_response(self, thumb_dir, monkeypatch):
+    async def test_rejects_html_with_no_preview_image(self, thumb_dir, monkeypatch):
         mock_http(monkeypatch, lambda req: httpx.Response(
-            200, content=b"<html>", headers={"content-type": "text/html"}))
-        with pytest.raises(ThumbnailDownloadError, match="image"):
+            200, content=b"<html><head></head></html>",
+            headers={"content-type": "text/html"}))
+        with pytest.raises(ThumbnailDownloadError, match="preview image"):
+            await download_thumbnail(1, "https://example.com/page")
+
+    @pytest.mark.anyio
+    async def test_follows_html_to_og_image(self, thumb_dir, monkeypatch):
+        """#285: a product-page URL (text/html) should resolve to its og:image
+        and download that — this is what the user's Gumroad link does."""
+        def handler(req):
+            if req.url.path == "/preview.png":
+                return httpx.Response(200, content=PNG_BYTES,
+                                      headers={"content-type": "image/png"})
+            html = (
+                b'<html><head>'
+                b'<meta property="og:image" content="https://cdn.example.com/preview.png">'
+                b'</head></html>'
+            )
+            return httpx.Response(200, content=html,
+                                  headers={"content-type": "text/html; charset=utf-8"})
+        mock_http(monkeypatch, handler)
+
+        out = await download_thumbnail(7, "https://creator.gumroad.com/l/dphoenix")
+        assert out == thumb_dir / "7.png"
+        assert out.read_bytes() == PNG_BYTES
+
+    @pytest.mark.anyio
+    async def test_resolves_relative_og_image(self, thumb_dir, monkeypatch):
+        """A relative og:image is resolved against the page's own URL."""
+        def handler(req):
+            if req.url.path == "/img/preview.jpg":
+                return httpx.Response(200, content=JPEG_BYTES,
+                                      headers={"content-type": "image/jpeg"})
+            html = (
+                b'<html><head>'
+                b'<meta property="og:image" content="/img/preview.jpg">'
+                b'</head></html>'
+            )
+            return httpx.Response(200, content=html,
+                                  headers={"content-type": "text/html"})
+        mock_http(monkeypatch, handler)
+
+        out = await download_thumbnail(8, "https://store.example.com/l/widget")
+        assert out == thumb_dir / "8.jpg"
+
+    @pytest.mark.anyio
+    async def test_does_not_follow_html_twice(self, thumb_dir, monkeypatch):
+        """The extracted image URL is fetched with following disabled, so an
+        og:image that itself points at HTML errors rather than looping."""
+        def handler(req):
+            html = (
+                b'<html><head>'
+                b'<meta property="og:image" content="https://example.com/another-page">'
+                b'</head></html>'
+            )
+            return httpx.Response(200, content=html,
+                                  headers={"content-type": "text/html"})
+        mock_http(monkeypatch, handler)
+
+        with pytest.raises(ThumbnailDownloadError, match="did not return an image"):
             await download_thumbnail(1, "https://example.com/page")
 
     @pytest.mark.anyio

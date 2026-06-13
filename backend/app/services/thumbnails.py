@@ -7,9 +7,10 @@ scrapers use — and store it locally next to the DB, setting thumbnail_path.
 """
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
+from bs4 import BeautifulSoup
 
 from app.config import settings
 
@@ -24,6 +25,10 @@ _HEADERS = {
 }
 
 MAX_BYTES = 15 * 1024 * 1024
+# Cap on how much of an HTML page we read while hunting for its preview image,
+# so a pathologically large page can't exhaust memory.
+HTML_MAX_BYTES = 3 * 1024 * 1024
+_HTML_TYPES = {"text/html", "application/xhtml+xml"}
 
 _CONTENT_TYPE_EXT = {
     "image/jpeg": ".jpg",
@@ -69,8 +74,40 @@ def _pick_extension(content_type: str, url: str) -> str:
     )
 
 
-async def download_thumbnail(model_id: int, url: str) -> Path:
+def _extract_og_image(html: str, base_url: str) -> str | None:
+    """Pull a page's preview-image URL from its social meta tags.
+
+    Checks og:image / twitter:image (and a couple of common variants), then
+    falls back to <link rel="image_src">. Relative URLs are resolved against
+    the page's own (post-redirect) URL.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    candidates = (
+        ("property", "og:image"),
+        ("property", "og:image:url"),
+        ("property", "og:image:secure_url"),
+        ("name", "twitter:image"),
+        ("name", "twitter:image:src"),
+    )
+    for attr, value in candidates:
+        tag = soup.find("meta", attrs={attr: value})
+        content = tag.get("content") if tag else None
+        if content and content.strip():
+            return urljoin(base_url, content.strip())
+
+    link = soup.find("link", rel="image_src")
+    href = link.get("href") if link else None
+    if href and href.strip():
+        return urljoin(base_url, href.strip())
+    return None
+
+
+async def download_thumbnail(model_id: int, url: str, *, _follow_html: bool = True) -> Path:
     """Fetch `url` and store it as the local thumbnail file for `model_id`.
+
+    If `url` returns an HTML page (e.g. a Gumroad/MMF/Cults product page), its
+    preview image (og:image / twitter:image) is extracted and downloaded
+    instead — one level only, guarded by `_follow_html`.
 
     Returns the saved path. Raises ThumbnailDownloadError on any failure.
     """
@@ -78,6 +115,7 @@ async def download_thumbnail(model_id: int, url: str) -> Path:
     if scheme not in ("http", "https"):
         raise ThumbnailDownloadError("Only http(s) URLs are supported")
 
+    og_image_url: str | None = None
     try:
         async with httpx.AsyncClient(
             timeout=20, headers=_HEADERS, follow_redirects=True
@@ -87,23 +125,56 @@ async def download_thumbnail(model_id: int, url: str) -> Path:
                     raise ThumbnailDownloadError(
                         f"Server returned HTTP {resp.status_code}"
                     )
-                ext = _pick_extension(resp.headers.get("content-type", ""), str(resp.url))
-                chunks: list[bytes] = []
-                total = 0
-                async for chunk in resp.aiter_bytes():
-                    total += len(chunk)
-                    if total > MAX_BYTES:
-                        raise ThumbnailDownloadError("Image is too large (over 15 MB)")
-                    chunks.append(chunk)
+                content_type = resp.headers.get("content-type", "")
+                ctype = content_type.split(";")[0].strip().lower()
+
+                if ctype in _HTML_TYPES:
+                    if not _follow_html:
+                        raise ThumbnailDownloadError(
+                            f"URL did not return an image (content type: {content_type})"
+                        )
+                    html = await _read_capped(resp, HTML_MAX_BYTES, stop_at_limit=True)
+                    og_image_url = _extract_og_image(
+                        html.decode("utf-8", errors="replace"), str(resp.url)
+                    )
+                    if not og_image_url:
+                        raise ThumbnailDownloadError(
+                            "That looks like a web page, not an image, and it has no "
+                            "preview image to use. Paste a direct image link instead."
+                        )
+                else:
+                    ext = _pick_extension(content_type, str(resp.url))
+                    data = await _read_capped(resp, MAX_BYTES, stop_at_limit=False)
+                    if not data:
+                        raise ThumbnailDownloadError("Server returned an empty response")
+                    return store_thumbnail(model_id, ext, data)
     except ThumbnailDownloadError:
         raise
     except httpx.HTTPError as e:
         raise ThumbnailDownloadError(f"Could not fetch the image: {e}") from e
 
-    if total == 0:
-        raise ThumbnailDownloadError("Server returned an empty response")
+    # HTML page → download the preview image it points to (no further following).
+    return await download_thumbnail(model_id, og_image_url, _follow_html=False)
 
-    return store_thumbnail(model_id, ext, b"".join(chunks))
+
+async def _read_capped(resp: httpx.Response, limit: int, *, stop_at_limit: bool) -> bytes:
+    """Collect the response body up to `limit` bytes.
+
+    For images (`stop_at_limit=False`) exceeding the cap is an error — we won't
+    store a truncated file. For HTML (`stop_at_limit=True`) we just stop reading
+    once we have enough to find the meta tags.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in resp.aiter_bytes():
+        total += len(chunk)
+        if total > limit:
+            if stop_at_limit:
+                chunks.append(chunk)
+                break
+            raise ThumbnailDownloadError("Image is too large (over 15 MB)")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def store_thumbnail(model_id: int, ext: str, data: bytes) -> Path:
