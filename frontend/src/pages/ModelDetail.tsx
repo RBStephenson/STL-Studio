@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush } from "lucide-react";
 import { api, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
@@ -231,6 +231,7 @@ export default function ModelDetail() {
   const [printCount, setPrintCount] = useState(0);
   const [tags, setTags] = useState<string[]>([]);
   const [removedAutoTags, setRemovedAutoTags] = useState<string[]>([]);
+  const [showHiddenTags, setShowHiddenTags] = useState(false);
   const [partTypes, setPartTypes] = useState<Record<number, string>>({});
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
@@ -288,6 +289,7 @@ export default function ModelDetail() {
     setShowKitBuilder(false);
     setOpenFolderError(null);
     setSettingGroup(false);
+    setShowHiddenTags(false);
   }, [id]);
 
   const downloadAllFiles = async () => {
@@ -413,6 +415,19 @@ export default function ModelDetail() {
       setRemovedAutoTags(prevRemoved);  // revert on failure
       setTags(prevTags);
       toast("Couldn't remove tag — try again.", "error");
+    }
+  };
+
+  // Un-suppress a previously removed auto-tag so it reappears as auto-detected.
+  const restoreAutoTag = async (tag: string) => {
+    const prevRemoved = removedAutoTags;
+    const nextRemoved = removedAutoTags.filter((t) => t !== tag);
+    setRemovedAutoTags(nextRemoved);
+    try {
+      await api.models.update(Number(id), { removed_auto_tags: nextRemoved });
+    } catch {
+      setRemovedAutoTags(prevRemoved);  // revert on failure
+      toast("Couldn't restore tag — try again.", "error");
     }
   };
 
@@ -1051,6 +1066,40 @@ export default function ModelDetail() {
                 })}
               </div>
             </div>
+            );
+          })()}
+
+          {/* Hidden (suppressed) auto-tags — restore any that the scanner still
+              detects. Only shows tags currently in auto_tags so restoring is
+              guaranteed to bring the chip back. */}
+          {(() => {
+            const hidden = (model.auto_tags ?? []).filter((t) => removedAutoTags.includes(t));
+            if (hidden.length === 0) return null;
+            return (
+              <div className="flex flex-col gap-1.5">
+                <button
+                  onClick={() => setShowHiddenTags((s) => !s)}
+                  className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-400 transition-colors w-fit"
+                >
+                  {showHiddenTags ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                  {hidden.length} hidden auto-{hidden.length === 1 ? "tag" : "tags"}
+                </button>
+                {showHiddenTags && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {hidden.map((tag) => (
+                      <button
+                        key={tag}
+                        onClick={() => restoreAutoTag(tag)}
+                        title="Restore this auto-detected tag"
+                        className="flex items-center gap-1 rounded-full border border-gray-800 px-2 py-0.5 text-xs bg-gray-900/60 text-gray-600 line-through hover:no-underline hover:border-emerald-800 hover:bg-emerald-950 hover:text-emerald-400 transition-colors"
+                      >
+                        <Plus size={9} />
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             );
           })()}
 
