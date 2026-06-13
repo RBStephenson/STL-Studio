@@ -425,6 +425,14 @@ def list_variants(
     db: Session = Depends(get_db),
 ):
     """Return all variant models for a (creator, character) group."""
+    from sqlalchemy import case as sa_case
+    has_thumb = sa_case(
+        (
+            (Model.thumbnail_path != None) | (Model.thumbnail_url != None),
+            0,
+        ),
+        else_=1,
+    )
     items = (
         db.query(Model)
         .filter(
@@ -432,7 +440,7 @@ def list_variants(
             Model.character == character,
             Model.excluded == False,
         )
-        .order_by(Model.name)
+        .order_by(has_thumb, Model.name)
         .all()
     )
     return ModelList(total=len(items), page=1, page_size=max(len(items), 1), items=items)

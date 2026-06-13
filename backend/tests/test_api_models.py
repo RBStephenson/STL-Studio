@@ -192,6 +192,20 @@ class TestVariantsEndpoint:
         resp = client.get(f"/models/variants?creator_id=9999&character=Akuma")
         assert resp.json()["total"] == 0
 
+    def test_thumbnailed_models_sort_before_no_thumbnail(self, client, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="A_no_thumb", character="Rocky")
+        make_model(db, creator, name="B_has_thumb", character="Rocky", thumbnail_path="/img/b.jpg")
+        make_model(db, creator, name="C_no_thumb", character="Rocky")
+        commit_all(db)
+
+        resp = client.get(f"/models/variants?creator_id={creator.id}&character=Rocky")
+        assert resp.status_code == 200
+        names = [item["name"] for item in resp.json()["items"]]
+        # B has a thumbnail — must appear before both no-thumb models
+        assert names.index("B_has_thumb") < names.index("A_no_thumb")
+        assert names.index("B_has_thumb") < names.index("C_no_thumb")
+
 
 # ---------------------------------------------------------------------------
 # Stats endpoint
