@@ -150,85 +150,73 @@ async def _scrape_mmf(url: str) -> list[StorefrontProduct]:
 # Gumroad
 # ---------------------------------------------------------------------------
 
-# Gumroad is a client-side React app — no product HTML in the initial page.
-# However, GET /creator with Accept: application/json returns a list of
-# permalink slugs. We then fetch each product page concurrently to extract
-# title + og:image from server-rendered meta tags.
-_GUMROAD_MAX_PRODUCTS = 200  # cap to keep response time reasonable
+# Gumroad's creator profile is an Inertia.js app. The initial HTML embeds the
+# page's props as an HTML-escaped JSON blob on `<div id="app" data-page="…">`.
+# Products live at props.sections[].search_results.products[], each carrying a
+# name, permalink, canonical url and thumbnail_url — no per-product fetch needed.
+#
+# Note: each section embeds only its first page of results (search_results.total
+# is the full count). Pulling the remainder needs Gumroad's products-search
+# endpoint and is tracked as a follow-up (#316); this returns the embedded page.
 
 async def _scrape_gumroad(url: str) -> list[StorefrontProduct]:
     """
     Scrape a Gumroad creator store.
     Works for https://creator.gumroad.com or https://gumroad.com/creator.
     """
-    # Normalise: we always want the subdomain form for the JSON API
-    base_url = url.rstrip("/")
-
-    json_headers = {**_HEADERS, "Accept": "application/json"}
-    async with httpx.AsyncClient(timeout=20, headers=json_headers, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True) as client:
         try:
-            r = await client.get(base_url)
+            r = await client.get(url.rstrip("/"))
             r.raise_for_status()
-            data = r.json()
         except Exception as e:
             logger.error(f"Gumroad profile fetch failed: {e}")
             return []
 
-    slugs: list[str] = data.get("links", [])
-    if not slugs:
-        logger.warning("Gumroad: no permalink slugs found in profile response")
+    page = _gumroad_inertia_page(r.text)
+    if page is None:
+        logger.warning(
+            "Gumroad: could not parse Inertia page data from profile — "
+            "site structure may have changed"
+        )
         return []
 
-    # Derive the store base so product URLs stay on the creator's subdomain
-    # (some creators have custom domains — use the final URL from the profile)
-    slugs = slugs[:_GUMROAD_MAX_PRODUCTS]
-    logger.info(f"Gumroad: fetching {len(slugs)} product pages (of {len(data.get('links', []))} total)")
+    products: list[StorefrontProduct] = []
+    seen: set[str] = set()
+    for section in page.get("props", {}).get("sections", []):
+        for prod in (section.get("search_results") or {}).get("products", []):
+            permalink = prod.get("permalink")
+            name = (prod.get("name") or "").strip()
+            if not permalink or not name or permalink in seen:
+                continue
+            seen.add(permalink)
+            products.append(StorefrontProduct(
+                title=name,
+                source_url=prod.get("url") or f"{url.rstrip('/')}/l/{permalink}",
+                source_site="gumroad",
+                external_id=permalink,
+                thumbnail_url=prod.get("thumbnail_url"),
+            ))
 
-    semaphore = asyncio.Semaphore(20)
-
-    async def fetch_product(client: httpx.AsyncClient, slug: str) -> StorefrontProduct | None:
-        product_url = f"{base_url}/l/{slug}"
-        async with semaphore:
-            try:
-                r = await client.get(product_url)
-                r.raise_for_status()
-            except Exception:
-                return None
-
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        # Title: prefer og:title, fall back to <title> (strips "| Gumroad" suffix)
-        og_title = soup.find("meta", property="og:title")
-        title = (og_title.get("content") if og_title else None) or ""
-        if not title:
-            t = soup.find("title")
-            title = t.get_text(strip=True) if t else ""
-        # Strip common Gumroad suffixes
-        for suffix in [" | Gumroad", " - Gumroad", " by "]:
-            if suffix in title:
-                title = title.split(suffix)[0].strip()
-        if not title:
-            return None
-
-        # Thumbnail from og:image
-        og_image = soup.find("meta", property="og:image")
-        thumb = og_image.get("content") if og_image else None
-
-        return StorefrontProduct(
-            title=title,
-            source_url=product_url,
-            source_site="gumroad",
-            external_id=slug,
-            thumbnail_url=thumb,
-        )
-
-    async with httpx.AsyncClient(timeout=15, headers=_HEADERS, follow_redirects=True) as client:
-        tasks = [fetch_product(client, slug) for slug in slugs]
-        results = await asyncio.gather(*tasks)
-
-    products = [p for p in results if p is not None]
-    logger.info(f"Gumroad: scraped {len(products)} products successfully")
+    if not products:
+        logger.warning("Gumroad: no products found in profile page data")
+    else:
+        logger.info(f"Gumroad: scraped {len(products)} products from embedded page data")
     return products
+
+
+def _gumroad_inertia_page(html: str) -> Optional[dict]:
+    """Parse the JSON props from a Gumroad Inertia page (<div id="app" data-page>)."""
+    soup = BeautifulSoup(html, "html.parser")
+    app = soup.find(id="app")
+    raw = app.get("data-page") if app else None
+    if not raw:
+        return None
+    try:
+        # BeautifulSoup already unescapes HTML entities in attribute values.
+        return json.loads(raw)
+    except (ValueError, TypeError) as e:
+        logger.error(f"Gumroad: data-page JSON parse failed: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
