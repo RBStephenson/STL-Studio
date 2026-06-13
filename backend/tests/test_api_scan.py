@@ -2,8 +2,20 @@
 Tests for the /scan/browse folder-picker endpoint.
 """
 
+import pytest
+
+
+@pytest.fixture
+def bootstrap_under_tmp(tmp_path, monkeypatch):
+    """Treat tmp_path as a bootstrap browse root so the no-roots picker tests
+    exercise listing behaviour rather than the allowlist rejection."""
+    from app.routers import scan
+    monkeypatch.setattr(scan, "_bootstrap_roots", lambda: [tmp_path])
+
 
 class TestBrowse:
+    pytestmark = pytest.mark.usefixtures("bootstrap_under_tmp")
+
     def test_lists_subdirectories(self, client, tmp_path):
         (tmp_path / "Alpha").mkdir()
         (tmp_path / "Beta").mkdir()
@@ -43,6 +55,25 @@ class TestBrowse:
         # The returned path can be browsed directly.
         nested = client.get("/scan/browse", params={"path": entry_path}).json()
         assert [e["name"] for e in nested["entries"]] == ["Model"]
+
+
+class TestBrowseBootstrapRestriction:
+    """With no scan roots configured, browsing is still limited to the
+    bootstrap allowlist — it must not expose the whole filesystem (#41)."""
+
+    def test_arbitrary_path_rejected_when_no_roots(self, client, tmp_path, monkeypatch):
+        from app.config import settings
+        from app.routers import scan
+        monkeypatch.setattr(settings, "stl_roots", "")
+
+        allowed = tmp_path / "allowed"
+        outside = tmp_path / "outside"
+        allowed.mkdir()
+        outside.mkdir()
+        monkeypatch.setattr(scan, "_bootstrap_roots", lambda: [allowed])
+
+        assert client.get("/scan/browse", params={"path": str(allowed)}).status_code == 200
+        assert client.get("/scan/browse", params={"path": str(outside)}).status_code == 403
 
 
 class TestBrowseRootRestriction:

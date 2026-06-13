@@ -34,6 +34,26 @@ def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
     return any(p.is_relative_to(root) for root in roots)
 
 
+# Safe top-level locations the first-run folder picker may browse before any
+# scan root is configured. Without this, an empty root list left /scan/browse
+# able to list the entire host/container filesystem (#41).
+_UNIX_BROWSE_DIRS = ("/mnt", "/media", "/Volumes", "/data")
+
+
+def _bootstrap_roots() -> list[Path]:
+    """Allowlist for /scan/browse when no scan roots are configured yet.
+
+    Windows: the existing drive roots. Unix/Docker: the user's home directory
+    plus any common mount/data directories that exist (where STL drives and the
+    app volume live).
+    """
+    if platform.system() == "Windows":
+        return [Path(f"{d}:\\") for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+    roots = [Path.home()]
+    roots += [Path(d) for d in _UNIX_BROWSE_DIRS if os.path.isdir(d)]
+    return roots
+
+
 @router.get("/browse")
 def browse_dirs(path: str = "", db: Session = Depends(get_db)):
     """List sub-directories for the Settings folder picker.
@@ -42,11 +62,14 @@ def browse_dirs(path: str = "", db: Session = Depends(get_db)):
     the user's home directory. Otherwise returns the immediate sub-folders of
     `path`, plus its parent (for an "up" button). Directories only — never files.
 
-    Once scan roots are configured, browsing is restricted to paths within those
-    roots to avoid exposing the rest of the container/host filesystem.
+    Browsing is always restricted to an allowlist: the configured scan roots
+    once any exist, otherwise a small bootstrap set of safe top-level locations
+    (drives on Windows; home + common mount/data dirs on Unix). This keeps the
+    first-run picker from exposing the rest of the container/host filesystem.
     """
     system = platform.system()
     roots = _configured_roots(db)
+    allowlist = roots or _bootstrap_roots()
 
     # Top level — drive list on Windows, home dir elsewhere.
     if not path:
@@ -64,9 +87,9 @@ def browse_dirs(path: str = "", db: Session = Depends(get_db)):
     if not p.exists() or not p.is_dir():
         raise HTTPException(status_code=404, detail="Folder not found")
 
-    # Once roots are configured, only allow browsing within them.
-    if roots and not _is_under_configured_root(p, roots):
-        raise HTTPException(status_code=403, detail="Path is outside configured scan roots")
+    # Restrict browsing to the allowlist (configured roots, or bootstrap roots).
+    if not _is_under_configured_root(p, allowlist):
+        raise HTTPException(status_code=403, detail="Path is outside the allowed folders")
 
     try:
         entries = sorted(
