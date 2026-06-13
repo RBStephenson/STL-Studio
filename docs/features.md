@@ -54,6 +54,12 @@ and print-queue 🖨) that appear on hover. You can also **drag a card by its
 hover grip onto another card to group them as variants** — see
 [Variant grouping](#variant-grouping).
 
+**Keyboard shortcuts:** the grid is fully keyboard-drivable. Press `/` to jump to
+the search box, `A`/`D` and `W`/`S` (or the arrow keys) to move the focus ring
+between cards, `Enter` to open the focused model, and `Esc` to blur search or
+clear the focus ring. Press `?` (or the keyboard button in the header) at any
+time to see the full list.
+
 ## Variant grouping
 
 When several folders share the same character (for example a *Bust*, a

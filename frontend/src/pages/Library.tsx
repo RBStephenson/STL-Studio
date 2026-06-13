@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams, Link } from "react-router-dom";
-import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, FolderPlus, ArrowRight, EyeOff, Package, GripVertical, Layers, Sparkles } from "lucide-react";
+import { useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
+import { Search, SlidersHorizontal, AlertCircle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, FolderPlus, ArrowRight, EyeOff, Package, GripVertical, Layers, Sparkles, Keyboard } from "lucide-react";
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   useDraggable, useDroppable, pointerWithin,
@@ -15,6 +15,9 @@ import HelpLink from "../components/HelpLink";
 import { useToast } from "../context/ToastContext";
 import { nextTagParams } from "../utils/tagFilter";
 import { nextSelection } from "../utils/selection";
+import { modelLinkTo } from "../utils/modelLink";
+import { useLibraryKeyboard } from "../hooks/useLibraryKeyboard";
+import ShortcutsOverlay from "../components/ShortcutsOverlay";
 
 const SITES = ["thingiverse", "printables", "myminifactory", "cults3d", "gumroad", "thangs", "makerworld", "other"];
 
@@ -136,6 +139,8 @@ function DraggableCard({ model, draggingCreatorId, children }: {
 
 export default function Library() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
 
   // All filter state lives in the URL
@@ -177,6 +182,7 @@ export default function Library() {
   // with { replace: true } so typing doesn't fire a fetch per character or push
   // a history entry per character (Back used to step through "a", "ak", …).
   const [searchInput, setSearchInput] = useState(search);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Keep the input in sync when `q` changes from outside the box (clear-filters,
   // back/forward navigation, applying a preset). While typing, `q` is stale
@@ -404,6 +410,58 @@ export default function Library() {
     refreshStats();
   }, [refreshStats]);
 
+  // --- Keyboard navigation (#169) --------------------------------------------
+  // WASD/arrows move a focus ring between cards, Enter opens, "/" focuses
+  // search, "?" toggles a shortcuts overlay, Esc steps back out.
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  // Measure the responsive grid's column count (2→6 across breakpoints) so
+  // up/down jumps a whole row: count cards sharing the first card's offsetTop.
+  const getColumns = useCallback(() => {
+    const grid = gridRef.current;
+    if (!grid) return 1;
+    const cards = Array.from(grid.children) as HTMLElement[];
+    if (cards.length === 0) return 1;
+    const top = cards[0].offsetTop;
+    let cols = 0;
+    for (const c of cards) {
+      if (c.offsetTop === top) cols++;
+      else break;
+    }
+    return cols || 1;
+  }, []);
+
+  const openModel = useCallback((index: number) => {
+    const m = models[index];
+    if (!m) return;
+    sessionStorage.setItem("library_scroll", String(window.scrollY));
+    navigate(modelLinkTo(m), { state: { from: location.pathname + location.search } });
+  }, [models, navigate, location]);
+
+  const focusSearch = useCallback(() => {
+    const el = searchInputRef.current;
+    if (el) { el.focus(); el.select(); }
+  }, []);
+
+  const { focusedIndex, setFocusedIndex } = useLibraryKeyboard({
+    count: models.length,
+    getColumns,
+    onActivate: openModel,
+    onFocusSearch: focusSearch,
+    onToggleHelp: () => setShowShortcuts((o) => !o),
+    onEscape: () => {
+      if (showShortcuts) { setShowShortcuts(false); return; }
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.tagName === "INPUT") { active.blur(); return; }
+      setFocusedIndex(-1);
+    },
+  });
+
+  // Reset the focus ring whenever the result set changes (new page, filter, or
+  // search) so it never points past the end of a shorter list.
+  useEffect(() => { setFocusedIndex(-1); }, [models, setFocusedIndex]);
+
   // --- Drag to group ---------------------------------------------------------
   // Variant grouping is only on in the default view (favorites/queue/printed/
   // excluded views show flat, ungrouped cards), so drag-to-group is too.
@@ -604,6 +662,14 @@ export default function Library() {
               <option value="rating">Rating</option>
             </select>
           </label>
+          <button
+            onClick={() => setShowShortcuts(true)}
+            title="Keyboard shortcuts ( ? )"
+            aria-label="Keyboard shortcuts"
+            className="p-1.5 rounded border border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-100 hover:border-gray-500 transition-colors"
+          >
+            <Keyboard size={16} />
+          </button>
           <ScanButton onScanComplete={fetchModels} />
         </div>
       </div>
@@ -613,8 +679,9 @@ export default function Library() {
         <div className="relative flex-1 min-w-48">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
           <input
+            ref={searchInputRef}
             type="text"
-            placeholder="Search models…"
+            placeholder="Search models…  (press / )"
             value={searchInput}
             onChange={(e) => onSearchChange(e.target.value)}
             className="w-full bg-gray-900 border border-gray-700 rounded pl-9 pr-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
@@ -863,8 +930,8 @@ export default function Library() {
           <p className="text-sm mt-1">Try scanning your library or adjusting filters</p>
         </div>
       ) : !dndEnabled ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {models.map((m) => (
+        <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          {models.map((m, i) => (
             <ModelCard
               key={m.id}
               model={m}
@@ -875,6 +942,7 @@ export default function Library() {
               onRemoved={handleRemoved}
               hasGuide={guideModelIds.has(m.id)}
               allTagSuggestions={allTags}
+              focused={focusedIndex === i}
             />
           ))}
         </div>
@@ -886,8 +954,8 @@ export default function Library() {
           onDragEnd={onDragEnd}
           onDragCancel={() => setDraggingId(null)}
         >
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {models.map((m) => (
+          <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {models.map((m, i) => (
               <DraggableCard key={m.id} model={m} draggingCreatorId={draggingModel?.creator_id ?? null}>
                 <ModelCard
                   model={m}
@@ -897,6 +965,8 @@ export default function Library() {
                   excludedView={excludedParam}
                   onRemoved={handleRemoved}
                   hasGuide={guideModelIds.has(m.id)}
+                  allTagSuggestions={allTags}
+                  focused={focusedIndex === i}
                 />
               </DraggableCard>
             ))}
@@ -942,6 +1012,8 @@ export default function Library() {
       {totalPages > 1 && (
         <PaginationBar page={page} totalPages={totalPages} onPage={setPage} />
       )}
+
+      {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />}
 
       {/* Name-the-group prompt when two ungrouped models are dragged together */}
       {pendingMerge && (

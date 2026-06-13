@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal } from "lucide-react";
 import { Model, PrintStatus, PRINT_STATUS_CYCLE, api } from "../api/client";
@@ -6,6 +6,7 @@ import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 import { isRecentlyAdded } from "../utils/recentlyAdded";
+import { modelLinkTo } from "../utils/modelLink";
 import QuickAssignPopover from "./QuickAssignPopover";
 import StarRating from "./StarRating";
 
@@ -27,6 +28,8 @@ interface Props {
   hasGuide?: boolean;
   /** All tags with counts for the quick-assign popover typeahead. */
   allTagSuggestions?: { tag: string; count: number }[];
+  /** Keyboard-navigation focus (#169): draws a focus ring and scrolls into view. */
+  focused?: boolean;
 }
 
 const SITE_LABELS: Record<string, string> = {
@@ -48,8 +51,14 @@ const TAG_COLORS: Record<string, string> = {
   "figure":        "bg-indigo-900 text-indigo-300",
 };
 
-export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false, allTagSuggestions = [] }: Props) {
+export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false, allTagSuggestions = [], focused = false }: Props) {
   const location = useLocation();
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Keep the keyboard-focused card in view as the user moves with WASD (#169).
+  useEffect(() => {
+    if (focused) cardRef.current?.scrollIntoView({ block: "nearest" });
+  }, [focused]);
   const { showNSFW } = useNSFW();
   const { settings } = useAppSettings();
   const { toast } = useToast();
@@ -156,12 +165,10 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
     sessionStorage.setItem("library_scroll", String(window.scrollY));
   };
 
-  const linkTo = isGroup && model.creator_id && model.character
-    ? `/groups/${model.creator_id}/${encodeURIComponent(model.character)}`
-    : `/models/${model.id}`;
+  const linkTo = modelLinkTo(model);
 
   return (
-    <div className="relative">
+    <div ref={cardRef} className="relative">
     <Link
       to={linkTo}
       state={{ from: backTo ?? location.pathname + location.search }}
@@ -169,6 +176,8 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
       className={`group bg-gray-900 rounded-lg overflow-hidden border transition-colors flex flex-col ${
         selected
           ? "border-indigo-500 ring-1 ring-indigo-500/50"
+          : focused
+          ? "border-indigo-400 ring-2 ring-indigo-400"
           : "border-gray-800 hover:border-indigo-500"
       }`}
     >

@@ -87,6 +87,12 @@ const SECTIONS: Section[] = [
           Each card shows the thumbnail, name, and tags, plus favorite (★) and
           print-queue (🖨) icons on hover.
         </p>
+        <p>
+          <strong>Keyboard shortcuts:</strong> press <kbd>/</kbd> to jump to search,{" "}
+          <kbd>A</kbd>/<kbd>D</kbd> and <kbd>W</kbd>/<kbd>S</kbd> (or the arrow keys) to
+          move the focus ring between cards, <kbd>Enter</kbd> to open the focused model,
+          and <kbd>Esc</kbd> to step back out. Press <kbd>?</kbd> any time for the full list.
+        </p>
       </>
     ),
   },
