@@ -1,11 +1,21 @@
 const BASE = "/api";
 
+// Error carrying the HTTP status so callers can distinguish a 404 (resource
+// gone) from a 5xx or a network failure. Still an Error, so existing handlers
+// that only read `.message` keep working.
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options);
   if (!res.ok) {
     let detail: string | undefined;
     try { detail = (await res.json()).detail; } catch { /* ignore */ }
-    throw new Error(detail || `${res.status} ${res.statusText}`);
+    throw new ApiError(res.status, detail || `${res.status} ${res.statusText}`);
   }
   return res.json();
 }

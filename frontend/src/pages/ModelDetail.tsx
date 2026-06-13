@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush } from "lucide-react";
-import { api, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw } from "lucide-react";
+import { api, ApiError, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
 import ImagePicker from "../components/ImagePicker";
@@ -214,6 +214,9 @@ export default function ModelDetail() {
   // The painting guide for this model, if one exists (#263). null = none/unknown.
   const [guideId, setGuideId] = useState<number | null>(null);
   const [model, setModel] = useState<ModelDetailType | null>(null);
+  // null = no error; "notfound" = 404 (model gone); "network" = transient
+  // fetch/5xx failure the user can retry.
+  const [loadError, setLoadError] = useState<"notfound" | "network" | null>(null);
   const [variants, setVariants] = useState<Model[]>([]);
   // Bumped on every load() so the variants effect refetches after in-place
   // refreshes (e.g. thumbnail updates) that don't change creator/character.
@@ -389,15 +392,30 @@ export default function ModelDetail() {
 
   const savePartType = async (fileId: number, value: string) => {
     const pt = value.trim().toLowerCase() || "";
-    setPartTypes((prev) => ({ ...prev, [fileId]: pt }));
-    await api.models.updateSTLFile(fileId, { part_type: pt || null });
+    // Revert target is the last-persisted value, not live input state (onChange
+    // already mutated partTypes before this blur fires).
+    const saved = model?.stl_files.find((f) => f.id === fileId)?.part_type ?? "";
+    if (pt === saved) return;
+    setPartTypes((prevState) => ({ ...prevState, [fileId]: pt }));
+    try {
+      await api.models.updateSTLFile(fileId, { part_type: pt || null });
+    } catch {
+      setPartTypes((prevState) => ({ ...prevState, [fileId]: saved }));  // revert on failure
+      toast("Couldn't save label — try again.", "error");
+    }
   };
 
   const addTag = async (tag: string) => {
     if (tags.includes(tag)) return;
+    const prev = tags;
     const next = [...tags, tag];
     setTags(next);
-    await api.models.update(Number(id), { tags: next });
+    try {
+      await api.models.update(Number(id), { tags: next });
+    } catch {
+      setTags(prev);  // revert on failure
+      toast("Couldn't add tag — try again.", "error");
+    }
   };
 
   // Suppress an auto-detected tag so it stops showing and survives rescans.
@@ -485,6 +503,7 @@ export default function ModelDetail() {
   const load = useCallback(() => {
     if (!id) return;
     const loadId = ++loadIdRef.current;
+    setLoadError(null);
     api.models.get(Number(id)).then((m) => {
       if (loadId !== loadIdRef.current) return; // stale — newer load in flight
       setModel(m);
@@ -494,7 +513,13 @@ export default function ModelDetail() {
         : m.thumbnail_url ?? null;
       setActiveImage(thumb);
       setLoading(false);
-    }).catch(() => { if (loadId === loadIdRef.current) setLoading(false); });
+    }).catch((err) => {
+      if (loadId !== loadIdRef.current) return;
+      // A 404 means the model is genuinely gone; anything else (network drop,
+      // 5xx) is transient and worth a retry rather than "not found".
+      setLoadError(err instanceof ApiError && err.status === 404 ? "notfound" : "network");
+      setLoading(false);
+    });
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
@@ -555,6 +580,19 @@ export default function ModelDetail() {
   }, [id, backTo, navOrigin]);
 
   if (loading) return <div className="p-8 text-gray-500 animate-pulse">Loading…</div>;
+  if (loadError === "network") {
+    return (
+      <div className="p-8 flex flex-col items-start gap-3 text-gray-400">
+        <p>Couldn't load this model — check your connection and try again.</p>
+        <button
+          onClick={load}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm text-white transition-colors"
+        >
+          <RefreshCw size={14} /> Retry
+        </button>
+      </div>
+    );
+  }
   if (!model) return <div className="p-8 text-gray-500">Model not found.</div>;
 
   const allImages = [
