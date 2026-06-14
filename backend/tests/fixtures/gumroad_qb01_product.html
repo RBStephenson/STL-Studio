@@ -1,0 +1,28 @@
+<!--
+  Trimmed capture of a real Gumroad product page
+  (https://francisquez.gumroad.com/l/qb01jshark), reduced to the <head> OG/meta
+  markup that the single-product scraper parses. Session/CSRF tokens, the Stripe
+  publishable key and the large Inertia data-page blob from the live page have
+  been removed.
+
+  Note the attribute shape that motivated issue #317: og:title and
+  og:description carry their text in a `value=` attribute, while og:image uses
+  `content=`.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head prefix="og: http://ogp.me/ns# fb: http://ogp.me/ns/fb#">
+<meta charset="utf-8">
+<title inertia="title">QB01: J. Shark - 3D printing model </title>
+<meta property="og:image" content="https://public-files.gumroad.com/89u6yjpug60ndgc6ms9zf1z0fmut" inertia="meta-property-og-image">
+<meta property="og:image:alt" value="" inertia="meta-property-og-image-alt">
+<meta property="og:title" value="QB01: J. Shark - 3D printing model " inertia="meta-property-og-title">
+<meta property="og:site_name" value="Gumroad" inertia="meta-property-og-site_name">
+<meta property="og:description" value="Hi!Q- Bestiary #01: J. Shark, Inspired by Jeff the Land Shark (Marvel), a darker version with a grotesque style and exaggerated proportions, highly characteristic of the Art Toy theme." inertia="meta-property-og-description">
+<meta property="og:url" content="https://francisquez.gumroad.com/l/qb01jshark" inertia="meta-property-og-url">
+<meta property="og:type" value="gumroad:product" inertia="meta-property-og-type">
+</head>
+<body>
+<div id="app"></div>
+</body>
+</html>

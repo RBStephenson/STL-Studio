@@ -61,8 +61,14 @@ def _parse(html: str, url: str) -> Optional[ScrapedModel]:
 
     # --- Open Graph (most reliable on Gumroad) ---
     def og(prop: str) -> Optional[str]:
+        # Gumroad's Inertia app emits OG tags with a `value=` attribute on some
+        # properties (og:title, og:description) and `content=` on others
+        # (og:image), so accept either.
         tag = soup.find("meta", property=f"og:{prop}")
-        return tag["content"].strip() if tag and tag.get("content") else None
+        if not tag:
+            return None
+        raw = tag.get("content") or tag.get("value")
+        return raw.strip() if raw else None
 
     title = og("title") or _text(soup, ["h1.product-name", "h1"])
     description = og("description") or _text(soup, [".product-description", ".description"])
