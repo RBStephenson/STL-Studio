@@ -124,7 +124,7 @@ A folder is only indexed as a model if it contains 3D files.
 - Stored in the database and included in every backup
 
 ### Storefront Enrichment
-- Paste a Gumroad, Cults3D, or MyMiniFactory creator URL
+- Paste a Gumroad, Cults3D, MyMiniFactory, or Loot Studios creator URL
 - Fuzzy-matches scraped listings against local models and bulk-applies metadata (source URL, thumbnail, external ID)
 
 ### Paint Shelf (Painting Guides module)

@@ -38,10 +38,10 @@ and capped Cults3D scraper pagination
 
 ---
 
-## v0.6 — Polish, bug fixes & painting groundwork 🚧 In progress
+## v0.6 — Polish, bug fixes & painting groundwork ✅ Complete
 
-Mostly shipped. Landed so far: the painting module M0 groundwork — backend
-package and DB tables ([#178](https://github.com/RBStephenson/STL-Inventory/issues/178),
+The painting module M0 groundwork — backend package and DB tables
+([#178](https://github.com/RBStephenson/STL-Inventory/issues/178),
 [#179](https://github.com/RBStephenson/STL-Inventory/issues/179)), Settings
 toggle and Guides / Paint Shelf route shells
 ([#180](https://github.com/RBStephenson/STL-Inventory/issues/180),
@@ -57,15 +57,13 @@ the image-update bug cluster ([#186](https://github.com/RBStephenson/STL-Invento
 [#190](https://github.com/RBStephenson/STL-Inventory/issues/190),
 [#203](https://github.com/RBStephenson/STL-Inventory/issues/203)),
 database import ([#163](https://github.com/RBStephenson/STL-Inventory/issues/163)),
-and a fullscreen lightbox ([#168](https://github.com/RBStephenson/STL-Inventory/issues/168)).
-
-Remaining:
-
-| Issue | Item |
-|-------|------|
-| [#32](https://github.com/RBStephenson/STL-Inventory/issues/32) | **Server-side persisted preferences** — NSFW default, page size, sort, filter presets (currently lost between browsers) |
-| [#206](https://github.com/RBStephenson/STL-Inventory/issues/206) | **Exclude slicer project files from the scan** — and prune any already indexed |
-| [#170](https://github.com/RBStephenson/STL-Inventory/issues/170) | **"Recently added" view** — highlight or filter models from the last scan |
+a fullscreen lightbox ([#168](https://github.com/RBStephenson/STL-Inventory/issues/168)),
+server-side persisted preferences — NSFW default, page size, sort, and filter
+presets ([#32](https://github.com/RBStephenson/STL-Inventory/issues/32)),
+slicer project file exclusion from the scan with pruning of any already indexed
+([#206](https://github.com/RBStephenson/STL-Inventory/issues/206)),
+and the "Recently added" view with configurable day window and New badges
+([#170](https://github.com/RBStephenson/STL-Inventory/issues/170)).
 
 ---
 
@@ -100,11 +98,9 @@ work (M2+) stands on.
 | [#167](https://github.com/RBStephenson/STL-Inventory/issues/167) | **Star ratings** — rate models 1–5 stars and filter by rating |
 | [#169](https://github.com/RBStephenson/STL-Inventory/issues/169) | **Keyboard navigation** — j/k library browsing, `/` to focus search |
 | [#220](https://github.com/RBStephenson/STL-Inventory/issues/220) | **Library search polish** — debounce input, stop flooding browser history |
-| [#221](https://github.com/RBStephenson/STL-Inventory/issues/221) | **Frontend error-handling polish** — surface silent failures, replace `alert()` |
 | [#219](https://github.com/RBStephenson/STL-Inventory/issues/219) | **download-zip hardening** — stream instead of building in memory; handle duplicate filenames |
 | [#222](https://github.com/RBStephenson/STL-Inventory/issues/222) | **Auto-snapshot the database before restore/reset** |
 | [#223](https://github.com/RBStephenson/STL-Inventory/issues/223) | **Scanner status polish** — completion summary message, consistent `_state_lock` use |
-| [#224](https://github.com/RBStephenson/STL-Inventory/issues/224) | **Back-fill frontend test coverage** — Library filter state, ModelDetail navigation |
 
 ---
 
@@ -128,7 +124,6 @@ keyboard accessibility ([#139](https://github.com/RBStephenson/STL-Inventory/iss
 **Infrastructure & code quality** — notarize the macOS binary
 ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17)),
 reload settings on `.env` change ([#140](https://github.com/RBStephenson/STL-Inventory/issues/140)),
-`/scan/browse` directory allowlist ([#41](https://github.com/RBStephenson/STL-Inventory/issues/41)),
 standardize DB session handling ([#45](https://github.com/RBStephenson/STL-Inventory/issues/45)),
 dedupe tag-map logic ([#56](https://github.com/RBStephenson/STL-Inventory/issues/56)),
 pre-tokenize matcher products ([#57](https://github.com/RBStephenson/STL-Inventory/issues/57)),

@@ -194,8 +194,9 @@ Open a model and click **Edit** to change the title, creator, description,
 notes, source URL, license, category, tags, and NSFW flag.
 
 The **Source URL** field has a **Fetch** button: paste a product page from
-**Gumroad**, **Cults3D**, or **MyMiniFactory** and it scrapes the page to fill
-in the title, description, creator, thumbnail, and tags automatically.
+**Gumroad**, **Cults3D**, **MyMiniFactory**, or **Loot Studios** and it scrapes
+the page to fill in the title, description, creator, thumbnail, and tags
+automatically.
 
 There's also bulk enrichment from the **Creators** page (see below).
 
