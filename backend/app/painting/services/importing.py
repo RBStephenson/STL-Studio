@@ -54,27 +54,89 @@ class ImportReport:
         }
 
 
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokens(s: Optional[str]) -> frozenset[str]:
+    return frozenset(_TOKEN_RE.findall((s or "").lower()))
+
+
+def _num_token(s: Optional[str]) -> Optional[str]:
+    """Trailing number of a guide string or numeric suffix of a code, with the
+    line prefix and leading zeros stripped: 'AMP-018' / '018' -> '18',
+    'Dark Warm Flesh S08' -> '8'. Lets a bare guide number match a prefixed code."""
+    m = re.search(r"(\d+)\s*$", s or "")
+    if not m:
+        return None
+    return m.group(1).lstrip("0") or "0"
+
+
 def make_db_resolver(db: Session) -> PaintResolver:
     """Resolve a swatch display string ('Coal Black 002' / 'P-002 Black Primer')
-    to a Paint id by matching name+code in either order within the brand. The
-    name/code split is lossy (spec §9.6), so we match on the combined string
-    rather than guessing the boundary."""
-    def resolve(swatch_name: str, brand: Optional[str]) -> Optional[int]:
-        if not swatch_name:
-            return None
-        target = " ".join(swatch_name.split()).lower()
-        q = (
-            db.query(Paint.id, Paint.name, Paint.code)
-            .join(PaintLine, Paint.paint_line_id == PaintLine.id)
-            .join(PaintBrand, PaintLine.brand_id == PaintBrand.id)
-        )
-        if brand:
-            q = q.filter(PaintBrand.name == brand)
-        for pid, name, code in q.all():
+    to a Paint id (#334). The name/code split is lossy (spec §9.6), and real
+    corpus guides drift from a PaintRack-backed shelf — bare numbers vs prefixed
+    codes ('Burnt Umber 018' vs code 'AMP-018'), extra descriptor words
+    ('Bold Titanium White 001' vs 'Titanium White'), and brand-name drift
+    ('FW Acrylic Ink' vs 'FW Inks'). So we match in layers, first *unambiguous*
+    hit wins; ambiguous matches are left unresolved and reported, never guessed.
+    """
+    rows = (
+        db.query(Paint.id, Paint.name, Paint.code, PaintBrand.name)
+        .join(PaintLine, Paint.paint_line_id == PaintLine.id)
+        .join(PaintBrand, PaintLine.brand_id == PaintBrand.id)
+        .all()
+    )
+    # (id, name, code, brand, name-tokens, code-number)
+    catalog = [
+        (pid, name or "", code or "", bname or "", _tokens(name), _num_token(code))
+        for pid, name, code, bname in rows
+    ]
+
+    def _exact(target: str, brand: Optional[str]) -> Optional[int]:
+        for pid, name, code, bname, _nt, _cn in catalog:
+            if brand and bname != brand:
+                continue
             forms = {f"{name} {code}".lower(), f"{code} {name}".lower(), name.lower()}
             if target in forms:
                 return pid
         return None
+
+    def _smart(gtokens: frozenset[str], gnum: Optional[str],
+               brand: Optional[str]) -> Optional[int]:
+        """Code-number match AND shelf-name tokens are a subset of the guide
+        string's tokens. When several candidates qualify, the most specific —
+        the one matching the most name tokens — wins ('Bold Titanium White'
+        over generic 'Titanium White'); a tie at the top stays unresolved."""
+        if not gnum:
+            return None
+        hits = [
+            (len(ntoks), pid)
+            for pid, _n, _c, bname, ntoks, cnum in catalog
+            if (brand is None or bname == brand)
+            and cnum == gnum and ntoks and ntoks <= gtokens
+        ]
+        if not hits:
+            return None
+        top = max(h[0] for h in hits)
+        winners = [pid for n, pid in hits if n == top]
+        return winners[0] if len(winners) == 1 else None
+
+    def resolve(swatch_name: str, brand: Optional[str]) -> Optional[int]:
+        if not swatch_name:
+            return None
+        target = " ".join(swatch_name.split()).lower()
+        pid = _exact(target, brand)
+        if pid is not None:
+            return pid
+        gtokens, gnum = _tokens(swatch_name), _num_token(swatch_name)
+        # Prefer a match inside the named brand, then fall back brand-agnostic
+        # (bridges brand drift like FW) — both require a unique candidate.
+        if brand:
+            pid = _smart(gtokens, gnum, brand)
+            if pid is not None:
+                return pid
+        return _smart(gtokens, gnum, None)
+
     return resolve
 
 

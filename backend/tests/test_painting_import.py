@@ -138,6 +138,56 @@ class TestImportEndpoint:
         assert r.json()["report"]["unresolved_paints"]
 
 
+class TestSmartResolver:
+    """Swatch->paint resolution against a PaintRack-style shelf (#334): bare
+    guide numbers vs prefixed codes, descriptor words, brand drift — first
+    unambiguous match wins, ambiguous stays unresolved."""
+
+    @pytest.fixture
+    def line_id(self, client):
+        brand = client.post("/painting/brands", json={"name": "Pro Acryl"}).json()
+        return client.post(
+            "/painting/lines", json={"brand_id": brand["id"], "name": "AMP"}
+        ).json()["id"]
+
+    def test_exact_combined_string_still_wins(self, client, db, line_id):
+        p = mk_paint(client, line_id, code="002", name="Coal Black")
+        assert make_db_resolver(db)("Coal Black 002", "Pro Acryl") == p["id"]
+
+    def test_bare_number_matches_prefixed_code(self, client, db, line_id):
+        p = mk_paint(client, line_id, code="AMP-018", name="Burnt Umber")
+        assert make_db_resolver(db)("Burnt Umber 018", "Pro Acryl") == p["id"]
+
+    def test_descriptor_words_in_guide_name(self, client, db, line_id):
+        p = mk_paint(client, line_id, code="MEA-001", name="Titanium White")
+        assert make_db_resolver(db)("Bold Titanium White 001", "Pro Acryl") == p["id"]
+
+    def test_specificity_breaks_ties(self, client, db, line_id):
+        mk_paint(client, line_id, code="MEA-001", name="Titanium White")
+        specific = mk_paint(client, line_id, code="MPA-001", name="Bold Titanium White")
+        # both fit, but the longer name-token match is the more specific paint
+        assert make_db_resolver(db)("Bold Titanium White 001", "Pro Acryl") == specific["id"]
+
+    def test_unbreakable_tie_left_unresolved(self, client, db, line_id):
+        mk_paint(client, line_id, code="A-001", name="Red")
+        mk_paint(client, line_id, code="B-001", name="Blue")
+        assert make_db_resolver(db)("Red Blue 001", "Pro Acryl") is None
+
+    def test_brand_agnostic_fallback_for_brand_drift(self, client, db):
+        brand = client.post("/painting/brands", json={"name": "FW Inks"}).json()
+        line = client.post(
+            "/painting/lines", json={"brand_id": brand["id"], "name": "Ink"}
+        ).json()
+        p = mk_paint(client, line["id"], code="513", name="FW Crimson Ink")
+        # guide says "FW Acrylic Ink"; no brand match, but a unique global hit
+        assert make_db_resolver(db)("FW Crimson Ink 513", "FW Acrylic Ink") == p["id"]
+
+    def test_no_number_no_smart_match(self, client, db, line_id):
+        mk_paint(client, line_id, code="AMP-018", name="Burnt Umber")
+        # no exact hit and no number token -> the heuristic must not guess
+        assert make_db_resolver(db)("Burnt Umber Deep", "Pro Acryl") is None
+
+
 # ---------------------------------------------------------------------------
 # real corpus parse + import report (schema-coverage / inventory gap lists)
 # ---------------------------------------------------------------------------
