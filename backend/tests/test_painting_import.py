@@ -190,6 +190,38 @@ class TestSmartResolver:
         # brand-wide it's genuinely ambiguous -> left unresolved
         assert resolve("Titanium White 001", "Pro Acryl") is None
 
+    def test_full_code_in_swatch_string_resolves(self, client, db):
+        # 'VMC 77.702 Duraluminium' carries the exact code mid-string, with brand
+        # drift ('Vallejo Metal Color' vs brand Vallejo / line Metal Color) (#336).
+        v = client.post("/painting/brands", json={"name": "Vallejo"}).json()
+        mc = client.post(
+            "/painting/lines", json={"brand_id": v["id"], "name": "Metal Color"}
+        ).json()
+        ma = client.post(
+            "/painting/lines", json={"brand_id": v["id"], "name": "Model Air"}
+        ).json()
+        dura = mk_paint(client, mc["id"], code="77.702", name="Duraluminium")
+        mk_paint(client, ma["id"], code="71.062", name="Aluminium")  # decoy
+        assert make_db_resolver(db)(
+            "VMC 77.702 Duraluminium", "Vallejo Metal Color"
+        ) == dura["id"]
+
+    def test_pure_numeric_code_not_matched_by_token(self, client, db):
+        # A bare-number code must not match a guide's per-line number token
+        # ('065' the FW code vs '065' written in some other brand's swatch).
+        fw = client.post("/painting/brands", json={"name": "FW Inks"}).json()
+        line = client.post(
+            "/painting/lines", json={"brand_id": fw["id"], "name": "Acrylic"}
+        ).json()
+        mk_paint(client, line["id"], code="065", name="Payne's Grey")
+        assert make_db_resolver(db)("Mystery Colour 065", "Some Other Brand") is None
+
+    def test_mix_swatch_left_unresolved(self, client, db, line_id):
+        # 'Satin Black S39 + gloss medium' is a mix; don't collapse it onto the
+        # S39 component just because the code token matches (#271 mix parsing).
+        mk_paint(client, line_id, code="S39", name="Satin Black")
+        assert make_db_resolver(db)("Satin Black S39 + gloss medium", "Pro Acryl") is None
+
     def test_brand_agnostic_fallback_for_brand_drift(self, client, db):
         brand = client.post("/painting/brands", json={"name": "FW Inks"}).json()
         line = client.post(
