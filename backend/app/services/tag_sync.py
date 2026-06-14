@@ -33,12 +33,19 @@ def _tag_map_for(model: Model) -> dict[str, bool]:
     return tag_map
 
 
+def _write_model_tags(model: Model, db: Session) -> int:
+    """Insert ModelTag rows for one model from its effective tag map. Returns the row count."""
+    rows = 0
+    for tag, is_auto in _tag_map_for(model).items():
+        db.add(ModelTag(model_id=model.id, tag=tag, is_auto=is_auto))
+        rows += 1
+    return rows
+
+
 def sync_model_tags(model: Model, db: Session) -> None:
     """Rebuild model_tags rows for a single model from its JSON tag columns."""
     db.query(ModelTag).filter(ModelTag.model_id == model.id).delete(synchronize_session=False)
-
-    for tag, is_auto in _tag_map_for(model).items():
-        db.add(ModelTag(model_id=model.id, tag=tag, is_auto=is_auto))
+    _write_model_tags(model, db)
 
 
 def rebuild_all_tags(db: Session) -> int:
@@ -56,9 +63,7 @@ def rebuild_all_tags(db: Session) -> int:
         if not models:
             break
         for model in models:
-            for tag, is_auto in _tag_map_for(model).items():
-                db.add(ModelTag(model_id=model.id, tag=tag, is_auto=is_auto))
-                count += 1
+            count += _write_model_tags(model, db)
         db.flush()
         offset += batch_size
 
