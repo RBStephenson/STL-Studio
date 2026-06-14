@@ -61,10 +61,14 @@ jobs:
             newtag="v${major}.${minor}.${patch}"
             echo "Latest tag: ${latest} -> new tag: ${newtag}"
           fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$newtag" -m "Release $newtag"
-          git push origin "$newtag"
+          if git rev-parse "$newtag" >/dev/null 2>&1; then
+            echo "Tag $newtag already exists — skipping tag creation."
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$newtag" -m "Release $newtag"
+            git push origin "$newtag"
+          fi
           echo "tag=$newtag" >> "$GITHUB_OUTPUT"
 
       # Create the release as a DRAFT up front. The parallel build jobs upload
