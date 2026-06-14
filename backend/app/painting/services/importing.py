@@ -56,16 +56,31 @@ class ImportReport:
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
+# US/EU spelling variants normalized so 'Warm Gray' matches shelf 'Warm Grey'.
+_SPELL = ((r"\bgray\b", "grey"), (r"\bcolour", "color"))
+
+
+def _canon(s: Optional[str]) -> str:
+    s = (s or "").lower()
+    for pat, repl in _SPELL:
+        s = re.sub(pat, repl, s)
+    return s
+
 
 def _tokens(s: Optional[str]) -> frozenset[str]:
-    return frozenset(_TOKEN_RE.findall((s or "").lower()))
+    return frozenset(_TOKEN_RE.findall(_canon(s)))
 
 
 def _num_token(s: Optional[str]) -> Optional[str]:
-    """Trailing number of a guide string or numeric suffix of a code, with the
-    line prefix and leading zeros stripped: 'AMP-018' / '018' -> '18',
-    'Dark Warm Flesh S08' -> '8'. Lets a bare guide number match a prefixed code."""
+    """A number to key code matching on, leading-zeros stripped: trailing first
+    ('AMP-018'/'018'->'18', 'Dark Warm Flesh S08'->'8'); else the number inside a
+    leading code-like token ('P-002 Black Primer'->'2', for shorthand codes the
+    guide writes ahead of the name). Lets a bare guide number match a prefixed
+    shelf code."""
     m = re.search(r"(\d+)\s*$", s or "")
+    if not m:
+        # e.g. 'P-002 Black Primer' -> the '002' in the leading code token.
+        m = re.search(r"\b[A-Za-z]+-?(\d+)\b", s or "")
     if not m:
         return None
     return m.group(1).lstrip("0") or "0"
@@ -110,7 +125,9 @@ def make_db_resolver(db: Session) -> PaintResolver:
 
     def _exact(target: str, rows_: list) -> Optional[int]:
         for pid, name, code, _b, _l, _nt, _cn in rows_:
-            forms = {f"{name} {code}".lower(), f"{code} {name}".lower(), name.lower()}
+            forms = {
+                _canon(f"{name} {code}"), _canon(f"{code} {name}"), _canon(name),
+            }
             if target in forms:
                 return pid
         return None
@@ -150,7 +167,7 @@ def make_db_resolver(db: Session) -> PaintResolver:
     def resolve(swatch_name: str, brand: Optional[str]) -> Optional[int]:
         if not swatch_name:
             return None
-        target = " ".join(swatch_name.split()).lower()
+        target = _canon(" ".join(swatch_name.split()))
         gtokens, gnum = _tokens(swatch_name), _num_token(swatch_name)
         # A mix swatch ('X + Y') is two paints — leave it for mix parsing (#271)
         # rather than collapsing it onto whichever component matches first.
@@ -205,8 +222,20 @@ def _classes(node: Tag) -> list[str]:
 _VALUE_RE = re.compile(r"~\s*(\d+)\s*%\s*value(?:\s*[—-]\s*(.*))?", re.I)
 
 
+def _mix_parts(name: str) -> list[str]:
+    """Split a mix swatch name ('Burnt Sienna + Titanium White', '+ Khaki 061
+    (2:1)') into component paint strings. Ratio parens are dropped; a single
+    paint returns one part."""
+    cleaned = re.sub(r"\([^)]*\)", "", name)  # drop ratio like (2:1)
+    return [p.strip() for p in cleaned.split("+") if p.strip()]
+
+
 def _parse_swatch(node: Tag, resolve: PaintResolver, report: ImportReport,
-                  step_title: str) -> Optional[dict]:
+                  step_title: str) -> list[dict]:
+    """A swatch -> one or more swatch dicts. A mix ('A + B') expands into one
+    swatch per resolvable component, sharing the value/role (#336, Option A);
+    components that don't resolve (mediums, back-references) are reported and
+    dropped. Unresolved single swatches are reported and yield nothing."""
     name = _txt(node.select_one(".swatch-name"))
     brand = _txt(node.select_one(".swatch-brand")) or None
     value_text = _txt(node.select_one(".swatch-value"))
@@ -220,17 +249,22 @@ def _parse_swatch(node: Tag, resolve: PaintResolver, report: ImportReport,
         # No "~N% value" prefix — the whole string is the role label.
         role = value_text
 
-    paint_id = resolve(name, brand)
-    if paint_id is None:
-        report.unresolved_paints.append({"name": name, "brand": brand, "step": step_title})
-        return None
-    report.resolved_paints += 1
-    sw: dict = {"paint_id": paint_id}
-    if value_pct is not None:
-        sw["value_pct"] = value_pct
-    if role:
-        sw["role_label"] = role
-    return sw
+    out: list[dict] = []
+    for part in _mix_parts(name):
+        paint_id = resolve(part, brand)
+        if paint_id is None:
+            report.unresolved_paints.append(
+                {"name": part, "brand": brand, "step": step_title}
+            )
+            continue
+        report.resolved_paints += 1
+        sw: dict = {"paint_id": paint_id}
+        if value_pct is not None:
+            sw["value_pct"] = value_pct
+        if role:
+            sw["role_label"] = role
+        out.append(sw)
+    return out
 
 
 _STEP_NUM_RE = re.compile(r"^Step\s+\d+\s*·\s*(.*)$")
@@ -255,9 +289,7 @@ def _parse_step(node: Tag, resolve: PaintResolver, report: ImportReport) -> dict
 
     swatches = []
     for sw_node in node.select(".swatches > .swatch"):
-        sw = _parse_swatch(sw_node, resolve, report, title)
-        if sw is not None:
-            swatches.append(sw)
+        swatches.extend(_parse_swatch(sw_node, resolve, report, title))
     if swatches:
         step["swatches"] = swatches
 

@@ -12,7 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from app.painting.services.importing import import_guide_html, make_db_resolver
+from bs4 import BeautifulSoup
+
+from app.painting.services.importing import (
+    ImportReport, _parse_swatch, import_guide_html, make_db_resolver,
+)
 from tests.test_painting_guides import mk_paint
 from tests.test_painting_guide_schema import presto_body
 
@@ -222,6 +226,20 @@ class TestSmartResolver:
         mk_paint(client, line_id, code="S39", name="Satin Black")
         assert make_db_resolver(db)("Satin Black S39 + gloss medium", "Pro Acryl") is None
 
+    def test_us_eu_spelling_normalized(self, client, db, line_id):
+        # guide 'Gray' (US) matches shelf 'Grey' (EU)
+        p = mk_paint(client, line_id, code="074", name="Warm Grey")
+        assert make_db_resolver(db)("Warm Gray 074", "Pro Acryl") == p["id"]
+
+    def test_primer_code_shorthand(self, client, db):
+        brand = client.post("/painting/brands", json={"name": "Pro Acryl"}).json()
+        line = client.post(
+            "/painting/lines", json={"brand_id": brand["id"], "name": "PRIME"}
+        ).json()
+        p = mk_paint(client, line["id"], code="MPAP-002", name="Black")
+        # guide writes the shorthand 'P-002'; number inside the leading code token
+        assert make_db_resolver(db)("P-002 Black Primer", "Pro Acryl") == p["id"]
+
     def test_brand_agnostic_fallback_for_brand_drift(self, client, db):
         brand = client.post("/painting/brands", json={"name": "FW Inks"}).json()
         line = client.post(
@@ -235,6 +253,39 @@ class TestSmartResolver:
         mk_paint(client, line_id, code="AMP-018", name="Burnt Umber")
         # no exact hit and no number token -> the heuristic must not guess
         assert make_db_resolver(db)("Burnt Umber Deep", "Pro Acryl") is None
+
+
+class TestMixExpansion:
+    """A mix swatch ('A + B') expands into one swatch per resolvable component
+    (#336 Option A); non-paint components (mediums, back-refs) drop + report."""
+
+    def _swatch(self, name, value="~40% value — base", brand="Pro Acryl"):
+        html = (f'<div class="swatch"><div class="swatch-name">{name}</div>'
+                f'<div class="swatch-brand">{brand}</div>'
+                f'<div class="swatch-value">{value}</div></div>')
+        return BeautifulSoup(html, "html.parser").select_one(".swatch")
+
+    def test_mix_expands_to_each_component(self):
+        resolve = lambda n, b: {"coal black": 1, "warm grey": 2}.get(n.lower())
+        rep = ImportReport()
+        out = _parse_swatch(self._swatch("Coal Black + Warm Grey"), resolve, rep, "S")
+        assert [s["paint_id"] for s in out] == [1, 2]
+        assert all(s["value_pct"] == 40 for s in out)  # shared value
+        assert rep.resolved_paints == 2
+
+    def test_non_paint_component_dropped_and_reported(self):
+        resolve = lambda n, b: {"satin black s39": 5}.get(n.lower())
+        rep = ImportReport()
+        out = _parse_swatch(
+            self._swatch("Satin Black S39 + gloss medium"), resolve, rep, "S")
+        assert [s["paint_id"] for s in out] == [5]
+        assert any(u["name"] == "gloss medium" for u in rep.unresolved_paints)
+
+    def test_leading_plus_and_ratio_stripped(self):
+        resolve = lambda n, b: 7 if n.lower() == "khaki 061" else None
+        rep = ImportReport()
+        out = _parse_swatch(self._swatch("+ Khaki 061 (2:1)"), resolve, rep, "S")
+        assert [s["paint_id"] for s in out] == [7]
 
 
 # ---------------------------------------------------------------------------
