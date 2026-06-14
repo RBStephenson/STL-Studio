@@ -133,21 +133,43 @@ def make_db_resolver(db: Session) -> PaintResolver:
         winners = [pid for n, pid in hits if n == top]
         return winners[0] if len(winners) == 1 else None
 
+    def _by_code(ws_tokens: set, rows_: list) -> Optional[int]:
+        """Match when the paint's full code appears verbatim as a token in the
+        swatch string ('VMC 77.702 Duraluminium' -> code '77.702'). Pure-digit
+        codes are excluded — a bare number collides with the per-line numbering
+        guides use ('Burnt Umber 018'); a distinctive code (dots/letters) is a
+        strong, near-unique key, so this also bridges brand drift like Vallejo
+        Metal Color. Requires a unique hit."""
+        hits = {
+            pid
+            for pid, _n, code, _b, _l, _nt, _cn in rows_
+            if code and not code.isdigit() and code.lower() in ws_tokens
+        }
+        return next(iter(hits)) if len(hits) == 1 else None
+
     def resolve(swatch_name: str, brand: Optional[str]) -> Optional[int]:
         if not swatch_name:
             return None
         target = " ".join(swatch_name.split()).lower()
         gtokens, gnum = _tokens(swatch_name), _num_token(swatch_name)
+        # A mix swatch ('X + Y') is two paints — leave it for mix parsing (#271)
+        # rather than collapsing it onto whichever component matches first.
+        is_mix = "+" in swatch_name
+        ws_tokens = set(target.split())
         scoped = _scope(brand)
         # Prefer the brand/line-scoped match, then fall back to the whole
-        # catalog (bridges brand drift like FW) — each requires a unique hit.
+        # catalog (bridges brand drift) — each requires a unique hit.
         for rows_ in (scoped, catalog):
             pid = _exact(target, rows_)
             if pid is not None:
                 return pid
-            pid = _smart(gtokens, gnum, rows_)
-            if pid is not None:
-                return pid
+            if not is_mix:
+                pid = _by_code(ws_tokens, rows_)
+                if pid is not None:
+                    return pid
+                pid = _smart(gtokens, gnum, rows_)
+                if pid is not None:
+                    return pid
             if rows_ is catalog:
                 break
         return None
