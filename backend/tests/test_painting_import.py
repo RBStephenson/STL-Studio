@@ -173,6 +173,23 @@ class TestSmartResolver:
         mk_paint(client, line_id, code="B-001", name="Blue")
         assert make_db_resolver(db)("Red Blue 001", "Pro Acryl") is None
 
+    def test_line_name_disambiguates_same_name_number(self, client, db):
+        # A code's number restarts per line, so 'Titanium White 001' exists in
+        # two lines of one brand. The swatch's brand text names the LINE (#336).
+        brand = client.post("/painting/brands", json={"name": "Pro Acryl"}).json()
+        ea = client.post(
+            "/painting/lines", json={"brand_id": brand["id"], "name": "Expert Acrylics"}
+        ).json()
+        wp = client.post(
+            "/painting/lines", json={"brand_id": brand["id"], "name": "Weathering Pigments"}
+        ).json()
+        expert = mk_paint(client, ea["id"], code="MEA-001", name="Titanium White")
+        mk_paint(client, wp["id"], code="MWP-01", name="Titanium White")
+        resolve = make_db_resolver(db)
+        assert resolve("Titanium White 001", "Expert Acrylics") == expert["id"]
+        # brand-wide it's genuinely ambiguous -> left unresolved
+        assert resolve("Titanium White 001", "Pro Acryl") is None
+
     def test_brand_agnostic_fallback_for_brand_drift(self, client, db):
         brand = client.post("/painting/brands", json={"name": "FW Inks"}).json()
         line = client.post(

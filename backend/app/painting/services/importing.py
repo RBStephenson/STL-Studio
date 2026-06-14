@@ -79,30 +79,43 @@ def make_db_resolver(db: Session) -> PaintResolver:
     ('Bold Titanium White 001' vs 'Titanium White'), and brand-name drift
     ('FW Acrylic Ink' vs 'FW Inks'). So we match in layers, first *unambiguous*
     hit wins; ambiguous matches are left unresolved and reported, never guessed.
+
+    The swatch's "brand" is matched against the paint's brand **or line** name
+    (#336): a code's number restarts per line, so 'Titanium White 001' is
+    ambiguous brand-wide ('Titanium White' MEA-001 in the Expert Acrylics line
+    vs MWP-01 in Weathering Pigments) but unique once the swatch's 'Expert
+    Acrylics' is read as the line.
     """
     rows = (
-        db.query(Paint.id, Paint.name, Paint.code, PaintBrand.name)
+        db.query(Paint.id, Paint.name, Paint.code, PaintBrand.name, PaintLine.name)
         .join(PaintLine, Paint.paint_line_id == PaintLine.id)
         .join(PaintBrand, PaintLine.brand_id == PaintBrand.id)
         .all()
     )
-    # (id, name, code, brand, name-tokens, code-number)
+    # (id, name, code, brand, line, name-tokens, code-number)
     catalog = [
-        (pid, name or "", code or "", bname or "", _tokens(name), _num_token(code))
-        for pid, name, code, bname in rows
+        (pid, name or "", code or "", bname or "", lname or "",
+         _tokens(name), _num_token(code))
+        for pid, name, code, bname, lname in rows
     ]
 
-    def _exact(target: str, brand: Optional[str]) -> Optional[int]:
-        for pid, name, code, bname, _nt, _cn in catalog:
-            if brand and bname != brand:
-                continue
+    def _scope(brand: Optional[str]) -> list:
+        """Candidates whose brand or line name equals the swatch's brand text
+        (case-insensitive). None / no match -> the whole catalog."""
+        if not brand:
+            return catalog
+        b = brand.strip().lower()
+        hits = [r for r in catalog if r[3].lower() == b or r[4].lower() == b]
+        return hits or catalog
+
+    def _exact(target: str, rows_: list) -> Optional[int]:
+        for pid, name, code, _b, _l, _nt, _cn in rows_:
             forms = {f"{name} {code}".lower(), f"{code} {name}".lower(), name.lower()}
             if target in forms:
                 return pid
         return None
 
-    def _smart(gtokens: frozenset[str], gnum: Optional[str],
-               brand: Optional[str]) -> Optional[int]:
+    def _smart(gtokens: frozenset[str], gnum: Optional[str], rows_: list) -> Optional[int]:
         """Code-number match AND shelf-name tokens are a subset of the guide
         string's tokens. When several candidates qualify, the most specific —
         the one matching the most name tokens — wins ('Bold Titanium White'
@@ -111,9 +124,8 @@ def make_db_resolver(db: Session) -> PaintResolver:
             return None
         hits = [
             (len(ntoks), pid)
-            for pid, _n, _c, bname, ntoks, cnum in catalog
-            if (brand is None or bname == brand)
-            and cnum == gnum and ntoks and ntoks <= gtokens
+            for pid, _n, _c, _b, _l, ntoks, cnum in rows_
+            if cnum == gnum and ntoks and ntoks <= gtokens
         ]
         if not hits:
             return None
@@ -125,17 +137,20 @@ def make_db_resolver(db: Session) -> PaintResolver:
         if not swatch_name:
             return None
         target = " ".join(swatch_name.split()).lower()
-        pid = _exact(target, brand)
-        if pid is not None:
-            return pid
         gtokens, gnum = _tokens(swatch_name), _num_token(swatch_name)
-        # Prefer a match inside the named brand, then fall back brand-agnostic
-        # (bridges brand drift like FW) — both require a unique candidate.
-        if brand:
-            pid = _smart(gtokens, gnum, brand)
+        scoped = _scope(brand)
+        # Prefer the brand/line-scoped match, then fall back to the whole
+        # catalog (bridges brand drift like FW) — each requires a unique hit.
+        for rows_ in (scoped, catalog):
+            pid = _exact(target, rows_)
             if pid is not None:
                 return pid
-        return _smart(gtokens, gnum, None)
+            pid = _smart(gtokens, gnum, rows_)
+            if pid is not None:
+                return pid
+            if rows_ is catalog:
+                break
+        return None
 
     return resolve
 
