@@ -9,9 +9,12 @@ import platform
 import subprocess
 import zipfile
 from pathlib import Path
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 from app.config import settings
+from app.database import get_db
+from app.models import Model as ModelDB, ScanRoot, STLFile
 from app.schemas import DownloadZipRequest
 
 logger = logging.getLogger(__name__)
@@ -90,7 +93,6 @@ def _allowed_roots() -> list[Path]:
     # (where STL_ROOTS is empty and drives are added entirely through the UI).
     try:
         from app.database import SessionLocal
-        from app.models import ScanRoot
         db = SessionLocal()
         try:
             for (path,) in db.query(ScanRoot.path).filter(ScanRoot.enabled == True):
@@ -198,27 +200,24 @@ def _unique_arcname(filename: str, used: set[str]) -> str:
 
 
 @router.post("/download-zip")
-def download_zip(body: DownloadZipRequest, background_tasks: BackgroundTasks):
+def download_zip(
+    body: DownloadZipRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """Build a zip archive from a list of STL file IDs and stream it to the client.
 
     The archive is written to a temp file (not an in-memory BytesIO) so a
     multi-GB kit doesn't have to fit in RAM (#219); the temp file is removed after
     the response is sent, the same way /database/backup cleans up its snapshot.
     """
-    from app.database import SessionLocal
-    from app.models import STLFile
-
     file_ids = body.file_ids
     zip_name = body.zip_name
 
     if not file_ids:
         raise HTTPException(status_code=400, detail="No file IDs provided")
 
-    db = SessionLocal()
-    try:
-        files = db.query(STLFile).filter(STLFile.id.in_(file_ids)).all()
-    finally:
-        db.close()
+    files = db.query(STLFile).filter(STLFile.id.in_(file_ids)).all()
 
     if not files:
         raise HTTPException(status_code=404, detail="No matching files found")
@@ -346,7 +345,7 @@ def browse_images(path: str = ""):
 
 
 @router.get("/model-images/{model_id}")
-def list_model_images(model_id: int, refresh: bool = False):
+def list_model_images(model_id: int, refresh: bool = False, db: Session = Depends(get_db)):
     """List images for the image picker.
 
     Searches everything within the character/product boundary — the folder
@@ -359,110 +358,96 @@ def list_model_images(model_id: int, refresh: bool = False):
     and the persisted manifest signature — the user's escape hatch when an image
     added deep in a nested subtree didn't bump the shallow boundary signature.
     """
-    from app.database import SessionLocal
-    from app.models import Model as ModelDB
-
     now = time.monotonic()
     if not refresh:
         cached = _model_images_cache.get(model_id)
         if cached is not None and now - cached[0] < _MODEL_IMAGES_TTL:
             return cached[1]
 
-    db = SessionLocal()
-    try:
-        model = db.query(ModelDB).filter(ModelDB.id == model_id).first()
-        if not model:
-            raise HTTPException(status_code=404, detail="Model not found")
-        folder = Path(model.folder_path)
-        if not folder.exists():
-            return []
+    model = db.query(ModelDB).filter(ModelDB.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    folder = Path(model.folder_path)
+    if not folder.exists():
+        return []
 
-        # Find the character boundary: the folder directly inside the creator dir.
-        # Walk up until the parent is the creator dir (its parent is a scan root).
-        # If the model is directly under the creator dir, boundary stays as the
-        # model folder itself — don't expand to the full creator dir.
-        roots = {str(r) for r in _allowed_roots()}
-        boundary = folder
-        current = folder.parent
-        while current != current.parent:
-            if str(current) in roots:
-                break
-            if str(current.parent) in roots:
-                # current is the creator dir — stop; boundary is already correct
-                break
-            boundary = current
-            current = current.parent
+    # Find the character boundary: the folder directly inside the creator dir.
+    # Walk up until the parent is the creator dir (its parent is a scan root).
+    # If the model is directly under the creator dir, boundary stays as the
+    # model folder itself — don't expand to the full creator dir.
+    roots = {str(r) for r in _allowed_roots()}
+    boundary = folder
+    current = folder.parent
+    while current != current.parent:
+        if str(current) in roots:
+            break
+        if str(current.parent) in roots:
+            # current is the creator dir — stop; boundary is already correct
+            break
+        boundary = current
+        current = current.parent
 
-        # Layer 2: persisted manifest. If the boundary signature matches what the
-        # stored manifest was built from, return it without a full directory walk
-        # — this fast path survives restarts (unlike the in-memory cache). The
-        # signature is one scandir; the walk it replaces is the whole subtree.
-        sig = _boundary_signature(boundary)
-        if not refresh and sig and model.image_manifest is not None and model.image_manifest_sig == sig:
-            images = model.image_manifest
-            _store_in_memory(model_id, images)
-            return images
-
-        # Load all other model folder paths under the boundary so we can skip
-        # them during traversal (avoids mixing in sibling variant images).
-        boundary_prefix = str(boundary)
-        other_model_folders = {
-            p for (p,) in db.query(ModelDB.folder_path)
-            .filter(ModelDB.folder_path.like(f"{boundary_prefix}/%"),
-                    ModelDB.id != model.id)
-            .all() if p
-        }
-
-        seen: set[str] = set()
-        images: list[dict] = []
-
-        def _collect(path: Path):
-            try:
-                entries = path.iterdir()
-            except PermissionError:
-                return
-            for entry in entries:
-                if entry.is_dir():
-                    if str(entry) not in other_model_folders:
-                        _collect(entry)
-                elif entry.is_file() and entry.suffix.lower() in ALLOWED_IMAGE_EXTENSIONS:
-                    key = str(entry)
-                    if key not in seen:
-                        seen.add(key)
-                        images.append({"path": key, "filename": entry.name,
-                                       "url": f"/api/files/image?path={_url_quote(str(entry), safe='')}"})
-
-        _collect(boundary)
-
-        # Persist the freshly-walked manifest against the signature we walked at,
-        # so a later open (even after a restart) can skip the walk entirely.
-        if sig and (model.image_manifest != images or model.image_manifest_sig != sig):
-            model.image_manifest = images
-            model.image_manifest_sig = sig
-            db.commit()
-
+    # Layer 2: persisted manifest. If the boundary signature matches what the
+    # stored manifest was built from, return it without a full directory walk
+    # — this fast path survives restarts (unlike the in-memory cache). The
+    # signature is one scandir; the walk it replaces is the whole subtree.
+    sig = _boundary_signature(boundary)
+    if not refresh and sig and model.image_manifest is not None and model.image_manifest_sig == sig:
+        images = model.image_manifest
         _store_in_memory(model_id, images)
         return images
-    finally:
-        db.close()
+
+    # Load all other model folder paths under the boundary so we can skip
+    # them during traversal (avoids mixing in sibling variant images).
+    boundary_prefix = str(boundary)
+    other_model_folders = {
+        p for (p,) in db.query(ModelDB.folder_path)
+        .filter(ModelDB.folder_path.like(f"{boundary_prefix}/%"),
+                ModelDB.id != model.id)
+        .all() if p
+    }
+
+    seen: set[str] = set()
+    images: list[dict] = []
+
+    def _collect(path: Path):
+        try:
+            entries = path.iterdir()
+        except PermissionError:
+            return
+        for entry in entries:
+            if entry.is_dir():
+                if str(entry) not in other_model_folders:
+                    _collect(entry)
+            elif entry.is_file() and entry.suffix.lower() in ALLOWED_IMAGE_EXTENSIONS:
+                key = str(entry)
+                if key not in seen:
+                    seen.add(key)
+                    images.append({"path": key, "filename": entry.name,
+                                   "url": f"/api/files/image?path={_url_quote(str(entry), safe='')}"})
+
+    _collect(boundary)
+
+    # Persist the freshly-walked manifest against the signature we walked at,
+    # so a later open (even after a restart) can skip the walk entirely.
+    if sig and (model.image_manifest != images or model.image_manifest_sig != sig):
+        model.image_manifest = images
+        model.image_manifest_sig = sig
+        db.commit()
+
+    _store_in_memory(model_id, images)
+    return images
 
 
 @router.get("/drive-status")
-def drive_status():
+def drive_status(db: Session = Depends(get_db)):
     """Report availability of each configured scan root.
 
     External drives can be unmounted or disconnected, in which case scans and
     file serving silently return nothing. This lets the UI surface a clear
     "drive unavailable" warning instead of an empty library.
     """
-    from app.database import SessionLocal
-    from app.models import ScanRoot
-
-    db = SessionLocal()
-    try:
-        rows = db.query(ScanRoot.path, ScanRoot.enabled).all()
-    finally:
-        db.close()
+    rows = db.query(ScanRoot.path, ScanRoot.enabled).all()
 
     roots: list[dict] = []
     for path, enabled in rows:
