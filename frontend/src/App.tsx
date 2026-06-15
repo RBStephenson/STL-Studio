@@ -16,7 +16,6 @@ import GuideReaderPage from "./pages/GuideReaderPage";
 import GuideEditorPage from "./pages/GuideEditorPage";
 import GuideContentEditorPage from "./pages/GuideContentEditorPage";
 import PaintShelfPage from "./pages/PaintShelfPage";
-import ReorganizePage from "./pages/ReorganizePage";
 import BackToTop from "./components/BackToTop";
 
 export default function App() {
@@ -34,7 +33,6 @@ export default function App() {
           <Route path="/queue" element={<Queue />} />
           <Route path="/triage" element={<Triage />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/reorganize" element={<ReorganizePage />} />
           <Route path="/tags" element={<TagsPage />} />
           <Route path="/painting/guides" element={<GuidesPage />} />
           <Route path="/painting/guides/new" element={<GuideEditorPage />} />

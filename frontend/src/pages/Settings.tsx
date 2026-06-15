@@ -1,9 +1,7 @@
 import { useEffect, useState, useRef } from "react";
-import { Link } from "react-router-dom";
 import {
   HardDrive, Plus, Trash2, AlertCircle, CheckCircle, FolderSearch,
   Database, Download, Upload, ShieldAlert, Paintbrush, SlidersHorizontal, RefreshCw,
-  FolderTree,
 } from "lucide-react";
 import { api, ScanRoot } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -446,21 +444,6 @@ export default function Settings() {
             </div>
           ))}
         </div>
-      </section>
-
-      {/* Library tools */}
-      <section className="mt-12 pt-8 border-t border-gray-800">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-          <FolderTree size={14} /> Library Tools
-        </h2>
-        <Link
-          to="/reorganize"
-          className="flex items-center gap-2 text-sm text-gray-300 hover:text-indigo-300 bg-gray-900 border border-gray-800 hover:border-indigo-700 rounded-lg px-4 py-3 self-start transition-colors w-fit"
-        >
-          <FolderTree size={15} className="text-indigo-400" />
-          Reorganize Library (preview)
-          <span className="text-xs text-gray-600">— see a proposed tidy layout; no files are moved</span>
-        </Link>
       </section>
 
       {/* Preferences */}

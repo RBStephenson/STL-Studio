@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.database import Base, engine, SessionLocal
-from app.routers import models, scan, files, collections, scrape, enrich, database, settings, reorganize
+from app.routers import models, scan, files, collections, scrape, enrich, database, settings
 # Registers the paint_*/guide_* tables on Base before create_all below.
 from app.painting import models as painting_models  # noqa: F401
 from app.painting.routers import router as painting_router
@@ -274,7 +274,6 @@ def create_app(api_prefix: str = "") -> FastAPI:
         enrich.router,
         database.router,
         settings.router,
-        reorganize.router,
         painting_router,
         _health_router,
     ):
