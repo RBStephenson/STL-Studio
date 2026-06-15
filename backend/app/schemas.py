@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -256,3 +256,71 @@ class AppSettingsUpdate(BaseModel):
     library_sort: Optional[str] = Field(None, pattern="^(name|added|creator|rating)$")
 
     model_config = {"extra": "forbid"}
+
+
+# --- Library reorganize, Phase 1 preview (#323) ---------------------------
+
+FingerprintMethod = Literal["stat", "content_hash"]
+MoveKind = Literal["move", "rename", "case_rename", "in_place", "merge"]
+CollisionKind = Literal[
+    "none", "exact", "case_only", "unicode_only", "legitimate_duplicate"
+]
+
+
+class ReorganizeFileMove(BaseModel):
+    stl_file_id: int
+    current_path: str          # normalized, '/'-internal
+    proposed_path: str
+    # Real fingerprint for the Phase 2 drift check (decision D) — not the dead
+    # STLFile.file_hash column. stat-only in Phase 1; content_hash deferred.
+    size_bytes: int
+    mtime_ns: int
+    content_hash: Optional[str] = None
+    fingerprint_method: FingerprintMethod
+
+
+class ReorganizeEntry(BaseModel):
+    model_id: int
+    model_name: str
+    files: list[ReorganizeFileMove]   # the move unit is the file set
+    kind: MoveKind
+    proposed_dir: str
+    eligible: bool
+
+    # Path-keyed references this move invalidates (decision D); Phase 2 repaths.
+    pack_override_paths: list[str]
+    group_override_paths: list[str]
+
+    # Blockers / flags.
+    collision: bool
+    collision_kind: CollisionKind
+    collision_with: list[int]
+    unclassifiable: bool
+    missing_fields: list[str]
+    over_length: bool
+    reserved_name: bool
+    overlaps_other: bool
+    spans_multiple_dirs: bool
+    is_symlink: bool
+    escapes_scan_root: bool
+
+
+class ReorganizeStats(BaseModel):
+    total: int
+    eligible: int
+    moves_needed: int
+    already_in_place: int
+    collisions: int
+    unclassifiable: int
+    over_length: int
+    reserved: int
+    overlaps: int
+    blocked: int                      # total ineligible
+
+
+class ReorganizePreviewResponse(BaseModel):
+    manifest_id: str                  # durable, identified artifact
+    template: str
+    generated_at: str
+    entries: list[ReorganizeEntry]
+    stats: ReorganizeStats

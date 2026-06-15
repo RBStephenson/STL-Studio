@@ -203,3 +203,19 @@ class AppSetting(Base):
 
     key = Column(String, primary_key=True)
     value = Column(JSON, nullable=False)
+
+
+class ReorganizeManifest(Base):
+    """A persisted library-reorganize preview manifest (#323, Phase 1).
+
+    The preview is computed and stored as an immutable artifact (id + JSON
+    payload of entries with per-file source paths and fingerprints) so Phase 2
+    (#324) can execute the *approved* manifest and verify non-drift, rather than
+    silently recomputing — see the issue's decision B. No files are moved here.
+    """
+    __tablename__ = "reorganize_manifests"
+
+    id = Column(String, primary_key=True)          # uuid4 hex
+    template = Column(String, nullable=False)
+    payload = Column(JSON, nullable=False)         # full ReorganizePreviewResponse
+    created_at = Column(DateTime, default=utcnow)

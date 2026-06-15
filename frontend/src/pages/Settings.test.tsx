@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { render as rtlRender, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import Settings from "./Settings";
 import { AppSettingsProvider } from "../context/AppSettingsContext";
 import { mkSettings } from "../test/settings";
+
+// Settings now contains a <Link> (Library Tools → /reorganize), so every render
+// needs a Router context.
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 vi.mock("../api/client", () => ({
   api: {
