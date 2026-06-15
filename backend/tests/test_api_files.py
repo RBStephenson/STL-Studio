@@ -434,6 +434,23 @@ class TestModelImagesCache:
             Path.iterdir = orig_iterdir
         assert [i["filename"] for i in served] == ["render.png"]
 
+    def test_refresh_param_bypasses_caches(self, client, db, tmp_path):
+        """?refresh=true forces a re-walk even when both the in-memory cache and
+        the persisted manifest signature are still valid (#304 escape hatch)."""
+        model, char_dir = self._setup_model(db, tmp_path)
+        (char_dir / "first.png").write_bytes(b"PNG")
+        # A deep subtree that already exists at first walk, so adding a file
+        # inside it later won't bump the boundary or its immediate children's
+        # mtimes — the shallow signature stays stale.
+        nested = char_dir / "Supported" / "Extra"
+        nested.mkdir(parents=True)
+        client.get(f"/files/model-images/{model.id}")  # warms both caches
+
+        (nested / "deep.png").write_bytes(b"PNG")
+
+        forced = client.get(f"/files/model-images/{model.id}?refresh=true").json()
+        assert {i["filename"] for i in forced} == {"first.png", "deep.png"}
+
     def test_signature_change_forces_rewalk_and_repersist(self, client, db, tmp_path):
         """Adding an image bumps the boundary signature, so the persisted manifest
         is rebuilt on the next open even after a restart (no in-memory cache)."""

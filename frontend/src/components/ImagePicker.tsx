@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, Check, ImageOff, Loader2, Link2, Trash2, FolderOpen, ArrowUp, Folder, HardDrive, Image } from "lucide-react";
+import { X, Check, ImageOff, Loader2, Link2, Trash2, FolderOpen, ArrowUp, Folder, HardDrive, Image, RefreshCw } from "lucide-react";
 
 interface ImageEntry {
   path: string;
@@ -58,12 +58,21 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
       .finally(() => setBrowseLoading(false));
   }, []);
 
-  useEffect(() => {
-    fetch(`/api/files/model-images/${modelId}`)
+  const [refreshing, setRefreshing] = useState(false);
+
+  // `refresh` forces the server to re-walk the folder, bypassing its cached
+  // manifest — used when a newly-added image hasn't shown up yet.
+  const loadImages = useCallback((refresh = false) => {
+    if (refresh) setRefreshing(true);
+    else setLoading(true);
+    fetch(`/api/files/model-images/${modelId}${refresh ? "?refresh=true" : ""}`)
       .then((r) => r.json())
-      .then((data) => { setImages(data); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then((data) => setImages(data))
+      .catch(() => { /* leave the existing list in place on failure */ })
+      .finally(() => { setLoading(false); setRefreshing(false); });
   }, [modelId]);
+
+  useEffect(() => { loadImages(); }, [loadImages]);
 
   const apply = async (clear = false) => {
     setSaving(true);
@@ -288,13 +297,24 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
                   ))}
                 </div>
               )}
-              <button
-                onClick={() => { setBrowsing(true); browseDir(); }}
-                className="flex items-center gap-2 self-start px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors"
-              >
-                <FolderOpen size={13} />
-                Browse for image…
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setBrowsing(true); browseDir(); }}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  <FolderOpen size={13} />
+                  Browse for image…
+                </button>
+                <button
+                  onClick={() => loadImages(true)}
+                  disabled={refreshing}
+                  title="Re-scan this model's folder for images"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50 transition-colors"
+                >
+                  <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+                  Refresh
+                </button>
+              </div>
             </div>
           )}
         </div>

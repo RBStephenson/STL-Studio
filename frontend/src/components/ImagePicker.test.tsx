@@ -99,3 +99,19 @@ describe("ImagePicker – From URL tab", () => {
     expect(onApplied).toHaveBeenCalled();
   });
 });
+
+describe("ImagePicker – From Folder tab", () => {
+  it("re-fetches with ?refresh=true when Refresh is clicked", async () => {
+    renderPicker();
+    // Wait for the initial empty load so the local-tab content is rendered.
+    await screen.findByText(/no images found/i);
+
+    fetchMock.mockImplementationOnce((url: string) => {
+      expect(url).toBe("/api/files/model-images/7?refresh=true");
+      return jsonResponse([{ path: "/d/new.png", filename: "new.png", url: "/img" }]);
+    });
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    expect(await screen.findByTitle("new.png")).toBeInTheDocument();
+  });
+});

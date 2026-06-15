@@ -333,7 +333,7 @@ def browse_images(path: str = ""):
 
 
 @router.get("/model-images/{model_id}")
-def list_model_images(model_id: int):
+def list_model_images(model_id: int, refresh: bool = False):
     """List images for the image picker.
 
     Searches everything within the character/product boundary — the folder
@@ -341,14 +341,19 @@ def list_model_images(model_id: int):
     subdirectories that are themselves indexed model folders so sibling
     variants don't bleed in. Handles models nested at any depth inside
     the character folder.
+
+    ``refresh=True`` forces a full re-walk, bypassing both the in-memory cache
+    and the persisted manifest signature — the user's escape hatch when an image
+    added deep in a nested subtree didn't bump the shallow boundary signature.
     """
     from app.database import SessionLocal
     from app.models import Model as ModelDB
 
     now = time.monotonic()
-    cached = _model_images_cache.get(model_id)
-    if cached is not None and now - cached[0] < _MODEL_IMAGES_TTL:
-        return cached[1]
+    if not refresh:
+        cached = _model_images_cache.get(model_id)
+        if cached is not None and now - cached[0] < _MODEL_IMAGES_TTL:
+            return cached[1]
 
     db = SessionLocal()
     try:
@@ -380,7 +385,7 @@ def list_model_images(model_id: int):
         # — this fast path survives restarts (unlike the in-memory cache). The
         # signature is one scandir; the walk it replaces is the whole subtree.
         sig = _boundary_signature(boundary)
-        if sig and model.image_manifest is not None and model.image_manifest_sig == sig:
+        if not refresh and sig and model.image_manifest is not None and model.image_manifest_sig == sig:
             images = model.image_manifest
             _store_in_memory(model_id, images)
             return images
