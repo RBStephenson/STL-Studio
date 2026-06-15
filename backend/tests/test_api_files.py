@@ -401,6 +401,60 @@ class TestModelImagesCache:
         resp = client.get("/files/model-images/99999")
         assert resp.status_code == 404
 
+    def test_manifest_persists_and_skips_rewalk(self, client, db, tmp_path):
+        """After the in-memory cache is gone, an unchanged folder is served from
+        the persisted DB manifest without re-walking the disk (#304)."""
+        import app.routers.files as files_module
+        from app.models import Model as ModelDB
+
+        model, char_dir = self._setup_model(db, tmp_path)
+        (char_dir / "render.png").write_bytes(b"PNG")
+
+        first = client.get(f"/files/model-images/{model.id}").json()
+        assert [i["filename"] for i in first] == ["render.png"]
+
+        # The walk persisted a manifest + signature to the DB.
+        db.expire_all()
+        stored = db.query(ModelDB).filter(ModelDB.id == model.id).first()
+        assert [i["filename"] for i in stored.image_manifest] == ["render.png"]
+        assert stored.image_manifest_sig
+
+        # Drop the in-memory layer; the persisted manifest must answer without a
+        # full walk (patch _collect to fail if it runs).
+        files_module._clear_model_images_cache()
+        orig_iterdir = Path.iterdir
+
+        def _boom(self):
+            raise AssertionError("boundary was re-walked despite unchanged signature")
+
+        Path.iterdir = _boom
+        try:
+            served = client.get(f"/files/model-images/{model.id}").json()
+        finally:
+            Path.iterdir = orig_iterdir
+        assert [i["filename"] for i in served] == ["render.png"]
+
+    def test_signature_change_forces_rewalk_and_repersist(self, client, db, tmp_path):
+        """Adding an image bumps the boundary signature, so the persisted manifest
+        is rebuilt on the next open even after a restart (no in-memory cache)."""
+        import app.routers.files as files_module
+        from app.models import Model as ModelDB
+
+        model, char_dir = self._setup_model(db, tmp_path)
+        (char_dir / "first.png").write_bytes(b"PNG")
+        client.get(f"/files/model-images/{model.id}")
+
+        # Simulate a restart: only the persisted manifest survives.
+        files_module._clear_model_images_cache()
+        (char_dir / "second.png").write_bytes(b"PNG")
+
+        served = client.get(f"/files/model-images/{model.id}").json()
+        assert {i["filename"] for i in served} == {"first.png", "second.png"}
+
+        db.expire_all()
+        stored = db.query(ModelDB).filter(ModelDB.id == model.id).first()
+        assert {i["filename"] for i in stored.image_manifest} == {"first.png", "second.png"}
+
 
 # ---------------------------------------------------------------------------
 # /files/drive-status

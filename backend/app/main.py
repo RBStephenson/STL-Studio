@@ -58,6 +58,8 @@ def _migrate_schema():
         ("models", "print_count", "INTEGER NOT NULL DEFAULT 0"),
         ("models", "user_rating", "INTEGER"),
         ("models", "removed_auto_tags", "JSON DEFAULT '[]'"),
+        ("models", "image_manifest", "JSON"),
+        ("models", "image_manifest_sig", "TEXT"),
     ]
     with engine.connect() as conn:
         table_cols: dict[str, set[str]] = {}

@@ -116,6 +116,12 @@ class Model(Base):
     thumbnail_url = Column(String, nullable=True)    # remote URL
     image_paths = Column(JSON, default=list)          # additional local images
 
+    # Persisted Set-Thumbnail picker manifest (#304). Caches the walk of the
+    # character boundary so reopening the picker — even across restarts — needs
+    # no directory enumeration when the folder signature is unchanged.
+    image_manifest = Column(JSON, nullable=True)          # [{path, filename}] or None (never built)
+    image_manifest_sig = Column(String, nullable=True)    # boundary signature the manifest was built from
+
     # Stats from source site
     rating = Column(Float, nullable=True)
     download_count = Column(Integer, nullable=True)

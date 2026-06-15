@@ -41,6 +41,41 @@ def _clear_model_images_cache() -> None:
     _model_images_cache.clear()
 
 
+def _store_in_memory(model_id: int, images: list[dict]) -> None:
+    """Warm the per-process LRU (layer 1), evicting the oldest entry when full."""
+    if len(_model_images_cache) >= _MODEL_IMAGES_MAX and model_id not in _model_images_cache:
+        oldest = min(_model_images_cache, key=lambda k: _model_images_cache[k][0])
+        _model_images_cache.pop(oldest, None)
+    _model_images_cache[model_id] = (time.monotonic(), images)
+
+
+def _boundary_signature(boundary: Path) -> str:
+    """A cheap signature of the picker boundary, used to skip the full walk (#304).
+
+    A single ``scandir`` round-trip: the boundary dir's own mtime plus each
+    immediate child directory's mtime. A directory's mtime bumps when its direct
+    children are added/removed/renamed, so this catches images dropped into the
+    character folder or one level down (the common case) without enumerating the
+    whole tree. Deeper nested additions only surface once the in-memory TTL
+    lapses and the walk runs again — an accepted trade-off for the fast path.
+    """
+    try:
+        parts = [str(boundary.stat().st_mtime_ns)]
+    except OSError:
+        return ""
+    try:
+        with os.scandir(boundary) as it:
+            for entry in it:
+                try:
+                    if entry.is_dir():
+                        parts.append(f"{entry.name}:{entry.stat().st_mtime_ns}")
+                except OSError:
+                    continue
+    except OSError:
+        return ""
+    return "|".join(sorted(parts))
+
+
 # Directories the file server is allowed to read from
 def _allowed_roots() -> list[Path]:
     global _roots_cache
@@ -340,6 +375,16 @@ def list_model_images(model_id: int):
             boundary = current
             current = current.parent
 
+        # Layer 2: persisted manifest. If the boundary signature matches what the
+        # stored manifest was built from, return it without a full directory walk
+        # — this fast path survives restarts (unlike the in-memory cache). The
+        # signature is one scandir; the walk it replaces is the whole subtree.
+        sig = _boundary_signature(boundary)
+        if sig and model.image_manifest is not None and model.image_manifest_sig == sig:
+            images = model.image_manifest
+            _store_in_memory(model_id, images)
+            return images
+
         # Load all other model folder paths under the boundary so we can skip
         # them during traversal (avoids mixing in sibling variant images).
         boundary_prefix = str(boundary)
@@ -371,11 +416,14 @@ def list_model_images(model_id: int):
 
         _collect(boundary)
 
-        # Bound the cache: evict the oldest entry once it's full (cheap LRU).
-        if len(_model_images_cache) >= _MODEL_IMAGES_MAX:
-            oldest = min(_model_images_cache, key=lambda k: _model_images_cache[k][0])
-            _model_images_cache.pop(oldest, None)
-        _model_images_cache[model_id] = (time.monotonic(), images)
+        # Persist the freshly-walked manifest against the signature we walked at,
+        # so a later open (even after a restart) can skip the walk entirely.
+        if sig and (model.image_manifest != images or model.image_manifest_sig != sig):
+            model.image_manifest = images
+            model.image_manifest_sig = sig
+            db.commit()
+
+        _store_in_memory(model_id, images)
         return images
     finally:
         db.close()
