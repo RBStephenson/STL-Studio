@@ -412,8 +412,49 @@ export interface GuideCreateInput {
   technique_tags?: string[];
 }
 
-// All-optional partial update; same fields as create plus `status`.
-export type GuideUpdateInput = Partial<GuideCreateInput>;
+// Content-spine input shapes (#329 PR 2). Mirror backend SwatchIn/StepIn/
+// PhaseIn/TabIn. Sending `tabs` on a guide update REPLACES the whole subtree,
+// so the editor always serializes the complete tree. Mix components are
+// deferred to #339, so only single-paint swatches are authored here.
+export type StepTechnique = "airbrush" | "brush" | "wash" | "finish" | "effects" | "filter";
+
+export interface SwatchInput {
+  paint_id: number;
+  value_pct?: number | null;
+  role_label?: string | null;
+  sort_order?: number;
+}
+
+export interface StepInput {
+  title: string;
+  technique_tag?: StepTechnique | null;
+  technique_label?: string | null;
+  body?: string | null;
+  value_intent?: string | null;
+  tip?: string | null;
+  warning?: string | null;
+  ratio_box?: string | null;
+  sort_order?: number;
+  swatches?: SwatchInput[];
+}
+
+export interface PhaseInput {
+  label?: string;
+  subtab_key?: string | null;
+  sort_order?: number;
+  steps?: StepInput[];
+}
+
+export interface TabInput {
+  name: string;
+  dom_id?: string | null;
+  sort_order?: number;
+  section?: { heading: string; intro: string | null } | null;
+  phases?: PhaseInput[];
+}
+
+// All-optional partial update; create fields plus the optional content spine.
+export type GuideUpdateInput = Partial<GuideCreateInput> & { tabs?: TabInput[] };
 
 export interface GuideListItem {
   id: number;

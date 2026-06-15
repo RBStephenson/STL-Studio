@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Printer, FileDown, Globe, Undo2, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, Printer, FileDown, Globe, Undo2, Trash2, Pencil, ListTree } from "lucide-react";
 import { api, Guide } from "../api/client";
 import GuideReader from "../components/guide/GuideReader";
 import ModelLink from "../components/guide/ModelLink";
@@ -93,6 +93,13 @@ export default function GuideReaderPage() {
               className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
             >
               <Pencil size={15} /> Edit
+            </Link>
+            <Link
+              to={`/painting/guides/${guide.id}/content`}
+              title="Edit this guide's tabs, steps and swatches"
+              className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+            >
+              <ListTree size={15} /> Edit content
             </Link>
             <button
               onClick={togglePublish}

@@ -14,6 +14,7 @@ import TagsPage from "./pages/TagsPage";
 import GuidesPage from "./pages/GuidesPage";
 import GuideReaderPage from "./pages/GuideReaderPage";
 import GuideEditorPage from "./pages/GuideEditorPage";
+import GuideContentEditorPage from "./pages/GuideContentEditorPage";
 import PaintShelfPage from "./pages/PaintShelfPage";
 import BackToTop from "./components/BackToTop";
 
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/painting/guides/new" element={<GuideEditorPage />} />
           <Route path="/painting/guides/:id" element={<GuideReaderPage />} />
           <Route path="/painting/guides/:id/edit" element={<GuideEditorPage />} />
+          <Route path="/painting/guides/:id/content" element={<GuideContentEditorPage />} />
           <Route path="/painting/shelf" element={<PaintShelfPage />} />
           <Route path="/help" element={<Help />} />
         </Routes>

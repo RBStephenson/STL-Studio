@@ -423,9 +423,10 @@ const SECTIONS: Section[] = [
           <strong>New guide</strong> (top of the Guides page) creates a guide from
           scratch, and <strong>Edit</strong> (on an open guide) changes its title,
           subtitle, scale, franchise, technique tags, creator credit and other
-          details. Editing the metadata leaves the guide's content spine
-          untouched. A structured editor for the tabs/steps/swatches themselves is
-          coming next.
+          details. <strong>Edit content</strong> opens a structured editor for the
+          guide's tabs, phases, steps and paint swatches — add, remove and reorder
+          each, and pick swatch paints from your shelf. Saving content replaces the
+          guide's tab tree; saving metadata leaves the content untouched.
         </p>
       </>
     ),
