@@ -154,44 +154,10 @@ def _seed_tag_index():
         db.close()
 
 
-def _run_migrations() -> None:
-    """Run Alembic migrations at startup.
-
-    Legacy DBs (created before Alembic was introduced) have no alembic_version
-    table. For those we run the hand-rolled _migrate_schema() one final time to
-    bring all columns up to date, then stamp the DB at revision 0001 (baseline)
-    so future Alembic migrations apply cleanly. New and already-stamped DBs go
-    straight through `upgrade head`.
-    """
-    import logging
-    from pathlib import Path
-    from sqlalchemy import text
-    from alembic.config import Config
-    from alembic import command
-
-    logger = logging.getLogger(__name__)
-    alembic_cfg = Config(Path(__file__).parent.parent / "alembic.ini")
-
-    with engine.connect() as conn:
-        tables = {
-            r[0] for r in conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table'")
-            )
-        }
-
-    if "alembic_version" not in tables:
-        _migrate_schema()
-        command.stamp(alembic_cfg, "head")
-        logger.info("Alembic: stamped legacy/new DB at head (0001 baseline)")
-    else:
-        command.upgrade(alembic_cfg, "head")
-        logger.info("Alembic: schema up to date")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # One-time startup migrations / seeding, run before the app serves requests.
-    _run_migrations()
+    _migrate_schema()
     _seed_tag_index()
     yield
 
