@@ -104,7 +104,7 @@ interface STLFile {
 
 interface Props {
   files: STLFile[];
-  getUrl: (path: string) => string;
+  getUrl: (path: string, version?: string | number | null) => string;
   modelId?: number;
   onThumbnailCaptured?: () => void;
 }
@@ -241,7 +241,7 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured 
 
               <LoaderErrorBoundary onError={setError}>
                 <Suspense fallback={null}>
-                  <STLMesh url={getUrl(selected.path)} />
+                  <STLMesh url={getUrl(selected.path, selected.size_bytes)} />
                   <Environment preset="city" />
                 </Suspense>
               </LoaderErrorBoundary>

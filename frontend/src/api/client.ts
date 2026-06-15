@@ -946,7 +946,11 @@ export const api = {
   fileUrl: (path: string, version?: string | null) =>
     `/api/files/image?path=${encodeURIComponent(path)}` +
     (version ? `&v=${encodeURIComponent(version)}` : ""),
-  stlUrl: (path: string) => `/api/files/stl?path=${encodeURIComponent(path)}`,
+  // version (the file size) lets the backend serve an immutable long-cache
+  // response so reopening the viewer doesn't re-read the STL from the drive (#304).
+  stlUrl: (path: string, version?: string | number | null) =>
+    `/api/files/stl?path=${encodeURIComponent(path)}` +
+    (version != null ? `&v=${encodeURIComponent(String(version))}` : ""),
   downloadZip: async (fileIds: number[], zipName: string) => {
     const res = await fetch(`${BASE}/files/download-zip`, {
       method: "POST",

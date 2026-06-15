@@ -82,7 +82,10 @@ class TestServeStl:
 
     def test_serves_allowed_stl(self, client, tmp_path, monkeypatch):
         import app.routers.files as files_module
+        from app.services import stl_cache
         monkeypatch.setattr(files_module, "_is_safe_path", lambda p: True)
+        monkeypatch.setattr(stl_cache, "stl_cache_dir", lambda: tmp_path / "c")
+        (tmp_path / "c").mkdir()
 
         stl = tmp_path / "model.stl"
         stl.write_bytes(b"solid\nendsolid\n")
@@ -90,6 +93,26 @@ class TestServeStl:
         resp = client.get("/files/stl", params={"path": str(stl)})
         assert resp.status_code == 200
         assert resp.content == b"solid\nendsolid\n"
+        # Unversioned request must stay revalidatable (a replaced same-path file
+        # is re-served), unlike the immutable versioned response below.
+        assert resp.headers["cache-control"] == "no-cache"
+        # The file was copied into the local cache so repeat opens skip the drive.
+        assert list((tmp_path / "c").glob("*.stl"))
+
+    def test_versioned_stl_is_immutable(self, client, tmp_path, monkeypatch):
+        import app.routers.files as files_module
+        from app.services import stl_cache
+        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: True)
+        monkeypatch.setattr(stl_cache, "stl_cache_dir", lambda: tmp_path / "c")
+        (tmp_path / "c").mkdir()
+
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"solid\nendsolid\n")
+
+        resp = client.get("/files/stl", params={"path": str(stl), "v": "1234"})
+        assert resp.status_code == 200
+        assert resp.content == b"solid\nendsolid\n"
+        assert resp.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
 # ---------------------------------------------------------------------------

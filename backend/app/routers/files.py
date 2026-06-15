@@ -155,7 +155,17 @@ def serve_image(path: str, v: str | None = None):
 
 
 @router.get("/stl")
-def serve_stl(path: str):
+def serve_stl(path: str, v: str | None = None):
+    """Serve an STL/3MF/OBJ file, preferring a local cached copy (#304).
+
+    Files live on external drives; ``cached_stl`` copies to fast local storage on
+    first access so repeat opens don't re-read the drive. When a version token
+    ``v`` is supplied (the frontend passes the file size) the response is marked
+    immutable so the browser caches it and skips the re-fetch on remount; without
+    ``v`` the response is left uncached so a replaced same-path file is re-read.
+    """
+    from app.services.stl_cache import cached_stl
+
     p = Path(path)
     if p.suffix.lower() not in ALLOWED_STL_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Not an STL/3MF/OBJ file")
@@ -163,7 +173,10 @@ def serve_stl(path: str):
         raise HTTPException(status_code=403, detail="Path not allowed")
     if not p.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(p, media_type="application/octet-stream")
+    served = cached_stl(p)
+    cache_control = "public, max-age=31536000, immutable" if v else "no-cache"
+    return FileResponse(served, media_type="application/octet-stream",
+                        headers={"Cache-Control": cache_control})
 
 
 def _unique_arcname(filename: str, used: set[str]) -> str:
