@@ -26,14 +26,14 @@ class MatchCandidate:
     confidence: str       # "high" | "medium" | "low"
 
 
+# _STRIP_RE replaces every non-word/non-space char with a space, so scale
+# separators ("1/6", "1-6", "1:6") are already split into "1 6" before any
+# further normalization runs — no dedicated scale regex is needed (#353).
 _STRIP_RE = re.compile(r"[^\w\s]")
-_SCALE_RE = re.compile(r"\b1[-/:]?(\d{1,2})\b")
 
 
 def _tokens(text: str) -> set[str]:
     text = _STRIP_RE.sub(" ", text.lower())
-    # Normalise scale expressions so "1-6" and "1/6" both become "1 6"
-    text = _SCALE_RE.sub(lambda m: f"1 {m.group(1)}", text)
     return {t for t in text.split() if len(t) > 1}
 
 
