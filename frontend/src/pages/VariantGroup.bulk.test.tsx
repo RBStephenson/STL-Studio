@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import VariantGroup from "./VariantGroup";
 
 const batchSetGroup = vi.fn();
+const batchThumbnailFromUrl = vi.fn();
 const variantsMock = vi.fn();
 const toast = vi.fn();
 
@@ -14,6 +15,7 @@ vi.mock("../api/client", () => ({
       characters: vi.fn().mockResolvedValue(["Rocky", "Apollo"]),
       setGroupOverride: vi.fn().mockResolvedValue({}),
       batchSetGroup: (...a: unknown[]) => batchSetGroup(...a),
+      batchThumbnailFromUrl: (...a: unknown[]) => batchThumbnailFromUrl(...a),
     },
   },
 }));
@@ -45,7 +47,9 @@ const flush = () => act(async () => { await Promise.resolve(); });
 
 beforeEach(() => {
   batchSetGroup.mockReset();
+  batchThumbnailFromUrl.mockReset();
   toast.mockReset();
+  variantsMock.mockReset();
   variantsMock.mockResolvedValue({
     items: [
       { id: 10, name: "Bust", character: "Rocky" },
@@ -95,6 +99,35 @@ describe("VariantGroup bulk management (#183)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("loc").textContent).toBe("/groups/3/Rocky%20II"),
     );
+  });
+
+  it("sets one image on the selected members (#184) and refetches", async () => {
+    batchThumbnailFromUrl.mockResolvedValue({ ok: true, downloaded: true, updated: [10], missing: [] });
+    renderPage();
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Select Bust"));
+    fireEvent.click(screen.getByLabelText("Set image for selected"));
+    fireEvent.change(screen.getByLabelText("Image URL"), { target: { value: "https://cdn.example.com/g.png" } });
+    await act(async () => { fireEvent.click(screen.getByText("Apply")); });
+
+    expect(batchThumbnailFromUrl).toHaveBeenCalledWith([10], "https://cdn.example.com/g.png");
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("Image set on 1 model"), "success");
+    // Refetched to cache-bust the grid thumbnails.
+    expect(variantsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("warns when the server-side download fails (bare link stored)", async () => {
+    batchThumbnailFromUrl.mockResolvedValue({ ok: true, downloaded: false, detail: "403", updated: [10], missing: [] });
+    renderPage();
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Select Bust"));
+    fireEvent.click(screen.getByLabelText("Set image for selected"));
+    fireEvent.change(screen.getByLabelText("Image URL"), { target: { value: "https://cdn.example.com/blocked.png" } });
+    await act(async () => { fireEvent.click(screen.getByText("Apply")); });
+
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("may not load"), "error");
   });
 
   it("reports skipped models from a partial bulk result", async () => {

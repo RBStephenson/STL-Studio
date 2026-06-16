@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Layers, MoveRight, X, Keyboard, Pencil, Check } from "lucide-react";
+import { ArrowLeft, Layers, MoveRight, X, Keyboard, Pencil, Check, Image as ImageIcon } from "lucide-react";
 import { api, Model } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import ShortcutsOverlay from "../components/ShortcutsOverlay";
@@ -177,6 +177,72 @@ function BulkMove({ creatorId, currentGroup, onMove }: {
   );
 }
 
+// Bulk "set image for selected" control: a button that expands into a URL
+// input. The pasted image (or product page → og:image) is downloaded once
+// server-side and applied to every selected member (#184). Module-scope to
+// avoid the define-component-in-render remount/focus-loss trap.
+function BulkSetImage({ onApply }: { onApply: (url: string) => void | Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const openInput = () => {
+    setUrl("");
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const submit = async () => {
+    if (!url.trim() || saving) return;
+    setSaving(true);
+    await onApply(url.trim());
+    setSaving(false);
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={openInput}
+        aria-label="Set image for selected"
+        className="flex items-center gap-1 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
+      >
+        <ImageIcon size={13} />
+        Set image
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        ref={inputRef}
+        type="url"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setOpen(false); }}
+        placeholder="Image or page URL…"
+        aria-label="Image URL"
+        className="px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-xs text-gray-200 outline-none w-56"
+      />
+      <button
+        onClick={submit}
+        disabled={saving || !url.trim()}
+        className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-xs text-white disabled:opacity-40"
+      >
+        {saving ? "…" : "Apply"}
+      </button>
+      <button
+        onClick={() => setOpen(false)}
+        className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 export default function VariantGroup() {
   const { creatorId, character } = useParams<{ creatorId: string; character: string }>();
   const navigate = useNavigate();
@@ -271,6 +337,28 @@ export default function VariantGroup() {
   const ungroupSelected = async () => {
     if (selectedIds.length === 0) return;
     if (await applyGroup(selectedIds, null)) removeVariants(selectedIds);
+  };
+
+  // Set one image on every selected member (#184). Fetched once server-side,
+  // fanned out to each member. On success refetch so the bumped updated_at
+  // cache-busts the grid thumbnails (#185); selection is preserved.
+  const setImageForSelected = async (url: string) => {
+    if (selectedIds.length === 0) return;
+    try {
+      const res = await api.models.batchThumbnailFromUrl(selectedIds, url);
+      const n = res.updated.length;
+      const noun = n === 1 ? "model" : "models";
+      if (!res.downloaded) {
+        toast(`Saved image link on ${n} ${noun} — it may not load if the host blocks embedding.`, "error");
+      } else {
+        const skipped = res.missing.length;
+        toast(skipped > 0 ? `Image set on ${n} ${noun}; ${skipped} skipped.` : `Image set on ${n} ${noun}.`, "success");
+      }
+      const data = await api.models.variants(numCreatorId, decodedCharacter);
+      setVariants(data.items);
+    } catch (e: any) {
+      toast(e?.message || "Couldn't set the group image — try again.", "error");
+    }
   };
 
   // --- Rename (applies to the whole group) -----------------------------------
@@ -412,6 +500,7 @@ export default function VariantGroup() {
               <div className="h-4 w-px bg-gray-700" />
               <span className="text-gray-400">{selected.size} selected</span>
               <BulkMove creatorId={numCreatorId} currentGroup={decodedCharacter} onMove={moveSelected} />
+              <BulkSetImage onApply={setImageForSelected} />
               <button
                 onClick={ungroupSelected}
                 className="flex items-center gap-1 px-2.5 py-1 rounded bg-gray-800 hover:bg-red-900/40 border border-gray-700 hover:border-red-600 text-gray-400 hover:text-red-400 transition-colors"

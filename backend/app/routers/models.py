@@ -9,11 +9,11 @@ from app.database import get_db
 from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
-    ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, FavoriteUpdate, RatingUpdate, QueueReorder,
+    ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl, FavoriteUpdate, RatingUpdate, QueueReorder,
     PrintStatusUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate,
     BulkExcludeUpdate, BulkReviewUpdate, SetGroupBody, BatchSetGroupBody,
 )
-from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail, store_thumbnail
+from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail, fetch_image_bytes, store_thumbnail
 from app.services.variant_sync import propagate_source_url
 from app.services.tag_sync import sync_model_tags
 from app.services import scanner
@@ -574,6 +574,64 @@ def set_thumbnail(model_id: int, body: ThumbnailUpdate, db: Session = Depends(ge
         model.thumbnail_url = data["thumbnail_url"] or None
     db.commit()
     return {"ok": True}
+
+
+@router.post("/group/thumbnail/from-url")
+async def batch_thumbnail_from_url(body: BatchThumbnailFromUrl, db: Session = Depends(get_db)):
+    """Assign one image to every model in a group (#184).
+
+    The image is fetched ONCE (reusing the single-model HTML/og:image follow),
+    then the same bytes are written to each member's per-model thumbnail file.
+    On a download failure we fall back to storing the bare URL on every member
+    and clearing their local paths — the same graceful degradation the single
+    from-url path uses (#285) — so the UI can still try to render directly.
+    Unknown ids are skipped and reported. 409 if a scan is running, since it
+    would overwrite character/grouping mid-write.
+
+    Registered BEFORE `/{model_id}/thumbnail/from-url` so the literal `group`
+    segment isn't captured as a model_id (FastAPI matches in declaration order).
+    """
+    if scanner.get_status()["running"]:
+        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
+
+    if not body.model_ids:
+        raise HTTPException(status_code=400, detail="model_ids must not be empty.")
+
+    requested = list(dict.fromkeys(body.model_ids))  # de-dupe, preserve order
+    models = db.query(Model).filter(Model.id.in_(requested)).all()
+    found = {m.id for m in models}
+    missing = [mid for mid in requested if mid not in found]
+
+    try:
+        ext, data = await fetch_image_bytes(body.url)
+    except ThumbnailDownloadError as e:
+        # Graceful degrade: store the bare URL on every member so the UI can try
+        # to render it directly, even though the server-side download failed.
+        for model in models:
+            model.thumbnail_path = None
+            model.thumbnail_url = body.url
+            model.updated_at = utcnow()
+        db.commit()
+        return {
+            "ok": True,
+            "downloaded": False,
+            "detail": str(e),
+            "updated": [m.id for m in models],
+            "missing": missing,
+        }
+
+    for model in models:
+        path = store_thumbnail(model.id, ext, data)
+        model.thumbnail_path = str(path)
+        model.thumbnail_url = None
+        model.updated_at = utcnow()
+    db.commit()
+    return {
+        "ok": True,
+        "downloaded": True,
+        "updated": [m.id for m in models],
+        "missing": missing,
+    }
 
 
 @router.post("/{model_id}/thumbnail/from-url")
