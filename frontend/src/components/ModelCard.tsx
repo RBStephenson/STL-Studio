@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { memo, useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal } from "lucide-react";
 import { Model, PrintStatus, PRINT_STATUS_CYCLE, api } from "../api/client";
@@ -51,7 +51,13 @@ const TAG_COLORS: Record<string, string> = {
   "figure":        "bg-indigo-900 text-indigo-300",
 };
 
-export default function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false, allTagSuggestions = [], focused = false }: Props) {
+// Memoized: the Library re-renders the whole grid on every selection / keyboard-
+// focus / drag tick. Without memo, all N cards on the page re-render each time
+// (per-keystroke during keyboard nav). Props are stable across those ticks —
+// `model` refs survive, callbacks are useCallback'd, `allTagSuggestions` is stable
+// state — so the default shallow compare re-renders only the card whose
+// `selected`/`focused` actually changed (#382).
+function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false, allTagSuggestions = [], focused = false }: Props) {
   const location = useLocation();
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -381,3 +387,5 @@ export default function ModelCard({ model, selected = false, onSelect, backTo, o
     </div>
   );
 }
+
+export default memo(ModelCard);
