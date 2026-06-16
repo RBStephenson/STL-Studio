@@ -139,6 +139,7 @@ export interface AppSettings {
   library_sort: LibrarySort;
   scan_ignore_patterns: string[];
   scan_tag_rules: ScanTagRule[];
+  scan_parts_names: string[];
 }
 
 export interface ScanTagRule {

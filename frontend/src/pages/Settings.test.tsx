@@ -290,6 +290,38 @@ describe("Settings – Scan tag rules (#31)", () => {
   });
 });
 
+describe("Settings – Scan parts names (#31)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("adds a parts name, appending to the list", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ scan_parts_names: [] }));
+    vi.mocked(api.settings.update).mockResolvedValue(
+      mkSettings({ scan_parts_names: ["Sprues"] })
+    );
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    await userEvent.type(await screen.findByPlaceholderText(/Sprues/i), "Sprues");
+    // Third "Add" button on the page (ignore patterns, tag rules, parts names).
+    await userEvent.click(screen.getAllByRole("button", { name: /^add$/i })[2]);
+
+    expect(api.settings.update).toHaveBeenCalledWith({ scan_parts_names: ["Sprues"] });
+  });
+
+  it("removes a parts name via its trash button", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ scan_parts_names: ["Sprues"] }));
+    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ scan_parts_names: [] }));
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: /remove Sprues/i }));
+
+    expect(api.settings.update).toHaveBeenCalledWith({ scan_parts_names: [] });
+  });
+});
+
 describe("Settings – Library page size (#32)", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 

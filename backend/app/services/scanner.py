@@ -34,7 +34,9 @@ from sqlalchemy import text as _sqltext, func, or_
 from app.database import SessionLocal
 from app.models import Creator, Model, STLFile, ScanRoot, ModelTag, CollectionModel, PackOverride, GroupOverride
 from app.services import name_parser, layout
-from app.services.scan_rules import IgnoreMatcher, load_ignore_matcher, load_tag_rules
+from app.services.scan_rules import (
+    IgnoreMatcher, load_ignore_matcher, load_tag_rules, load_parts_names,
+)
 from app.services.tag_sync import sync_model_tags
 from app.utils import utcnow
 
@@ -97,8 +99,10 @@ def _load_group_overrides(db: Session) -> None:
 def _load_scan_rules(db: Session) -> None:
     global _ignore_matcher
     _ignore_matcher = load_ignore_matcher(db)
-    # Push user tag-inference rules into the name parser for this run (#31).
+    # Push user tag-inference rules + parts/structural names into the name
+    # parser for this run (#31).
     name_parser.set_tag_rules([(r.pattern, r.tag) for r in load_tag_rules(db)])
+    name_parser.set_parts_names(load_parts_names(db))
 
 
 def request_cancel():

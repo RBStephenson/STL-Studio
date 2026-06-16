@@ -9,6 +9,7 @@ DEFAULTS = {
     "library_sort": "name",
     "scan_ignore_patterns": [],
     "scan_tag_rules": [],
+    "scan_parts_names": [],
 }
 
 

@@ -10,7 +10,9 @@ import pytest
 from app.models import AppSetting
 from app.schemas import AppSettingsUpdate, ScanTagRule
 from app.services import scan_rules
-from app.services.scan_rules import IgnoreMatcher, load_ignore_matcher, load_tag_rules
+from app.services.scan_rules import (
+    IgnoreMatcher, load_ignore_matcher, load_tag_rules, load_parts_names,
+)
 
 
 class TestIgnoreMatcher:
@@ -107,6 +109,32 @@ class TestLoadTagRules:
         ]))
         db.commit()
         assert len(load_tag_rules(db)) == 1
+
+
+class TestLoadPartsNames:
+    def test_no_row_yields_empty(self, db):
+        assert load_parts_names(db) == frozenset()
+
+    def test_lowercases_strips_drops_blanks(self, db):
+        db.add(AppSetting(key=scan_rules.PARTS_NAMES_KEY,
+                          value=[" Sprues ", "MAGNETS", ""]))
+        db.commit()
+        assert load_parts_names(db) == frozenset({"sprues", "magnets"})
+
+    def test_non_list_value_is_empty(self, db):
+        db.add(AppSetting(key=scan_rules.PARTS_NAMES_KEY, value="nope"))
+        db.commit()
+        assert load_parts_names(db) == frozenset()
+
+
+class TestUpdateValidatorPartsNames:
+    def test_shares_clean_patterns_validator(self):
+        body = AppSettingsUpdate(scan_parts_names=[" Sprues ", "Sprues", ""])
+        assert body.scan_parts_names == ["Sprues"]
+
+    def test_rejects_overlong(self):
+        with pytest.raises(ValueError):
+            AppSettingsUpdate(scan_parts_names=["x" * 201])
 
 
 class TestUpdateValidatorTagRules:

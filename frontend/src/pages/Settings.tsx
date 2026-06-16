@@ -76,6 +76,7 @@ export default function Settings() {
   const [newPattern, setNewPattern] = useState("");
   const [newKeyword, setNewKeyword] = useState("");
   const [newTag, setNewTag] = useState("");
+  const [newPartsName, setNewPartsName] = useState("");
 
   const load = () => {
     api.scan.roots()
@@ -289,6 +290,32 @@ export default function Settings() {
       });
     } catch (e: any) {
       flash(e?.message || "Could not remove tag rule", "err");
+    }
+  };
+
+  const addPartsName = async () => {
+    const name = newPartsName.trim();
+    if (!name) return;
+    const current = appSettings.scan_parts_names;
+    if (current.some((n) => n.toLowerCase() === name.toLowerCase())) {
+      setNewPartsName("");
+      return;
+    }
+    try {
+      await updateAppSettings({ scan_parts_names: [...current, name] });
+      setNewPartsName("");
+    } catch (e: any) {
+      flash(e?.message || "Could not add parts name", "err");
+    }
+  };
+
+  const removePartsName = async (name: string) => {
+    try {
+      await updateAppSettings({
+        scan_parts_names: appSettings.scan_parts_names.filter((n) => n !== name),
+      });
+    } catch (e: any) {
+      flash(e?.message || "Could not remove parts name", "err");
     }
   };
 
@@ -657,6 +684,51 @@ export default function Settings() {
             <button
               onClick={addTagRule}
               disabled={!newKeyword.trim() || !newTag.trim()}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Plus size={14} /> Add
+            </button>
+          </div>
+        </div>
+
+        <p className="text-xs text-gray-600 mt-6 mb-4">
+          <strong className="text-gray-500">Parts folder names</strong> are exact folder names
+          treated as parts/structure (e.g. <code className="text-gray-500">Sprues</code>,{" "}
+          <code className="text-gray-500">Magnets</code>) — never indexed as their own model and
+          never used to group variants. These add to the built-in names (Parts, Base, Supports…)
+          and apply on the next full scan.
+        </p>
+        <div className="flex flex-col gap-2 self-start" data-testid="parts-names">
+          {appSettings.scan_parts_names.length === 0 && (
+            <p className="text-xs text-gray-600 italic">No custom parts names yet.</p>
+          )}
+          {appSettings.scan_parts_names.map((name) => (
+            <div
+              key={name}
+              className="flex items-center justify-between gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 self-start min-w-[18rem]"
+            >
+              <code className="text-sm text-gray-200">{name}</code>
+              <button
+                onClick={() => removePartsName(name)}
+                aria-label={`Remove ${name}`}
+                className="text-gray-500 hover:text-red-400 transition-colors"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 mt-1">
+            <input
+              type="text"
+              value={newPartsName}
+              onChange={(e) => setNewPartsName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPartsName(); } }}
+              placeholder="e.g. Sprues"
+              className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-64"
+            />
+            <button
+              onClick={addPartsName}
+              disabled={!newPartsName.trim()}
               className="flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <Plus size={14} /> Add

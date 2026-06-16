@@ -253,6 +253,9 @@ class AppSettingsRead(BaseModel):
     scan_ignore_patterns: list[str] = []
     # User keyword→tag inference rules, merged with built-in detection (#31).
     scan_tag_rules: list[ScanTagRule] = []
+    # Exact folder names treated as parts/structural (never a product or a
+    # variant-grouping character), merged with built-in detection (#31).
+    scan_parts_names: list[str] = []
 
 
 class AppSettingsUpdate(BaseModel):
@@ -272,15 +275,16 @@ class AppSettingsUpdate(BaseModel):
     scan_ignore_patterns: Optional[list[str]] = Field(None, max_length=200)
 
     scan_tag_rules: Optional[list[ScanTagRule]] = Field(None, max_length=500)
+    scan_parts_names: Optional[list[str]] = Field(None, max_length=500)
 
-    @field_validator("scan_ignore_patterns")
+    @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
     def _clean_patterns(cls, v: Optional[list[str]]) -> Optional[list[str]]:
         if v is None:
             return None
         cleaned = [p.strip() for p in v if p and p.strip()]
         if any(len(p) > 200 for p in cleaned):
-            raise ValueError("ignore patterns must be 200 characters or fewer")
+            raise ValueError("entries must be 200 characters or fewer")
         # de-dupe, preserve order
         seen: set[str] = set()
         out: list[str] = []

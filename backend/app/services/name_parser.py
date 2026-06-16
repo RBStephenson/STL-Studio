@@ -128,6 +128,24 @@ _PARTS_PATTERNS: list[re.Pattern] = [
     re.compile(r"^part[_\s]extra[s]?$",  re.I),
 ]
 
+# User-configured extra parts/structural folder names (#31, Phase 3): exact,
+# lower-cased folder names that should be treated like the built-in _PARTS_EXACT
+# / _STRUCTURAL_EXACT sets — never a product boundary, never a variant-grouping
+# character. Module global set once per scan run by the scanner; empty by
+# default so non-scan callers see only the built-ins.
+_user_parts_names: frozenset[str] = frozenset()
+
+
+def set_parts_names(names: frozenset[str] | set[str] | None) -> None:
+    """Replace the active user parts/structural folder names (lower-cased)."""
+    global _user_parts_names
+    _user_parts_names = frozenset(n.lower() for n in names) if names else frozenset()
+
+
+def _is_parts_name(low: str) -> bool:
+    """Built-in OR user-configured parts folder name (exact, already lower)."""
+    return low in _PARTS_EXACT or low in _user_parts_names
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -170,7 +188,7 @@ def parse_folder(
     # Recalculate is_product / confidence after merging
     has_product_signal = bool(primary.scales or primary.types or primary.modifiers)
     lower = folder_name.lower().strip()
-    is_parts_exact = lower in _PARTS_EXACT
+    is_parts_exact = _is_parts_name(lower)
     is_parts_pattern = any(p.search(lower) for p in _PARTS_PATTERNS)
 
     if is_parts_exact or is_parts_pattern:
@@ -369,7 +387,7 @@ def is_structural_folder(name: str) -> bool:
     scale/type tokens (e.g. "75mm", "Bust", "1-10 Scale Split").
     """
     low = name.lower().strip()
-    if low in _STRUCTURAL_EXACT or low in _PARTS_EXACT:
+    if low in _STRUCTURAL_EXACT or _is_parts_name(low):
         return True
     cleaned = re.sub(r"[\s_\-]+", "", _strip_signal_tokens(name)).lower()
     if cleaned in {"", "scale", "scalesplit", "split", "miniature", "mini"}:
@@ -380,7 +398,7 @@ def is_structural_folder(name: str) -> bool:
     tokens = [t for t in re.split(r"[\s_\-]+", low) if t]
     return bool(tokens) and all(
         t in _STRUCTURAL_EXACT
-        or t in _PARTS_EXACT
+        or _is_parts_name(t)
         or t in _EXTRA
         or re.fullmatch(r"\d+mm", t)            # any mm scale, incl. unlisted sizes
         or not _strip_signal_tokens(t)
@@ -428,7 +446,7 @@ def _parse_text(text: str) -> NameSignals:
             sig.modifiers.append(tag)
 
     has_signal = bool(sig.scales or sig.types or sig.modifiers)
-    is_parts_exact = lower in _PARTS_EXACT
+    is_parts_exact = _is_parts_name(lower)
     is_parts_pattern = any(p.search(lower) for p in _PARTS_PATTERNS)
 
     if is_parts_exact or is_parts_pattern:

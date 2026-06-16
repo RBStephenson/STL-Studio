@@ -30,6 +30,7 @@ from app.models import AppSetting
 
 IGNORE_PATTERNS_KEY = "scan_ignore_patterns"
 TAG_RULES_KEY = "scan_tag_rules"
+PARTS_NAMES_KEY = "scan_parts_names"
 
 # Built-in ignore patterns, merged with the user's. Empty today (the scanner has
 # always walked everything), but the hook makes the merge semantics explicit and
@@ -130,3 +131,20 @@ def load_tag_rules(db: Session) -> tuple[CompiledTagRule, ...]:
             re.compile(rf"(?<!\w){re.escape(keyword)}(?!\w)", re.I), tag
         ))
     return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Parts/structural folder names (#31, Phase 3)
+# ---------------------------------------------------------------------------
+
+def load_parts_names(db: Session) -> frozenset[str]:
+    """Stored ``scan_parts_names`` as a lower-cased set of exact folder names.
+
+    These extend the built-in _PARTS_EXACT/_STRUCTURAL_EXACT sets in name_parser:
+    a matching folder is never a product boundary nor a variant-grouping
+    character. Called once per scan run.
+    """
+    row = db.query(AppSetting).filter(AppSetting.key == PARTS_NAMES_KEY).one_or_none()
+    if row is None or not isinstance(row.value, (list, tuple)):
+        return frozenset()
+    return frozenset(str(n).strip().lower() for n in row.value if str(n).strip())

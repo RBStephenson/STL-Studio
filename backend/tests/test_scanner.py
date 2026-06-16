@@ -213,6 +213,52 @@ class TestTagRules:
 
 
 # ---------------------------------------------------------------------------
+# Configurable parts/structural folder names (#31, Phase 3)
+# ---------------------------------------------------------------------------
+
+class TestPartsNames:
+    def test_default_splits_signal_subfolder(self, db, tmp_path):
+        """Baseline: 'Golem' (no signal, direct STLs) with a 'Bust' sub-folder —
+        'Bust' carries a product signal, so by default it splits into its own
+        model rather than folding into Golem."""
+        creator_dir = tmp_path / "A"
+        _stl(creator_dir / "Golem")
+        _stl(creator_dir / "Golem" / "Bust")
+        creator = make_creator(db, "A")
+
+        name_parser.set_parts_names(None)
+        _walk(db, creator, creator_dir)
+
+        assert any("Bust" in _rel(m, creator_dir) for m in _models(db, creator))
+
+    def test_user_parts_folder_folds_into_parent_product(self, db, tmp_path):
+        """With 'bust' configured as a parts name, the same layout collapses to a
+        single 'Golem' model — the parts sub-folder is no longer split out."""
+        creator_dir = tmp_path / "B"
+        _stl(creator_dir / "Golem")
+        _stl(creator_dir / "Golem" / "Bust")
+        creator = make_creator(db, "B")
+
+        name_parser.set_parts_names(frozenset({"bust"}))
+        try:
+            _walk(db, creator, creator_dir)
+        finally:
+            name_parser.set_parts_names(None)
+
+        paths = {_rel(m, creator_dir) for m in _models(db, creator)}
+        assert paths == {"Golem"}
+
+    def test_is_structural_folder_honors_user_names(self):
+        name_parser.set_parts_names(frozenset({"sprues"}))
+        try:
+            assert name_parser.is_structural_folder("Sprues") is True
+        finally:
+            name_parser.set_parts_names(None)
+        # cleared → no longer structural
+        assert name_parser.is_structural_folder("Sprues") is False
+
+
+# ---------------------------------------------------------------------------
 # Configurable folder layouts — layout {tag} levels become model auto-tags
 # ---------------------------------------------------------------------------
 
