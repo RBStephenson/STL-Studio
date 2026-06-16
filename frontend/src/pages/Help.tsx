@@ -117,7 +117,11 @@ const SECTIONS: Section[] = [
           <li>
             <strong>Drag-to-group (Library):</strong> hover a card, grab the grip in its
             bottom-left corner, and drop it onto another card from the <em>same creator</em>.
-            A prompt (pre-filled with the target's name) asks what to call the group.
+            Dropping onto an existing group adds the card straight to it; dropping onto a
+            loose card opens a naming prompt. Select several cards first (checkboxes) and
+            drag any one of them to group the <em>whole selection</em> at once. Drag a{" "}
+            <em>group</em> card onto another to <strong>merge</strong> the two groups
+            (after a confirm).
           </li>
           <li>
             <strong>From a group card:</strong> open it to manage the whole group. Click the

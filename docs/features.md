@@ -80,15 +80,22 @@ correction survives future rescans:
 
 In the main Library view, hover a model card and a small **grip handle**
 appears in its bottom-left corner. Drag the card onto another card from the
-**same creator** to group them. A naming prompt opens, pre-filled with the
-target's existing group name (if it already belongs to one) or otherwise its
-display name — confirm or edit the name, and both models are placed in that
-group. (The prompt always appears so you can rename or back out, even when the
-target is already grouped.)
+**same creator** to group them:
 
-Grouping only works within a single creator, and only in the default Library
-view (it's off in the favorites/queue/printed/excluded views, which show flat
-cards). Group cards themselves can be dropped onto but not dragged.
+- **Onto an existing group** — the dragged model is added to that group straight
+  away, taking on its name.
+- **Onto a loose card** — a naming prompt opens (pre-filled with the target's
+  display name); confirm or edit the name and both models join that group.
+- **Multi-select drag** — select several cards with their checkboxes first, then
+  drag any one of them to group the whole selection in a single step. The drag
+  preview shows a count badge.
+- **Merge two groups** — drag a **group** card onto another card. A confirmation
+  asks before moving every member of the dragged group into the target group
+  (the dragged group's name is discarded).
+
+Grouping only works within a single creator (cards from other creators in a
+multi-selection are skipped), and only in the default Library view (it's off in
+the favorites/queue/printed/excluded views, which show flat cards).
 
 **From the group view** (fastest for fixing a whole group at once)
 
