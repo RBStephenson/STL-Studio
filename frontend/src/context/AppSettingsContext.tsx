@@ -11,6 +11,7 @@ const DEFAULTS: AppSettings = {
   filter_presets: [],
   recent_days: 7,
   library_sort: "name",
+  scan_ignore_patterns: [],
 };
 
 interface AppSettingsContextValue {

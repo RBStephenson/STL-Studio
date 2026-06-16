@@ -137,6 +137,7 @@ export interface AppSettings {
   filter_presets: FilterPreset[];
   recent_days: number;
   library_sort: LibrarySort;
+  scan_ignore_patterns: string[];
 }
 
 export type LibrarySort = "name" | "added" | "creator" | "rating";

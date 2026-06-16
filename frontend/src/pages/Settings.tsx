@@ -72,6 +72,9 @@ export default function Settings() {
 
   const [reloadingEnv, setReloadingEnv] = useState(false);
 
+  // Scan rules — ignore patterns (#31)
+  const [newPattern, setNewPattern] = useState("");
+
   const load = () => {
     api.scan.roots()
       .then(setRoots)
@@ -228,6 +231,32 @@ export default function Settings() {
       flash(next ? "Painting Guides enabled" : "Painting Guides disabled", "ok");
     } catch (e: any) {
       flash(e?.message || "Could not update setting", "err");
+    }
+  };
+
+  const addIgnorePattern = async () => {
+    const pat = newPattern.trim();
+    if (!pat) return;
+    const current = appSettings.scan_ignore_patterns;
+    if (current.includes(pat)) {
+      setNewPattern("");
+      return;
+    }
+    try {
+      await updateAppSettings({ scan_ignore_patterns: [...current, pat] });
+      setNewPattern("");
+    } catch (e: any) {
+      flash(e?.message || "Could not add ignore pattern", "err");
+    }
+  };
+
+  const removeIgnorePattern = async (pat: string) => {
+    try {
+      await updateAppSettings({
+        scan_ignore_patterns: appSettings.scan_ignore_patterns.filter((p) => p !== pat),
+      });
+    } catch (e: any) {
+      flash(e?.message || "Could not remove ignore pattern", "err");
     }
   };
 
@@ -492,6 +521,57 @@ export default function Settings() {
               ))}
             </div>
             <span className="text-xs text-gray-600">drives the Library's "recently added" filter too</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Scan Rules — ignore patterns (#31) */}
+      <section className="mt-12 pt-8 border-t border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+          <FolderSearch size={14} /> Scan Rules
+        </h2>
+        <p className="text-xs text-gray-600 mb-4">
+          Folders matching an <strong className="text-gray-500">ignore pattern</strong> (and everything
+          inside them) are skipped during scanning. Matching is case-insensitive against a folder's name
+          (e.g. <code className="text-gray-500">WIP</code>) or its full path (e.g.{" "}
+          <code className="text-gray-500">*/_archive/*</code>). Patterns take effect on the next scan;
+          any already-indexed models they now cover are removed.
+        </p>
+        <div className="flex flex-col gap-2 self-start" data-testid="ignore-patterns">
+          {appSettings.scan_ignore_patterns.length === 0 && (
+            <p className="text-xs text-gray-600 italic">No ignore patterns yet.</p>
+          )}
+          {appSettings.scan_ignore_patterns.map((pat) => (
+            <div
+              key={pat}
+              className="flex items-center justify-between gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 self-start min-w-[18rem]"
+            >
+              <code className="text-sm text-gray-200">{pat}</code>
+              <button
+                onClick={() => removeIgnorePattern(pat)}
+                aria-label={`Remove ${pat}`}
+                className="text-gray-500 hover:text-red-400 transition-colors"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 mt-1">
+            <input
+              type="text"
+              value={newPattern}
+              onChange={(e) => setNewPattern(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addIgnorePattern(); } }}
+              placeholder="e.g. WIP or */_archive/*"
+              className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-64"
+            />
+            <button
+              onClick={addIgnorePattern}
+              disabled={!newPattern.trim()}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Plus size={14} /> Add
+            </button>
           </div>
         </div>
       </section>

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app.models import Creator, Model, STLFile
 from app.services import scanner
+from app.services.scan_rules import IgnoreMatcher
 from tests.conftest import make_creator
 
 
@@ -90,6 +91,92 @@ class TestLeafDetection:
 
         for m in _models(db, creator):
             assert db.query(STLFile).filter(STLFile.model_id == m.id).count() > 0
+
+
+# ---------------------------------------------------------------------------
+# Configurable ignore patterns (#31, Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestIgnorePatterns:
+    def test_ignored_subtree_is_not_walked(self, db, tmp_path, monkeypatch):
+        """A folder matching an ignore pattern — and everything beneath it — is
+        skipped, while siblings still index."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Knight" / "STL")
+        _stl(creator_dir / "WIP" / "HalfDone" / "STL")
+        creator = make_creator(db, "Creator")
+
+        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
+        _walk(db, creator, creator_dir)
+
+        paths = {_rel(m, creator_dir) for m in _models(db, creator)}
+        assert any("Knight" in p for p in paths)
+        assert not any("WIP" in p for p in paths)
+
+    def test_creator_root_is_never_ignored(self, db, tmp_path, monkeypatch):
+        """A pattern matching the creator boundary itself must not drop the whole
+        creator — ignore is for sub-folders, not entire creators."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Knight" / "STL")
+        creator = make_creator(db, "Creator")
+
+        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("creator",)))
+        _walk(db, creator, creator_dir)
+
+        assert any("Knight" in _rel(m, creator_dir) for m in _models(db, creator))
+
+    def test_prune_ignored_removes_nested_models(self, db, tmp_path, monkeypatch):
+        """Models already indexed under a folder a NEW pattern now covers are
+        pruned, including those nested below a bare-name match."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Knight" / "STL")
+        _stl(creator_dir / "WIP" / "HalfDone" / "STL")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+        assert len(_models(db, creator)) == 2  # nothing ignored on first walk
+
+        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(tmp_path)])
+
+        assert removed == 1
+        paths = {_rel(m, creator_dir) for m in _models(db, creator)}
+        assert any("Knight" in p for p in paths)
+        assert not any("WIP" in p for p in paths)
+
+    def test_prune_ignored_respects_cap(self, db, tmp_path, monkeypatch):
+        """A pattern matching >50% of models is treated as a misconfiguration and
+        skipped, not allowed to wipe the library."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "WIP_A" / "STL")
+        _stl(creator_dir / "WIP_B" / "STL")
+        _stl(creator_dir / "Knight" / "STL")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+        before = len(_models(db, creator))
+
+        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip*",)))
+        removed = scanner._prune_ignored(db, [str(tmp_path)])
+
+        assert removed == 0
+        assert len(_models(db, creator)) == before
+
+    def test_prune_ignored_skips_excluded(self, db, tmp_path, monkeypatch):
+        """User-excluded models are already hidden; the ignore prune leaves them
+        alone (mirrors _prune_stale_models)."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Knight" / "STL")
+        _stl(creator_dir / "WIP" / "STL")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+        wip = next(m for m in _models(db, creator) if "WIP" in m.folder_path)
+        wip.excluded = True
+        db.commit()
+
+        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(tmp_path)])
+
+        assert removed == 0
+        assert any("WIP" in m.folder_path for m in _models(db, creator))
 
 
 # ---------------------------------------------------------------------------
