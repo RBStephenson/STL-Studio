@@ -92,15 +92,24 @@ cards). Group cards themselves can be dropped onto but not dragged.
 
 **From the group view** (fastest for fixing a whole group at once)
 
-Open a group card to see all its variants. Below each card there are two
-quick actions:
+Open a group card to see all its variants. The group view manages the whole
+group as well as individual variants:
 
-- **Move to group** — type the target group name. As you type, a dropdown
-  offers the creator's existing groups so you don't have to remember exact
-  names. Press **Enter** or click **Move** to apply; the variant is removed
-  from the current list immediately.
-- **× Remove** — pull the model out of this group entirely, making it a
-  standalone model in the Library.
+- **Rename the group** — click the group title in the header to edit it in
+  place. Saving renames *every* variant in the group and takes you to the
+  renamed group.
+- **Bulk actions** — tick the checkbox on each card you want (or **Select
+  all**), then use the toolbar that appears:
+  - **Move to group** — type a target group name (with existing-group
+    suggestions); the selected models move there. Moving into a group that
+    already exists is how you **merge** groups.
+  - **Ungroup** — pull the selected models out of the group, making them
+    standalone models in the Library.
+- **Per-card actions** — below each card, **Move to group** (with name
+  suggestions) and **× Remove** act on that one variant.
+
+Models that move or ungroup leave the current list immediately. When the last
+variant leaves, the group view closes back to where you came from.
 
 **From a model's detail page**
 

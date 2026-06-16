@@ -120,8 +120,12 @@ const SECTIONS: Section[] = [
             A prompt (pre-filled with the target's name) asks what to call the group.
           </li>
           <li>
-            <strong>From a group card:</strong> open it and use <strong>Move to group</strong>{" "}
-            (with name suggestions) or <strong>× Remove</strong> under any variant.
+            <strong>From a group card:</strong> open it to manage the whole group. Click the
+            title to <strong>rename</strong> the group (applies to every variant). Use the
+            per-card checkboxes (or <strong>Select all</strong>) to pick several variants, then{" "}
+            <strong>Move to group</strong> them into another group or <strong>Ungroup</strong>{" "}
+            them in one go. Each card also has its own <strong>Move to group</strong>{" "}
+            (with name suggestions) and <strong>× Remove</strong>.
           </li>
           <li>
             <strong>From a model:</strong> the <strong>Set group</strong> button in the model
