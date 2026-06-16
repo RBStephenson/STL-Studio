@@ -9,6 +9,7 @@ import app.services.matcher as matcher
 from app.services.matcher import (
     _confidence,
     _score,
+    _tokens,
     match_products_to_models,
 )
 from app.services.scrapers.storefront import StorefrontProduct
@@ -51,6 +52,21 @@ class TestScore:
         # All local tokens present in a longer product title → strong recall.
         s = _score("Akuma", "Akuma Street Fighter 1/6 Scale Figure")
         assert s > 0.3
+
+
+# ---------------------------------------------------------------------------
+# #353 — scale separators are normalized by _STRIP_RE alone (no scale regex)
+# ---------------------------------------------------------------------------
+
+class TestTokens:
+    def test_scale_separators_produce_identical_tokens(self):
+        # "/", "-", ":" are all non-word chars stripped to spaces, so every
+        # separator form tokenizes the same way. Guards against reintroducing a
+        # dedicated scale regex (the removed _SCALE_RE, which never fired).
+        assert _tokens("1/6scale") == _tokens("1-6scale") == _tokens("1:6scale")
+
+    def test_scale_separator_does_not_survive_as_token(self):
+        assert _tokens("1/6 figure") == {"figure"}
 
 
 class TestConfidence:
