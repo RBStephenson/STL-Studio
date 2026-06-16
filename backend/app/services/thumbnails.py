@@ -102,14 +102,16 @@ def _extract_og_image(html: str, base_url: str) -> str | None:
     return None
 
 
-async def download_thumbnail(model_id: int, url: str, *, _follow_html: bool = True) -> Path:
-    """Fetch `url` and store it as the local thumbnail file for `model_id`.
+async def fetch_image_bytes(url: str, *, _follow_html: bool = True) -> tuple[str, bytes]:
+    """Fetch `url` and return its `(extension, image_bytes)`.
 
     If `url` returns an HTML page (e.g. a Gumroad/MMF/Cults product page), its
     preview image (og:image / twitter:image) is extracted and downloaded
     instead — one level only, guarded by `_follow_html`.
 
-    Returns the saved path. Raises ThumbnailDownloadError on any failure.
+    Raises ThumbnailDownloadError on any failure. Storing the bytes is the
+    caller's job (see download_thumbnail), so one fetch can fan out to many
+    models without re-downloading (group image, #184).
     """
     scheme = urlparse(url).scheme.lower()
     if scheme not in ("http", "https"):
@@ -147,14 +149,23 @@ async def download_thumbnail(model_id: int, url: str, *, _follow_html: bool = Tr
                     data = await _read_capped(resp, MAX_BYTES, stop_at_limit=False)
                     if not data:
                         raise ThumbnailDownloadError("Server returned an empty response")
-                    return store_thumbnail(model_id, ext, data)
+                    return ext, data
     except ThumbnailDownloadError:
         raise
     except httpx.HTTPError as e:
         raise ThumbnailDownloadError(f"Could not fetch the image: {e}") from e
 
     # HTML page → download the preview image it points to (no further following).
-    return await download_thumbnail(model_id, og_image_url, _follow_html=False)
+    return await fetch_image_bytes(og_image_url, _follow_html=False)
+
+
+async def download_thumbnail(model_id: int, url: str) -> Path:
+    """Fetch `url` and store it as the local thumbnail file for `model_id`.
+
+    Returns the saved path. Raises ThumbnailDownloadError on any failure.
+    """
+    ext, data = await fetch_image_bytes(url)
+    return store_thumbnail(model_id, ext, data)
 
 
 async def _read_capped(resp: httpx.Response, limit: int, *, stop_at_limit: bool) -> bytes:

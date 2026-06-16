@@ -110,6 +110,9 @@ group as well as individual variants:
   - **Move to group** — type a target group name (with existing-group
     suggestions); the selected models move there. Moving into a group that
     already exists is how you **merge** groups.
+  - **Set image** — paste an image URL (or a product-page link, whose preview
+    image is used) to give *every* selected variant the same thumbnail. The
+    image is downloaded once and applied to all of them.
   - **Ungroup** — pull the selected models out of the group, making them
     standalone models in the Library.
 - **Per-card actions** — below each card, **Move to group** (with name

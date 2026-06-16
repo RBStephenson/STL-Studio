@@ -144,6 +144,13 @@ class ThumbnailFromUrl(BaseModel):
     url: str
 
 
+class BatchThumbnailFromUrl(BaseModel):
+    """Download one image and store it as the thumbnail for many models (#184).
+    Fetched once, fanned out to every member's per-model thumbnail file."""
+    model_ids: list[int]
+    url: str
+
+
 class FavoriteUpdate(BaseModel):
     is_favorite: bool
 

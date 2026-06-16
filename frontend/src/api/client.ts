@@ -685,6 +685,15 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
+    batchThumbnailFromUrl: (modelIds: number[], url: string) =>
+      request<{ ok: boolean; downloaded: boolean; detail?: string; updated: number[]; missing: number[] }>(
+        `/models/group/thumbnail/from-url`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model_ids: modelIds, url }),
+        },
+      ),
     neighbors: (id: number, params: Record<string, string | number | boolean>) => {
       const qs = new URLSearchParams(
         Object.entries(params)

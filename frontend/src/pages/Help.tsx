@@ -127,9 +127,10 @@ const SECTIONS: Section[] = [
             <strong>From a group card:</strong> open it to manage the whole group. Click the
             title to <strong>rename</strong> the group (applies to every variant). Use the
             per-card checkboxes (or <strong>Select all</strong>) to pick several variants, then{" "}
-            <strong>Move to group</strong> them into another group or <strong>Ungroup</strong>{" "}
-            them in one go. Each card also has its own <strong>Move to group</strong>{" "}
-            (with name suggestions) and <strong>× Remove</strong>.
+            <strong>Move to group</strong> them into another group, <strong>Set image</strong>{" "}
+            (paste one image or product-page URL to give every selected variant the same
+            thumbnail), or <strong>Ungroup</strong> them in one go. Each card also has its own{" "}
+            <strong>Move to group</strong> (with name suggestions) and <strong>× Remove</strong>.
           </li>
           <li>
             <strong>From a model:</strong> the <strong>Set group</strong> button in the model

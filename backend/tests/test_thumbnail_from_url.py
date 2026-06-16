@@ -355,6 +355,101 @@ class TestUpdateModelThumbnail:
 # /files/image cache revalidation (#186)
 # ---------------------------------------------------------------------------
 
+class TestBatchFromUrlEndpoint:
+    """POST /models/group/thumbnail/from-url — one image, fanned out to a group (#184)."""
+
+    def test_fans_one_image_out_to_all_members(self, client, db, thumb_dir, monkeypatch):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A")
+        b = make_model(db, creator, name="B")
+        b.thumbnail_url = "https://old.example.com/old.png"
+        db.commit()
+
+        calls = {"n": 0}
+
+        def handler(req):
+            calls["n"] += 1
+            return httpx.Response(200, content=PNG_BYTES, headers={"content-type": "image/png"})
+        mock_http(monkeypatch, handler)
+
+        resp = client.post(
+            "/models/group/thumbnail/from-url",
+            json={"model_ids": [a.id, b.id], "url": "https://cdn.example.com/group.png"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["downloaded"] is True
+        assert sorted(body["updated"]) == sorted([a.id, b.id])
+        assert body["missing"] == []
+        # Fetched ONCE, written per member.
+        assert calls["n"] == 1
+
+        db.refresh(a); db.refresh(b)
+        assert a.thumbnail_path == str(thumb_dir / f"{a.id}.png")
+        assert b.thumbnail_path == str(thumb_dir / f"{b.id}.png")
+        assert b.thumbnail_url is None
+        assert (thumb_dir / f"{a.id}.png").read_bytes() == PNG_BYTES
+        assert (thumb_dir / f"{b.id}.png").read_bytes() == PNG_BYTES
+
+    def test_download_failure_stores_url_on_all_members(self, client, db, thumb_dir, monkeypatch):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A", thumbnail_path="/somewhere/a.png")
+        b = make_model(db, creator, name="B", thumbnail_path="/somewhere/b.png")
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(403))
+
+        resp = client.post(
+            "/models/group/thumbnail/from-url",
+            json={"model_ids": [a.id, b.id], "url": "https://cdn.example.com/blocked.png"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["downloaded"] is False
+        assert "403" in body["detail"]
+
+        db.refresh(a); db.refresh(b)
+        for m in (a, b):
+            assert m.thumbnail_url == "https://cdn.example.com/blocked.png"
+            assert m.thumbnail_path is None
+
+    def test_missing_ids_reported_others_updated(self, client, db, thumb_dir, monkeypatch):
+        creator = make_creator(db)
+        m = make_model(db, creator, name="M")
+        db.commit()
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
+
+        resp = client.post(
+            "/models/group/thumbnail/from-url",
+            json={"model_ids": [m.id, 999999], "url": "https://cdn.example.com/x.png"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["updated"] == [m.id]
+        assert data["missing"] == [999999]
+
+    def test_empty_ids_is_400(self, client, thumb_dir):
+        resp = client.post(
+            "/models/group/thumbnail/from-url",
+            json={"model_ids": [], "url": "https://cdn.example.com/x.png"},
+        )
+        assert resp.status_code == 400
+
+    def test_409_when_scan_running(self, client, db, thumb_dir, monkeypatch):
+        from app.services import scanner
+        creator = make_creator(db)
+        m = make_model(db, creator, name="M")
+        db.commit()
+
+        monkeypatch.setattr(scanner, "get_status", lambda: {"running": True})
+        resp = client.post(
+            "/models/group/thumbnail/from-url",
+            json={"model_ids": [m.id], "url": "https://cdn.example.com/x.png"},
+        )
+        assert resp.status_code == 409
+
+
 class TestImageCacheControl:
     def test_serve_image_sends_no_cache(self, client, tmp_path, monkeypatch):
         import app.routers.files as files_module
