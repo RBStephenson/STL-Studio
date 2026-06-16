@@ -34,6 +34,7 @@ from sqlalchemy import text as _sqltext, func, or_
 from app.database import SessionLocal
 from app.models import Creator, Model, STLFile, ScanRoot, ModelTag, CollectionModel, PackOverride, GroupOverride
 from app.services import name_parser, layout
+from app.services.scan_rules import IgnoreMatcher, load_ignore_matcher
 from app.services.tag_sync import sync_model_tags
 from app.utils import utcnow
 
@@ -71,6 +72,11 @@ _pack_overrides: set[str] = set()
 # User-assigned character groupings keyed by model folder_path (see GroupOverride).
 # None value = explicitly ungrouped. Applied in _index_model instead of the heuristic.
 _group_overrides: dict[str, str | None] = {}
+# Configurable folder/file ignore patterns (#31). Loaded from app_settings at the
+# start of every scan; the walk skips any folder it matches. Module-level for the
+# same reason as the overrides above — one scan at a time, threading it through
+# every recursive call would be noise.
+_ignore_matcher: IgnoreMatcher = IgnoreMatcher(())
 
 
 def get_status() -> dict:
@@ -86,6 +92,11 @@ def _load_pack_overrides(db: Session) -> None:
 def _load_group_overrides(db: Session) -> None:
     global _group_overrides
     _group_overrides = {row[0]: row[1] for row in db.query(GroupOverride.path, GroupOverride.character)}
+
+
+def _load_scan_rules(db: Session) -> None:
+    global _ignore_matcher
+    _ignore_matcher = load_ignore_matcher(db)
 
 
 def request_cancel():
@@ -106,6 +117,7 @@ def scan_all_roots(db: Session | None = None):
         try:
             _load_pack_overrides(_db)
             _load_group_overrides(_db)
+            _load_scan_rules(_db)
 
             # Clear needs_review for any model that already has indexed STL files —
             # those are confirmed real products that were over-eagerly flagged.
@@ -137,6 +149,8 @@ def scan_all_roots(db: Session | None = None):
             if not _cancel_requested:
                 removed = _prune_stale_models(_db, scan_start, root_paths)
                 removed += _prune_stale_paths(_db)
+                # Drop models that a newly-added ignore pattern now covers (#31).
+                removed += _prune_ignored(_db, root_paths)
                 # Slicer rows must go before the phantom prune so a model whose
                 # only "STL" was a slicer project is removed in the same scan.
                 _prune_slicer_files(_db)
@@ -215,6 +229,56 @@ def _prune_stale_paths(db: Session):
     _cascade_delete_models(db, stale_ids)
     logger.info(f"Post-scan: pruned {len(stale_ids)} models with missing folder paths")
     return len(stale_ids)
+
+
+def _prune_ignored(db: Session, root_paths: list[str]):
+    """Remove already-indexed models that now fall under a configured ignore
+    pattern (#31).
+
+    The walk returns at the first ignored folder and never indexes anything
+    beneath it, so a model already in the DB is "ignored" when its own folder OR
+    any ancestor up to (but not including) its scan root matches the ignore
+    matcher. Testing ancestors — not just the leaf — means a bare-name pattern
+    like "wip" still drops every model nested under a "wip" folder.
+
+    Cap-guarded via _exceeds_prune_cap so a too-broad new pattern can't silently
+    wipe the library, and user-excluded models are left alone (already hidden;
+    mirrors _prune_stale_models).
+
+    Returns the number of models pruned (for the scan completion summary, #223).
+    """
+    if not _ignore_matcher.patterns or not root_paths:
+        return 0
+    roots_norm = {os.path.normcase(os.path.normpath(p)) for p in root_paths}
+
+    def _is_ignored(folder_path: str | None) -> bool:
+        if not folder_path:
+            return False
+        current = Path(folder_path)
+        # Walk leaf → up, stopping when we step onto a scan root (don't test the
+        # root itself — ignoring a whole root is not this feature's job) or run
+        # out of parents.
+        while True:
+            if os.path.normcase(os.path.normpath(str(current))) in roots_norm:
+                return False
+            if _ignore_matcher.matches(current):
+                return True
+            parent = current.parent
+            if parent == current:  # filesystem root, no scan-root match found
+                return False
+            current = parent
+
+    rows = db.query(Model.id, Model.folder_path, Model.excluded).all()
+    total = len(rows)
+    ignored_ids = [r.id for r in rows if not r.excluded and _is_ignored(r.folder_path)]
+    if not ignored_ids:
+        return 0
+    if _exceeds_prune_cap(len(ignored_ids), total, "matched an ignore pattern"):
+        return 0
+
+    _cascade_delete_models(db, ignored_ids)
+    logger.info(f"Post-scan: pruned {len(ignored_ids)} models under ignore patterns")
+    return len(ignored_ids)
 
 
 def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]):
@@ -391,6 +455,7 @@ def scan_creator(creator_id: int):
 
             _load_pack_overrides(db)
             _load_group_overrides(db)
+            _load_scan_rules(db)
 
             # Clear stale needs_review on this creator's already-indexed models.
             db.execute(_sqltext(
@@ -610,6 +675,14 @@ def _walk_for_models(
     layout_tags: list[str] | None = None,
 ):
     if not folder.is_dir():
+        return
+
+    # User-configured ignore patterns (#31): skip this folder and its entire
+    # subtree. Checked before any classification so an ignored folder costs nothing.
+    # The creator boundary itself is never ignored — a pattern that happened to match
+    # a creator folder would silently drop every model under it; ignore is for
+    # sub-folders (WIP dumps, archives, slicer project dirs), not whole creators.
+    if folder != creator_boundary and _ignore_matcher.matches(folder):
         return
 
     # The creator-boundary folder is never itself a model. Its name may contain a

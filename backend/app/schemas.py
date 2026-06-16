@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class CreatorBase(BaseModel):
@@ -240,6 +240,10 @@ class AppSettingsRead(BaseModel):
     filter_presets: list[FilterPreset] = []
     recent_days: int = 7  # "Recently added" window in days (#170)
     library_sort: str = "name"  # default Library order: name | added | creator (#247)
+    # Glob patterns of folders/files the scanner skips, merged with built-in
+    # defaults (#31). Matched case-insensitively against a path's basename and
+    # its full POSIX path — see services/scan_rules.py.
+    scan_ignore_patterns: list[str] = []
 
 
 class AppSettingsUpdate(BaseModel):
@@ -254,5 +258,25 @@ class AppSettingsUpdate(BaseModel):
     # Only the three user-facing Library sorts are persistable defaults; the
     # queue/queued_at/printed_at keys are page-specific, not a Library default.
     library_sort: Optional[str] = Field(None, pattern="^(name|added|creator|rating)$")
+    # Up to 200 ignore globs (#31); each non-blank and <=200 chars. Blanks are
+    # dropped so an empty editor row can't poison the list.
+    scan_ignore_patterns: Optional[list[str]] = Field(None, max_length=200)
+
+    @field_validator("scan_ignore_patterns")
+    @classmethod
+    def _clean_patterns(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is None:
+            return None
+        cleaned = [p.strip() for p in v if p and p.strip()]
+        if any(len(p) > 200 for p in cleaned):
+            raise ValueError("ignore patterns must be 200 characters or fewer")
+        # de-dupe, preserve order
+        seen: set[str] = set()
+        out: list[str] = []
+        for p in cleaned:
+            if p not in seen:
+                seen.add(p)
+                out.append(p)
+        return out
 
     model_config = {"extra": "forbid"}

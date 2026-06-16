@@ -199,6 +199,58 @@ describe("Settings – Reload .env (#140)", () => {
   });
 });
 
+describe("Settings – Scan ignore patterns (#31)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("adds a typed pattern, appending it to the existing list", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ scan_ignore_patterns: ["WIP"] }));
+    vi.mocked(api.settings.update).mockResolvedValue(
+      mkSettings({ scan_ignore_patterns: ["WIP", "_archive"] })
+    );
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    await screen.findByText("WIP");
+    await userEvent.type(screen.getByPlaceholderText(/_archive/i), "_archive");
+    await userEvent.click(screen.getByRole("button", { name: /^add$/i }));
+
+    expect(api.settings.update).toHaveBeenCalledWith({
+      scan_ignore_patterns: ["WIP", "_archive"],
+    });
+    expect(await screen.findByText("_archive")).toBeInTheDocument();
+  });
+
+  it("does not re-add a pattern that already exists", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ scan_ignore_patterns: ["WIP"] }));
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    await screen.findByText("WIP");
+    await userEvent.type(screen.getByPlaceholderText(/_archive/i), "WIP");
+    await userEvent.click(screen.getByRole("button", { name: /^add$/i }));
+
+    expect(api.settings.update).not.toHaveBeenCalled();
+  });
+
+  it("removes a pattern via its trash button", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(
+      mkSettings({ scan_ignore_patterns: ["WIP", "_archive"] })
+    );
+    vi.mocked(api.settings.update).mockResolvedValue(
+      mkSettings({ scan_ignore_patterns: ["_archive"] })
+    );
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: /remove WIP/i }));
+
+    expect(api.settings.update).toHaveBeenCalledWith({ scan_ignore_patterns: ["_archive"] });
+  });
+});
+
 describe("Settings – Library page size (#32)", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
