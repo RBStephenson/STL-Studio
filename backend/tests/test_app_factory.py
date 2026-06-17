@@ -134,6 +134,37 @@ def test_migrate_schema_backfills_print_status_from_legacy_flags(monkeypatch):
     engine.dispose()
 
 
+def test_alembic_chain_adds_is_group_rep(monkeypatch, tmp_path):
+    """The 0003 revision adds models.is_group_rep on an already-stamped DB (#193).
+
+    Guards the Alembic path: create_all is skipped for existing tables, so an
+    Alembic-managed DB only gets the column from a real migration revision.
+    """
+    from pathlib import Path
+    from alembic.config import Config
+    from alembic import command
+
+    db_url = f"sqlite:///{tmp_path / 'mig.db'}"
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE models (id INTEGER PRIMARY KEY, name VARCHAR)"))
+        conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        conn.execute(text("INSERT INTO alembic_version VALUES ('0002')"))
+        conn.commit()
+
+    # env.py binds to app.database.engine, so point the whole app at this DB.
+    monkeypatch.setattr("app.database.engine", engine)
+    cfg = Config(str(Path(main_module.__file__).parent.parent / "alembic.ini"))
+    command.upgrade(cfg, "head")
+
+    with engine.connect() as conn:
+        cols = {r[1] for r in conn.execute(text("PRAGMA table_info(models)"))}
+        version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    assert "is_group_rep" in cols
+    assert version == "0003"
+    engine.dispose()
+
+
 def test_run_migrations_stamps_legacy_db(monkeypatch):
     """A DB without alembic_version gets _migrate_schema() then stamped at head."""
     engine = create_engine(
