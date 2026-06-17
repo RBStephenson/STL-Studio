@@ -18,4 +18,4 @@ numpy==2.4.6
 scikit-image==0.26.0
 pillow==12.2.0
 playwright==1.60.0
-anthropic==0.109.1
+anthropic==0.109.2
