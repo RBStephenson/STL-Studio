@@ -75,6 +75,17 @@ describe("BulkTagBar bulk actions (#164)", () => {
     expect(props.onClear).not.toHaveBeenCalled();
   });
 
+  it("sizes the Hide button like the other action buttons (#381)", () => {
+    render(<BulkTagBar {...baseProps()} />);
+    const hide = screen.getByRole("button", { name: /^hide$/i });
+    const addTags = screen.getByRole("button", { name: /add tags/i });
+    // Same padding/sizing + shrink-0 so Hide stays inside the toolbar, aligned.
+    for (const cls of ["px-3", "py-1.5", "shrink-0", "text-sm"]) {
+      expect(hide).toHaveClass(cls);
+      expect(addTags).toHaveClass(cls);
+    }
+  });
+
   it("adds tags via the bulk endpoint", async () => {
     render(<BulkTagBar {...baseProps()} />);
     fireEvent.click(screen.getByRole("button", { name: /add tags/i }));

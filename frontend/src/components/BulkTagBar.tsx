@@ -133,7 +133,7 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
 
   return (
     <div className="fixed bottom-0 inset-x-0 z-50 flex justify-center pb-5 pointer-events-none">
-      <div className="pointer-events-auto flex items-center gap-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl px-4 py-3 min-w-[520px] max-w-2xl">
+      <div className="pointer-events-auto flex flex-wrap items-center gap-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl px-4 py-3 min-w-[520px] max-w-4xl">
 
         {/* Selection count + select-all / clear */}
         <div className="flex items-center gap-2 shrink-0">
@@ -245,24 +245,24 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
 
         {/* Action buttons */}
         {status === "idle" && mode === "idle" && (
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
             <button
               onClick={() => setMode("add")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+              className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
             >
               <Tag size={13} />
               Add Tags
             </button>
             <button
               onClick={() => setMode("remove")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+              className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
             >
               <Trash2 size={13} />
               Remove Tags
             </button>
             <button
               onClick={() => setMode("collection")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+              className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
             >
               <FolderOpen size={13} />
               Add to Collection
@@ -270,7 +270,7 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
             <button
               onClick={markReview}
               title="Flag the selected models for review"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+              className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
             >
               <AlertCircle size={13} />
               Mark Review
@@ -278,7 +278,7 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
             <button
               onClick={hideSelected}
               title="Hide the selected models from the library (files kept on disk)"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-red-900/60 text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
+              className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-red-900/60 text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
             >
               <EyeOff size={13} />
               Hide
