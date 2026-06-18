@@ -59,7 +59,7 @@ export default function ScanButton({ onScanComplete }: Props) {
     <div className="flex items-center gap-3">
       {status?.running && (
         <span className="text-xs text-gray-400 animate-pulse">
-          {cancelling ? "Cancelling…" : `Scanning… ${status.models_found ?? 0} models, ${status.files_found ?? 0} files`}
+          {cancelling ? "Cancelling…" : `Scanning… ${status.models_found ?? 0} models`}
         </span>
       )}
       {status?.running ? (
