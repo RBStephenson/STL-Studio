@@ -67,81 +67,158 @@ and the "Recently added" view with configurable day window and New badges
 
 ---
 
-## Painting M1 — Paint Shelf
+## v0.7 — Configuration, scan features & advanced UX ✅ Complete
 
-Next up after v0.6. The painting module follows its own M0–M5 milestone track
-from the [spec](docs/painting/spec.md) (see also the
-[kickoff brief](docs/painting/kickoff.md)). M0 — the module wiring — shipped in
-v0.6; M1 builds the Paint Shelf, the paint-inventory foundation the guide
-work (M2+) stands on.
-
-| Issue | Item |
-|-------|------|
-| [#240](https://github.com/RBStephenson/STL-Inventory/issues/240) | **Inventory data core** — `brand` / `paint_line` / `paint` models + CRUD endpoints, with the derived `matchable` flag |
-| [#241](https://github.com/RBStephenson/STL-Inventory/issues/241) | **Paint Shelf table UI** — grid/filter/pagination reusing Library patterns, color chips from `paint.hex` |
-| [#242](https://github.com/RBStephenson/STL-Inventory/issues/242) | **PaintRack CSV import with diff preview** — added/removed/changed, confirm-to-apply, never a blind overwrite |
-| [#243](https://github.com/RBStephenson/STL-Inventory/issues/243) | **PaintRack CSV export** — lossless round-trip with the importer |
-| [#244](https://github.com/RBStephenson/STL-Inventory/issues/244) | **Paint code validation** — per-line `code_pattern` checks on entry and import |
-
----
-
-## v0.7 — Configuration, scan features & advanced UX
-
-| Issue | Item |
-|-------|------|
-| [#31](https://github.com/RBStephenson/STL-Inventory/issues/31) | **Configurable scan rules** — ignore patterns, custom parts-folder names, toggle auto-tag inference |
-| [#43](https://github.com/RBStephenson/STL-Inventory/issues/43) | **Adopt Alembic for DB migrations** — the hand-rolled `ALTER TABLE` startup loop only supports additive changes |
-| [#164](https://github.com/RBStephenson/STL-Inventory/issues/164) | **Bulk actions** — tag, add to collection, or delete multiple models at once |
-| [#165](https://github.com/RBStephenson/STL-Inventory/issues/165) | **Tag management UI** — rename, merge, and delete tags globally |
-| [#172](https://github.com/RBStephenson/STL-Inventory/issues/172) | **Quick-assign tags/collections from the library card** — without opening the detail page |
-| [#166](https://github.com/RBStephenson/STL-Inventory/issues/166) | **Print queue** — track per-model print status (queued, printing, printed) |
-| [#167](https://github.com/RBStephenson/STL-Inventory/issues/167) | **Star ratings** — rate models 1–5 stars and filter by rating |
-| [#169](https://github.com/RBStephenson/STL-Inventory/issues/169) | **Keyboard navigation** — j/k library browsing, `/` to focus search |
-| [#220](https://github.com/RBStephenson/STL-Inventory/issues/220) | **Library search polish** — debounce input, stop flooding browser history |
-| [#219](https://github.com/RBStephenson/STL-Inventory/issues/219) | **download-zip hardening** — stream instead of building in memory; handle duplicate filenames |
-| [#222](https://github.com/RBStephenson/STL-Inventory/issues/222) | **Auto-snapshot the database before restore/reset** |
-| [#223](https://github.com/RBStephenson/STL-Inventory/issues/223) | **Scanner status polish** — completion summary message, consistent `_state_lock` use |
+The big interaction milestone, all merged: bulk actions
+([#164](https://github.com/RBStephenson/STL-Inventory/issues/164)), global tag
+management ([#165](https://github.com/RBStephenson/STL-Inventory/issues/165)),
+quick-assign tags/collections from the card
+([#172](https://github.com/RBStephenson/STL-Inventory/issues/172)), the print
+queue with per-model status
+([#166](https://github.com/RBStephenson/STL-Inventory/issues/166)), 1–5 star
+ratings ([#167](https://github.com/RBStephenson/STL-Inventory/issues/167)),
+full keyboard navigation
+([#169](https://github.com/RBStephenson/STL-Inventory/issues/169)), a Library
+sort control ([#247](https://github.com/RBStephenson/STL-Inventory/issues/247)),
+search debounce ([#220](https://github.com/RBStephenson/STL-Inventory/issues/220)),
+3D-viewer code-splitting ([#24](https://github.com/RBStephenson/STL-Inventory/issues/24)),
+a `/scan/browse` allowlist ([#41](https://github.com/RBStephenson/STL-Inventory/issues/41)),
+plus download-zip, snapshot-before-restore, scanner-status, and frontend
+error-handling/test-coverage hardening
+([#219](https://github.com/RBStephenson/STL-Inventory/issues/219),
+[#222](https://github.com/RBStephenson/STL-Inventory/issues/222),
+[#223](https://github.com/RBStephenson/STL-Inventory/issues/223),
+[#221](https://github.com/RBStephenson/STL-Inventory/issues/221),
+[#224](https://github.com/RBStephenson/STL-Inventory/issues/224)), and a batch
+of reported bugs ([#285](https://github.com/RBStephenson/STL-Inventory/issues/285),
+[#286](https://github.com/RBStephenson/STL-Inventory/issues/286),
+[#287](https://github.com/RBStephenson/STL-Inventory/issues/287),
+[#288](https://github.com/RBStephenson/STL-Inventory/issues/288)).
 
 ---
 
-## Backlog (unscheduled)
+## v0.8 — Storefront, performance & painting guides ✅ Complete
 
-Open issues not yet assigned to a milestone. Notable clusters:
+Gumroad scraper overhaul — pagination beyond the first page
+([#316](https://github.com/RBStephenson/STL-Inventory/issues/316)), the
+`value=`/`content=` og-tag fix
+([#317](https://github.com/RBStephenson/STL-Inventory/issues/317)), and richer
+Inertia `data-page` JSON parsing
+([#326](https://github.com/RBStephenson/STL-Inventory/issues/326)) — plus
+external-drive access caching
+([#304](https://github.com/RBStephenson/STL-Inventory/issues/304)), in-group
+image caching ([#185](https://github.com/RBStephenson/STL-Inventory/issues/185)),
+a `tag_sync` dedupe ([#56](https://github.com/RBStephenson/STL-Inventory/issues/56)),
+and `.env` settings reload
+([#140](https://github.com/RBStephenson/STL-Inventory/issues/140)). This
+milestone also carried the painting **guide authoring** work: the
+import/authoring UI ([#277](https://github.com/RBStephenson/STL-Inventory/issues/277)),
+the structured tab→phase→step→swatch editor
+([#329](https://github.com/RBStephenson/STL-Inventory/issues/329)), and Painting
+M3 PDF export via Playwright
+([#320](https://github.com/RBStephenson/STL-Inventory/issues/320)).
 
-**Variant group UX** — rename groups ([#183](https://github.com/RBStephenson/STL-Inventory/issues/183)),
-quick inline rename ([#191](https://github.com/RBStephenson/STL-Inventory/issues/191)),
-set the display thumbnail ([#193](https://github.com/RBStephenson/STL-Inventory/issues/193)),
-assign one image to a whole group ([#184](https://github.com/RBStephenson/STL-Inventory/issues/184)),
+---
+
+## v0.9 — Scan config, migrations & Library performance ✅ Complete
+
+Released as **v0.9.0**. Shipped: configurable scan rules
+([#31](https://github.com/RBStephenson/STL-Inventory/issues/31)), **Alembic**
+migrations replacing the hand-rolled `ALTER TABLE` loop
+([#43](https://github.com/RBStephenson/STL-Inventory/issues/43)), standardized
+DB session handling ([#45](https://github.com/RBStephenson/STL-Inventory/issues/45)),
+matcher pre-tokenization and dead-code cleanup
+([#57](https://github.com/RBStephenson/STL-Inventory/issues/57),
+[#353](https://github.com/RBStephenson/STL-Inventory/issues/353)), a Library
+search clear button ([#355](https://github.com/RBStephenson/STL-Inventory/issues/355)),
+revertible printed status ([#379](https://github.com/RBStephenson/STL-Inventory/issues/379)),
+a scan-progress file-count fix
+([#380](https://github.com/RBStephenson/STL-Inventory/issues/380)), and a
+Library performance regression fix
+([#382](https://github.com/RBStephenson/STL-Inventory/issues/382)).
+
+The **Library reorganize / normalize-on-disk** epic was deferred to v0.10 to
+ship v0.9.0 on the work above.
+
+---
+
+## v0.10 — Variant-group management 🚧 In progress
+
+A focused milestone making variant groups fully manageable. Shipped: bulk
+set-group endpoint + multi-select groundwork
+([#374](https://github.com/RBStephenson/STL-Inventory/issues/374)), inline
+rename ([#191](https://github.com/RBStephenson/STL-Inventory/issues/191)) and
+group rename ([#183](https://github.com/RBStephenson/STL-Inventory/issues/183)),
+set the display thumbnail
+([#193](https://github.com/RBStephenson/STL-Inventory/issues/193)), assign one
+image to a whole group ([#184](https://github.com/RBStephenson/STL-Inventory/issues/184)),
 clear a model's image ([#192](https://github.com/RBStephenson/STL-Inventory/issues/192)),
-nested variant groups ([#188](https://github.com/RBStephenson/STL-Inventory/issues/188)),
-image caching within a group ([#185](https://github.com/RBStephenson/STL-Inventory/issues/185)).
+drag-to-group **merge** ([#136](https://github.com/RBStephenson/STL-Inventory/issues/136))
+and **multi-select drag**
+([#137](https://github.com/RBStephenson/STL-Inventory/issues/137)) and
+**keyboard accessibility** for the gesture
+([#139](https://github.com/RBStephenson/STL-Inventory/issues/139)), in-group
+Set-Thumbnail image-list caching
+([#303](https://github.com/RBStephenson/STL-Inventory/issues/303)),
+favorited/queued auto-promotion to the group rep
+([#401](https://github.com/RBStephenson/STL-Inventory/issues/401), Phase 1 of
+[#302](https://github.com/RBStephenson/STL-Inventory/issues/302)), and a Library
+list-path performance pass — SQL variant collapse, page-scoped variant counts,
+and supporting indexes
+([#392](https://github.com/RBStephenson/STL-Inventory/issues/392),
+[#393](https://github.com/RBStephenson/STL-Inventory/issues/393),
+[#394](https://github.com/RBStephenson/STL-Inventory/issues/394)).
 
-**Drag-to-group follow-ups** — merge two existing groups by dragging
-([#136](https://github.com/RBStephenson/STL-Inventory/issues/136)),
-multi-select drag ([#137](https://github.com/RBStephenson/STL-Inventory/issues/137)),
-keyboard accessibility ([#139](https://github.com/RBStephenson/STL-Inventory/issues/139)).
-
-**Infrastructure & code quality** — notarize the macOS binary
-([#17](https://github.com/RBStephenson/STL-Inventory/issues/17)),
-reload settings on `.env` change ([#140](https://github.com/RBStephenson/STL-Inventory/issues/140)),
-standardize DB session handling ([#45](https://github.com/RBStephenson/STL-Inventory/issues/45)),
-dedupe tag-map logic ([#56](https://github.com/RBStephenson/STL-Inventory/issues/56)),
-pre-tokenize matcher products ([#57](https://github.com/RBStephenson/STL-Inventory/issues/57)),
-require branches up to date with `main` before merge
-([#153](https://github.com/RBStephenson/STL-Inventory/issues/153)).
-
----
-
-## Stretch goals
-
-Large features that are well-defined but each represent a significant project.
+Still open:
 
 | Issue | Item |
 |-------|------|
-| | **Painting module M2–M5** — guide data model + renderer + print view (M2), authoring + validation + PDF export (M3), AI drafts + color match (M4), full-corpus import (M5); see the [spec](docs/painting/spec.md) §15. Issues will be filed milestone by milestone as each phase starts |
-| [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs |
-| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize library on disk** — preview → apply with manifest/undo; standalone-only (Docker mounts are read-only) |
+| [#302](https://github.com/RBStephenson/STL-Inventory/issues/302) / [#399](https://github.com/RBStephenson/STL-Inventory/issues/399) | **Manual drag-to-reorder** models within a group (Phase 2; needs a persisted `variant_order` column) |
+| [#188](https://github.com/RBStephenson/STL-Inventory/issues/188) | **Nested variant groups** — group variant groups (the largest remaining item) |
+| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize library on disk** (deferred from v0.9) — umbrella: preview → apply with manifest/undo |
+| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Reorganize Phase 1** — preview-only manifest |
+| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Reorganize Phase 2** — apply, undo, conflict resolution (2a/2b/2c) |
 
 ---
 
-Have an idea or want to pick something up? Check the [open issues](https://github.com/RBStephenson/STL-Inventory/issues) or open a new one.
+## v1.0 — Planned
+
+| Issue | Item |
+|-------|------|
+| [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs |
+| [#17](https://github.com/RBStephenson/STL-Inventory/issues/17) | **Notarize the macOS standalone binary** |
+
+---
+
+## Painting module
+
+The painting module follows its own M0–M5 track from the
+[spec](docs/painting/spec.md) (see also the
+[kickoff brief](docs/painting/kickoff.md)).
+
+- **M0 — module wiring** ✅ — backend package, DB tables, Settings toggle, route
+  shells, CI (shipped in v0.6).
+- **M1 — Paint Shelf** ✅ — `brand`/`paint_line`/`paint` models + CRUD
+  ([#240](https://github.com/RBStephenson/STL-Inventory/issues/240)), the shelf
+  table UI ([#241](https://github.com/RBStephenson/STL-Inventory/issues/241)),
+  PaintRack CSV import/export with diff preview
+  ([#242](https://github.com/RBStephenson/STL-Inventory/issues/242),
+  [#243](https://github.com/RBStephenson/STL-Inventory/issues/243)), and code
+  validation ([#244](https://github.com/RBStephenson/STL-Inventory/issues/244)).
+- **M2 — Guide model, renderer & print** ✅ — guide schema + CRUD, React reader,
+  static-HTML exporter, HTML importer with round-trip, print view, and the
+  model↔guide link.
+- **M3 — Authoring, validation & PDF export** ✅ (delivered across v0.8) —
+  import/authoring UI ([#277](https://github.com/RBStephenson/STL-Inventory/issues/277)),
+  structured editor ([#329](https://github.com/RBStephenson/STL-Inventory/issues/329)),
+  Playwright PDF export ([#320](https://github.com/RBStephenson/STL-Inventory/issues/320)).
+- **M4 — AI drafts + color match** — generate guide drafts and match swatches to
+  shelf paints (`generation.py` / `colormatch.py` are stubs today).
+- **M5 — Full-corpus import** — bulk-import the reference guide corpus.
+
+M4–M5 issues will be filed as each phase starts.
+
+---
+
+Have an idea or want to pick something up? Check the
+[open issues](https://github.com/RBStephenson/STL-Inventory/issues) or open a new one.

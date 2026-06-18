@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { Search, SlidersHorizontal, AlertCircle, AlertTriangle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, FolderPlus, ArrowRight, EyeOff, Package, GripVertical, Layers, Sparkles, Keyboard } from "lucide-react";
 import {
-  DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
+  DndContext, DragOverlay, PointerSensor, KeyboardSensor, useSensor, useSensors,
   useDraggable, useDroppable, pointerWithin,
-  DragStartEvent, DragEndEvent,
+  DragStartEvent, DragEndEvent, Announcements,
 } from "@dnd-kit/core";
+import { gridKeyboardCoordinates } from "../utils/gridKeyboardCoordinates";
 import { api, Model, Creator, ModelStats, Collection, FilterPreset, LibrarySort, PRINT_STATUS_LABELS } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import ModelCard from "../components/ModelCard";
@@ -130,7 +131,7 @@ function DraggableCard({ model, draggingCreatorId, children }: {
           ? "Drag onto another card to merge these groups"
           : "Drag onto another model to group them as variants"}
         aria-label={isGroup ? "Drag to merge group" : "Drag to group"}
-        className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 hover:bg-black/90 text-gray-300 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/drag:opacity-100 transition-opacity"
+        className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 hover:bg-black/90 text-gray-300 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/drag:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-400 outline-none transition-opacity"
       >
         <GripVertical size={14} />
       </button>
@@ -455,9 +456,15 @@ export default function Library() {
     if (el) { el.focus(); el.select(); }
   }, []);
 
+  // A drag is in progress (pointer or keyboard). Tracked here (above the keyboard
+  // hook) so grid WASD/arrow nav pauses while a card is picked up — otherwise the
+  // arrow keys would both walk the focus ring AND move the dragged card (#139).
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+
   const { focusedIndex, setFocusedIndex } = useLibraryKeyboard({
     count: models.length,
     getColumns,
+    enabled: draggingId === null,
     onActivate: openModel,
     onFocusSearch: focusSearch,
     onToggleHelp: () => setShowShortcuts((o) => !o),
@@ -477,7 +484,6 @@ export default function Library() {
   // Variant grouping is only on in the default view (favorites/queue/printed/
   // excluded views show flat, ungrouped cards), so drag-to-group is too.
   const dndEnabled = !favParam && !printStatusParam && !excludedParam;
-  const [draggingId, setDraggingId] = useState<number | null>(null);
   // A pending group op awaiting a name: a set of source models that will join the
   // target. Used when the drop target is ungrouped (no character to inherit);
   // covers both single- and multi-card drags (#137).
@@ -491,6 +497,10 @@ export default function Library() {
     // Small threshold so a plain click on the grip still isn't treated as a drag,
     // and ordinary card clicks never start one.
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    // Keyboard parity (#139): focus a grip, Space to pick up, arrows to hop
+    // between cards (free-draggable grid getter), Space/Enter to drop, Esc to
+    // cancel. dnd-kit announces pickup/over/drop via `dndAnnouncements`.
+    useSensor(KeyboardSensor, { coordinateGetter: gridKeyboardCoordinates }),
   );
   const draggingModel = draggingId != null ? models.find((m) => m.id === draggingId) ?? null : null;
   // How many cards a drag moves: the whole selection when the grabbed card is part
@@ -523,6 +533,29 @@ export default function Library() {
     },
     [toast],
   );
+
+  const nameOfModel = (id: number) => {
+    const m = models.find((x) => x.id === id);
+    return m ? m.title || m.name : "this model";
+  };
+
+  // Screen-reader narration for the drag-to-group gesture (#139). Names come from
+  // the loaded page, so announcements stay meaningful for keyboard/AT users.
+  const dndAnnouncements: Announcements = {
+    onDragStart: ({ active }) => {
+      const name = nameOfModel(Number(active.id));
+      return `Picked up ${name}. Use the arrow keys to move it onto another card, then press space or enter to group them. Press escape to cancel.`;
+    },
+    onDragOver: ({ active, over }) => {
+      if (!over) return `${nameOfModel(Number(active.id))} is not over a card.`;
+      return `${nameOfModel(Number(active.id))} is over ${nameOfModel(Number(over.id))}. Press space or enter to group them.`;
+    },
+    onDragEnd: ({ active, over }) => {
+      if (!over) return `${nameOfModel(Number(active.id))} was dropped. No group change.`;
+      return `Grouped ${nameOfModel(Number(active.id))} with ${nameOfModel(Number(over.id))}.`;
+    },
+    onDragCancel: ({ active }) => `Cancelled. ${nameOfModel(Number(active.id))} was not grouped.`,
+  };
 
   const onDragStart = (e: DragStartEvent) => setDraggingId(Number(e.active.id));
 
@@ -1066,6 +1099,7 @@ export default function Library() {
         <DndContext
           sensors={dndSensors}
           collisionDetection={pointerWithin}
+          accessibility={{ announcements: dndAnnouncements }}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragCancel={() => setDraggingId(null)}
@@ -1136,7 +1170,7 @@ export default function Library() {
         <PaginationBar page={page} totalPages={totalPages} onPage={setPage} />
       )}
 
-      {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />}
+      {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} showDragGroup={dndEnabled} />}
 
       {/* Name-the-group prompt when two ungrouped models are dragged together */}
       {pendingMerge && (

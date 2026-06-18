@@ -91,7 +91,10 @@ const SECTIONS: Section[] = [
           <strong>Keyboard shortcuts:</strong> press <kbd>/</kbd> to jump to search,{" "}
           <kbd>A</kbd>/<kbd>D</kbd> and <kbd>W</kbd>/<kbd>S</kbd> (or the arrow keys) to
           move the focus ring between cards, <kbd>Enter</kbd> to open the focused model,
-          and <kbd>Esc</kbd> to step back out. Press <kbd>?</kbd> any time for the full list.
+          and <kbd>Esc</kbd> to step back out. You can also group cards by keyboard:{" "}
+          <kbd>Tab</kbd> to a card's grip, <kbd>Space</kbd> to pick it up, arrow keys to
+          move it onto a target, then <kbd>Space</kbd>/<kbd>Enter</kbd> to group them.
+          Press <kbd>?</kbd> any time for the full list.
         </p>
       </>
     ),
@@ -121,7 +124,9 @@ const SECTIONS: Section[] = [
             loose card opens a naming prompt. Select several cards first (checkboxes) and
             drag any one of them to group the <em>whole selection</em> at once. Drag a{" "}
             <em>group</em> card onto another to <strong>merge</strong> the two groups
-            (after a confirm).
+            (after a confirm). The gesture also works by keyboard — <kbd>Tab</kbd> to a
+            grip, <kbd>Space</kbd> to pick up, arrow keys to move, <kbd>Space</kbd>/
+            <kbd>Enter</kbd> to drop.
           </li>
           <li>
             <strong>From a group card:</strong> open it to manage the whole group. Click the
@@ -134,9 +139,11 @@ const SECTIONS: Section[] = [
           </li>
           <li>
             <strong>Group thumbnail:</strong> the group's library card shows one variant's image.
-            By default that's a variant that has a thumbnail; to pick a specific one, open the
-            group and click the <strong>image button</strong> on that variant —{" "}
-            <strong>Set as group thumbnail</strong>. The choice survives rescans.
+            By default a variant you've <strong>favorited or queued</strong> is promoted to the
+            front so its ★/🖨 chip shows on the group card; otherwise a variant that has a
+            thumbnail represents the group. To pin a specific one, open the group and click the{" "}
+            <strong>image button</strong> on that variant — <strong>Set as group thumbnail</strong>.
+            The choice survives rescans.
           </li>
           <li>
             <strong>From a model:</strong> the <strong>Set group</strong> button in the model

@@ -4,18 +4,26 @@ interface Props {
   onClose: () => void;
   /** Whether to list the "/" focus-search shortcut (off on pages with no search box). */
   showSearch?: boolean;
+  /** Whether to list the drag-to-group keyboard gesture (Library only — #139). */
+  showDragGroup?: boolean;
 }
 
 // Help dialog for the keyboard shortcuts (#169), shared by the Library and
 // variant-group grids. Closing is driven by the backdrop, the X button, and
 // the global Escape handler on the host page.
-export default function ShortcutsOverlay({ onClose, showSearch = true }: Props) {
+export default function ShortcutsOverlay({ onClose, showSearch = true, showDragGroup = false }: Props) {
   const shortcuts: { keys: string[]; desc: string }[] = [
     ...(showSearch ? [{ keys: ["/"], desc: "Focus the search box" }] : []),
     { keys: ["A", "D"], desc: "Move left / right between cards" },
     { keys: ["W", "S"], desc: "Move up / down a row" },
     { keys: ["←", "→", "↑", "↓"], desc: "Move between cards (arrow keys)" },
     { keys: ["Enter"], desc: "Open the focused model" },
+    ...(showDragGroup
+      ? [
+          { keys: ["Tab"], desc: "Focus a card's drag grip" },
+          { keys: ["Space"], desc: "Pick up / drop grip — drop onto a card to group" },
+        ]
+      : []),
     { keys: ["Esc"], desc: "Clear focus / close this dialog" },
     { keys: ["?"], desc: "Show this help" },
   ];

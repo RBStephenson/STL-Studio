@@ -13,18 +13,22 @@ function jsonResponse(body: unknown, ok = true) {
   } as Response);
 }
 
-function renderPicker(onApplied = vi.fn()) {
-  render(
+function renderPicker(onApplied = vi.fn(), extra: { modelId?: number; cacheKey?: string } = {}) {
+  const utils = render(
     <ImagePicker
-      modelId={7}
+      modelId={extra.modelId ?? 7}
       currentPath={null}
       currentUrl={null}
+      cacheKey={extra.cacheKey}
       onApplied={onApplied}
       onClose={vi.fn()}
     />
   );
-  return onApplied;
+  return { onApplied, ...utils };
 }
+
+const imageListCalls = () =>
+  fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/files/model-images/")).length;
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -37,7 +41,7 @@ beforeEach(() => {
 
 describe("ImagePicker – From URL tab", () => {
   it("POSTs to the from-url endpoint and calls onApplied on success", async () => {
-    const onApplied = renderPicker();
+    const { onApplied } = renderPicker();
 
     await userEvent.click(screen.getByRole("button", { name: /from url/i }));
     await userEvent.type(
@@ -59,7 +63,7 @@ describe("ImagePicker – From URL tab", () => {
   });
 
   it("shows the backend error detail when the download fails", async () => {
-    const onApplied = renderPicker();
+    const { onApplied } = renderPicker();
 
     await userEvent.click(screen.getByRole("button", { name: /from url/i }));
     await userEvent.type(
@@ -77,7 +81,7 @@ describe("ImagePicker – From URL tab", () => {
   });
 
   it("warns (but keeps the save) when the server falls back to storing the URL", async () => {
-    const onApplied = renderPicker();
+    const { onApplied } = renderPicker();
 
     await userEvent.click(screen.getByRole("button", { name: /from url/i }));
     await userEvent.type(
@@ -113,5 +117,62 @@ describe("ImagePicker – From Folder tab", () => {
     await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
 
     expect(await screen.findByTitle("new.png")).toBeInTheDocument();
+  });
+});
+
+describe("ImagePicker – group image-list cache (#303)", () => {
+  const oneImage = [{ path: "/d/a.png", filename: "a.png", url: "/img" }];
+
+  it("reuses the cached list for a sibling variant without re-fetching", async () => {
+    // Distinct key per test so the module-scope cache can't leak across tests.
+    const cacheKey = "9:Akuma";
+    fetchMock.mockImplementation((url: string) =>
+      url.startsWith("/api/files/model-images/") ? jsonResponse(oneImage) : jsonResponse({}),
+    );
+
+    // First variant: fetches and populates the cache.
+    const first = renderPicker(vi.fn(), { modelId: 7, cacheKey });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(1);
+    first.unmount();
+
+    // Sibling variant (different modelId, same group key): served from cache.
+    renderPicker(vi.fn(), { modelId: 8, cacheKey });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(1); // no second folder walk
+  });
+
+  it("still re-fetches on Refresh even when the list is cached", async () => {
+    const cacheKey = "9:Boomer";
+    fetchMock.mockImplementation((url: string) =>
+      url.startsWith("/api/files/model-images/") ? jsonResponse(oneImage) : jsonResponse({}),
+    );
+
+    renderPicker(vi.fn(), { modelId: 7, cacheKey });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(1);
+
+    fetchMock.mockImplementationOnce((url: string) => {
+      expect(url).toBe("/api/files/model-images/7?refresh=true");
+      return jsonResponse([{ path: "/d/new.png", filename: "new.png", url: "/img" }]);
+    });
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    expect(await screen.findByTitle("new.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(2);
+  });
+
+  it("always fetches when no cacheKey is given", async () => {
+    fetchMock.mockImplementation((url: string) =>
+      url.startsWith("/api/files/model-images/") ? jsonResponse(oneImage) : jsonResponse({}),
+    );
+
+    const first = renderPicker(vi.fn(), { modelId: 7 });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    first.unmount();
+
+    renderPicker(vi.fn(), { modelId: 7 });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(2); // no caching without a key
   });
 });
