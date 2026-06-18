@@ -155,13 +155,46 @@ def test_alembic_chain_adds_is_group_rep(monkeypatch, tmp_path):
     # env.py binds to app.database.engine, so point the whole app at this DB.
     monkeypatch.setattr("app.database.engine", engine)
     cfg = Config(str(Path(main_module.__file__).parent.parent / "alembic.ini"))
-    command.upgrade(cfg, "head")
+    # Pin to 0003: this guards that specific revision. Later revisions (0004
+    # indexes) need columns this stripped fixture table doesn't have.
+    command.upgrade(cfg, "0003")
 
     with engine.connect() as conn:
         cols = {r[1] for r in conn.execute(text("PRAGMA table_info(models)"))}
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
     assert "is_group_rep" in cols
     assert version == "0003"
+    engine.dispose()
+
+
+def test_alembic_chain_adds_library_indexes(monkeypatch, tmp_path):
+    """The 0004 revision adds the Library list-path indexes on a stamped DB (#394).
+
+    create_all skips existing tables, so an already-managed DB only gains the new
+    indexes from the real migration."""
+    from pathlib import Path
+    from alembic.config import Config
+    from alembic import command
+
+    db_url = f"sqlite:///{tmp_path / 'idx.db'}"
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        conn.execute(text(
+            "CREATE TABLE models (id INTEGER PRIMARY KEY, name VARCHAR, "
+            "creator_id INTEGER, character VARCHAR, created_at DATETIME)"
+        ))
+        conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        conn.execute(text("INSERT INTO alembic_version VALUES ('0003')"))
+        conn.commit()
+
+    monkeypatch.setattr("app.database.engine", engine)
+    cfg = Config(str(Path(main_module.__file__).parent.parent / "alembic.ini"))
+    command.upgrade(cfg, "0004")
+
+    with engine.connect() as conn:
+        idx = {r[1] for r in conn.execute(text("PRAGMA index_list(models)"))}
+    assert {"ix_models_creator_character", "ix_models_character_name",
+            "ix_models_created_at"} <= idx
     engine.dispose()
 
 

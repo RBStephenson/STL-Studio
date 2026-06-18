@@ -60,6 +60,16 @@ class Creator(Base):
 class Model(Base):
     """One logical model (a folder under a creator). May contain many STL files."""
     __tablename__ = "models"
+    __table_args__ = (
+        # Variant-collapse window partitions by (creator_id, character); the
+        # creator sort reuses the leading column.
+        Index("ix_models_creator_character", "creator_id", "character"),
+        # Default grid sort is ORDER BY character, name — needs an index led by
+        # character (the creator_character one can't serve it).
+        Index("ix_models_character_name", "character", "name"),
+        # `sort=added` orders by created_at desc (#170).
+        Index("ix_models_created_at", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
