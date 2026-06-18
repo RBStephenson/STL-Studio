@@ -90,9 +90,9 @@ describe("ModelDetail clear print status (#379)", () => {
     get.mockResolvedValue(printedModel);
     setPrintStatus.mockResolvedValue({ ok: true, print_status: "none", print_count: 0 });
     renderAt();
-    await waitFor(() => expect(screen.getByText("Goblin")).toBeInTheDocument());
-
-    const clear = screen.getByRole("button", { name: "Clear print status" });
+    // Wait for the load effect to apply the model's "printed" status, which is
+    // what renders the clear control (findByRole retries until it appears).
+    const clear = await screen.findByRole("button", { name: "Clear print status" });
     fireEvent.click(clear);
 
     await waitFor(() => expect(setPrintStatus).toHaveBeenCalledWith(1, "none"));
