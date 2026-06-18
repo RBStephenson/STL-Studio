@@ -184,6 +184,13 @@ describe("ModelCard inline rename (#191)", () => {
     fireEvent.click(screen.getByText("popover-rename"));
     expect(screen.getByLabelText("Rename model")).toBeInTheDocument();
   });
+
+  it("marks the card link non-draggable so text selection in rename doesn't drag the URL", () => {
+    renderCard();
+    // The card is an <a>; native anchor drag would paste the link URL into the
+    // rename input when selecting text. draggable={false} prevents that.
+    expect(screen.getByRole("link")).toHaveAttribute("draggable", "false");
+  });
 });
 
 describe("ModelCard inline star rating (#167)", () => {

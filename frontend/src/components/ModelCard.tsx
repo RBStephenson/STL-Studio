@@ -239,6 +239,10 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
       to={linkTo}
       state={{ from: backTo ?? location.pathname + location.search }}
       onClick={handleCardClick}
+      // Anchors are native drag sources: dragging the link drags its URL.
+      // Without this, mouse-selecting text in the inline rename input starts a
+      // link-drag and drops the URL into the field instead of selecting text.
+      draggable={false}
       className={`group bg-gray-900 rounded-lg overflow-hidden border transition-colors flex flex-col ${
         selected
           ? "border-indigo-500 ring-1 ring-indigo-500/50"
@@ -394,6 +398,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             value={nameDraft}
             onChange={(e) => setNameDraft(e.target.value)}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDragStart={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               e.stopPropagation();  // keep WASD grid nav (#169) from eating keystrokes
               if (e.key === "Enter") { e.preventDefault(); commitRename(); }
