@@ -516,6 +516,20 @@ export default function ModelDetail() {
     }
   };
 
+  const clearPrintStatus = async () => {
+    const prev = printStatus;
+    const prevCount = printCount;
+    setPrintStatus("none");
+    try {
+      const res = await api.models.setPrintStatus(Number(id), "none");
+      setPrintCount(res.print_count);
+    } catch {
+      setPrintStatus(prev);
+      setPrintCount(prevCount);
+      toast("Couldn't clear print status — try again.", "error");
+    }
+  };
+
   const loadIdRef = useRef(0);
   const load = useCallback(() => {
     if (!id) return;
@@ -854,6 +868,16 @@ export default function ModelDetail() {
                   <span className="ml-1 text-xs opacity-70">×{printCount}</span>
                 )}
               </button>
+              {printStatus !== "none" && (
+                <button
+                  onClick={clearPrintStatus}
+                  title="Clear print status (revert to not set)"
+                  aria-label="Clear print status"
+                  className="px-2 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              )}
               <button
                 onClick={toggleNSFW}
                 title={nsfw ? "Mark as SFW" : "Mark as NSFW"}

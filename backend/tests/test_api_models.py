@@ -484,6 +484,57 @@ class TestQueueOrdering:
         assert self._queue_names(client) == ["B", "A"]
 
 
+class TestPrintStatusLifecycle:
+    """Print count must reflect real prints, not click history (#379)."""
+
+    def _set(self, client, model_id, status):
+        resp = client.patch(f"/models/{model_id}/print-status", json={"status": status})
+        assert resp.status_code == 200
+        return resp.json()
+
+    def test_marking_printed_sets_count_and_timestamp(self, client, db):
+        creator = make_creator(db)
+        m = make_model(db, creator, name="A")
+        commit_all(db)
+
+        body = self._set(client, m.id, "printed")
+        assert body["print_count"] == 1
+        db.refresh(m)
+        assert m.printed_at is not None
+
+    def test_re_setting_printed_does_not_inflate_count(self, client, db):
+        creator = make_creator(db)
+        m = make_model(db, creator, name="A")
+        commit_all(db)
+
+        self._set(client, m.id, "printed")
+        body = self._set(client, m.id, "printed")
+        assert body["print_count"] == 1
+
+    def test_reverting_from_printed_decrements_and_clears_timestamp(self, client, db):
+        creator = make_creator(db)
+        m = make_model(db, creator, name="A")
+        commit_all(db)
+
+        self._set(client, m.id, "printed")
+        body = self._set(client, m.id, "none")
+        assert body["print_count"] == 0
+        db.refresh(m)
+        assert m.printed_at is None
+        assert m.print_status == "none"
+
+    def test_revert_never_drives_count_negative(self, client, db):
+        creator = make_creator(db)
+        m = make_model(db, creator, name="A")
+        commit_all(db)
+
+        # Two accidental advances through to printed, then back out.
+        self._set(client, m.id, "printed")
+        self._set(client, m.id, "none")
+        body = self._set(client, m.id, "printing")  # leaving 'none', not 'printed'
+        assert body["print_count"] == 0
+
+
 # ---------------------------------------------------------------------------
 # Neighbors endpoint
 # ---------------------------------------------------------------------------

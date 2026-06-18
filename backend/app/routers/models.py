@@ -785,6 +785,7 @@ def set_print_status(model_id: int, body: PrintStatusUpdate, db: Session = Depen
         raise HTTPException(status_code=404, detail="Model not found")
 
     was_queued = model.print_status == "queued"
+    was_printed = model.print_status == "printed"
     model.print_status = body.status
 
     if body.status == "queued":
@@ -797,13 +798,22 @@ def set_print_status(model_id: int, body: PrintStatusUpdate, db: Session = Depen
             ).scalar()
             model.queue_position = (max_pos or 0) + 1
     elif body.status == "printed":
-        model.printed_at = model.printed_at or utcnow()
         model.queued_at = None
         model.queue_position = None
-        model.print_count = (model.print_count or 0) + 1
+        # Only a real none/queued/printing → printed transition counts as a new
+        # print; re-setting an already-printed model must not inflate the count.
+        if not was_printed:
+            model.printed_at = utcnow()
+            model.print_count = (model.print_count or 0) + 1
     else:  # none | printing — leaves the active queue
         model.queued_at = None
         model.queue_position = None
+        # Reverting away from printed (e.g. a status advanced by mistake) undoes
+        # the print it recorded so phantom counts don't accumulate (#379).
+        if was_printed:
+            model.print_count = max((model.print_count or 0) - 1, 0)
+            if model.print_count == 0:
+                model.printed_at = None
 
     db.commit()
     return {"ok": True, "print_status": model.print_status, "print_count": model.print_count}

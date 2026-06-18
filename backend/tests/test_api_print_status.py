@@ -51,15 +51,18 @@ def test_set_status_to_printed_increments_count(client, db):
     assert m.queue_position is None
 
 
-def test_set_status_to_printed_twice_increments_count_twice(client, db):
+def test_reprint_after_revert_nets_single_count(client, db):
+    """A printed -> none -> printed round trip nets one count, not two: the
+    revert undoes the original print so accidental click-throughs can't pile up
+    phantom prints (#379)."""
     m = setup(db)
     client.patch(f"/models/{m.id}/print-status", json={"status": "printed"})
-    # Reset to none then mark printed again
+    # Reverting to none undoes that print (decrement + clear timestamp).
     client.patch(f"/models/{m.id}/print-status", json={"status": "none"})
     r = client.patch(f"/models/{m.id}/print-status", json={"status": "printed"})
     db.refresh(m)
-    assert m.print_count == 2
-    assert r.json()["print_count"] == 2
+    assert m.print_count == 1
+    assert r.json()["print_count"] == 1
 
 
 def test_set_status_to_none_clears_queue(client, db):
