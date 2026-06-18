@@ -108,18 +108,18 @@ work (M2+) stands on.
 
 Open issues not yet assigned to a milestone. Notable clusters:
 
-**Variant group UX** — rename groups ([#183](https://github.com/RBStephenson/STL-Inventory/issues/183)),
-quick inline rename ([#191](https://github.com/RBStephenson/STL-Inventory/issues/191)),
-set the display thumbnail ([#193](https://github.com/RBStephenson/STL-Inventory/issues/193)),
-assign one image to a whole group ([#184](https://github.com/RBStephenson/STL-Inventory/issues/184)),
-clear a model's image ([#192](https://github.com/RBStephenson/STL-Inventory/issues/192)),
-nested variant groups ([#188](https://github.com/RBStephenson/STL-Inventory/issues/188)),
-image caching within a group ([#185](https://github.com/RBStephenson/STL-Inventory/issues/185)).
+> Most of the variant-group UX and drag-to-group work below shipped in the
+> **v0.10** milestone (rename groups, inline rename, display thumbnail, whole-group
+> image, clear image, group/multi-select drag merge, drag-to-group keyboard
+> accessibility, in-group image caching, favorited/queued auto-promotion to the
+> group rep). See the [GitHub milestones](https://github.com/RBStephenson/STL-Inventory/milestones)
+> for the live v0.8–v0.10 status — this file's per-release sections cover through v0.7.
 
-**Drag-to-group follow-ups** — merge two existing groups by dragging
-([#136](https://github.com/RBStephenson/STL-Inventory/issues/136)),
-multi-select drag ([#137](https://github.com/RBStephenson/STL-Inventory/issues/137)),
-keyboard accessibility ([#139](https://github.com/RBStephenson/STL-Inventory/issues/139)).
+**Variant group UX (open)** — nested variant groups
+([#188](https://github.com/RBStephenson/STL-Inventory/issues/188)),
+manual drag-to-reorder of models within a group
+([#399](https://github.com/RBStephenson/STL-Inventory/issues/399), Phase 2 of
+[#302](https://github.com/RBStephenson/STL-Inventory/issues/302)).
 
 **Infrastructure & code quality** — notarize the macOS binary
 ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17)),

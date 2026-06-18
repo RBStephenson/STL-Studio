@@ -57,8 +57,10 @@ hover grip onto another card to group them as variants** — see
 **Keyboard shortcuts:** the grid is fully keyboard-drivable. Press `/` to jump to
 the search box, `A`/`D` and `W`/`S` (or the arrow keys) to move the focus ring
 between cards, `Enter` to open the focused model, and `Esc` to blur search or
-clear the focus ring. Press `?` (or the keyboard button in the header) at any
-time to see the full list.
+clear the focus ring. You can also **group cards from the keyboard**: `Tab` to a
+card's grip handle, `Space` to pick it up, the arrow keys to move it onto a
+target card, then `Space`/`Enter` to group them (`Esc` cancels). Press `?` (or
+the keyboard button in the header) at any time to see the full list.
 
 ## Variant grouping
 
@@ -97,6 +99,11 @@ Grouping only works within a single creator (cards from other creators in a
 multi-selection are skipped), and only in the default Library view (it's off in
 the favorites/queue/printed/excluded views, which show flat cards).
 
+The whole gesture is keyboard-accessible: `Tab` to a card's grip, `Space` to
+pick it up, arrow keys to move it onto the target, `Space`/`Enter` to drop and
+group (`Esc` cancels). Screen readers announce the pickup, the card you're over,
+and the result.
+
 **From the group view** (fastest for fixing a whole group at once)
 
 Open a group card to see all its variants. The group view manages the whole
@@ -119,9 +126,12 @@ group as well as individual variants:
   suggestions), the **image button** (**Set as group thumbnail**), and
   **× Remove** act on that one variant.
 - **Pick the group thumbnail** — the group's Library card borrows one
-  variant's image. By default a variant that *has* a thumbnail represents the
-  group; click the **image button** under any variant to make it the group's
-  display image instead. The choice is saved and survives rescans.
+  variant's image. By default the representative variant is chosen
+  automatically: a variant you've **favorited or queued** is promoted to the
+  front so its ★/🖨 chip shows on the group card, otherwise a variant that
+  *has* a thumbnail represents the group. Click the **image button** under any
+  variant to override and make it the group's display image instead — that
+  choice is saved and survives rescans.
 
 Models that move or ungroup leave the current list immediately. When the last
 variant leaves, the group view closes back to where you came from.
