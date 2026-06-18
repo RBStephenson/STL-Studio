@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Tag, Layers, Check, Loader2, ImageOff } from "lucide-react";
+import { X, Tag, Layers, Check, Loader2, ImageOff, Pencil } from "lucide-react";
 import { api, Collection } from "../api/client";
 import { useToast } from "../context/ToastContext";
 
@@ -18,6 +18,8 @@ interface Props {
   hasImage?: boolean;
   /** Called after the thumbnail is cleared so the parent can drop the card image. */
   onImageCleared?: () => void;
+  /** Opens the card's inline rename editor (#191). Omit to hide the Rename action. */
+  onRename?: () => void;
 }
 
 export default function QuickAssignPopover({
@@ -28,6 +30,7 @@ export default function QuickAssignPopover({
   onClose,
   hasImage = false,
   onImageCleared,
+  onRename,
 }: Props) {
   const { toast } = useToast();
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -177,6 +180,20 @@ export default function QuickAssignPopover({
           <X size={13} />
         </button>
       </div>
+
+      {/* Rename action (#191) */}
+      {onRename && (
+        <div className="px-3 py-2 border-b border-gray-700/50">
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); onRename(); }}
+            className="flex items-center gap-2 w-full px-1.5 py-1 rounded text-xs text-left text-gray-300 hover:bg-gray-800 transition-colors"
+          >
+            <Pencil size={11} className="text-gray-400" />
+            Rename
+          </button>
+        </div>
+      )}
 
       {/* Tags section */}
       <div className="px-3 py-2 border-b border-gray-700/50">

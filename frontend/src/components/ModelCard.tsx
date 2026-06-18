@@ -77,9 +77,38 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [rating, setRating] = useState<number | null>(model.user_rating ?? null);
   const [imageCleared, setImageCleared] = useState(false);
+  const [localTitle, setLocalTitle] = useState(model.title ?? "");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   const variantCount = model.variant_count ?? 1;
   const isGroup = variantCount > 1;
+
+  // Keep the optimistic title in sync if the parent reloads with fresh data.
+  useEffect(() => { setLocalTitle(model.title ?? ""); }, [model.title]);
+  useEffect(() => { if (editingName) nameInputRef.current?.select(); }, [editingName]);
+
+  const startRename = () => {
+    if (isGroup) return;  // group rename is a separate gesture (#191 P2)
+    setNameDraft(localTitle || model.name);
+    setEditingName(true);
+  };
+
+  const commitRename = async () => {
+    const next = nameDraft.trim();
+    setEditingName(false);
+    if (!next || next === (localTitle || model.name)) return;
+    const prev = localTitle;
+    setLocalTitle(next);
+    try {
+      await api.models.update(model.id, { title: next });
+      onMutate?.();
+    } catch {
+      setLocalTitle(prev);  // revert on failure
+      toast("Couldn't rename — try again.", "error");
+    }
+  };
 
   const changeRating = async (next: number | null) => {
     const prev = rating;
@@ -164,7 +193,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
 
   const displayName = isGroup && model.character
     ? model.character
-    : (model.title || model.name);
+    : (localTitle || model.name);
   const removedAuto = new Set(model.removed_auto_tags ?? []);
   const visibleAutoTags = (model.auto_tags ?? []).filter((t) => !removedAuto.has(t));
   const allTagsDisplay = [...visibleAutoTags, ...localTags];
@@ -331,7 +360,31 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
         {model.character && !isGroup && (
           <p className="text-xs text-indigo-400 truncate">{model.character}</p>
         )}
-        <p className="text-sm font-medium truncate text-gray-100">{displayName}</p>
+        {editingName ? (
+          <input
+            ref={nameInputRef}
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onKeyDown={(e) => {
+              e.stopPropagation();  // keep WASD grid nav (#169) from eating keystrokes
+              if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+              else if (e.key === "Escape") { e.preventDefault(); setEditingName(false); }
+            }}
+            onBlur={commitRename}
+            aria-label="Rename model"
+            className="text-sm font-medium bg-gray-800 border border-indigo-500 rounded px-1 py-0.5 text-gray-100 focus:outline-none"
+          />
+        ) : (
+          <p
+            className="text-sm font-medium truncate text-gray-100"
+            onClick={isGroup ? undefined : (e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDoubleClick={isGroup ? undefined : (e) => { e.preventDefault(); e.stopPropagation(); startRename(); }}
+            title={isGroup ? undefined : "Double-click to rename"}
+          >
+            {displayName}
+          </p>
+        )}
 
         {uniqueTags.length > 0 && (
           <div className="flex flex-wrap gap-1">
@@ -386,6 +439,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
         onTagsChange={(next) => setLocalTags(next)}
         hasImage={!!thumbnail}
         onImageCleared={() => { setImageCleared(true); onMutate?.(); }}
+        onRename={isGroup ? undefined : startRename}
         onClose={() => setPopoverOpen(false)}
       />
     )}

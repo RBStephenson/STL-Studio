@@ -8,9 +8,10 @@ vi.mock("../context/NSFWContext", () => ({ useNSFW: () => ({ showNSFW: true }) }
 vi.mock("../context/AppSettingsContext", () => ({ useAppSettings: () => ({ settings: { recent_days: 30 } }) }));
 vi.mock("../context/ToastContext", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("./QuickAssignPopover", () => ({
-  default: ({ onClose }: { onClose: () => void }) => (
+  default: ({ onClose, onRename }: { onClose: () => void; onRename?: () => void }) => (
     <div data-testid="quick-assign-popover">
       <button onClick={onClose}>close-popover</button>
+      {onRename && <button onClick={() => { onClose(); onRename(); }}>popover-rename</button>}
     </div>
   ),
 }));
@@ -28,6 +29,7 @@ vi.mock("../api/client", async (importOriginal) => {
         setRating: vi.fn(async () => ({ ok: true, user_rating: 4 })),
         setNSFW: vi.fn(async () => ({ ok: true })),
         setExcluded: vi.fn(async () => ({ ok: true, excluded: false })),
+        update: vi.fn(async () => ({})),
       },
     },
   };
@@ -132,6 +134,45 @@ describe("ModelCard print-status cycle (#166)", () => {
     await waitFor(() =>
       expect(vi.mocked(api.models.setPrintStatus)).toHaveBeenCalledWith(7, "queued")
     );
+  });
+});
+
+describe("ModelCard inline rename (#191)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("renames the model on double-click + Enter", async () => {
+    renderCard();
+    fireEvent.doubleClick(screen.getByText("RoboCop"));
+    const input = screen.getByLabelText("Rename model") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "RoboCop 2" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(vi.mocked(api.models.update)).toHaveBeenCalledWith(7, { title: "RoboCop 2" })
+    );
+    expect(screen.getByText("RoboCop 2")).toBeInTheDocument();
+  });
+
+  it("cancels on Escape without saving", () => {
+    renderCard();
+    fireEvent.doubleClick(screen.getByText("RoboCop"));
+    const input = screen.getByLabelText("Rename model") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Nope" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(vi.mocked(api.models.update)).not.toHaveBeenCalled();
+    expect(screen.getByText("RoboCop")).toBeInTheDocument();
+  });
+
+  it("does not offer rename for a variant group (double-click is a no-op)", () => {
+    renderCard({ variant_count: 3, character: "Akuma" } as any);
+    fireEvent.doubleClick(screen.getByText("Akuma"));
+    expect(screen.queryByLabelText("Rename model")).toBeNull();
+  });
+
+  it("opens the rename editor from the quick-assign popover", () => {
+    renderCard();
+    fireEvent.click(screen.getByLabelText("Quick assign tags and collections"));
+    fireEvent.click(screen.getByText("popover-rename"));
+    expect(screen.getByLabelText("Rename model")).toBeInTheDocument();
   });
 });
 
