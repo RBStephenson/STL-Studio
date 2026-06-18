@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen } from "@testing-library/react";
 import ScanButton from "./ScanButton";
 
 // api.scan.status is driven per-test; start/cancel just need to resolve.
@@ -44,6 +44,18 @@ describe("ScanButton completion notification (#283)", () => {
     await flush();
 
     expect(toastMock).toHaveBeenCalledWith("done — 12 models, 34 files", "success");
+  });
+
+  it("shows the live models count without a files count while scanning (#380)", async () => {
+    statusMock.mockResolvedValue({
+      running: true, message: "scanning…", models_found: 7, files_found: 0,
+    });
+
+    render(<ScanButton />);
+    await flush();
+
+    expect(screen.getByText(/Scanning… 7 models/)).toBeInTheDocument();
+    expect(screen.queryByText(/files/)).not.toBeInTheDocument();
   });
 
   it("does not toast when no scan was running (initial idle load)", async () => {
