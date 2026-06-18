@@ -120,9 +120,9 @@ M3 PDF export via Playwright
 
 ---
 
-## v0.9 — Scan config, migrations & Library performance 🚧 In progress
+## v0.9 — Scan config, migrations & Library performance ✅ Complete
 
-Shipped: configurable scan rules
+Released as **v0.9.0**. Shipped: configurable scan rules
 ([#31](https://github.com/RBStephenson/STL-Inventory/issues/31)), **Alembic**
 migrations replacing the hand-rolled `ALTER TABLE` loop
 ([#43](https://github.com/RBStephenson/STL-Inventory/issues/43)), standardized
@@ -137,14 +137,8 @@ a scan-progress file-count fix
 Library performance regression fix
 ([#382](https://github.com/RBStephenson/STL-Inventory/issues/382)).
 
-Still open — the **Library reorganize / normalize-on-disk** epic (opt-in,
-preview-first, standalone-only since Docker mounts are read-only):
-
-| Issue | Item |
-|-------|------|
-| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize library on disk** — umbrella: preview → apply with manifest/undo |
-| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Phase 1** — preview-only manifest |
-| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Phase 2** — apply, undo, conflict resolution (2a/2b/2c) |
+The **Library reorganize / normalize-on-disk** epic was deferred to v0.10 to
+ship v0.9.0 on the work above.
 
 ---
 
@@ -181,6 +175,9 @@ Still open:
 |-------|------|
 | [#302](https://github.com/RBStephenson/STL-Inventory/issues/302) / [#399](https://github.com/RBStephenson/STL-Inventory/issues/399) | **Manual drag-to-reorder** models within a group (Phase 2; needs a persisted `variant_order` column) |
 | [#188](https://github.com/RBStephenson/STL-Inventory/issues/188) | **Nested variant groups** — group variant groups (the largest remaining item) |
+| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize library on disk** (deferred from v0.9) — umbrella: preview → apply with manifest/undo |
+| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Reorganize Phase 1** — preview-only manifest |
+| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Reorganize Phase 2** — apply, undo, conflict resolution (2a/2b/2c) |
 
 ---
 
