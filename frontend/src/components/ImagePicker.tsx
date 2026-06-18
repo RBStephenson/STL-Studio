@@ -27,9 +27,20 @@ interface Props {
   currentUrl: string | null;
   onApplied: () => void;
   onClose: () => void;
+  // Stable across variants of one group (e.g. `${creatorId}:${character}`).
+  // Variants share the character folder, so the image list is identical — caching
+  // by this key lets reopening the modal on a sibling reuse the list instantly
+  // instead of re-walking the folder (#303). Omit to always fetch fresh.
+  cacheKey?: string;
 }
 
-export default function ImagePicker({ modelId, currentPath, currentUrl, onApplied, onClose }: Props) {
+// Module-scope so it survives the modal unmount/remount that happens every time
+// the picker closes and reopens (state in the component itself would be lost).
+// Lives for the SPA session; the Refresh button is the escape hatch when images
+// are added on disk.
+const imageListCache = new Map<string, ImageEntry[]>();
+
+export default function ImagePicker({ modelId, currentPath, currentUrl, onApplied, onClose, cacheKey }: Props) {
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(currentPath);
@@ -63,14 +74,24 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
   // `refresh` forces the server to re-walk the folder, bypassing its cached
   // manifest — used when a newly-added image hasn't shown up yet.
   const loadImages = useCallback((refresh = false) => {
+    // Cache hit: reuse the sibling-shared list immediately, no fetch. Refresh
+    // always bypasses to re-walk the folder (and refreshes the cached entry).
+    if (!refresh && cacheKey && imageListCache.has(cacheKey)) {
+      setImages(imageListCache.get(cacheKey)!);
+      setLoading(false);
+      return;
+    }
     if (refresh) setRefreshing(true);
     else setLoading(true);
     fetch(`/api/files/model-images/${modelId}${refresh ? "?refresh=true" : ""}`)
       .then((r) => r.json())
-      .then((data) => setImages(data))
+      .then((data) => {
+        setImages(data);
+        if (cacheKey) imageListCache.set(cacheKey, data);
+      })
       .catch(() => { /* leave the existing list in place on failure */ })
       .finally(() => { setLoading(false); setRefreshing(false); });
-  }, [modelId]);
+  }, [modelId, cacheKey]);
 
   useEffect(() => { loadImages(); }, [loadImages]);
 

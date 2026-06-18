@@ -1300,6 +1300,7 @@ export default function ModelDetail() {
           modelId={model.id}
           currentPath={model.thumbnail_path}
           currentUrl={model.thumbnail_url ?? null}
+          cacheKey={model.character ? `${model.creator_id}:${model.character}` : undefined}
           onApplied={() => { setShowImagePicker(false); load(); }}
           onClose={() => setShowImagePicker(false)}
         />
