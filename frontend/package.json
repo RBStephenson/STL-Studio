@@ -16,11 +16,11 @@
     "@dnd-kit/utilities": "^3.2.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.17.0",
+    "react-router-dom": "^7.18.0",
     "three": "^0.184.0",
     "@react-three/fiber": "^9.6.1",
     "@react-three/drei": "^10.7.7",
-    "lucide-react": "^1.17.0"
+    "lucide-react": "^1.21.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
