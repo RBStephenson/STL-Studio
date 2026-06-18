@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Layers, MoveRight, X, Keyboard, Pencil, Check, Image as ImageIcon } from "lucide-react";
+import { ArrowLeft, Layers, MoveRight, X, Keyboard, Pencil, Check, Image as ImageIcon, GripVertical, ListRestart } from "lucide-react";
+import {
+  DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors,
+  closestCenter, DragStartEvent, DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext, useSortable, rectSortingStrategy, sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { api, Model } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import ShortcutsOverlay from "../components/ShortcutsOverlay";
 import { useToast } from "../context/ToastContext";
 import { modelLinkTo } from "../utils/modelLink";
 import { measureGridColumns } from "../utils/libraryKeys";
+import { reorderedIds } from "../utils/reorderList";
 import { useLibraryKeyboard } from "../hooks/useLibraryKeyboard";
 
 // Shared write path for every group op (rename/move/ungroup, single or bulk):
@@ -273,6 +282,34 @@ function BulkSetImage({ onApply }: { onApply: (url: string) => void | Promise<vo
   );
 }
 
+// Sortable wrapper for one variant card (#399). Drag listeners live on a small
+// grip handle (top-left) so card clicks, the selection checkbox, and the link
+// still work; the handle is keyboard-operable (Space to pick up, arrows to move).
+function SortableCard({ id, children }: { id: number; children: React.ReactNode }) {
+  const { setNodeRef, transform, transition, listeners, attributes, isDragging } =
+    useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="relative flex flex-col group/sortable">
+      <button
+        {...listeners}
+        {...attributes}
+        aria-label="Drag to reorder"
+        title="Drag to reorder within the group"
+        className="absolute top-2 left-2 z-30 p-1 rounded bg-black/60 hover:bg-black/90 text-gray-300 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/sortable:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-400 outline-none transition-opacity"
+      >
+        <GripVertical size={14} />
+      </button>
+      {children}
+    </div>
+  );
+}
+
 export default function VariantGroup() {
   const { creatorId, character } = useParams<{ creatorId: string; character: string }>();
   const navigate = useNavigate();
@@ -366,6 +403,50 @@ export default function VariantGroup() {
 
   const selectedIds = variants.filter((v) => selected.has(v.id)).map((v) => v.id);
 
+  // --- Manual drag-reorder (#399) --------------------------------------------
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  // Whether the user has imposed a manual order (any member carries one). Drives
+  // the "Reset order" affordance; cleared optimistically on reset.
+  const [hasManualOrder, setHasManualOrder] = useState(false);
+  useEffect(() => {
+    setHasManualOrder(variants.some((v) => v.variant_order != null));
+  }, [variants]);
+
+  const onReorderStart = (e: DragStartEvent) => setDraggingId(Number(e.active.id));
+
+  const onReorderEnd = async (e: DragEndEvent) => {
+    setDraggingId(null);
+    const activeId = Number(e.active.id);
+    const overId = e.over ? Number(e.over.id) : activeId;
+    const order = reorderedIds(variants.map((v) => v.id), activeId, overId);
+    if (order.length !== variants.length || order.every((id, i) => id === variants[i].id)) return;
+    const prev = variants;
+    const byId = new Map(prev.map((v) => [v.id, v]));
+    setVariants(order.map((id) => byId.get(id)!));   // optimistic
+    setHasManualOrder(true);
+    try {
+      await api.models.reorderGroup(numCreatorId, decodedCharacter, order);
+    } catch (err: any) {
+      setVariants(prev);   // roll back
+      toast(err?.message || "Couldn't save the order — try again.", "error");
+    }
+  };
+
+  const resetOrder = async () => {
+    try {
+      await api.models.reorderGroup(numCreatorId, decodedCharacter, []);
+      setHasManualOrder(false);
+      reloadVariants();
+      toast("Order reset to default.", "success");
+    } catch (err: any) {
+      toast(err?.message || "Couldn't reset the order — try again.", "error");
+    }
+  };
+
   const moveSelected = async (targetGroup: string) => {
     const trimmed = targetGroup.trim();
     if (!trimmed || trimmed === decodedCharacter || selectedIds.length === 0) return;
@@ -441,6 +522,9 @@ export default function VariantGroup() {
   const { focusedIndex, setFocusedIndex } = useLibraryKeyboard({
     count: variants.length,
     getColumns,
+    // Pause grid WASD/arrow nav while a card is picked up so arrows drive the
+    // sortable drag, not the focus ring (#399, mirrors the Library grid #139).
+    enabled: draggingId === null,
     onActivate: openVariant,
     onFocusSearch: () => {},
     onToggleHelp: () => setShowShortcuts((o) => !o),
@@ -533,6 +617,18 @@ export default function VariantGroup() {
           >
             {allSelected ? "Clear selection" : "Select all"}
           </button>
+          <span className="text-gray-600">·</span>
+          <span className="text-gray-500">Drag a card's grip to reorder</span>
+          {hasManualOrder && (
+            <button
+              onClick={resetOrder}
+              title="Clear the manual order and restore the default"
+              className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors"
+            >
+              <ListRestart size={13} />
+              Reset order
+            </button>
+          )}
           {selected.size > 0 && (
             <>
               <div className="h-4 w-px bg-gray-700" />
@@ -556,32 +652,43 @@ export default function VariantGroup() {
       ) : variants.length === 0 ? (
         <div className="flex justify-center py-24 text-gray-500 text-sm">No variants found.</div>
       ) : (
-        <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {variants.map((model, i) => (
-            <div key={model.id} className="flex flex-col">
-              <div className="relative">
-                <label className="absolute top-2 left-2 z-10 flex items-center justify-center p-1 rounded bg-gray-900/80 border border-gray-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(model.id)}
-                    onChange={() => toggleSelect(model.id)}
-                    aria-label={`Select ${model.name}`}
-                    className="h-4 w-4 accent-indigo-500 cursor-pointer"
+        <DndContext
+          sensors={dndSensors}
+          collisionDetection={closestCenter}
+          onDragStart={onReorderStart}
+          onDragEnd={onReorderEnd}
+          onDragCancel={() => setDraggingId(null)}
+        >
+          <SortableContext items={variants.map((v) => v.id)} strategy={rectSortingStrategy}>
+            <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {variants.map((model, i) => (
+                <SortableCard key={model.id} id={model.id}>
+                  <div className="relative">
+                    {/* Checkbox sits right of the drag grip (top-left). */}
+                    <label className="absolute top-2 left-9 z-10 flex items-center justify-center p-1 rounded bg-gray-900/80 border border-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(model.id)}
+                        onChange={() => toggleSelect(model.id)}
+                        aria-label={`Select ${model.name}`}
+                        className="h-4 w-4 accent-indigo-500 cursor-pointer"
+                      />
+                    </label>
+                    <ModelCard model={model} backTo={from} focused={focusedIndex === i} />
+                  </div>
+                  <GroupAction
+                    model={model}
+                    creatorId={numCreatorId}
+                    applyGroup={applyGroup}
+                    onRemoved={removeVariant}
+                    onMoved={removeVariant}
+                    onRepChanged={reloadVariants}
                   />
-                </label>
-                <ModelCard model={model} backTo={from} focused={focusedIndex === i} />
-              </div>
-              <GroupAction
-                model={model}
-                creatorId={numCreatorId}
-                applyGroup={applyGroup}
-                onRemoved={removeVariant}
-                onMoved={removeVariant}
-                onRepChanged={reloadVariants}
-              />
+                </SortableCard>
+              ))}
             </div>
-          ))}
-        </div>
+          </SortableContext>
+        </DndContext>
       )}
 
       {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} showSearch={false} />}

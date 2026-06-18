@@ -51,6 +51,7 @@ export interface Model {
   excluded: boolean;
   is_favorite: boolean;
   is_group_rep: boolean;
+  variant_order: number | null;
   user_rating: number | null;
   queued_at: string | null;
   printed_at: string | null;
@@ -698,6 +699,14 @@ export const api = {
           body: JSON.stringify({ model_ids: modelIds, character }),
         },
       ),
+    // Persist a manual model order within a variant group (#399). Empty `ids`
+    // resets the group to its heuristic order.
+    reorderGroup: (creatorId: number, character: string, ids: number[]) =>
+      request<{ ok: boolean; reset: boolean; updated: number }>(`/models/group/reorder`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ creator_id: creatorId, character, ids }),
+      }),
     updateSTLFile: (fileId: number, body: Record<string, unknown>) =>
       request<{ ok: boolean }>(`/models/stl-files/${fileId}`, {
         method: "PATCH",

@@ -53,6 +53,7 @@ class ModelRead(ModelBase):
     excluded: bool = False
     is_favorite: bool = False
     is_group_rep: bool = False
+    variant_order: Optional[int] = None
     user_rating: Optional[int] = None
     queued_at: Optional[datetime] = None
     printed_at: Optional[datetime] = None
@@ -168,6 +169,15 @@ class RatingUpdate(BaseModel):
 
 class QueueReorder(BaseModel):
     ids: list[int]   # queued model ids in the desired manual order
+
+
+class GroupReorder(BaseModel):
+    creator_id: int
+    character: str
+    # Member ids in the desired display order. Empty = reset (clear the whole
+    # group's manual order, falling back to the heuristic). Ids not in the group
+    # are ignored.
+    ids: list[int] = []
 
 
 PRINT_STATUSES = {"none", "queued", "printing", "printed"}
