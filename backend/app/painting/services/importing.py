@@ -230,12 +230,31 @@ def _mix_parts(name: str) -> list[str]:
     return [p.strip() for p in cleaned.split("+") if p.strip()]
 
 
+_RATIO_RE = re.compile(r"\(\s*([\d.]+(?:\s*:\s*[\d.]+)+)\s*\)\s*$")
+
+
+def _mix_ratio(name: str) -> Optional[list[float]]:
+    """Trailing mix ratio paren -> parts list aligned to the components, e.g.
+    'A + B (3:1)' -> [3.0, 1.0]. Returns None when there's no parseable ratio
+    (components then default to equal parts)."""
+    m = _RATIO_RE.search(name)
+    if not m:
+        return None
+    try:
+        parts = [float(x) for x in m.group(1).split(":") if x.strip()]
+    except ValueError:
+        return None
+    return parts or None
+
+
 def _parse_swatch(node: Tag, resolve: PaintResolver, report: ImportReport,
-                  step_title: str) -> list[dict]:
-    """A swatch -> one or more swatch dicts. A mix ('A + B') expands into one
-    swatch per resolvable component, sharing the value/role (#336, Option A);
-    components that don't resolve (mediums, back-references) are reported and
-    dropped. Unresolved single swatches are reported and yield nothing."""
+                  step_title: str) -> tuple[list[dict], list[dict]]:
+    """A swatch node -> (swatch dicts, mix-component dicts). A single paint
+    yields one swatch; a mix ('A + B (3:1)') yields ordered mix components
+    carrying their ratio parts (#339, Option A). Components that don't resolve
+    (mediums, back-references — #415) are reported and dropped; an unresolved
+    single swatch is reported and yields nothing. Mix swatches don't carry a
+    value/role (the blend's value lives in the step's ratio box / body)."""
     name = _txt(node.select_one(".swatch-name"))
     brand = _txt(node.select_one(".swatch-brand")) or None
     value_text = _txt(node.select_one(".swatch-value"))
@@ -249,22 +268,39 @@ def _parse_swatch(node: Tag, resolve: PaintResolver, report: ImportReport,
         # No "~N% value" prefix — the whole string is the role label.
         role = value_text
 
-    out: list[dict] = []
-    for part in _mix_parts(name):
-        paint_id = resolve(part, brand)
-        if paint_id is None:
-            report.unresolved_paints.append(
-                {"name": part, "brand": brand, "step": step_title}
-            )
-            continue
-        report.resolved_paints += 1
-        sw: dict = {"paint_id": paint_id}
-        if value_pct is not None:
-            sw["value_pct"] = value_pct
-        if role:
-            sw["role_label"] = role
-        out.append(sw)
-    return out
+    parts = _mix_parts(name)
+    if len(parts) > 1:
+        ratio = _mix_ratio(name)
+        mix: list[dict] = []
+        for i, part in enumerate(parts):
+            paint_id = resolve(part, brand)
+            if paint_id is None:
+                report.unresolved_paints.append(
+                    {"name": part, "brand": brand, "step": step_title}
+                )
+                continue
+            report.resolved_paints += 1
+            mix.append({
+                "paint_id": paint_id,
+                "parts": ratio[i] if ratio and i < len(ratio) else 1.0,
+                "sort_order": len(mix),
+            })
+        return [], mix
+
+    # Single paint — resolve the cleaned part so a leading-plus continuation
+    # ('+ Khaki 061 (2:1)') and trailing ratio parens are handled too.
+    single = parts[0] if parts else name
+    paint_id = resolve(single, brand)
+    if paint_id is None:
+        report.unresolved_paints.append({"name": single, "brand": brand, "step": step_title})
+        return [], []
+    report.resolved_paints += 1
+    sw: dict = {"paint_id": paint_id}
+    if value_pct is not None:
+        sw["value_pct"] = value_pct
+    if role:
+        sw["role_label"] = role
+    return [sw], []
 
 
 _STEP_NUM_RE = re.compile(r"^Step\s+\d+\s*·\s*(.*)$")
@@ -287,11 +323,16 @@ def _parse_step(node: Tag, resolve: PaintResolver, report: ImportReport) -> dict
     if body is not None:
         step["body"] = _inner_html(body)
 
-    swatches = []
+    swatches: list[dict] = []
+    mix_components: list[dict] = []
     for sw_node in node.select(".swatches > .swatch"):
-        swatches.extend(_parse_swatch(sw_node, resolve, report, title))
+        sws, mix = _parse_swatch(sw_node, resolve, report, title)
+        swatches.extend(sws)
+        mix_components.extend(mix)
     if swatches:
         step["swatches"] = swatches
+    if mix_components:
+        step["mix_components"] = mix_components
 
     ratio = node.select_one(".ratio-box")
     if ratio is not None:

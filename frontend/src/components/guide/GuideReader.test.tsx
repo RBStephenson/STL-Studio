@@ -52,7 +52,13 @@ const GUIDE: Guide = {
               id: 111, title: "Gloss black base", technique_tag: "airbrush",
               technique_label: null, body: "Lay it <strong>down</strong>.", value_intent: null,
               tip: "Thin to milk.", warning: null, ratio_box: "1:1 paint:thinner", sort_order: 0,
-              swatches: [mkSwatch()], mix_components: [],
+              swatches: [mkSwatch()],
+              mix_components: [
+                { id: 1, paint_id: 10, parts: 3, sort_order: 0,
+                  paint: { name: "Burnt Sienna", code: "073", brand: "Pro Acryl", hex: "#a0522d" } },
+                { id: 2, paint_id: 11, parts: 1, sort_order: 1,
+                  paint: { name: "Titanium White", code: "001", brand: "Pro Acryl", hex: "#ffffff" } },
+              ],
             },
           ],
         },
@@ -126,6 +132,12 @@ describe("GuideReader", () => {
     // value map chip
     expect(within(metals).getByText("deep shadow")).toBeInTheDocument();
     expect(within(metals).getByText("~10%")).toBeInTheDocument();
+  });
+
+  it("renders a mix as one chip with combined name and ratio suffix (#339)", () => {
+    const { container } = render(<GuideReader guide={GUIDE} />);
+    const metals = panel(container, "metals");
+    expect(within(metals).getByText("Burnt Sienna 073 + Titanium White 001 (3:1)")).toBeInTheDocument();
   });
 
   it("renders tab-level callouts: intro above content, tip below (#271)", () => {

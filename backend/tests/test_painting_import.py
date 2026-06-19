@@ -14,9 +14,12 @@ import pytest
 
 from bs4 import BeautifulSoup
 
+from types import SimpleNamespace
+
 from app.painting.services.importing import (
     ImportReport, _parse_swatch, import_guide_html, make_db_resolver,
 )
+from app.painting.services.rendering import PaintInfo, _render_mix
 from tests.test_painting_guides import mk_paint
 from tests.test_painting_guide_schema import presto_body
 
@@ -283,9 +286,10 @@ class TestSmartResolver:
         assert make_db_resolver(db)("Burnt Umber Deep", "Pro Acryl") is None
 
 
-class TestMixExpansion:
-    """A mix swatch ('A + B') expands into one swatch per resolvable component
-    (#336 Option A); non-paint components (mediums, back-refs) drop + report."""
+class TestMixComponents:
+    """A mix swatch ('A + B (3:1)') parses into ordered mix components carrying
+    ratio parts (#339 Option B); non-paint components (mediums, back-refs #415)
+    drop + report. _parse_swatch returns (swatches, mix_components)."""
 
     def _swatch(self, name, value="~40% value — base", brand="Pro Acryl"):
         html = (f'<div class="swatch"><div class="swatch-name">{name}</div>'
@@ -293,27 +297,84 @@ class TestMixExpansion:
                 f'<div class="swatch-value">{value}</div></div>')
         return BeautifulSoup(html, "html.parser").select_one(".swatch")
 
-    def test_mix_expands_to_each_component(self):
+    def test_mix_yields_ordered_components_with_default_parts(self):
         resolve = lambda n, b: {"coal black": 1, "warm grey": 2}.get(n.lower())
         rep = ImportReport()
-        out = _parse_swatch(self._swatch("Coal Black + Warm Grey"), resolve, rep, "S")
-        assert [s["paint_id"] for s in out] == [1, 2]
-        assert all(s["value_pct"] == 40 for s in out)  # shared value
+        swatches, mix = _parse_swatch(self._swatch("Coal Black + Warm Grey"), resolve, rep, "S")
+        assert swatches == []
+        assert [(m["paint_id"], m["parts"], m["sort_order"]) for m in mix] == [
+            (1, 1.0, 0), (2, 1.0, 1)
+        ]
         assert rep.resolved_paints == 2
+
+    def test_mix_ratio_maps_to_parts(self):
+        resolve = lambda n, b: {"burnt sienna": 1, "pyrrole red": 2}.get(n.lower())
+        rep = ImportReport()
+        _swatches, mix = _parse_swatch(
+            self._swatch("Burnt Sienna + Pyrrole Red (3:1)"), resolve, rep, "S")
+        assert [m["parts"] for m in mix] == [3.0, 1.0]
 
     def test_non_paint_component_dropped_and_reported(self):
         resolve = lambda n, b: {"satin black s39": 5}.get(n.lower())
         rep = ImportReport()
-        out = _parse_swatch(
+        _swatches, mix = _parse_swatch(
             self._swatch("Satin Black S39 + gloss medium"), resolve, rep, "S")
-        assert [s["paint_id"] for s in out] == [5]
+        assert [m["paint_id"] for m in mix] == [5]
         assert any(u["name"] == "gloss medium" for u in rep.unresolved_paints)
 
-    def test_leading_plus_and_ratio_stripped(self):
+    def test_leading_plus_continuation_is_single_swatch(self):
+        # '+ Khaki 061 (2:1)' has one real component -> a single swatch, not a mix.
         resolve = lambda n, b: 7 if n.lower() == "khaki 061" else None
         rep = ImportReport()
-        out = _parse_swatch(self._swatch("+ Khaki 061 (2:1)"), resolve, rep, "S")
-        assert [s["paint_id"] for s in out] == [7]
+        swatches, mix = _parse_swatch(self._swatch("+ Khaki 061 (2:1)"), resolve, rep, "S")
+        assert [s["paint_id"] for s in swatches] == [7]
+        assert mix == []
+
+    def test_single_swatch_keeps_value_and_role(self):
+        resolve = lambda n, b: 9 if n.lower() == "coal black 002" else None
+        rep = ImportReport()
+        swatches, mix = _parse_swatch(self._swatch("Coal Black 002"), resolve, rep, "S")
+        assert swatches == [{"paint_id": 9, "value_pct": 40, "role_label": "base"}]
+        assert mix == []
+
+
+class TestMixRoundTrip:
+    """_render_mix (export) and _parse_swatch (import) are inverses over a mix
+    (#339): components -> 'A + B (3:1)' swatch -> components."""
+
+    _PAINTS = {
+        1: PaintInfo(name="Burnt Sienna", code="073", brand="Pro Acryl", hex="#a0522d"),
+        2: PaintInfo(name="Titanium White", code="001", brand="Pro Acryl", hex="#ffffff"),
+    }
+
+    def _parse_rendered(self, html):
+        swatch = BeautifulSoup(f'<div class="swatches">{html}</div>', "html.parser").select_one(".swatch")
+        resolve = lambda n, b: next(
+            (pid for pid, p in self._PAINTS.items() if f"{p.name} {p.code}".lower() == n.lower()),
+            None,
+        )
+        return _parse_swatch(swatch, resolve, ImportReport(), "S")
+
+    def test_ratio_round_trips(self):
+        comps = [SimpleNamespace(paint_id=1, parts=3.0), SimpleNamespace(paint_id=2, parts=1.0)]
+        html = _render_mix(comps, self._PAINTS)
+        assert "Burnt Sienna 073 + Titanium White 001 (3:1)" in html
+        swatches, mix = self._parse_rendered(html)
+        assert swatches == []
+        assert [(m["paint_id"], m["parts"]) for m in mix] == [(1, 3.0), (2, 1.0)]
+
+    def test_equal_parts_omit_ratio_suffix(self):
+        comps = [SimpleNamespace(paint_id=1, parts=1.0), SimpleNamespace(paint_id=2, parts=1.0)]
+        html = _render_mix(comps, self._PAINTS)
+        assert "(" not in html  # no ratio suffix when parts are equal
+        _swatches, mix = self._parse_rendered(html)
+        assert [m["paint_id"] for m in mix] == [1, 2]
+
+    def test_blended_dot_is_mean_rgb(self):
+        comps = [SimpleNamespace(paint_id=1, parts=1.0), SimpleNamespace(paint_id=2, parts=1.0)]
+        html = _render_mix(comps, self._PAINTS)
+        # mean of #a0522d and #ffffff = (cf, a8, 96)
+        assert "background:#cfa896" in html
 
 
 # ---------------------------------------------------------------------------

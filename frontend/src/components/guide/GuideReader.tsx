@@ -1,6 +1,6 @@
 import { useState, CSSProperties } from "react";
 import {
-  Guide, GuideTab, GuidePhase, GuideStep, GuideSwatch, GuideTheme, MethodBlock,
+  Guide, GuideTab, GuidePhase, GuideStep, GuideSwatch, GuideMixComponent, GuideTheme, MethodBlock,
   TabCallout,
 } from "../../api/client";
 import ThinningReference from "./ThinningReference";
@@ -68,6 +68,37 @@ function SwatchRow({ swatch }: { swatch: GuideSwatch }) {
   );
 }
 
+// A multi-paint mix as one chip: blended dot, "A + B" name, ratio suffix when
+// parts differ (#339). Mirrors the static exporter's _render_mix.
+function MixRow({ components }: { components: GuideMixComponent[] }) {
+  const infos = components.filter((c) => c.paint);
+  if (infos.length === 0) return null;
+  let name = infos.map((c) => `${c.paint!.name} ${c.paint!.code}`.trim()).join(" + ");
+  const parts = infos.map((c) => c.parts);
+  if (new Set(parts).size > 1) name = `${name} (${parts.map(String).join(":")})`;
+  const hexes = infos.map((c) => c.paint!.hex).filter((h): h is string => !!h);
+  const dot = blendHex(hexes);
+  return (
+    <div className="swatch">
+      <div className="swatch-dot" style={dot ? { background: dot } : undefined} />
+      <div className="swatch-info">
+        <div className="swatch-name">{name}</div>
+      </div>
+    </div>
+  );
+}
+
+function blendHex(hexes: string[]): string | null {
+  const rgbs = hexes
+    .map((h) => h.replace("#", ""))
+    .filter((s) => /^[0-9a-fA-F]{6}$/.test(s))
+    .map((s) => [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)]);
+  if (rgbs.length === 0) return null;
+  const n = rgbs.length;
+  const ch = (i: number) => Math.floor(rgbs.reduce((sum, c) => sum + c[i], 0) / n);
+  return `#${[ch(0), ch(1), ch(2)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
 function StepCard({ step, number }: { step: GuideStep; number: number }) {
   const tag = step.technique_tag || "";
   const label = step.technique_label || (tag ? tag.charAt(0).toUpperCase() + tag.slice(1) : "");
@@ -77,9 +108,10 @@ function StepCard({ step, number }: { step: GuideStep; number: number }) {
       <span className={`step-number ${tag}`.trim()}>{numberText}</span>
       <h3>{step.title}</h3>
       {step.body && <p dangerouslySetInnerHTML={{ __html: step.body }} />}
-      {step.swatches.length > 0 && (
+      {(step.swatches.length > 0 || step.mix_components.length > 0) && (
         <div className="swatches">
           {step.swatches.map((s) => <SwatchRow key={s.id} swatch={s} />)}
+          {step.mix_components.length > 0 && <MixRow components={step.mix_components} />}
         </div>
       )}
       {step.ratio_box && <div className="ratio-box">{step.ratio_box}</div>}
