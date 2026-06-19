@@ -11,10 +11,15 @@ from app.database import get_db
 from app.painting.models import Paint, PaintBrand, PaintLine
 from app.painting.schemas import (
     BrandCreate, BrandRead,
+    ForcedPaintCreate,
     PaintLineCreate, PaintLineRead, PaintLineUpdate,
     PaintCreate, PaintList, PaintRead, PaintUpdate,
     derive_matchable,
 )
+
+# Synthetic shelf location for paints force-added during guide import (#417).
+_IMPORTED_BRAND = "Imported"
+_IMPORTED_LINE = "Uncategorized"
 from app.painting.services.validation import validate_code, validate_pattern
 
 router = APIRouter()
@@ -75,6 +80,26 @@ def create_line(body: PaintLineCreate, db: Session = Depends(get_db)):
     db.add(line)
     db.commit()
     db.refresh(line)
+    return line
+
+
+def _get_or_create_imported_line(db: Session) -> PaintLine:
+    """The synthetic 'Imported / Uncategorized' line that force-added paints land
+    in (#417). Created on first use; no code pattern so any code is accepted."""
+    brand = db.query(PaintBrand).filter(PaintBrand.name == _IMPORTED_BRAND).first()
+    if brand is None:
+        brand = PaintBrand(name=_IMPORTED_BRAND)
+        db.add(brand)
+        db.flush()
+    line = (
+        db.query(PaintLine)
+        .filter(PaintLine.brand_id == brand.id, PaintLine.name == _IMPORTED_LINE)
+        .first()
+    )
+    if line is None:
+        line = PaintLine(brand_id=brand.id, name=_IMPORTED_LINE, code_pattern=None)
+        db.add(line)
+        db.flush()
     return line
 
 
@@ -152,6 +177,38 @@ def create_paint(body: PaintCreate, db: Session = Depends(get_db)):
             detail=f"Paint code '{body.code}' already exists in this line ({dup.name})",
         )
     paint = Paint(**body.model_dump(), matchable=derive_matchable(body.finish))
+    db.add(paint)
+    db.commit()
+    db.refresh(paint)
+    return paint
+
+
+@router.post("/paints/import-forced", response_model=PaintRead, status_code=201)
+def force_add_paint(body: ForcedPaintCreate, db: Session = Depends(get_db)):
+    """Force-add a paint encountered during guide import that isn't on the shelf
+    (#417). Lands in the synthetic 'Imported / Uncategorized' line as
+    known-but-not-owned. Idempotent by name within that line — re-forcing the
+    same paint returns the existing row rather than duplicating it."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Paint name is required")
+    line = _get_or_create_imported_line(db)
+    existing = (
+        db.query(Paint)
+        .filter(Paint.paint_line_id == line.id, Paint.name.ilike(name))
+        .first()
+    )
+    if existing is not None:
+        return existing
+    paint = Paint(
+        paint_line_id=line.id,
+        code=name,
+        name=name,
+        hex=body.hex,
+        finish="matte",
+        matchable=derive_matchable("matte"),
+        owned=False,
+    )
     db.add(paint)
     db.commit()
     db.refresh(paint)

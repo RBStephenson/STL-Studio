@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from types import SimpleNamespace
 
 from app.painting.services.importing import (
-    ImportReport, _parse_swatch, import_guide_html, make_db_resolver,
+    ImportReport, _parse_swatch, import_guide_html, make_db_resolver, with_overrides,
 )
 from app.painting.services.rendering import PaintInfo, _render_mix
 from tests.test_painting_guides import mk_paint
@@ -133,6 +133,92 @@ class TestRoundTrip:
         assert [c["kind"] for c in callouts] == ["text", "tip", "warning"]
         assert "<em>largest</em>" in callouts[0]["html"]
         assert callouts[1]["html"].startswith("<strong>✦ TIP:</strong>")
+
+
+class TestOverrideResolver:
+    """with_overrides layers user resolutions on top of the base resolver (#417),
+    keyed on the canonicalized swatch name; empty overrides are a no-op."""
+
+    def test_override_wins_before_base(self):
+        base = lambda n, b: 1 if n.lower() == "coal black" else None
+        resolve = with_overrides(base, {"Mystery Paint": 99})
+        assert resolve("Mystery Paint", None) == 99       # override
+        assert resolve("mystery paint", "X") == 99        # canonicalized match
+        assert resolve("Coal Black", None) == 1           # falls through to base
+        assert resolve("Unknown", None) is None
+
+    def test_empty_overrides_returns_base_unchanged(self):
+        base = lambda n, b: 7
+        assert with_overrides(base, {}) is base
+
+
+class TestImportResolution:
+    """dry_run preview + paint_overrides committing flow (#417)."""
+
+    def _unresolved_html(self, client, paint):
+        """Export a guide, then rename its swatch paint to something off-shelf so
+        re-import can't resolve it — the unresolved-paint scenario."""
+        g = client.post("/painting/guides", json=presto_body(paint["id"])).json()
+        html = client.get(f"/painting/guides/{g['id']}/export").text
+        return html.replace(f"{paint['name']} {paint['code']}", "Mystery Unknown XYZ")
+
+    def test_dry_run_reports_without_persisting(self, client, paint):
+        html = self._unresolved_html(client, paint)
+        before = client.get("/painting/guides").json()["total"]
+        r = client.post("/painting/guides/import",
+                        json={"html": html, "slug": "dry", "dry_run": True})
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["guide"] is None
+        assert any(u["name"] == "Mystery Unknown XYZ" for u in body["report"]["unresolved_paints"])
+        # Nothing persisted.
+        assert client.get("/painting/guides").json()["total"] == before
+
+    def test_unresolved_entry_carries_hex(self, client, paint):
+        html = self._unresolved_html(client, paint)
+        r = client.post("/painting/guides/import",
+                        json={"html": html, "slug": "dry2", "dry_run": True})
+        entry = next(u for u in r.json()["report"]["unresolved_paints"]
+                     if u["name"] == "Mystery Unknown XYZ")
+        assert entry["hex"] == paint["hex"]  # the swatch dot colour, for force-add
+
+    def test_override_resolves_and_commits(self, client, paint):
+        html = self._unresolved_html(client, paint)
+        r = client.post("/painting/guides/import", json={
+            "html": html, "slug": "resolved",
+            "paint_overrides": [{"name": "Mystery Unknown XYZ", "paint_id": paint["id"]}],
+        })
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["guide"] is not None
+        assert body["report"]["unresolved_paints"] == []
+        # The swatch now references the overridden paint.
+        guide = client.get(f"/painting/guides/{body['guide']['id']}").json()
+        swatch_ids = [
+            s["paint_id"]
+            for tab in guide["tabs"] for ph in tab["phases"]
+            for st in ph["steps"] for s in st["swatches"]
+        ]
+        assert paint["id"] in swatch_ids
+
+
+class TestForceAddPaint:
+    """POST /paints/import-forced lands an off-shelf paint in a synthetic
+    'Imported / Uncategorized' line as known-but-not-owned (#417)."""
+
+    def test_force_add_creates_unowned_paint(self, client):
+        r = client.post("/painting/paints/import-forced",
+                        json={"name": "Mystery Silver", "hex": "#c0c0c0"})
+        assert r.status_code == 201, r.text
+        p = r.json()
+        assert p["name"] == "Mystery Silver"
+        assert p["hex"] == "#c0c0c0"
+        assert p["owned"] is False
+
+    def test_force_add_is_idempotent_by_name(self, client):
+        first = client.post("/painting/paints/import-forced", json={"name": "Repeat Paint"}).json()
+        second = client.post("/painting/paints/import-forced", json={"name": "repeat paint"}).json()
+        assert first["id"] == second["id"]  # same row, not a duplicate
 
 
 class TestUnlabeledPhase:

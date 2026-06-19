@@ -194,6 +194,26 @@ def make_db_resolver(db: Session) -> PaintResolver:
     return resolve
 
 
+def with_overrides(resolver: PaintResolver, overrides: dict[str, int]) -> PaintResolver:
+    """Layer user-supplied resolutions on top of a base resolver (#417). Keyed on
+    the swatch name (the same string the importer passes to resolve and reports
+    as unresolved); names are canonicalized here so the caller can pass them raw.
+    A user's chosen paint_id wins before catalog matching. Empty overrides return
+    the base resolver unchanged."""
+    if not overrides:
+        return resolver
+
+    canon_map = {_canon(" ".join(name.split())): pid for name, pid in overrides.items()}
+
+    def resolve(swatch_name: str, brand: Optional[str]) -> Optional[int]:
+        override = canon_map.get(_canon(" ".join((swatch_name or "").split())))
+        if override is not None:
+            return override
+        return resolver(swatch_name, brand)
+
+    return resolve
+
+
 def _txt(node: Optional[Tag]) -> str:
     return node.get_text(" ", strip=True) if node else ""
 
@@ -257,6 +277,8 @@ def _parse_swatch(node: Tag, resolve: PaintResolver, report: ImportReport,
     value/role (the blend's value lives in the step's ratio box / body)."""
     name = _txt(node.select_one(".swatch-name"))
     brand = _txt(node.select_one(".swatch-brand")) or None
+    dot = node.select_one(".swatch-dot")
+    swatch_hex = _bg_color(dot.get("style")) if dot is not None else None
     value_text = _txt(node.select_one(".swatch-value"))
     value_pct: Optional[int] = None
     role: Optional[str] = None
@@ -276,7 +298,7 @@ def _parse_swatch(node: Tag, resolve: PaintResolver, report: ImportReport,
             paint_id = resolve(part, brand)
             if paint_id is None:
                 report.unresolved_paints.append(
-                    {"name": part, "brand": brand, "step": step_title}
+                    {"name": part, "brand": brand, "step": step_title, "hex": swatch_hex}
                 )
                 continue
             report.resolved_paints += 1
@@ -292,7 +314,9 @@ def _parse_swatch(node: Tag, resolve: PaintResolver, report: ImportReport,
     single = parts[0] if parts else name
     paint_id = resolve(single, brand)
     if paint_id is None:
-        report.unresolved_paints.append({"name": single, "brand": brand, "step": step_title})
+        report.unresolved_paints.append(
+            {"name": single, "brand": brand, "step": step_title, "hex": swatch_hex}
+        )
         return [], []
     report.resolved_paints += 1
     sw: dict = {"paint_id": paint_id}
