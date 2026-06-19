@@ -183,9 +183,11 @@ function parseLibraryOrigin(from: string | undefined): Record<string, string | n
   }
   const fav = sp.get("is_favorite") === "1";
   const printStatus = sp.get("print_status") ?? "";
+  const excludePrinted = sp.get("exclude_printed") === "1";
   const excluded = sp.get("excluded") === "1";
   if (fav) params.is_favorite = true;
   if (printStatus) params.print_status = printStatus;
+  if (excludePrinted) params.exclude_printed = true;
   if (excluded) params.excluded = true;
   // "Recently added" view (#170): same window + newest-first order as the grid,
   // so Prev/Next walks the list the user was looking at.

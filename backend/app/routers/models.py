@@ -39,6 +39,7 @@ def _apply_filters(
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
+    exclude_printed: bool = False,
     min_rating: int | None = None,
     excluded: bool = False,
     added_within_days: int | None = None,
@@ -86,6 +87,10 @@ def _apply_filters(
         q = q.filter(Model.is_favorite == is_favorite)
     if print_status is not None:
         q = q.filter(Model.print_status == print_status)
+    if exclude_printed:
+        # Hide already-printed models. NULL print_status stays visible (mirrors
+        # the exclude_creator pattern: SQL `!=` silently drops NULL rows).
+        q = q.filter((Model.print_status != "printed") | (Model.print_status == None))
     if min_rating is not None:
         q = q.filter(Model.user_rating != None, Model.user_rating >= min_rating)
     if added_within_days is not None:
@@ -239,6 +244,7 @@ def list_models(
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
+    exclude_printed: bool = False,  # hide already-printed models (keeps variant grouping)
     min_rating: int | None = Query(None, ge=1, le=5),
     excluded: bool = False,  # default: hide user-excluded models; pass true for the Excluded view
     added_within_days: int | None = Query(None, ge=1, le=365),  # "Recently added" window (#170)
@@ -252,7 +258,7 @@ def list_models(
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
         has_thumbnail=has_thumbnail, needs_review=needs_review,
         nsfw=nsfw, is_favorite=is_favorite,
-        print_status=print_status, min_rating=min_rating,
+        print_status=print_status, exclude_printed=exclude_printed, min_rating=min_rating,
         excluded=excluded, added_within_days=added_within_days,
     )
     # character filter is list_models-only (not exposed via Library URL state)
@@ -1036,6 +1042,7 @@ def get_neighbors(
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
+    exclude_printed: bool = False,
     min_rating: int | None = Query(None, ge=1, le=5),
     excluded: bool = False,
     added_within_days: int | None = Query(None, ge=1, le=365),
@@ -1054,7 +1061,7 @@ def get_neighbors(
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
         has_thumbnail=has_thumbnail, needs_review=needs_review,
         nsfw=nsfw, is_favorite=is_favorite,
-        print_status=print_status, min_rating=min_rating,
+        print_status=print_status, exclude_printed=exclude_printed, min_rating=min_rating,
         excluded=excluded, added_within_days=added_within_days,
     )
 

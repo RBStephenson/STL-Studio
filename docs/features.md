@@ -32,6 +32,13 @@ filtered view.
   or use the quick chips in the header (e.g. "*N* favorites", "*N* queued",
   "*N* printed") — so you can see both what you want to print and what you've
   already printed.
+- **Negative tag filter:** clicking a tag cycles through three states —
+  **include** (show only models with the tag), **exclude** (a `≠ tag` chip;
+  hides models with the tag), and **off**. Only one include and one exclude tag
+  apply at a time.
+- **Hide printed:** the **hide printed** chip excludes models you've already
+  printed (status *printed*), leaving queued and not-yet-printed models. It's
+  the inverse of the *printed* chip, and the two are mutually exclusive.
 - **Sort:** the **Sort** dropdown in the header orders the grid by **Name**,
   **Date added** (newest first), or **Creator**. The choice is captured in saved
   presets and remembered as your default across browsers; Prev/Next on a model's

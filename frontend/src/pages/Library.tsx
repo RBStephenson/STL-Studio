@@ -159,6 +159,7 @@ export default function Library() {
   const thumbParam   = searchParams.get("has_thumbnail") ?? ""; // "" | "1" | "0"
   const favParam     = searchParams.get("is_favorite") === "1";
   const printStatusParam = searchParams.get("print_status") ?? "";
+  const excludePrinted = searchParams.get("exclude_printed") === "1";
   const excludedParam = searchParams.get("excluded") === "1";
   const minRating    = searchParams.get("min_rating") ?? "";  // "" | "1".."5" (#167)
   const addedDays    = searchParams.get("added_days") ?? ""; // "Recently added" window (#170)
@@ -305,6 +306,7 @@ export default function Library() {
       if (thumbParam)  params.has_thumbnail = thumbParam === "1";
       if (favParam)    params.is_favorite   = true;
       if (printStatusParam) params.print_status  = printStatusParam;
+      if (excludePrinted) params.exclude_printed = true;
       if (excludedParam) params.excluded    = true;
       if (minRating)   params.min_rating   = minRating;
       if (addedDays)   params.added_within_days = addedDays;
@@ -316,7 +318,7 @@ export default function Library() {
     } finally {
       if (fetchId === fetchIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, printStatusParam, excludedParam, minRating, addedDays, effectiveSort]);
+  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, printStatusParam, excludePrinted, excludedParam, minRating, addedDays, effectiveSort]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);
@@ -353,7 +355,7 @@ export default function Library() {
   }, [savingPreset]);
 
   const totalPages = Math.ceil(total / pageSize);
-  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || printStatusParam || minRating || addedDays);
+  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || printStatusParam || excludePrinted || minRating || addedDays);
 
   const visibleTags = allTags.filter(({ tag }) =>
     !tagSearch || tag.includes(tagSearch.toLowerCase())
@@ -744,7 +746,7 @@ export default function Library() {
               ) : (stats && stats[s] > 0) ? (
                 <button
                   key={s}
-                  onClick={() => setParam("print_status", s)}
+                  onClick={() => setParams({ print_status: s, exclude_printed: "" })}
                   title={`Show only ${PRINT_STATUS_LABELS[s]} models`}
                   className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
                     s === "queued" ? "bg-sky-950/50 text-sky-400 hover:bg-sky-900/50" :
@@ -757,6 +759,21 @@ export default function Library() {
                 </button>
               ) : null
             ))}
+            {/* Hide-printed filter: excludes printed models while keeping variant
+                grouping on. Mutually exclusive with the print_status chips above. */}
+            <button
+              onClick={() => setParams({ exclude_printed: excludePrinted ? "" : "1", print_status: "" })}
+              title="Hide models you've already printed"
+              className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
+                excludePrinted
+                  ? "bg-rose-500 text-rose-950 font-medium"
+                  : "bg-rose-950/50 text-rose-400 hover:bg-rose-900/50"
+              }`}
+            >
+              <Printer size={11} />
+              hide printed
+              {excludePrinted && <X size={10} />}
+            </button>
             <button
               onClick={() => setParam("added_days", addedDays ? "" : String(settings.recent_days))}
               title={`Models added in the last ${settings.recent_days} days, newest first`}
