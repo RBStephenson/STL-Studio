@@ -27,11 +27,11 @@ The main grid. Every filter lives in the URL, so you can bookmark or share a
 filtered view.
 
 - **Search** by name, title, description, or character.
-- **Filters:** creator, source site, tag, NSFW, has-image, needs-review,
-  favorites, in-queue, and printed. Open the **Filters** panel for the full set,
-  or use the quick chips in the header (e.g. "*N* favorites", "*N* queued",
-  "*N* printed") — so you can see both what you want to print and what you've
-  already printed.
+- **Filters:** creator (include or exclude), source site, tag, NSFW, has-image,
+  needs-review, min star rating, favorites, in-queue, and printed. Open the
+  **Filters** panel for the full set, or use the quick chips in the header
+  (e.g. "*N* favorites", "*N* queued", "*N* printed") — so you can see both
+  what you want to print and what you've already printed.
 - **Negative tag filter:** clicking a tag cycles through three states —
   **include** (show only models with the tag), **exclude** (a `≠ tag` chip;
   hides models with the tag), and **off**. Only one include and one exclude tag
@@ -171,7 +171,10 @@ Click a card to open the model. From here you can:
 
 - View and switch between all its preview images.
 - Toggle to the **3D viewer** (if it has STL files).
-- Edit metadata, tags, source URL, and the NSFW flag.
+- **Edit tags inline** — click the **+** button next to a tag to add a tag, or
+  the **×** on any tag to remove it, without opening the full edit screen. The
+  tag list autocompletes from all tags already in your library.
+- Edit metadata, tags, source URL, and the NSFW flag (full form via **Edit**).
 - See and label each STL file (head, arm, base, etc.).
 - **Download all** files as a zip, or open the **Kit Builder**.
 - Add the model to one or more **Collections** (see below).
@@ -217,7 +220,9 @@ combination of these.
 - **✓ Printed** — mark a model as printed. This records the date and removes it
   from the active queue. The Queue page keeps a **Recently Printed** section so
   you can see what you've finished, and the Library has a **printed** header chip
-  to filter down to everything you've printed.
+  to filter down to everything you've printed. If you mark something printed by
+  mistake, click **Undo printed** in the model header to revert it to not-printed
+  (the print date is cleared).
 
 You can toggle favorite/queue right from a card (hover icons) or from the
 buttons in a model's header. *(Printed* is set from the model header.)
@@ -377,14 +382,22 @@ as the standalone HTML version.
   opens a structured editor for the guide's tabs, phases, steps and paint
   swatches — add, remove and reorder each level, and pick swatch paints from your
   shelf. Saving content replaces the guide's tab tree; saving metadata leaves the
-  content untouched. (Mix swatches — "Paint A + Paint B" — aren't authored here
-  yet; that's tracked separately.)
+  content untouched.
+- **Mix swatches** — a step swatch can reference a blend like *"Paint A + Paint B
+  (3:1)"*. These import from guide HTML, render as a single blended-dot chip in
+  the reader, and round-trip cleanly back to the same notation on export.
 - **Import guide** (button, top-right of the Guides page) uploads a guide HTML
-  file. It lands as a **draft** for review — never auto-published — and shows an
-  **import report**: how many swatch paints matched your Paint Shelf, which were
-  dropped because they aren't on your shelf, and any content the importer
-  couldn't map. Add the missing paints to your Paint Shelf and re-import, or
-  delete the draft, if the report flags gaps.
+  file — click the file input, or **drag and drop** an `.html` file onto the
+  dropzone. It lands as a **draft** for review — never auto-published — and shows
+  an **import report**: how many swatch paints matched your Paint Shelf and any
+  content the importer couldn't map.
+  - If some paints didn't resolve, the importer shows a **Paint resolution**
+    step before committing. For each unresolved paint you can: **Map** it to an
+    existing shelf paint, **Force-add** it straight to your Paint Shelf
+    (pre-filled with any swatch color from the guide), or **Skip** it (the swatch
+    is dropped). Once every paint is resolved or skipped, the guide imports.
+  - Add missing paints to your Paint Shelf before importing if you'd rather not
+    use the resolution step, or just re-import after the shelf is updated.
 - **Publish / Unpublish** and **Delete** (buttons, top-right of a guide) control
   a guide's lifecycle: drafts stay flagged in the list until you publish, and
   delete removes the guide and all its tabs, steps and swatches after a
@@ -399,11 +412,6 @@ as the standalone HTML version.
 - **Model links** tie guides to your library both ways: a model that has a guide
   shows a **Guide** badge on its Library card and a **Painting guide** button on
   its detail page, and the guide links back to its model.
-
-> **Authoring:** importing existing guide HTML and publishing/deleting are built
-> in. A full in-app **structured editor** (editing a guide's tabs, steps and
-> swatches) is tracked separately, and AI-assisted generation is a later
-> milestone.
 
 ## Settings
 

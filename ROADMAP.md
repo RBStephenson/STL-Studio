@@ -142,13 +142,21 @@ ship v0.9.0 on the work above.
 
 ---
 
-## v0.10 — Kitbash & painting depth 🚧 Planned
+## v0.10 — Kitbash & painting depth 🚧 In progress
 
 | Issue | Item |
 |-------|------|
 | [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs |
-| [#339](https://github.com/RBStephenson/STL-Inventory/issues/339) | **Paint mixes as first-class swatches** (Option B) — model a custom mix as its own swatch |
-| [#271](https://github.com/RBStephenson/STL-Inventory/issues/271) | **Painting round-trip coverage gaps** surfaced by the #261 importer |
+| [#271](https://github.com/RBStephenson/STL-Inventory/issues/271) | **Painting round-trip coverage gaps** — step 3: byte-fidelity for series-badge filenames, skills-tab bodies, and `GUIDE_THINNING` literal |
+
+Already landed since v0.9.0: paint mixes as first-class swatches
+([#339](https://github.com/RBStephenson/STL-Inventory/issues/339), Option A —
+blended-dot chip, round-trip import/export), drag-and-drop HTML guide import
+([#413](https://github.com/RBStephenson/STL-Inventory/issues/413)), guide-import
+paint resolution UI ([#417](https://github.com/RBStephenson/STL-Inventory/issues/417)
+— map/force-add/skip unresolved paints before committing), inline tag editing on
+model detail ([#411](https://github.com/RBStephenson/STL-Inventory/issues/411)), and
+hide-printed filter with variant grouping preserved.
 
 > The variant-group management cluster originally tracked under v0.10 (rename,
 > merge, drag-to-group + keyboard a11y, display thumbnail, image-list caching,
@@ -192,7 +200,8 @@ The painting module follows its own M0–M5 track from the
   Playwright PDF export ([#320](https://github.com/RBStephenson/STL-Inventory/issues/320)).
 - **M4 — AI drafts + color match** — generate guide drafts and match swatches to
   shelf paints (`generation.py` / `colormatch.py` are stubs today).
-- **M5 — Full-corpus import** — bulk-import the reference guide corpus.
+- **M5 — Full-corpus import** — bulk-import the reference guide corpus. Includes the
+  remaining round-trip gaps tracked under [#271](https://github.com/RBStephenson/STL-Inventory/issues/271).
 
 M4–M5 issues will be filed as each phase starts.
 
