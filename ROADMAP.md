@@ -142,16 +142,14 @@ ship v0.9.0 on the work above.
 
 ---
 
-## v0.10 — Kitbash & painting depth 🚧 In progress
+## v0.10 — Painting depth 🚧 In progress
 
 | Issue | Item |
 |-------|------|
-| [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs |
+| [#339](https://github.com/RBStephenson/STL-Inventory/issues/339) | **Paint mixes as swatches** — true mix modelling: nullable paint_id, ratios, round-trip, blended chip |
 | [#271](https://github.com/RBStephenson/STL-Inventory/issues/271) | **Painting round-trip coverage gaps** — step 3: byte-fidelity for series-badge filenames, skills-tab bodies, and `GUIDE_THINNING` literal |
 
-Already landed since v0.9.0: paint mixes as first-class swatches
-([#339](https://github.com/RBStephenson/STL-Inventory/issues/339), Option A —
-blended-dot chip, round-trip import/export), drag-and-drop HTML guide import
+Already landed since v0.9.0: drag-and-drop HTML guide import
 ([#413](https://github.com/RBStephenson/STL-Inventory/issues/413)), guide-import
 paint resolution UI ([#417](https://github.com/RBStephenson/STL-Inventory/issues/417)
 — map/force-add/skip unresolved paints before committing), inline tag editing on
@@ -213,6 +211,7 @@ Larger, well-defined efforts not tied to a near-term milestone.
 
 | Issue | Item |
 |-------|------|
+| [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs; needs cross-model part-picker UI design |
 | [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize / normalize the library on disk** (opt-in, preview-first, standalone-only — Docker mounts are read-only) — umbrella: preview → apply with manifest/undo |
 | [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Reorganize Phase 1** — preview-only manifest |
 | [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Reorganize Phase 2** — apply, undo, conflict resolution (2a/2b/2c) |

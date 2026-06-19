@@ -138,7 +138,7 @@ Enable under **Settings → Painting Guides** — adds **Guides** and **Paint Sh
 - Import an HTML guide file (click or drag-and-drop). Unresolved paints trigger a **Paint resolution** step — map each to a shelf paint, force-add it, or skip — so nothing is silently dropped.
 - **Mix swatches** (*Paint A + Paint B, 3:1*) import, render as blended chips, and round-trip cleanly.
 - In-app structured editor for tabs, phases, steps, and swatches.
-- **Print** or **Export PDF** the whole guide in one pass.
+- **Print** or **Export PDF** the whole guide in one pass — the print stylesheet preserves dark backgrounds and paint chip colors so swatches render correctly on paper.
 - **Model links** — guides appear as a badge on Library cards and a button on model detail pages.
 
 ### Scan

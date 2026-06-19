@@ -139,6 +139,8 @@ group as well as individual variants:
   *has* a thumbnail represents the group. Click the **image button** under any
   variant to override and make it the group's display image instead — that
   choice is saved and survives rescans.
+- **Reorder within a group** — drag variant cards within the group view to set
+  a custom display order. The order persists until you reset it.
 
 Models that move or ungroup leave the current list immediately. When the last
 variant leaves, the group view closes back to where you came from.
@@ -403,7 +405,9 @@ as the standalone HTML version.
   delete removes the guide and all its tabs, steps and swatches after a
   confirmation.
 - **Print** (button, top-right of a guide) expands *every* tab and sub-tab into
-  one continuous, print-styled document — the whole guide in one pass.
+  one continuous, print-styled document — the whole guide in one pass. The print
+  stylesheet preserves dark backgrounds and paint chip colors (`print-color-adjust: exact`)
+  so swatches render correctly on paper and in PDF.
 - **Export PDF** (button, top-right of a guide) renders that same print-styled
   document to a downloadable PDF — handy for sharing a guide or printing it
   later. In Docker the renderer is bundled and ready to use; the standalone

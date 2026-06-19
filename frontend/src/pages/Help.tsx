@@ -159,6 +159,11 @@ const SECTIONS: Section[] = [
             The choice survives rescans.
           </li>
           <li>
+            <strong>Reorder within a group:</strong> drag variant cards within the group view to
+            set a custom display order. Use the <strong>Reset order</strong> button to go back to
+            the default (favorited/queued first, then by thumbnail, then by name).
+          </li>
+          <li>
             <strong>From a model:</strong> the <strong>Set group</strong> button in the model
             header assigns or changes the group; leave it blank to ungroup.
           </li>
@@ -452,8 +457,9 @@ const SECTIONS: Section[] = [
           in-app — a tabbed, step-by-step recipe with value maps, numbered steps,
           <strong> paint swatches</strong> drawn from your shelf, and a shared
           Thinning Reference. <strong>Print</strong> expands every tab into one
-          print-styled document, and <strong>Export PDF</strong> saves that same
-          document as a downloadable PDF (the standalone build needs a one-time{" "}
+          print-styled document with dark backgrounds and paint chip colors preserved, and{" "}
+          <strong>Export PDF</strong> saves that same document as a downloadable PDF
+          (the standalone build needs a one-time{" "}
           <code>playwright install chromium</code> the first time you export).
           A model with a guide shows a <strong>Guide</strong>{" "}
           badge on its Library card and a <strong>Painting guide</strong> button on
