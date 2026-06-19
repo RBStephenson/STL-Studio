@@ -58,9 +58,22 @@ const SECTIONS: Section[] = [
         <ul>
           <li><strong>Search</strong> by name, title, description, or character.</li>
           <li>
-            <strong>Filters:</strong> creator, source site, tag, NSFW, has-image,
-            needs-review, favorites, in-queue, and printed. Open the <strong>Filters</strong>{" "}
-            panel for the full set, or use the quick chips in the header.
+            <strong>Filters:</strong> creator (include or exclude), source site, tag,
+            NSFW, has-image, needs-review, min star rating, favorites, in-queue, and
+            printed. Open the <strong>Filters</strong> panel for the full set, or use
+            the quick chips in the header.
+          </li>
+          <li>
+            <strong>Negative tag filter:</strong> clicking a tag chip cycles through
+            three states — <strong>include</strong> (show only models with that tag),{" "}
+            <strong>exclude</strong> (a <code>≠ tag</code> chip; hides models with the
+            tag), and <strong>off</strong>. One include and one exclude tag can be active
+            at a time.
+          </li>
+          <li>
+            <strong>Hide printed:</strong> the <strong>hide printed</strong> chip excludes
+            already-printed models while keeping variant grouping on — the inverse of the{" "}
+            <em>printed</em> chip. The two are mutually exclusive.
           </li>
           <li>
             <strong>Sort:</strong> the header dropdown orders the grid by Name, Date
@@ -167,7 +180,13 @@ const SECTIONS: Section[] = [
         <ul>
           <li>View and switch between all its preview images.</li>
           <li>Toggle to the <strong>3D viewer</strong> (if it has STL files).</li>
-          <li>Edit metadata, tags, source URL, and the NSFW flag.</li>
+          <li>
+            <strong>Edit tags inline</strong> — click the <strong>+</strong> button
+            next to the tag list to add a tag (autocompletes from your library), or the{" "}
+            <strong>×</strong> on any tag to remove it, without opening the full edit
+            screen.
+          </li>
+          <li>Edit metadata, tags, source URL, and the NSFW flag (full form via <strong>Edit</strong>).</li>
           <li>See and <strong>label each STL file</strong> (head, arm, base, etc.).</li>
           <li><strong>Download all</strong> files as a zip, or open the <strong>Kit Builder</strong>.</li>
           <li>
@@ -235,7 +254,9 @@ const SECTIONS: Section[] = [
             <strong>drag the handle</strong> to set your own order, and favorites always float
             to the top. Reaching <strong>Printed</strong> records the date, bumps the print
             count, and drops the model from the active queue — the Queue page keeps a{" "}
-            <strong>Recently Printed</strong> history. Filter by any status from the header chips.
+            <strong>Recently Printed</strong> history. If you marked something printed by
+            mistake, click <strong>Undo printed</strong> in the model header to revert it
+            (the print date is cleared). Filter by any status from the header chips.
           </li>
         </ul>
         <p>Set both from a card's hover icons or the model header.</p>
@@ -439,12 +460,22 @@ const SECTIONS: Section[] = [
           its detail page, and the guide links back to its model.
         </p>
         <p>
-          <strong>Import guide</strong> (top of the Guides page) uploads a guide
-          HTML file. It lands as a <strong>draft</strong> and shows a report: which
-          swatch paints matched your shelf, which were dropped (not on your shelf),
-          and any unmapped content. Add the missing paints and re-import, or delete
-          the draft, if the report flags gaps. From an open guide you can{" "}
-          <strong>Publish / Unpublish</strong> it or <strong>Delete</strong> it.
+          <strong>Mix swatches</strong> — a step can reference a blend like{" "}
+          <em>Paint A + Paint B (3:1)</em>. These import from guide HTML, render as
+          a single blended-dot chip in the reader, and round-trip cleanly on export.
+        </p>
+        <p>
+          <strong>Import guide</strong> (top of the Guides page) uploads a guide HTML
+          file — click to browse or <strong>drag and drop</strong> an{" "}
+          <code>.html</code> file onto the dropzone. It lands as a{" "}
+          <strong>draft</strong>. If all paints resolve against your shelf the guide
+          imports immediately; otherwise a <strong>Paint resolution</strong> step
+          appears — for each unresolved paint you can <strong>Map</strong> it to an
+          existing shelf paint, <strong>Force-add</strong> it to your shelf
+          (pre-filled with the swatch color from the guide), or <strong>Skip</strong>{" "}
+          it (the swatch is dropped). Once everything is resolved or skipped the guide
+          imports. From an open guide you can <strong>Publish / Unpublish</strong> it
+          or <strong>Delete</strong> it.
         </p>
         <p>
           <strong>New guide</strong> (top of the Guides page) creates a guide from
