@@ -142,39 +142,21 @@ ship v0.9.0 on the work above.
 
 ---
 
-## v0.10 — Variant-group management ✅ Complete
+## v0.10 — Kitbash & painting depth 🚧 Planned
 
-A focused milestone making variant groups fully manageable. Shipped: bulk
-set-group endpoint + multi-select groundwork
-([#374](https://github.com/RBStephenson/STL-Inventory/issues/374)), inline
-rename ([#191](https://github.com/RBStephenson/STL-Inventory/issues/191)) and
-group rename ([#183](https://github.com/RBStephenson/STL-Inventory/issues/183)),
-set the display thumbnail
-([#193](https://github.com/RBStephenson/STL-Inventory/issues/193)), assign one
-image to a whole group ([#184](https://github.com/RBStephenson/STL-Inventory/issues/184)),
-clear a model's image ([#192](https://github.com/RBStephenson/STL-Inventory/issues/192)),
-drag-to-group **merge** ([#136](https://github.com/RBStephenson/STL-Inventory/issues/136))
-and **multi-select drag**
-([#137](https://github.com/RBStephenson/STL-Inventory/issues/137)) and
-**keyboard accessibility** for the gesture
-([#139](https://github.com/RBStephenson/STL-Inventory/issues/139)), in-group
-Set-Thumbnail image-list caching
-([#303](https://github.com/RBStephenson/STL-Inventory/issues/303)),
-favorited/queued auto-promotion to the group rep
-([#401](https://github.com/RBStephenson/STL-Inventory/issues/401), Phase 1 of
-[#302](https://github.com/RBStephenson/STL-Inventory/issues/302)), and a Library
-list-path performance pass — SQL variant collapse, page-scoped variant counts,
-and supporting indexes
-([#392](https://github.com/RBStephenson/STL-Inventory/issues/392),
-[#393](https://github.com/RBStephenson/STL-Inventory/issues/393),
-[#394](https://github.com/RBStephenson/STL-Inventory/issues/394)), and manual
-drag-to-reorder of models within a group
-([#399](https://github.com/RBStephenson/STL-Inventory/issues/399), Phase 2 of
-[#302](https://github.com/RBStephenson/STL-Inventory/issues/302)).
+| Issue | Item |
+|-------|------|
+| [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs |
+| [#339](https://github.com/RBStephenson/STL-Inventory/issues/339) | **Paint mixes as first-class swatches** (Option B) — model a custom mix as its own swatch |
+| [#271](https://github.com/RBStephenson/STL-Inventory/issues/271) | **Painting round-trip coverage gaps** surfaced by the #261 importer |
 
-Combining variant groups is covered by the drag/move-to-group merge above;
-nested groups-within-groups ([#188](https://github.com/RBStephenson/STL-Inventory/issues/188))
-was closed as out of scope — merging already satisfies the need.
+> The variant-group management cluster originally tracked under v0.10 (rename,
+> merge, drag-to-group + keyboard a11y, display thumbnail, image-list caching,
+> rep auto-promotion, and manual drag-to-reorder — #136/#137/#139/#183/#184/#191/
+> #192/#193/#302/#303/#374/#399) all landed on `main` ahead of the **v0.9.0** cut,
+> so it shipped as part of that release. Nested groups-within-groups
+> ([#188](https://github.com/RBStephenson/STL-Inventory/issues/188)) was closed as
+> out of scope — group merging already covers combining groups.
 
 ---
 
@@ -182,7 +164,6 @@ was closed as out of scope — merging already satisfies the need.
 
 | Issue | Item |
 |-------|------|
-| [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs |
 | [#17](https://github.com/RBStephenson/STL-Inventory/issues/17) | **Notarize the macOS standalone binary** |
 
 ---
