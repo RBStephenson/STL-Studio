@@ -84,8 +84,9 @@ A folder is only indexed as a model if it contains 3D files.
 ## Features
 
 ### Library
-- Grid view with search, filter by creator, site, tag, NSFW flag, thumbnail presence, and review status
-- Filter presets saved in localStorage; all filter state lives in the URL
+- Grid view with search, filter by creator (include or exclude), site, tag (include or exclude), NSFW flag, thumbnail presence, review status, and star rating
+- **Hide printed** chip excludes already-printed models while keeping variant grouping on; **negative tag filter** (click a tag twice) excludes by tag
+- Filter presets saved server-side; all filter state lives in the URL
 - **Variant grouping** — folders that share a parent character (e.g. `Full_cutted`, `No_cuts`, `Semi_cutted` under `Akuma/`) are collapsed into a single group card with a variant count badge; click to open the group and select individual variants
 - **Fix grouping** — drag a card onto another from the same creator to group them, or use **Set group** on a model / **Move to group** in a group view; overrides persist across rescans
 - Pagination with jump-to-page input (Prev / page / Next)
@@ -97,6 +98,7 @@ A folder is only indexed as a model if it contains 3D files.
 
 ### Model Detail
 - View and edit tags, metadata, source URL, NSFW flag
+- **Inline tag editing** — add or remove tags directly from the detail view without opening the full edit form
 - Image picker for choosing the thumbnail from the model's folder
 - STL preview (3D viewer)
 - **Part labeling** — tag each STL file with a part category (head, right arm, base, weapon, etc.) using a free-text input with common suggestions
@@ -127,11 +129,17 @@ A folder is only indexed as a model if it contains 3D files.
 - Paste a Gumroad, Cults3D, MyMiniFactory, or Loot Studios creator URL
 - Fuzzy-matches scraped listings against local models and bulk-applies metadata (source URL, thumbnail, external ID)
 
-### Paint Shelf (Painting Guides module)
-- Opt-in paint inventory (enable under **Settings → Painting Guides**): search/filter your paints by brand, line, finish, and owned state, with color chips for swatches
-- Per-line **code patterns** (regex) validate paint codes on entry
-- **PaintRack CSV import/export** — import shows an added/changed/removed diff preview (confirm-to-apply, never a blind overwrite; manually added paints are never removed); export is a lossless round-trip
-- Optional **Color column** in the CSV (`#RRGGBB`, quoted `"rgb(r,g,b)"` or `"hsv(h,s,v)"`) pre-populates swatches on import; stored swatches are included in exports, and an empty color never clears one
+### Painting Guides module
+Enable under **Settings → Painting Guides** — adds **Guides** and **Paint Shelf** to the nav.
+
+**Paint Shelf** — opt-in paint inventory: search/filter by brand, line, finish, and owned state, with color chips for swatches. Per-line **code patterns** (regex) validate paint codes on entry. **PaintRack CSV import/export** with a diff preview (never a blind overwrite); optional `Color` column (`#RRGGBB`, `"rgb(r,g,b)"`, or `"hsv(h,s,v)"`) pre-populates swatches on import.
+
+**Painting Guides** — step-by-step guides tied to your Paint Shelf:
+- Import an HTML guide file (click or drag-and-drop). Unresolved paints trigger a **Paint resolution** step — map each to a shelf paint, force-add it, or skip — so nothing is silently dropped.
+- **Mix swatches** (*Paint A + Paint B, 3:1*) import, render as blended chips, and round-trip cleanly.
+- In-app structured editor for tabs, phases, steps, and swatches.
+- **Print** or **Export PDF** the whole guide in one pass.
+- **Model links** — guides appear as a badge on Library cards and a button on model detail pages.
 
 ### Scan
 - **Parallel** — scans up to 4 creator directories concurrently for faster indexing on large libraries
