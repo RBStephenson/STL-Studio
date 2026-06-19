@@ -209,9 +209,12 @@ function TabPanel({
           </div>
           {subtabs.map((sub) => {
             const active = (activeSub ?? subtabs[0].key) === sub.key;
+            const subCallouts = sub.callouts ?? [];
             return (
               <div className={active ? "sub-content active" : "sub-content"} key={sub.key}>
+                <Callouts callouts={subCallouts} kinds={["text"]} />
                 <Phases phases={tab.phases.filter((p) => p.subtab_key === sub.key)} />
+                <Callouts callouts={subCallouts} kinds={["tip", "warning"]} />
               </div>
             );
           })}

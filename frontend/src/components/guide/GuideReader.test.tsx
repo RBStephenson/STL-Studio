@@ -60,7 +60,8 @@ const GUIDE: Guide = {
       section: null, value_map: null, method_block: null, callouts: [],
       subtabs: [
         { key: "pa", label: "Pro Acryl", css_class: null, sort_order: 0 },
-        { key: "ex", label: "Expert", css_class: "expert-tab", sort_order: 1 },
+        { key: "ex", label: "Expert", css_class: "expert-tab", sort_order: 1,
+          callouts: [{ kind: "tip", html: "Expert dries matte." }] },
       ],
       phases: [
         { id: 21, label: "PA Base", subtab_key: "pa", sort_order: 0, steps: [
@@ -155,6 +156,16 @@ describe("GuideReader", () => {
     await userEvent.click(within(skin).getByText("Expert"));
     expect(skin.querySelectorAll(".sub-content")[1]).toHaveClass("active");
     expect(skin.querySelectorAll(".sub-content")[0]).not.toHaveClass("active");
+  });
+
+  it("renders sub-content-level callouts inside their subtab (#271)", () => {
+    const { container } = render(<GuideReader guide={GUIDE} />);
+    const skin = panel(container, "skin");
+    // The expert subtab's tip renders within its .sub-content, not the Pro one.
+    const expertSub = skin.querySelectorAll(".sub-content")[1];
+    expect(within(expertSub as HTMLElement).getByText(/dries matte/)).toBeInTheDocument();
+    const proSub = skin.querySelectorAll(".sub-content")[0];
+    expect(within(proSub as HTMLElement).queryByText(/dries matte/)).not.toBeInTheDocument();
   });
 
   it("builds the Thinning Reference from static + per-guide config", () => {

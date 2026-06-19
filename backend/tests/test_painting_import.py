@@ -103,6 +103,18 @@ class TestRoundTrip:
         )["steps"][0]
         assert step["warning"] == "<strong>⚠ NOTE:</strong> Never thin primer."
 
+    def test_subtab_callouts_survive(self, client, paint):
+        # Sub-content-level callouts round-trip on their own subtab (#271 residual).
+        _, result = self._round_trip(client, paint)
+        expert = next(
+            s for s in result["guide"]["tabs"][0]["subtabs"] if s["key"] == "expert"
+        )
+        assert [c["kind"] for c in expert["callouts"]] == ["tip"]
+        assert expert["callouts"][0]["html"].startswith("<strong>✦ TIP:</strong>")
+        # the "pro" subtab carries no callouts
+        pro = next(s for s in result["guide"]["tabs"][0]["subtabs"] if s["key"] == "pro")
+        assert pro.get("callouts", []) == []
+
     def test_tab_callouts_survive(self, client, paint):
         # Tab-level intro <p> + tip/warning round-trip (#271): captured in
         # document order, regrouped text-above / tip-warning-below by the exporter.
@@ -335,6 +347,48 @@ class TestTabCallouts:
         draft, _ = self._parse()
         htmls = [c["html"] for c in draft["tabs"][0]["callouts"]]
         assert "nested intro" not in htmls
+
+
+# ---------------------------------------------------------------------------
+# sub-content callouts (#271 residual): callouts nested in a sub-tabbed
+# .sub-content attach to that subtab, not the tab, and aren't coverage gaps
+# ---------------------------------------------------------------------------
+
+class TestSubContentCallouts:
+    HTML = """
+    <div class="tabs">
+      <div class="tab-btn" onclick="showTab('skin', this)">Skin</div>
+    </div>
+    <div class="tab-content" id="skin">
+      <div class="sub-tabs">
+        <div class="sub-tab" onclick="showSubTab('skin', 'skin-pro', this)">Pro</div>
+        <div class="sub-tab expert-tab" onclick="showSubTab('skin', 'skin-expert', this)">Expert</div>
+      </div>
+      <div class="sub-content" id="skin-pro">
+        <div class="step"><h3>Base</h3><p>pro base</p></div>
+      </div>
+      <div class="sub-content" id="skin-expert">
+        <p>Expert <em>intro</em>.</p>
+        <div class="step"><h3>Base</h3><p>expert base</p></div>
+        <div class="tip"><strong>✦ TIP:</strong> dries matte.</div>
+      </div>
+    </div>
+    """
+
+    def _parse(self):
+        return import_guide_html(self.HTML, slug="t", resolve_paint=lambda n, b: None)
+
+    def test_callouts_attached_to_their_subtab(self):
+        draft, _ = self._parse()
+        subs = {s["key"]: s for s in draft["tabs"][0]["subtabs"]}
+        assert [c["kind"] for c in subs["expert"]["callouts"]] == ["text", "tip"]
+        assert subs["expert"]["callouts"][0]["html"] == "Expert <em>intro</em>."
+        # the pro subtab has no callouts
+        assert subs["pro"].get("callouts", []) == []
+
+    def test_subcontent_callouts_not_reported_unmapped(self):
+        _, report = self._parse()
+        assert report.unmapped_nodes == []
 
 
 # ---------------------------------------------------------------------------

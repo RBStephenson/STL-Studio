@@ -216,6 +216,16 @@ class TabSection(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class TabCallout(BaseModel):
+    """A tab-level prose node directly under .tab-content (outside any step):
+    an intro paragraph (text) or a tip/warning callout (#271). `html` is inner
+    HTML, preserved verbatim like step tips."""
+    kind: Literal["tip", "warning", "text"]
+    html: str
+
+    model_config = {"extra": "forbid"}
+
+
 class SubTabDef(BaseModel):
     """One sub-tab (e.g. 'Pro Acryl' vs 'Expert Acrylics'); phases with a
     matching subtab_key render inside its .sub-content."""
@@ -223,16 +233,8 @@ class SubTabDef(BaseModel):
     label: str                           # button text (may include a ✦ marker)
     css_class: Optional[str] = None      # extra class, e.g. "expert-tab" / "folk-art-tab"
     sort_order: int = 0
-
-    model_config = {"extra": "forbid"}
-
-
-class TabCallout(BaseModel):
-    """A tab-level prose node directly under .tab-content (outside any step):
-    an intro paragraph (text) or a tip/warning callout (#271). `html` is inner
-    HTML, preserved verbatim like step tips."""
-    kind: Literal["tip", "warning", "text"]
-    html: str
+    # tip/warning/intro-<p> nested in this subtab's .sub-content (#271 residual).
+    callouts: list[TabCallout] = []
 
     model_config = {"extra": "forbid"}
 

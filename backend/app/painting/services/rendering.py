@@ -353,8 +353,11 @@ def _render_tab(buf: _Buf, tab, paints: dict[int, PaintInfo], active: bool) -> N
             content_id = f"{dom_id}-{sub['key']}"
             sc_cls = "sub-content active" if i == 0 else "sub-content"
             buf.add(f'<div class="{sc_cls}" id="{_attr(content_id)}">')
+            sub_callouts = sub.get("callouts")
+            _render_callouts(buf, sub_callouts, ("text",))
             sub_phases = [p for p in tab.phases if p.subtab_key == sub["key"]]
             _render_phases(buf, sub_phases, paints)
+            _render_callouts(buf, sub_callouts, ("tip", "warning"))
             buf.add("</div>")
     else:
         direct = [p for p in tab.phases if not p.subtab_key]

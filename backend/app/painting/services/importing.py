@@ -436,9 +436,15 @@ def _parse_tab(content: Tag, name: str, resolve: PaintResolver,
                 sub["css_class"] = extra[0]
             subtabs.append(sub)
         tab["subtabs"] = subtabs
+        sub_by_key = {s["key"]: s for s in subtabs}
         for sc in content.select(".sub-content"):
             key = (sc.get("id") or "").removeprefix(f"{dom_id}-")
             tab["phases"].extend(_parse_phases(sc, key, resolve, report))
+            # tip/warning/intro-<p> nested in a sub-content belong to that subtab,
+            # not the tab — capture them so they round-trip (#271 step-1 residual).
+            sub_callouts = _parse_callouts(sc)
+            if sub_callouts and key in sub_by_key:
+                sub_by_key[key]["callouts"] = sub_callouts
     else:
         tab["phases"] = _parse_phases(content, None, resolve, report)
 

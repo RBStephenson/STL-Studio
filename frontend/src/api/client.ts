@@ -309,6 +309,8 @@ export interface SubTabDef {
   label: string;
   css_class: string | null;
   sort_order: number;
+  // tip/warning/intro-<p> nested inside this subtab's .sub-content (#271).
+  callouts?: TabCallout[];
 }
 
 export interface MethodCard {
