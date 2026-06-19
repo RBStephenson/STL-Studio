@@ -114,6 +114,10 @@ class Model(Base):
     # (overriding the id/has-thumbnail heuristic). Survives rescans like other
     # user flags; harmless if the group later changes.
     is_group_rep = Column(Boolean, default=False, server_default="0", nullable=False)
+    # Manual position within the model's variant group (#399). NULL = no manual
+    # order (heuristic decides). When set across a group, the lowest value is the
+    # group's representative card. Survives rescans like other user choices.
+    variant_order = Column(Integer, nullable=True)
     user_rating = Column(Integer, nullable=True, index=True)  # 1–5 stars; NULL = unrated (#167)
 
     # Print-status lifecycle: none → queued → printing → printed. Single source of

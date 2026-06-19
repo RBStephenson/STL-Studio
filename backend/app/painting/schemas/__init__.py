@@ -216,6 +216,26 @@ class TabSection(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class TabCallout(BaseModel):
+    """A tab-level prose node directly under .tab-content (outside any step):
+    an intro paragraph (text) or a tip/warning callout (#271). `html` is inner
+    HTML, preserved verbatim like step tips."""
+    kind: Literal["tip", "warning", "text"]
+    html: str
+
+    model_config = {"extra": "forbid"}
+
+
+class RawBlock(BaseModel):
+    """An unmodelled tab-level block captured verbatim so it round-trips without
+    a dedicated schema — e.g. wargaming batch-stage / tier-card / trouble-grid /
+    resin-callout (#271). `html` is the block's outer HTML, preserved as-is."""
+    css_class: str
+    html: str
+
+    model_config = {"extra": "forbid"}
+
+
 class SubTabDef(BaseModel):
     """One sub-tab (e.g. 'Pro Acryl' vs 'Expert Acrylics'); phases with a
     matching subtab_key render inside its .sub-content."""
@@ -223,16 +243,8 @@ class SubTabDef(BaseModel):
     label: str                           # button text (may include a ✦ marker)
     css_class: Optional[str] = None      # extra class, e.g. "expert-tab" / "folk-art-tab"
     sort_order: int = 0
-
-    model_config = {"extra": "forbid"}
-
-
-class TabCallout(BaseModel):
-    """A tab-level prose node directly under .tab-content (outside any step):
-    an intro paragraph (text) or a tip/warning callout (#271). `html` is inner
-    HTML, preserved verbatim like step tips."""
-    kind: Literal["tip", "warning", "text"]
-    html: str
+    # tip/warning/intro-<p> nested in this subtab's .sub-content (#271 residual).
+    callouts: list[TabCallout] = []
 
     model_config = {"extra": "forbid"}
 
@@ -440,6 +452,7 @@ class TabIn(BaseModel):
     value_map: Optional[ValueMap] = None
     subtabs: list[SubTabDef] = []
     callouts: list[TabCallout] = []
+    raw_blocks: list[RawBlock] = []
     method_block: Optional[MethodBlock] = None
     skin_config: Optional[SkinConfig] = None
     metals_config: Optional[MetalsConfig] = None
@@ -458,6 +471,7 @@ class TabRead(BaseModel):
     value_map: Optional[ValueMap] = None
     subtabs: list[SubTabDef] = []
     callouts: list[TabCallout] = []
+    raw_blocks: list[RawBlock] = []
     method_block: Optional[MethodBlock] = None
     skin_config: Optional[SkinConfig] = None
     metals_config: Optional[MetalsConfig] = None
@@ -585,16 +599,43 @@ class GuideList(BaseModel):
     items: list[GuideListItem]
 
 
+class PaintOverride(BaseModel):
+    """A user decision mapping an unresolved swatch/mix paint to a shelf paint
+    (#417). `name`/`brand` echo the report's unresolved entry; the resolver keys
+    on the canonicalized name so the override wins before catalog matching."""
+    name: str = Field(min_length=1)
+    brand: Optional[str] = None
+    paint_id: int
+
+    model_config = {"extra": "forbid"}
+
+
 class GuideImportRequest(BaseModel):
     html: str = Field(min_length=1)
     slug: str = Field(min_length=1)
+    # Parse + report only, don't persist — lets the UI resolve unresolved paints
+    # before committing (#417).
+    dry_run: bool = False
+    # User-supplied resolutions for paints that wouldn't otherwise match (#417).
+    paint_overrides: list[PaintOverride] = []
 
     model_config = {"extra": "forbid"}
 
 
 class GuideImportResult(BaseModel):
-    guide: GuideRead
+    # None on a dry_run preview — nothing is persisted (#417).
+    guide: Optional[GuideRead] = None
     report: dict
+
+
+class ForcedPaintCreate(BaseModel):
+    """Force-add a paint that isn't on the shelf during guide import (#417):
+    lands in a synthetic 'Imported / Uncategorized' line as known-but-not-owned,
+    so the swatch can reference it. The user can re-file it later."""
+    name: str = Field(min_length=1)
+    hex: Optional[str] = Field(None, pattern=HEX_PATTERN)
+
+    model_config = {"extra": "forbid"}
 
 
 # --- Categories & series ---------------------------------------------------

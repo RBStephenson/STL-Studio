@@ -14,9 +14,12 @@ import pytest
 
 from bs4 import BeautifulSoup
 
+from types import SimpleNamespace
+
 from app.painting.services.importing import (
-    ImportReport, _parse_swatch, import_guide_html, make_db_resolver,
+    ImportReport, _parse_swatch, import_guide_html, make_db_resolver, with_overrides,
 )
+from app.painting.services.rendering import PaintInfo, _render_mix
 from tests.test_painting_guides import mk_paint
 from tests.test_painting_guide_schema import presto_body
 
@@ -103,6 +106,25 @@ class TestRoundTrip:
         )["steps"][0]
         assert step["warning"] == "<strong>⚠ NOTE:</strong> Never thin primer."
 
+    def test_subtab_callouts_survive(self, client, paint):
+        # Sub-content-level callouts round-trip on their own subtab (#271 residual).
+        _, result = self._round_trip(client, paint)
+        expert = next(
+            s for s in result["guide"]["tabs"][0]["subtabs"] if s["key"] == "expert"
+        )
+        assert [c["kind"] for c in expert["callouts"]] == ["tip"]
+        assert expert["callouts"][0]["html"].startswith("<strong>✦ TIP:</strong>")
+        # the "pro" subtab carries no callouts
+        pro = next(s for s in result["guide"]["tabs"][0]["subtabs"] if s["key"] == "pro")
+        assert pro.get("callouts", []) == []
+
+    def test_raw_blocks_survive(self, client, paint):
+        # Unmodelled tab blocks (#271 step 2) round-trip verbatim.
+        _, result = self._round_trip(client, paint)
+        blocks = result["guide"]["tabs"][0]["raw_blocks"]
+        assert [b["css_class"] for b in blocks] == ["tier-card"]
+        assert "Display" in blocks[0]["html"]
+
     def test_tab_callouts_survive(self, client, paint):
         # Tab-level intro <p> + tip/warning round-trip (#271): captured in
         # document order, regrouped text-above / tip-warning-below by the exporter.
@@ -111,6 +133,92 @@ class TestRoundTrip:
         assert [c["kind"] for c in callouts] == ["text", "tip", "warning"]
         assert "<em>largest</em>" in callouts[0]["html"]
         assert callouts[1]["html"].startswith("<strong>✦ TIP:</strong>")
+
+
+class TestOverrideResolver:
+    """with_overrides layers user resolutions on top of the base resolver (#417),
+    keyed on the canonicalized swatch name; empty overrides are a no-op."""
+
+    def test_override_wins_before_base(self):
+        base = lambda n, b: 1 if n.lower() == "coal black" else None
+        resolve = with_overrides(base, {"Mystery Paint": 99})
+        assert resolve("Mystery Paint", None) == 99       # override
+        assert resolve("mystery paint", "X") == 99        # canonicalized match
+        assert resolve("Coal Black", None) == 1           # falls through to base
+        assert resolve("Unknown", None) is None
+
+    def test_empty_overrides_returns_base_unchanged(self):
+        base = lambda n, b: 7
+        assert with_overrides(base, {}) is base
+
+
+class TestImportResolution:
+    """dry_run preview + paint_overrides committing flow (#417)."""
+
+    def _unresolved_html(self, client, paint):
+        """Export a guide, then rename its swatch paint to something off-shelf so
+        re-import can't resolve it — the unresolved-paint scenario."""
+        g = client.post("/painting/guides", json=presto_body(paint["id"])).json()
+        html = client.get(f"/painting/guides/{g['id']}/export").text
+        return html.replace(f"{paint['name']} {paint['code']}", "Mystery Unknown XYZ")
+
+    def test_dry_run_reports_without_persisting(self, client, paint):
+        html = self._unresolved_html(client, paint)
+        before = client.get("/painting/guides").json()["total"]
+        r = client.post("/painting/guides/import",
+                        json={"html": html, "slug": "dry", "dry_run": True})
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["guide"] is None
+        assert any(u["name"] == "Mystery Unknown XYZ" for u in body["report"]["unresolved_paints"])
+        # Nothing persisted.
+        assert client.get("/painting/guides").json()["total"] == before
+
+    def test_unresolved_entry_carries_hex(self, client, paint):
+        html = self._unresolved_html(client, paint)
+        r = client.post("/painting/guides/import",
+                        json={"html": html, "slug": "dry2", "dry_run": True})
+        entry = next(u for u in r.json()["report"]["unresolved_paints"]
+                     if u["name"] == "Mystery Unknown XYZ")
+        assert entry["hex"] == paint["hex"]  # the swatch dot colour, for force-add
+
+    def test_override_resolves_and_commits(self, client, paint):
+        html = self._unresolved_html(client, paint)
+        r = client.post("/painting/guides/import", json={
+            "html": html, "slug": "resolved",
+            "paint_overrides": [{"name": "Mystery Unknown XYZ", "paint_id": paint["id"]}],
+        })
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["guide"] is not None
+        assert body["report"]["unresolved_paints"] == []
+        # The swatch now references the overridden paint.
+        guide = client.get(f"/painting/guides/{body['guide']['id']}").json()
+        swatch_ids = [
+            s["paint_id"]
+            for tab in guide["tabs"] for ph in tab["phases"]
+            for st in ph["steps"] for s in st["swatches"]
+        ]
+        assert paint["id"] in swatch_ids
+
+
+class TestForceAddPaint:
+    """POST /paints/import-forced lands an off-shelf paint in a synthetic
+    'Imported / Uncategorized' line as known-but-not-owned (#417)."""
+
+    def test_force_add_creates_unowned_paint(self, client):
+        r = client.post("/painting/paints/import-forced",
+                        json={"name": "Mystery Silver", "hex": "#c0c0c0"})
+        assert r.status_code == 201, r.text
+        p = r.json()
+        assert p["name"] == "Mystery Silver"
+        assert p["hex"] == "#c0c0c0"
+        assert p["owned"] is False
+
+    def test_force_add_is_idempotent_by_name(self, client):
+        first = client.post("/painting/paints/import-forced", json={"name": "Repeat Paint"}).json()
+        second = client.post("/painting/paints/import-forced", json={"name": "repeat paint"}).json()
+        assert first["id"] == second["id"]  # same row, not a duplicate
 
 
 class TestUnlabeledPhase:
@@ -264,9 +372,10 @@ class TestSmartResolver:
         assert make_db_resolver(db)("Burnt Umber Deep", "Pro Acryl") is None
 
 
-class TestMixExpansion:
-    """A mix swatch ('A + B') expands into one swatch per resolvable component
-    (#336 Option A); non-paint components (mediums, back-refs) drop + report."""
+class TestMixComponents:
+    """A mix swatch ('A + B (3:1)') parses into ordered mix components carrying
+    ratio parts (#339 Option B); non-paint components (mediums, back-refs #415)
+    drop + report. _parse_swatch returns (swatches, mix_components)."""
 
     def _swatch(self, name, value="~40% value — base", brand="Pro Acryl"):
         html = (f'<div class="swatch"><div class="swatch-name">{name}</div>'
@@ -274,27 +383,84 @@ class TestMixExpansion:
                 f'<div class="swatch-value">{value}</div></div>')
         return BeautifulSoup(html, "html.parser").select_one(".swatch")
 
-    def test_mix_expands_to_each_component(self):
+    def test_mix_yields_ordered_components_with_default_parts(self):
         resolve = lambda n, b: {"coal black": 1, "warm grey": 2}.get(n.lower())
         rep = ImportReport()
-        out = _parse_swatch(self._swatch("Coal Black + Warm Grey"), resolve, rep, "S")
-        assert [s["paint_id"] for s in out] == [1, 2]
-        assert all(s["value_pct"] == 40 for s in out)  # shared value
+        swatches, mix = _parse_swatch(self._swatch("Coal Black + Warm Grey"), resolve, rep, "S")
+        assert swatches == []
+        assert [(m["paint_id"], m["parts"], m["sort_order"]) for m in mix] == [
+            (1, 1.0, 0), (2, 1.0, 1)
+        ]
         assert rep.resolved_paints == 2
+
+    def test_mix_ratio_maps_to_parts(self):
+        resolve = lambda n, b: {"burnt sienna": 1, "pyrrole red": 2}.get(n.lower())
+        rep = ImportReport()
+        _swatches, mix = _parse_swatch(
+            self._swatch("Burnt Sienna + Pyrrole Red (3:1)"), resolve, rep, "S")
+        assert [m["parts"] for m in mix] == [3.0, 1.0]
 
     def test_non_paint_component_dropped_and_reported(self):
         resolve = lambda n, b: {"satin black s39": 5}.get(n.lower())
         rep = ImportReport()
-        out = _parse_swatch(
+        _swatches, mix = _parse_swatch(
             self._swatch("Satin Black S39 + gloss medium"), resolve, rep, "S")
-        assert [s["paint_id"] for s in out] == [5]
+        assert [m["paint_id"] for m in mix] == [5]
         assert any(u["name"] == "gloss medium" for u in rep.unresolved_paints)
 
-    def test_leading_plus_and_ratio_stripped(self):
+    def test_leading_plus_continuation_is_single_swatch(self):
+        # '+ Khaki 061 (2:1)' has one real component -> a single swatch, not a mix.
         resolve = lambda n, b: 7 if n.lower() == "khaki 061" else None
         rep = ImportReport()
-        out = _parse_swatch(self._swatch("+ Khaki 061 (2:1)"), resolve, rep, "S")
-        assert [s["paint_id"] for s in out] == [7]
+        swatches, mix = _parse_swatch(self._swatch("+ Khaki 061 (2:1)"), resolve, rep, "S")
+        assert [s["paint_id"] for s in swatches] == [7]
+        assert mix == []
+
+    def test_single_swatch_keeps_value_and_role(self):
+        resolve = lambda n, b: 9 if n.lower() == "coal black 002" else None
+        rep = ImportReport()
+        swatches, mix = _parse_swatch(self._swatch("Coal Black 002"), resolve, rep, "S")
+        assert swatches == [{"paint_id": 9, "value_pct": 40, "role_label": "base"}]
+        assert mix == []
+
+
+class TestMixRoundTrip:
+    """_render_mix (export) and _parse_swatch (import) are inverses over a mix
+    (#339): components -> 'A + B (3:1)' swatch -> components."""
+
+    _PAINTS = {
+        1: PaintInfo(name="Burnt Sienna", code="073", brand="Pro Acryl", hex="#a0522d"),
+        2: PaintInfo(name="Titanium White", code="001", brand="Pro Acryl", hex="#ffffff"),
+    }
+
+    def _parse_rendered(self, html):
+        swatch = BeautifulSoup(f'<div class="swatches">{html}</div>', "html.parser").select_one(".swatch")
+        resolve = lambda n, b: next(
+            (pid for pid, p in self._PAINTS.items() if f"{p.name} {p.code}".lower() == n.lower()),
+            None,
+        )
+        return _parse_swatch(swatch, resolve, ImportReport(), "S")
+
+    def test_ratio_round_trips(self):
+        comps = [SimpleNamespace(paint_id=1, parts=3.0), SimpleNamespace(paint_id=2, parts=1.0)]
+        html = _render_mix(comps, self._PAINTS)
+        assert "Burnt Sienna 073 + Titanium White 001 (3:1)" in html
+        swatches, mix = self._parse_rendered(html)
+        assert swatches == []
+        assert [(m["paint_id"], m["parts"]) for m in mix] == [(1, 3.0), (2, 1.0)]
+
+    def test_equal_parts_omit_ratio_suffix(self):
+        comps = [SimpleNamespace(paint_id=1, parts=1.0), SimpleNamespace(paint_id=2, parts=1.0)]
+        html = _render_mix(comps, self._PAINTS)
+        assert "(" not in html  # no ratio suffix when parts are equal
+        _swatches, mix = self._parse_rendered(html)
+        assert [m["paint_id"] for m in mix] == [1, 2]
+
+    def test_blended_dot_is_mean_rgb(self):
+        comps = [SimpleNamespace(paint_id=1, parts=1.0), SimpleNamespace(paint_id=2, parts=1.0)]
+        html = _render_mix(comps, self._PAINTS)
+        # mean of #a0522d and #ffffff = (cf, a8, 96)
+        assert "background:#cfa896" in html
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +501,81 @@ class TestTabCallouts:
         draft, _ = self._parse()
         htmls = [c["html"] for c in draft["tabs"][0]["callouts"]]
         assert "nested intro" not in htmls
+
+
+# ---------------------------------------------------------------------------
+# sub-content callouts (#271 residual): callouts nested in a sub-tabbed
+# .sub-content attach to that subtab, not the tab, and aren't coverage gaps
+# ---------------------------------------------------------------------------
+
+class TestSubContentCallouts:
+    HTML = """
+    <div class="tabs">
+      <div class="tab-btn" onclick="showTab('skin', this)">Skin</div>
+    </div>
+    <div class="tab-content" id="skin">
+      <div class="sub-tabs">
+        <div class="sub-tab" onclick="showSubTab('skin', 'skin-pro', this)">Pro</div>
+        <div class="sub-tab expert-tab" onclick="showSubTab('skin', 'skin-expert', this)">Expert</div>
+      </div>
+      <div class="sub-content" id="skin-pro">
+        <div class="step"><h3>Base</h3><p>pro base</p></div>
+      </div>
+      <div class="sub-content" id="skin-expert">
+        <p>Expert <em>intro</em>.</p>
+        <div class="step"><h3>Base</h3><p>expert base</p></div>
+        <div class="tip"><strong>✦ TIP:</strong> dries matte.</div>
+      </div>
+    </div>
+    """
+
+    def _parse(self):
+        return import_guide_html(self.HTML, slug="t", resolve_paint=lambda n, b: None)
+
+    def test_callouts_attached_to_their_subtab(self):
+        draft, _ = self._parse()
+        subs = {s["key"]: s for s in draft["tabs"][0]["subtabs"]}
+        assert [c["kind"] for c in subs["expert"]["callouts"]] == ["text", "tip"]
+        assert subs["expert"]["callouts"][0]["html"] == "Expert <em>intro</em>."
+        # the pro subtab has no callouts
+        assert subs["pro"].get("callouts", []) == []
+
+    def test_subcontent_callouts_not_reported_unmapped(self):
+        _, report = self._parse()
+        assert report.unmapped_nodes == []
+
+
+# ---------------------------------------------------------------------------
+# raw blocks (#271 step 2): unmodelled tab blocks (wargaming batch-stage /
+# tier-card / etc.) captured verbatim, not reported as coverage gaps
+# ---------------------------------------------------------------------------
+
+class TestRawBlocks:
+    HTML = """
+    <div class="tabs">
+      <div class="tab-btn" onclick="showTab('build', this)">Build</div>
+    </div>
+    <div class="tab-content" id="build">
+      <div class="section-header"><h2>Build</h2></div>
+      <div class="tier-card"><span class="tier-badge">Tier 1</span><h3>Tabletop</h3></div>
+      <div class="batch-stage"><div class="batch-num">1</div>
+        <div class="batch-stage-body"><strong>Prime all 5</strong></div></div>
+    </div>
+    """
+
+    def _parse(self):
+        return import_guide_html(self.HTML, slug="t", resolve_paint=lambda n, b: None)
+
+    def test_unmodelled_blocks_captured_verbatim(self):
+        draft, _ = self._parse()
+        blocks = draft["tabs"][0]["raw_blocks"]
+        assert [b["css_class"] for b in blocks] == ["tier-card", "batch-stage"]
+        assert "Tabletop" in blocks[0]["html"]
+        assert '<div class="batch-num">1</div>' in blocks[1]["html"]
+
+    def test_raw_blocks_not_reported_unmapped(self):
+        _, report = self._parse()
+        assert report.unmapped_nodes == []
 
 
 # ---------------------------------------------------------------------------

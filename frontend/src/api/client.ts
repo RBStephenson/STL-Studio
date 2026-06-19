@@ -51,6 +51,7 @@ export interface Model {
   excluded: boolean;
   is_favorite: boolean;
   is_group_rep: boolean;
+  variant_order: number | null;
   user_rating: number | null;
   queued_at: string | null;
   printed_at: string | null;
@@ -308,6 +309,8 @@ export interface SubTabDef {
   label: string;
   css_class: string | null;
   sort_order: number;
+  // tip/warning/intro-<p> nested inside this subtab's .sub-content (#271).
+  callouts?: TabCallout[];
 }
 
 export interface MethodCard {
@@ -331,6 +334,11 @@ export interface TabCallout {
   html: string;
 }
 
+export interface RawBlock {
+  css_class: string;
+  html: string;
+}
+
 export interface GuideTab {
   id: number;
   name: string;
@@ -341,6 +349,7 @@ export interface GuideTab {
   value_map: { label: string | null; chips: ValueChip[] } | null;
   subtabs: SubTabDef[];
   callouts: TabCallout[];
+  raw_blocks?: RawBlock[];
   method_block: MethodBlock | null;
   phases: GuidePhase[];
 }
@@ -698,6 +707,14 @@ export const api = {
           body: JSON.stringify({ model_ids: modelIds, character }),
         },
       ),
+    // Persist a manual model order within a variant group (#399). Empty `ids`
+    // resets the group to its heuristic order.
+    reorderGroup: (creatorId: number, character: string, ids: number[]) =>
+      request<{ ok: boolean; reset: boolean; updated: number }>(`/models/group/reorder`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ creator_id: creatorId, character, ids }),
+      }),
     updateSTLFile: (fileId: number, body: Record<string, unknown>) =>
       request<{ ok: boolean }>(`/models/stl-files/${fileId}`, {
         method: "PATCH",

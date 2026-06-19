@@ -6,6 +6,7 @@ import VariantGroup from "./VariantGroup";
 const batchSetGroup = vi.fn();
 const batchThumbnailFromUrl = vi.fn();
 const setGroupRep = vi.fn();
+const reorderGroup = vi.fn();
 const variantsMock = vi.fn();
 const toast = vi.fn();
 
@@ -18,6 +19,7 @@ vi.mock("../api/client", () => ({
       batchSetGroup: (...a: unknown[]) => batchSetGroup(...a),
       batchThumbnailFromUrl: (...a: unknown[]) => batchThumbnailFromUrl(...a),
       setGroupRep: (...a: unknown[]) => setGroupRep(...a),
+      reorderGroup: (...a: unknown[]) => reorderGroup(...a),
     },
   },
 }));
@@ -51,6 +53,7 @@ beforeEach(() => {
   batchSetGroup.mockReset();
   batchThumbnailFromUrl.mockReset();
   setGroupRep.mockReset();
+  reorderGroup.mockReset();
   toast.mockReset();
   variantsMock.mockReset();
   variantsMock.mockResolvedValue({
@@ -159,5 +162,30 @@ describe("VariantGroup bulk management (#183)", () => {
     await act(async () => { fireEvent.click(screen.getByText("Move")); });
 
     expect(toast).toHaveBeenCalledWith(expect.stringContaining("1 skipped"), "success");
+  });
+
+  it("shows Reset order when a manual order exists and clears it (#399)", async () => {
+    variantsMock.mockResolvedValue({
+      items: [
+        { id: 10, name: "Bust", character: "Rocky", is_group_rep: false, variant_order: 0 },
+        { id: 11, name: "Full size", character: "Rocky", is_group_rep: false, variant_order: 1 },
+      ],
+    });
+    reorderGroup.mockResolvedValue({ ok: true, reset: true, updated: 2 });
+    renderPage();
+    await flush();
+
+    await act(async () => { fireEvent.click(screen.getByText("Reset order")); });
+
+    // Empty ids = reset the whole (creator, character) group.
+    expect(reorderGroup).toHaveBeenCalledWith(3, "Rocky", []);
+    expect(toast).toHaveBeenCalledWith("Order reset to default.", "success");
+    expect(variantsMock).toHaveBeenCalledTimes(2); // reloaded
+  });
+
+  it("hides Reset order when no manual order is set", async () => {
+    renderPage();
+    await flush();
+    expect(screen.queryByText("Reset order")).not.toBeInTheDocument();
   });
 });

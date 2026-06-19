@@ -259,6 +259,74 @@ class TestVariantsEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Manual variant ordering (#399)
+# ---------------------------------------------------------------------------
+
+class TestGroupReorder:
+    def _trio(self, db):
+        creator = make_creator(db, "Creator")
+        v1 = make_model(db, creator, name="V1", character="Hero")
+        v2 = make_model(db, creator, name="V2", character="Hero")
+        v3 = make_model(db, creator, name="V3", character="Hero")
+        commit_all(db)
+        return creator, v1, v2, v3
+
+    def test_reorder_sets_rep_and_group_order(self, client, db):
+        creator, v1, v2, v3 = self._trio(db)
+        resp = client.patch(
+            "/models/group/reorder",
+            json={"creator_id": creator.id, "character": "Hero", "ids": [v3.id, v1.id, v2.id]},
+        )
+        assert resp.status_code == 200 and resp.json()["updated"] == 3
+
+        # The dragged front model represents the group on the Library grid.
+        grid = client.get("/models?group_variants=true").json()["items"]
+        assert grid[0]["id"] == v3.id
+        # The group page shows the manual order.
+        order = [m["id"] for m in client.get(
+            f"/models/variants?creator_id={creator.id}&character=Hero"
+        ).json()["items"]]
+        assert order == [v3.id, v1.id, v2.id]
+
+    def test_empty_ids_resets_to_heuristic(self, client, db):
+        creator, v1, v2, v3 = self._trio(db)
+        client.patch(
+            "/models/group/reorder",
+            json={"creator_id": creator.id, "character": "Hero", "ids": [v3.id, v1.id, v2.id]},
+        )
+        reset = client.patch(
+            "/models/group/reorder",
+            json={"creator_id": creator.id, "character": "Hero", "ids": []},
+        )
+        assert reset.status_code == 200 and reset.json()["reset"] is True
+
+        # Heuristic resumes — lowest id (no thumbnails/flags) represents the group.
+        grid = client.get("/models?group_variants=true").json()["items"]
+        assert grid[0]["id"] == v1.id
+
+    def test_designated_rep_still_wins_over_manual_order(self, client, db):
+        creator, v1, v2, v3 = self._trio(db)
+        client.patch(f"/models/{v2.id}/group-rep", json={"is_group_rep": True})
+        client.patch(
+            "/models/group/reorder",
+            json={"creator_id": creator.id, "character": "Hero", "ids": [v3.id, v1.id, v2.id]},
+        )
+        grid = client.get("/models?group_variants=true").json()["items"]
+        assert grid[0]["id"] == v2.id  # explicit rep beats drag order
+
+    def test_foreign_ids_ignored(self, client, db):
+        creator, v1, v2, v3 = self._trio(db)
+        other = make_model(db, creator, name="Loner", character="Villain")
+        commit_all(db)
+        resp = client.patch(
+            "/models/group/reorder",
+            json={"creator_id": creator.id, "character": "Hero", "ids": [v2.id, other.id]},
+        )
+        # Only the 3 Hero members are touched; the foreign id is silently skipped.
+        assert resp.status_code == 200 and resp.json()["updated"] == 3
+
+
+# ---------------------------------------------------------------------------
 # Group display thumbnail / representative override (#193)
 # ---------------------------------------------------------------------------
 

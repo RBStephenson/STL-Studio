@@ -22,7 +22,7 @@ from app.painting.schemas import (
     GuideRead, GuideUpdate, SeriesCreate, SeriesRead,
 )
 from app.painting.services.guides import build_tabs, collect_paint_ids, missing_paint_ids
-from app.painting.services.importing import import_guide_html, make_db_resolver
+from app.painting.services.importing import import_guide_html, make_db_resolver, with_overrides
 from app.painting.services.pdf import ChromiumNotInstalledError, render_guide_pdf
 from app.painting.services.rendering import attach_resolved_paints, render_guide_html
 from app.utils import utcnow
@@ -271,10 +271,16 @@ def import_guide(body: GuideImportRequest, db: Session = Depends(get_db)):
 
     Resolves swatch paints against the Paint Shelf; unresolved ones are dropped
     from the draft and listed in the report (the inventory-gap list, §9.7).
-    Lands as draft for human review — never auto-published."""
-    draft, report = import_guide_html(
-        body.html, slug=body.slug, resolve_paint=make_db_resolver(db)
-    )
+    Lands as draft for human review — never auto-published.
+
+    `dry_run` parses + reports without persisting so the UI can resolve
+    unresolved paints first; `paint_overrides` then maps those names to chosen
+    shelf paints on the committing call (#417)."""
+    overrides = {o.name: o.paint_id for o in body.paint_overrides}
+    resolver = with_overrides(make_db_resolver(db), overrides)
+    draft, report = import_guide_html(body.html, slug=body.slug, resolve_paint=resolver)
+    if body.dry_run:
+        return {"guide": None, "report": report.as_dict()}
     guide = create_guide(GuideCreate.model_validate(draft), db)
     return {"guide": guide, "report": report.as_dict()}
 

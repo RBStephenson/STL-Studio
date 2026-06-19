@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import ImportGuideModal, { slugFromFilename } from "./ImportGuideModal";
@@ -59,6 +59,35 @@ describe("ImportGuideModal", () => {
     expect(screen.getByText("Mystery Silver")).toBeInTheDocument(); // dropped swatch listed
     expect(screen.getByTestId("unmapped-nodes")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /view draft/i })).toHaveAttribute("href", "/painting/guides/7");
+  });
+
+  it("imports a file dropped onto the dropzone (#413)", async () => {
+    const { api } = await import("../../api/client");
+    vi.mocked(api.painting.guides.import_).mockResolvedValue({
+      guide: { id: 9, title: "Presto", status: "draft" } as never,
+      report: { resolved_paints: 3, unresolved_paints: [], unmapped_nodes: [], notes: [] },
+    });
+
+    renderModal();
+    fireEvent.drop(screen.getByTestId("guide-dropzone"), {
+      dataTransfer: { files: [htmlFile("presto.html")] },
+    });
+
+    expect(await screen.findByTestId("import-report")).toBeInTheDocument();
+    expect(api.painting.guides.import_).toHaveBeenCalledWith(expect.stringContaining("guide"), "presto");
+  });
+
+  it("rejects a non-HTML drop with an error and no import (#413)", async () => {
+    const { api } = await import("../../api/client");
+
+    renderModal();
+    const notHtml = new File(["x"], "model.stl", { type: "application/octet-stream" });
+    fireEvent.drop(screen.getByTestId("guide-dropzone"), {
+      dataTransfer: { files: [notHtml] },
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/html file/i);
+    expect(api.painting.guides.import_).not.toHaveBeenCalled();
   });
 
   it("surfaces a slug-conflict (409) clearly", async () => {

@@ -41,6 +41,9 @@ const GUIDE: Guide = {
         { kind: "text", html: "Intro <em>note</em> for metals." },
         { kind: "tip", html: "<strong>✦ TIP:</strong> buff lightly." },
       ],
+      raw_blocks: [
+        { css_class: "tier-card", html: "<div class=\"tier-card\"><h3>Display tier</h3></div>" },
+      ],
       phases: [
         {
           id: 11, label: "Base", subtab_key: null, sort_order: 0,
@@ -49,7 +52,13 @@ const GUIDE: Guide = {
               id: 111, title: "Gloss black base", technique_tag: "airbrush",
               technique_label: null, body: "Lay it <strong>down</strong>.", value_intent: null,
               tip: "Thin to milk.", warning: null, ratio_box: "1:1 paint:thinner", sort_order: 0,
-              swatches: [mkSwatch()], mix_components: [],
+              swatches: [mkSwatch()],
+              mix_components: [
+                { id: 1, paint_id: 10, parts: 3, sort_order: 0,
+                  paint: { name: "Burnt Sienna", code: "073", brand: "Pro Acryl", hex: "#a0522d" } },
+                { id: 2, paint_id: 11, parts: 1, sort_order: 1,
+                  paint: { name: "Titanium White", code: "001", brand: "Pro Acryl", hex: "#ffffff" } },
+              ],
             },
           ],
         },
@@ -60,7 +69,8 @@ const GUIDE: Guide = {
       section: null, value_map: null, method_block: null, callouts: [],
       subtabs: [
         { key: "pa", label: "Pro Acryl", css_class: null, sort_order: 0 },
-        { key: "ex", label: "Expert", css_class: "expert-tab", sort_order: 1 },
+        { key: "ex", label: "Expert", css_class: "expert-tab", sort_order: 1,
+          callouts: [{ kind: "tip", html: "Expert dries matte." }] },
       ],
       phases: [
         { id: 21, label: "PA Base", subtab_key: "pa", sort_order: 0, steps: [
@@ -124,6 +134,12 @@ describe("GuideReader", () => {
     expect(within(metals).getByText("~10%")).toBeInTheDocument();
   });
 
+  it("renders a mix as one chip with combined name and ratio suffix (#339)", () => {
+    const { container } = render(<GuideReader guide={GUIDE} />);
+    const metals = panel(container, "metals");
+    expect(within(metals).getByText("Burnt Sienna 073 + Titanium White 001 (3:1)")).toBeInTheDocument();
+  });
+
   it("renders tab-level callouts: intro above content, tip below (#271)", () => {
     const { container } = render(<GuideReader guide={GUIDE} />);
     const metals = panel(container, "metals");
@@ -155,6 +171,24 @@ describe("GuideReader", () => {
     await userEvent.click(within(skin).getByText("Expert"));
     expect(skin.querySelectorAll(".sub-content")[1]).toHaveClass("active");
     expect(skin.querySelectorAll(".sub-content")[0]).not.toHaveClass("active");
+  });
+
+  it("renders verbatim raw blocks within the tab (#271 step 2)", () => {
+    const { container } = render(<GuideReader guide={GUIDE} />);
+    const metals = panel(container, "metals");
+    const tier = metals.querySelector(".tier-card");
+    expect(tier).not.toBeNull();
+    expect(tier).toHaveTextContent("Display tier");
+  });
+
+  it("renders sub-content-level callouts inside their subtab (#271)", () => {
+    const { container } = render(<GuideReader guide={GUIDE} />);
+    const skin = panel(container, "skin");
+    // The expert subtab's tip renders within its .sub-content, not the Pro one.
+    const expertSub = skin.querySelectorAll(".sub-content")[1];
+    expect(within(expertSub as HTMLElement).getByText(/dries matte/)).toBeInTheDocument();
+    const proSub = skin.querySelectorAll(".sub-content")[0];
+    expect(within(proSub as HTMLElement).queryByText(/dries matte/)).not.toBeInTheDocument();
   });
 
   it("builds the Thinning Reference from static + per-guide config", () => {

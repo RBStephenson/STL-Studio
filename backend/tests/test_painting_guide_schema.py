@@ -84,7 +84,13 @@ def presto_body(paint_id, **over):
                 "subtabs": [
                     {"key": "pro", "label": "Pro Acryl", "sort_order": 0},
                     {"key": "expert", "label": "✦ Expert Acrylics — Brush Only",
-                     "css_class": "expert-tab", "sort_order": 1},
+                     "css_class": "expert-tab", "sort_order": 1,
+                     # Sub-content-level prose (#271 residual): belongs to this
+                     # subtab, round-trips inside its .sub-content.
+                     "callouts": [
+                         {"kind": "tip",
+                          "html": "<strong>✦ TIP:</strong> Expert Acrylics dry matte."},
+                     ]},
                 ],
                 # Tab-level prose (#271): intro <p> renders above the content,
                 # tip/warning below the steps — order matches the exporter's split.
@@ -95,6 +101,12 @@ def presto_body(paint_id, **over):
                      "html": "<strong>✦ TIP:</strong> Photograph and desaturate to check value."},
                     {"kind": "warning",
                      "html": "<strong>⚠ NOTE:</strong> Thin glazes, never flood recesses."},
+                ],
+                # Unmodelled block captured verbatim (#271 step 2) — round-trips
+                # without a dedicated schema.
+                "raw_blocks": [
+                    {"css_class": "tier-card",
+                     "html": '<div class="tier-card"><h3>Display</h3></div>'},
                 ],
                 "phases": [
                     {

@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
-    ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl, FavoriteUpdate, RatingUpdate, QueueReorder,
+    ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl, FavoriteUpdate, RatingUpdate, QueueReorder, GroupReorder,
     PrintStatusUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate,
     BulkExcludeUpdate, BulkReviewUpdate, SetGroupBody, BatchSetGroupBody,
     GroupRepUpdate,
@@ -149,14 +149,25 @@ def _apply_sort(q, sort: str):
 
 
 # Representative precedence within a variant group, expressed as ORDER BY columns:
-# Rep precedence: user-flagged rep wins (#193); else a favorited/queued member so
-# its status chips surface on the Library card (#302 auto-promotion); else a
-# thumbnailed member (#300); else the lowest id. `func.row_number()` over this
-# order picks the rep as rn == 1.
+# user-flagged rep wins (#193); else manual drag order (#399); else a
+# favorited/queued member so its status chips surface on the Library card (#302
+# auto-promotion); else a thumbnailed member (#300); else the lowest id.
+# `func.row_number()` over this order picks the rep as rn == 1.
 def _rep_order():
     has_thumb = (Model.thumbnail_path != None) | (Model.thumbnail_url != None)
     pinned = (Model.is_favorite == True) | (Model.print_status.in_(("queued", "printing")))
-    return (Model.is_group_rep.desc(), pinned.desc(), has_thumb.desc(), Model.id.asc())
+    # Manual drag order (#399) outranks the favorited/queued/thumbnail heuristic
+    # but not an explicit set-as-thumbnail rep. `variant_order.is_(None)` sorts
+    # False(0) before True(1), so manually-ordered members precede un-ordered ones,
+    # then by ascending position — making the dragged front model the rep.
+    return (
+        Model.is_group_rep.desc(),
+        Model.variant_order.is_(None),
+        Model.variant_order.asc(),
+        pinned.desc(),
+        has_thumb.desc(),
+        Model.id.asc(),
+    )
 
 
 def _collapse_variants(q):
@@ -484,8 +495,16 @@ def list_variants(
             Model.character == character,
             Model.excluded == False,
         )
-        # User-designated rep first (#193), then thumbnailed members, then name.
-        .order_by(Model.is_group_rep.desc(), has_thumb, Model.name)
+        # Mirrors _rep_order so the group page shows the same order that decides the
+        # card rep: designated rep first (#193), then manual drag order (#399,
+        # NULLs last), then thumbnailed members, then name.
+        .order_by(
+            Model.is_group_rep.desc(),
+            Model.variant_order.is_(None),
+            Model.variant_order.asc(),
+            has_thumb,
+            Model.name,
+        )
         .all()
     )
     return ModelList(total=len(items), page=1, page_size=max(len(items), 1), items=items)
@@ -802,6 +821,37 @@ def reorder_queue(body: QueueReorder, db: Session = Depends(get_db)):
         m.queue_position = pos_by_id[m.id]
     db.commit()
     return {"ok": True, "updated": len(models)}
+
+
+@router.patch("/group/reorder")
+def reorder_group(body: GroupReorder, db: Session = Depends(get_db)):
+    """Persist a manual model order within a variant group (#399).
+
+    `ids` is the group's members in the user's desired order; each member's index
+    becomes its `variant_order`, and the lowest order is the group's representative
+    card (see _rep_order). An **empty `ids` resets** the whole (creator, character)
+    group — clears every member's variant_order so the heuristic order resumes.
+    Ids that don't belong to the group are ignored. Scans never touch
+    variant_order, so no scan-in-progress guard is needed."""
+    group = db.query(Model).filter(
+        Model.creator_id == body.creator_id,
+        Model.character == body.character,
+    )
+    if not body.ids:
+        updated = group.update({Model.variant_order: None}, synchronize_session=False)
+        db.commit()
+        return {"ok": True, "reset": True, "updated": updated}
+
+    pos_by_id = {mid: i for i, mid in enumerate(body.ids)}
+    members = group.all()
+    touched = 0
+    for m in members:
+        # Members listed in `ids` get their drag position; any group member the
+        # client omitted is sent to the back (keeps a stable, gap-free order).
+        m.variant_order = pos_by_id.get(m.id, len(pos_by_id))
+        touched += 1
+    db.commit()
+    return {"ok": True, "reset": False, "updated": touched}
 
 
 @router.patch("/{model_id}/print-status")
