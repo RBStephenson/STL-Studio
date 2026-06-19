@@ -8,6 +8,7 @@ import ImagePicker from "../components/ImagePicker";
 import MetadataEditor from "../components/MetadataEditor";
 import KitBuilder from "../components/KitBuilder";
 import StarRating from "../components/StarRating";
+import TagInput from "../components/TagInput";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
@@ -235,6 +236,8 @@ export default function ModelDetail() {
   const [tags, setTags] = useState<string[]>([]);
   const [removedAutoTags, setRemovedAutoTags] = useState<string[]>([]);
   const [showHiddenTags, setShowHiddenTags] = useState(false);
+  const [editingTags, setEditingTags] = useState(false);
+  const [tagSuggestions, setTagSuggestions] = useState<{ tag: string; count: number }[]>([]);
   const [partTypes, setPartTypes] = useState<Record<number, string>>({});
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
@@ -293,6 +296,7 @@ export default function ModelDetail() {
     setOpenFolderError(null);
     setSettingGroup(false);
     setShowHiddenTags(false);
+    setEditingTags(false);
   }, [id]);
 
   const downloadAllFiles = async () => {
@@ -432,6 +436,27 @@ export default function ModelDetail() {
     } catch {
       setTags(prev);  // revert on failure
       toast("Couldn't add tag — try again.", "error");
+    }
+  };
+
+  // Replace the full user-tag set (inline editor add/remove). Optimistic with
+  // revert, mirroring addTag.
+  const setUserTags = async (next: string[]) => {
+    const prev = tags;
+    setTags(next);
+    try {
+      await api.models.update(Number(id), { tags: next });
+    } catch {
+      setTags(prev);  // revert on failure
+      toast("Couldn't update tags — try again.", "error");
+    }
+  };
+
+  // Open the inline tag editor, lazily loading tag suggestions on first use.
+  const openTagEditor = () => {
+    setEditingTags(true);
+    if (tagSuggestions.length === 0) {
+      api.models.tags().then(setTagSuggestions).catch(() => {});
     }
   };
 
@@ -1094,9 +1119,24 @@ export default function ModelDetail() {
             </p>
           )}
 
-          {/* User tags */}
-          {tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
+          {/* User tags — chips browse by tag; inline editor adds/removes
+              without opening the full edit screen (#411) */}
+          {editingTags ? (
+            <div className="flex flex-col gap-1.5">
+              <TagInput
+                value={tags}
+                onChange={setUserTags}
+                suggestions={tagSuggestions}
+              />
+              <button
+                onClick={() => setEditingTags(false)}
+                className="text-xs text-gray-500 hover:text-gray-300 w-fit"
+              >
+                Done
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5">
               {tags.map((tag) => (
                 <Link
                   key={tag}
@@ -1107,6 +1147,14 @@ export default function ModelDetail() {
                   {tag}
                 </Link>
               ))}
+              <button
+                onClick={openTagEditor}
+                title="Add or remove tags"
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-indigo-300 border border-dashed border-gray-700 hover:border-indigo-700 px-2 py-1 rounded-full transition-colors"
+              >
+                <Plus size={10} />
+                {tags.length > 0 ? "Edit tags" : "Add tag"}
+              </button>
             </div>
           )}
 
