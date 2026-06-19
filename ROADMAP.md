@@ -175,9 +175,6 @@ Still open:
 |-------|------|
 | [#302](https://github.com/RBStephenson/STL-Inventory/issues/302) / [#399](https://github.com/RBStephenson/STL-Inventory/issues/399) | **Manual drag-to-reorder** models within a group (Phase 2; needs a persisted `variant_order` column) |
 | [#188](https://github.com/RBStephenson/STL-Inventory/issues/188) | **Nested variant groups** — group variant groups (the largest remaining item) |
-| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize library on disk** (deferred from v0.9) — umbrella: preview → apply with manifest/undo |
-| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Reorganize Phase 1** — preview-only manifest |
-| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Reorganize Phase 2** — apply, undo, conflict resolution (2a/2b/2c) |
 
 ---
 
@@ -217,6 +214,18 @@ The painting module follows its own M0–M5 track from the
 - **M5 — Full-corpus import** — bulk-import the reference guide corpus.
 
 M4–M5 issues will be filed as each phase starts.
+
+---
+
+## Stretch goals / backlog
+
+Larger, well-defined efforts not tied to a near-term milestone.
+
+| Issue | Item |
+|-------|------|
+| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize / normalize the library on disk** (opt-in, preview-first, standalone-only — Docker mounts are read-only) — umbrella: preview → apply with manifest/undo |
+| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Reorganize Phase 1** — preview-only manifest |
+| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Reorganize Phase 2** — apply, undo, conflict resolution (2a/2b/2c) |
 
 ---
 
