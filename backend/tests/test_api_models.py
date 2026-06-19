@@ -903,6 +903,40 @@ class TestExcludeFilters:
         resp = client.get(f"/models/{first.id}/neighbors?exclude_tag=statue")
         assert resp.json()["next_id"] == last.id
 
+    def test_exclude_printed_hides_printed_models(self, client, db):
+        creator = make_creator(db)
+        printed = make_model(db, creator, name="Printed Model")
+        printed.print_status = "printed"
+        make_model(db, creator, name="Queued Model").print_status = "queued"
+        make_model(db, creator, name="Unprinted Model")
+        commit_all(db)
+
+        resp = client.get("/models?exclude_printed=true")
+        data = resp.json()
+        assert data["total"] == 2
+        names = {m["name"] for m in data["items"]}
+        assert names == {"Queued Model", "Unprinted Model"}
+
+    def test_exclude_printed_off_by_default(self, client, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="Printed Model").print_status = "printed"
+        make_model(db, creator, name="Unprinted Model")
+        commit_all(db)
+
+        resp = client.get("/models")
+        assert resp.json()["total"] == 2
+
+    def test_neighbors_honor_exclude_printed(self, client, db):
+        """Prev/Next must skip printed models when exclude_printed is set."""
+        creator = make_creator(db)
+        first = make_model(db, creator, name="Alpha")
+        make_model(db, creator, name="Bravo").print_status = "printed"
+        last = make_model(db, creator, name="Charlie")
+        commit_all(db)
+
+        resp = client.get(f"/models/{first.id}/neighbors?exclude_printed=true")
+        assert resp.json()["next_id"] == last.id
+
 
 # ---------------------------------------------------------------------------
 # Recently added (#170)
