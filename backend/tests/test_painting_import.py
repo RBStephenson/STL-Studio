@@ -115,6 +115,13 @@ class TestRoundTrip:
         pro = next(s for s in result["guide"]["tabs"][0]["subtabs"] if s["key"] == "pro")
         assert pro.get("callouts", []) == []
 
+    def test_raw_blocks_survive(self, client, paint):
+        # Unmodelled tab blocks (#271 step 2) round-trip verbatim.
+        _, result = self._round_trip(client, paint)
+        blocks = result["guide"]["tabs"][0]["raw_blocks"]
+        assert [b["css_class"] for b in blocks] == ["tier-card"]
+        assert "Display" in blocks[0]["html"]
+
     def test_tab_callouts_survive(self, client, paint):
         # Tab-level intro <p> + tip/warning round-trip (#271): captured in
         # document order, regrouped text-above / tip-warning-below by the exporter.
@@ -387,6 +394,39 @@ class TestSubContentCallouts:
         assert subs["pro"].get("callouts", []) == []
 
     def test_subcontent_callouts_not_reported_unmapped(self):
+        _, report = self._parse()
+        assert report.unmapped_nodes == []
+
+
+# ---------------------------------------------------------------------------
+# raw blocks (#271 step 2): unmodelled tab blocks (wargaming batch-stage /
+# tier-card / etc.) captured verbatim, not reported as coverage gaps
+# ---------------------------------------------------------------------------
+
+class TestRawBlocks:
+    HTML = """
+    <div class="tabs">
+      <div class="tab-btn" onclick="showTab('build', this)">Build</div>
+    </div>
+    <div class="tab-content" id="build">
+      <div class="section-header"><h2>Build</h2></div>
+      <div class="tier-card"><span class="tier-badge">Tier 1</span><h3>Tabletop</h3></div>
+      <div class="batch-stage"><div class="batch-num">1</div>
+        <div class="batch-stage-body"><strong>Prime all 5</strong></div></div>
+    </div>
+    """
+
+    def _parse(self):
+        return import_guide_html(self.HTML, slug="t", resolve_paint=lambda n, b: None)
+
+    def test_unmodelled_blocks_captured_verbatim(self):
+        draft, _ = self._parse()
+        blocks = draft["tabs"][0]["raw_blocks"]
+        assert [b["css_class"] for b in blocks] == ["tier-card", "batch-stage"]
+        assert "Tabletop" in blocks[0]["html"]
+        assert '<div class="batch-num">1</div>' in blocks[1]["html"]
+
+    def test_raw_blocks_not_reported_unmapped(self):
         _, report = self._parse()
         assert report.unmapped_nodes == []
 

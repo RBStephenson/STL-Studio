@@ -192,6 +192,10 @@ function TabPanel({
       <Callouts callouts={callouts} kinds={["text"]} />
       <ValueMapBlock valueMap={tab.value_map} />
       {tab.method_block && <MethodBlockView method={tab.method_block} />}
+      {(tab.raw_blocks ?? []).map((rb, i) => (
+        // Verbatim unmodelled blocks (wargaming batch-stage / tier-card, #271).
+        <div key={i} dangerouslySetInnerHTML={{ __html: rb.html }} />
+      ))}
 
       {subtabs.length > 0 ? (
         <>

@@ -52,6 +52,7 @@ def build_tab(tab_in: TabIn) -> GuideTab:
         value_map=_block(tab_in.value_map),
         subtabs=[s.model_dump() for s in tab_in.subtabs],
         callouts=[c.model_dump() for c in tab_in.callouts],
+        raw_blocks=[b.model_dump() for b in tab_in.raw_blocks],
         method_block=_block(tab_in.method_block),
         skin_config=_block(tab_in.skin_config),
         metals_config=_block(tab_in.metals_config),

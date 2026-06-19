@@ -332,6 +332,9 @@ def _render_tab(buf: _Buf, tab, paints: dict[int, PaintInfo], active: bool) -> N
     _render_callouts(buf, tab.callouts, ("text",))
     _render_value_map(buf, tab.value_map)
     _render_method_block(buf, tab.method_block)
+    # Verbatim unmodelled blocks (wargaming batch-stage / tier-card / etc., #271).
+    for rb in tab.raw_blocks or []:
+        buf.add(rb["html"])
 
     subtabs = tab.subtabs or []
     if subtabs:

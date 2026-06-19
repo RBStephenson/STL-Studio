@@ -41,6 +41,9 @@ const GUIDE: Guide = {
         { kind: "text", html: "Intro <em>note</em> for metals." },
         { kind: "tip", html: "<strong>✦ TIP:</strong> buff lightly." },
       ],
+      raw_blocks: [
+        { css_class: "tier-card", html: "<div class=\"tier-card\"><h3>Display tier</h3></div>" },
+      ],
       phases: [
         {
           id: 11, label: "Base", subtab_key: null, sort_order: 0,
@@ -156,6 +159,14 @@ describe("GuideReader", () => {
     await userEvent.click(within(skin).getByText("Expert"));
     expect(skin.querySelectorAll(".sub-content")[1]).toHaveClass("active");
     expect(skin.querySelectorAll(".sub-content")[0]).not.toHaveClass("active");
+  });
+
+  it("renders verbatim raw blocks within the tab (#271 step 2)", () => {
+    const { container } = render(<GuideReader guide={GUIDE} />);
+    const metals = panel(container, "metals");
+    const tier = metals.querySelector(".tier-card");
+    expect(tier).not.toBeNull();
+    expect(tier).toHaveTextContent("Display tier");
   });
 
   it("renders sub-content-level callouts inside their subtab (#271)", () => {

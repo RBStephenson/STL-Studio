@@ -161,6 +161,11 @@ class GuideTab(Base):
     # under .tab-content (outside any step), in document order (#271).
     # [{kind: "tip"|"warning"|"text", html}] — always a list (read schema needs it).
     callouts = Column(JSON, default=list)
+    # Unmodelled tab-level blocks captured verbatim so they round-trip losslessly
+    # without a dedicated schema yet — e.g. wargaming batch-stage / tier-card /
+    # trouble-grid / resin-callout (#271; full wargaming type deferred per spec §6.6).
+    # [{css_class, html}] in document order. Always a list (read schema needs it).
+    raw_blocks = Column(JSON, default=list)
     method_block = Column(JSON, nullable=True)       # Skin "Method Selection": rec + cards + freckle_note
     skin_config = Column(JSON, nullable=True)        # (legacy, superseded by method_block)
     metals_config = Column(JSON, nullable=True)      # TMM + optional NMM (Metals tab)

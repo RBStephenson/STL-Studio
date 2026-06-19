@@ -102,6 +102,12 @@ def presto_body(paint_id, **over):
                     {"kind": "warning",
                      "html": "<strong>⚠ NOTE:</strong> Thin glazes, never flood recesses."},
                 ],
+                # Unmodelled block captured verbatim (#271 step 2) — round-trips
+                # without a dedicated schema.
+                "raw_blocks": [
+                    {"css_class": "tier-card",
+                     "html": '<div class="tier-card"><h3>Display</h3></div>'},
+                ],
                 "phases": [
                     {
                         "label": "Foundation",

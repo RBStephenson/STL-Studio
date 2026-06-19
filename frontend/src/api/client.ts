@@ -334,6 +334,11 @@ export interface TabCallout {
   html: string;
 }
 
+export interface RawBlock {
+  css_class: string;
+  html: string;
+}
+
 export interface GuideTab {
   id: number;
   name: string;
@@ -344,6 +349,7 @@ export interface GuideTab {
   value_map: { label: string | null; chips: ValueChip[] } | null;
   subtabs: SubTabDef[];
   callouts: TabCallout[];
+  raw_blocks?: RawBlock[];
   method_block: MethodBlock | null;
   phases: GuidePhase[];
 }

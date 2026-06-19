@@ -448,7 +448,9 @@ def _parse_tab(content: Tag, name: str, resolve: PaintResolver,
     else:
         tab["phases"] = _parse_phases(content, None, resolve, report)
 
-    _record_unmapped(content, report, dom_id)
+    raw_blocks = _parse_raw_blocks(content)
+    if raw_blocks:
+        tab["raw_blocks"] = raw_blocks
     return tab
 
 
@@ -469,15 +471,26 @@ _KNOWN_TAB_CHILD = {
 }
 
 
-def _record_unmapped(content: Tag, report: ImportReport, dom_id: Optional[str]) -> None:
+def _parse_raw_blocks(content: Tag) -> list[dict]:
+    """Capture tab-level blocks the schema doesn't model — wargaming batch-stage /
+    tier-card / trouble-grid / resin-callout, and any future unknown block —
+    verbatim so they round-trip losslessly (#271; full wargaming type deferred per
+    spec §6.6). Direct children that aren't known structural blocks and aren't
+    bare-<p>/callouts are stored as {css_class, html} in document order.
+
+    Trade-off: anything unrecognised now becomes an opaque block rather than a
+    reported coverage gap. The export→import identity round-trip still guards the
+    structured shapes; this only catches the deliberately-unmodelled extras."""
+    out: list[dict] = []
     for child in content.find_all(recursive=False):
-        classes = set(_classes(child))
         # Bare <p> intro paragraphs are captured as 'text' callouts (#271).
-        if child.name == "p" and not classes:
+        if child.name == "p":
             continue
+        classes = set(_classes(child))
         if classes.isdisjoint(_KNOWN_TAB_CHILD):
-            label = child.name + (f".{'.'.join(sorted(classes))}" if classes else "")
-            report.unmapped_nodes.append(f"#{dom_id} > {label}")
+            css = sorted(classes)[0] if classes else child.name
+            out.append({"css_class": css, "html": str(child)})
+    return out
 
 
 # --- hero / header ---------------------------------------------------------
