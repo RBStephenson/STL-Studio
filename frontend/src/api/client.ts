@@ -512,6 +512,14 @@ export interface UnresolvedPaint {
   name: string;
   brand: string | null;
   step: string | null;
+  hex: string | null; // swatch dot colour, seeds a forced add (#417)
+}
+
+// A user resolution mapping an unresolved swatch name to a chosen paint (#417).
+export interface PaintOverrideInput {
+  name: string;
+  brand?: string | null;
+  paint_id: number;
 }
 
 export interface GuideImportReport {
@@ -522,7 +530,7 @@ export interface GuideImportReport {
 }
 
 export interface GuideImportResult {
-  guide: Guide;
+  guide: Guide | null; // null on a dry_run preview — nothing persisted (#417)
   report: GuideImportReport;
 }
 
@@ -887,6 +895,14 @@ export const api = {
         }),
       delete: (id: number) =>
         request<{ ok: boolean }>(`/painting/paints/${id}`, { method: "DELETE" }),
+      // Force-add an off-shelf paint during guide import (#417): lands in the
+      // synthetic 'Imported / Uncategorized' line, known-but-not-owned.
+      forceAdd: (name: string, hex: string | null) =>
+        request<Paint>("/painting/paints/import-forced", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, hex }),
+        }),
     },
     guides: {
       list: (params: Record<string, string | number | boolean> = {}) => {
@@ -901,11 +917,22 @@ export const api = {
       // The set of model ids that have at least one guide (Library badge, #263).
       modelIds: () => request<{ model_ids: number[] }>("/painting/guides/model-ids"),
       // Import a legacy guide HTML file → lands a draft + returns the report (#277).
-      import_: (html: string, slug: string) =>
+      // `dryRun` previews without persisting; `paintOverrides` resolves unresolved
+      // swatch paints on the committing call (#417).
+      import_: (
+        html: string,
+        slug: string,
+        opts: { dryRun?: boolean; paintOverrides?: PaintOverrideInput[] } = {},
+      ) =>
         request<GuideImportResult>("/painting/guides/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html, slug }),
+          body: JSON.stringify({
+            html,
+            slug,
+            dry_run: opts.dryRun ?? false,
+            paint_overrides: opts.paintOverrides ?? [],
+          }),
         }),
       // Create a new guide (#329). Backend GuideCreate requires slug+title;
       // everything else (incl. the `tabs` spine) is optional.
