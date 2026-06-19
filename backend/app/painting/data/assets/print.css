@@ -1,19 +1,32 @@
 /* =============================================================
    print.css  —  Workshop print stylesheet for 1:6 Scale Guides
    Linked with media="print" — only active at print time.
+
+   Dark theme (#418): the guide is a dark surface and white-on-paper made the
+   printout hard to read, so print keeps the dark page background and light
+   text. `print-color-adjust: exact` forces browsers to actually paint the
+   backgrounds (they default to dropping them). Palette mirrors the React
+   reader defaults (guide-reader.css).
    ============================================================= */
 
 /* ---------- Page setup ---------- */
 @page {
-  margin: 15mm 12mm;
+  margin: 12mm 10mm;
   size: A4 portrait;
 }
 
-/* ---------- Reset screen chrome ---------- */
-body {
-  background: #fff !important;
-  color: #111 !important;
-  font-family: Georgia, serif;
+/* Force-print backgrounds everywhere (browsers strip them by default). */
+* {
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+/* ---------- Dark page ---------- */
+html, body {
+  background: #1a1a1a !important;
+  color: #e8e8e8 !important;
   font-size: 10pt;
   line-height: 1.5;
 }
@@ -43,10 +56,9 @@ body {
 
 /* ---------- Hero / title area ---------- */
 .hero {
-  background: none !important;
-  border: none !important;
-  border-bottom: 2pt solid #333 !important;
-  padding: 8mm 0 4mm !important;
+  background: #222 !important;
+  border: 1px solid #3a3a3a !important;
+  padding: 8mm 6mm 4mm !important;
   margin-bottom: 6mm;
   text-align: left !important;
 }
@@ -54,30 +66,35 @@ body {
 .hero h1,
 .hero .title {
   font-size: 18pt !important;
-  color: #111 !important;
+  color: #fff !important;
 }
+
+.hero h1 span { color: #c0a060 !important; }
 
 .hero .subtitle,
 .hero .film-ref {
   font-size: 9pt !important;
-  color: #444 !important;
+  color: #aaa !important;
 }
 
 /* ---------- Section titles ---------- */
-.section-title {
+.section-title,
+.section-header h2 {
   font-size: 13pt !important;
   font-weight: bold;
-  color: #111 !important;
-  border-bottom: 1pt solid #999;
+  color: #c0a060 !important;
+  border-bottom: 1pt solid #3a3a3a;
   margin: 6mm 0 3mm;
   padding-bottom: 1mm;
 }
 
+.phase-label { color: #c0a060 !important; border-bottom-color: #3a3a3a !important; }
+
 /* ---------- Step cards ---------- */
 .step {
-  background: #fff !important;
-  border: 0.5pt solid #bbb !important;
-  border-left: 3pt solid #555 !important;
+  background: #222 !important;
+  border: 0.5pt solid #3a3a3a !important;
+  border-left: 3pt solid #c0a060 !important;
   page-break-inside: avoid;
   margin: 3mm 0;
   padding: 3mm 4mm;
@@ -85,14 +102,16 @@ body {
 
 .step h3 {
   font-size: 10pt !important;
-  color: #111 !important;
+  color: #e8e8e8 !important;
   margin-bottom: 2mm;
 }
 
+.step p { color: #aaa !important; }
+
 .step-number {
   font-size: 7pt !important;
-  background: #eee !important;
-  color: #333 !important;
+  background: #333 !important;
+  color: #e8e8e8 !important;
   border: none !important;
   padding: 1mm 2mm;
   border-radius: 2pt;
@@ -103,25 +122,30 @@ body {
 /* ---------- Paint swatches — preserve colour for reference ---------- */
 .swatch-row,
 .paint-swatch,
-.swatch {
+.swatch,
+.value-chip {
   page-break-inside: avoid;
-  -webkit-print-color-adjust: exact !important;
-  print-color-adjust: exact !important;
+  background: #2a2a2a !important;
 }
 
 .color-dot,
-.swatch-dot {
-  -webkit-print-color-adjust: exact !important;
-  print-color-adjust: exact !important;
-  border: 0.5pt solid #666 !important;
+.swatch-dot,
+.chip-swatch {
+  border: 0.5pt solid #777 !important;
 }
+
+.swatch-name { color: #e8e8e8 !important; }
+.swatch-brand,
+.swatch-value,
+.chip-val,
+.chip-label { color: #aaa !important; }
 
 /* ---------- Callouts ---------- */
 .tip, .warn, .warning, .callout, .insight {
-  background: #f5f5f5 !important;
-  border: 0.5pt solid #999 !important;
-  border-left: 3pt solid #555 !important;
-  color: #222 !important;
+  background: #2a2a2a !important;
+  border: 0.5pt solid #3a3a3a !important;
+  border-left: 3pt solid #c0a060 !important;
+  color: #aaa !important;
   page-break-inside: avoid;
   margin: 2mm 0;
   padding: 2mm 3mm;
@@ -129,26 +153,38 @@ body {
 }
 
 .tip strong, .warn strong, .warning strong {
-  color: #111 !important;
+  color: #e8e8e8 !important;
 }
+
+/* ---------- Method cards + ratio box ---------- */
+.method-card,
+.method-rec-block,
+.freckle-note,
+.ratio-box {
+  background: #2a2a2a !important;
+  color: #aaa !important;
+  border: 0.5pt solid #3a3a3a !important;
+  page-break-inside: avoid;
+}
+.method-card h4 { color: #e8e8e8 !important; }
 
 /* ---------- Thinning reference ---------- */
 .thinning-card {
-  background: #f9f9f9 !important;
-  border: 0.5pt solid #ccc !important;
+  background: #2a2a2a !important;
+  border: 0.5pt solid #3a3a3a !important;
   page-break-inside: avoid;
   padding: 2mm 3mm;
   margin: 1.5mm 0;
 }
 
 .thinning-card h4 {
-  color: #222 !important;
+  color: #e8e8e8 !important;
   font-size: 9pt !important;
   margin-bottom: 1mm;
 }
 
 .thinning-card p {
-  color: #333 !important;
+  color: #aaa !important;
   font-size: 8.5pt !important;
 }
 
@@ -160,24 +196,22 @@ body {
 
 .thin-table th,
 .thin-table td {
-  border: 0.5pt solid #bbb !important;
+  border: 0.5pt solid #3a3a3a !important;
   padding: 1mm 2mm;
-  color: #111 !important;
-  background: #fff !important;
+  color: #e8e8e8 !important;
+  background: #222 !important;
 }
 
 .thin-table th {
-  background: #eee !important;
+  background: #333 !important;
   font-weight: bold;
-  -webkit-print-color-adjust: exact !important;
-  print-color-adjust: exact !important;
 }
 
 /* ---------- Tags ---------- */
 .tag, .method-tag {
-  background: #eee !important;
-  color: #333 !important;
-  border: 0.5pt solid #999 !important;
+  background: #333 !important;
+  color: #e8e8e8 !important;
+  border: 0.5pt solid #3a3a3a !important;
   font-size: 7pt !important;
   padding: 0.5mm 1.5mm;
   border-radius: 2pt;
@@ -189,6 +223,5 @@ body {
 }
 
 /* ---------- General cleanup ---------- */
-a { color: #111 !important; text-decoration: none !important; }
-* { box-shadow: none !important; text-shadow: none !important; }
+a { color: #c0a060 !important; text-decoration: none !important; }
 img { max-width: 100% !important; }

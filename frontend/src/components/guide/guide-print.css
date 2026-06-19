@@ -1,25 +1,41 @@
 /* ═══════════════════════════════════════════════════════════
-   guide-print.css — the legacy print.css, scoped under .guide-reader
-   and wrapped in @media print so it only affects the guide reader at
-   print time (the M3 PDF wraps this same layout — single source of truth,
-   spec §9.4). Ported from painting-guides/assets/print.css; keep in sync.
-   Every tab and sub-tab is forced visible so the printout is the COMPLETE
-   guide. App chrome (navbar, back link, print button, back-to-top) is hidden
-   with Tailwind `print:hidden` at the call sites, not here.
+   guide-print.css — print/PDF stylesheet for the guide reader, scoped
+   under .guide-reader and wrapped in @media print so it only affects the
+   reader at print time (the M3 PDF wraps this same layout — single source
+   of truth, spec §9.4). Every tab and sub-tab is forced visible so the
+   printout is the COMPLETE guide. App chrome (navbar, back link, print
+   button, back-to-top) is hidden with Tailwind `print:hidden` at the call
+   sites, not here.
+
+   Dark theme (#418): the reader is a dark surface and white-on-paper made the
+   printout hard to read, so print keeps the dark page background and light
+   text. Colors come from the reader's theme vars (--bg/--text/…) so a guide's
+   custom theme carries into print; `print-color-adjust: exact` forces browsers
+   to actually paint the backgrounds (they default to dropping them).
    ═══════════════════════════════════════════════════════════ */
 @media print {
   /* Page setup */
-  @page { margin: 15mm 12mm; size: A4 portrait; }
+  @page { margin: 12mm 10mm; size: A4 portrait; }
 
-  /* Reset screen chrome on the reader */
+  /* Force-print backgrounds everywhere (browsers strip them by default). */
+  .guide-reader,
+  .guide-reader * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Paint the full sheet the reader's dark background so no white shows
+     around/behind the reader. */
+  html, body { background: var(--bg, #1a1a1a) !important; }
+
   .guide-reader {
-    background: #fff !important;
-    color: #111 !important;
-    font-family: Georgia, serif;
+    background: var(--bg, #1a1a1a) !important;
+    color: var(--text, #e8e8e8) !important;
     font-size: 10pt;
     line-height: 1.5;
   }
-  .guide-reader * { box-shadow: none !important; text-shadow: none !important; }
 
   /* Hide interactive / nav elements */
   .guide-reader .guide-nav,
@@ -43,41 +59,41 @@
 
   /* Hero / title area */
   .guide-reader .hero {
-    background: none !important;
-    border: none !important;
-    border-bottom: 2pt solid #333 !important;
-    padding: 8mm 0 4mm !important;
+    background: var(--surface, #222) !important;
+    border: 1px solid var(--border, #3a3a3a) !important;
+    padding: 8mm 6mm 4mm !important;
     margin-bottom: 6mm;
     text-align: left !important;
   }
-  .guide-reader .hero h1 { font-size: 18pt !important; color: #111 !important; }
-  .guide-reader .hero h1 span { color: #111 !important; }
+  .guide-reader .hero h1 { font-size: 18pt !important; color: #fff !important; }
+  .guide-reader .hero h1 span { color: var(--accent, #c0a060) !important; }
   .guide-reader .hero .subtitle,
-  .guide-reader .hero .film-ref { font-size: 9pt !important; color: #444 !important; }
+  .guide-reader .hero-subtitle,
+  .guide-reader .hero .film-ref { font-size: 9pt !important; color: var(--text-muted, #aaa) !important; }
   .guide-reader .category,
-  .guide-reader .creator-credit { color: #444 !important; }
+  .guide-reader .creator-credit { color: var(--text-muted, #aaa) !important; }
 
   /* Section + phase headers */
   .guide-reader .section-header h2 {
-    font-size: 13pt !important; font-weight: bold; color: #111 !important;
-    border-bottom: 1pt solid #999; margin: 6mm 0 3mm; padding-bottom: 1mm;
+    font-size: 13pt !important; font-weight: bold; color: var(--accent, #c0a060) !important;
+    border-bottom: 1pt solid var(--border, #3a3a3a); margin: 6mm 0 3mm; padding-bottom: 1mm;
   }
   .guide-reader .section-header p,
-  .guide-reader .char-brief { color: #333 !important; }
-  .guide-reader .phase-label { color: #333 !important; border-bottom-color: #999 !important; }
+  .guide-reader .char-brief { color: var(--text-muted, #aaa) !important; }
+  .guide-reader .phase-label { color: var(--accent, #c0a060) !important; border-bottom-color: var(--border, #3a3a3a) !important; }
 
   /* Step cards */
   .guide-reader .step {
-    background: #fff !important;
-    border: 0.5pt solid #bbb !important;
-    border-left: 3pt solid #555 !important;
+    background: var(--surface, #222) !important;
+    border: 0.5pt solid var(--border, #3a3a3a) !important;
+    border-left: 3pt solid var(--accent, #c0a060) !important;
     page-break-inside: avoid;
     margin: 3mm 0; padding: 3mm 4mm;
   }
-  .guide-reader .step h3 { font-size: 10pt !important; color: #111 !important; margin-bottom: 2mm; }
-  .guide-reader .step p { color: #222 !important; }
+  .guide-reader .step h3 { font-size: 10pt !important; color: var(--text, #e8e8e8) !important; margin-bottom: 2mm; }
+  .guide-reader .step p { color: var(--text-muted, #aaa) !important; }
   .guide-reader .step-number {
-    font-size: 7pt !important; background: #eee !important; color: #333 !important;
+    font-size: 7pt !important; background: var(--surface3, #333) !important; color: var(--text, #e8e8e8) !important;
     border: none !important; padding: 1mm 2mm; border-radius: 2pt;
     display: inline-block; margin-bottom: 1.5mm;
   }
@@ -86,78 +102,73 @@
   .guide-reader .swatch,
   .guide-reader .value-chip {
     page-break-inside: avoid;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-    background: #fff !important;
+    background: var(--surface2, #2a2a2a) !important;
   }
   .guide-reader .swatch-dot,
   .guide-reader .chip-swatch {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-    border: 0.5pt solid #666 !important;
+    border: 0.5pt solid var(--text-dim, #777) !important;
   }
-  .guide-reader .swatch-name { color: #111 !important; }
+  .guide-reader .swatch-name { color: var(--text, #e8e8e8) !important; }
   .guide-reader .swatch-brand,
   .guide-reader .swatch-value,
   .guide-reader .chip-val,
-  .guide-reader .chip-label { color: #333 !important; }
+  .guide-reader .chip-label { color: var(--text-muted, #aaa) !important; }
 
   /* Callouts */
   .guide-reader .tip,
   .guide-reader .warn,
   .guide-reader .warning {
-    background: #f5f5f5 !important;
-    border: 0.5pt solid #999 !important;
-    border-left: 3pt solid #555 !important;
-    color: #222 !important;
+    background: var(--surface2, #2a2a2a) !important;
+    border: 0.5pt solid var(--border, #3a3a3a) !important;
+    border-left: 3pt solid var(--accent, #c0a060) !important;
+    color: var(--text-muted, #aaa) !important;
     page-break-inside: avoid;
     margin: 2mm 0; padding: 2mm 3mm; font-size: 9pt;
   }
   .guide-reader .tip strong,
   .guide-reader .warn strong,
-  .guide-reader .warning strong { color: #111 !important; }
+  .guide-reader .warning strong { color: var(--text, #e8e8e8) !important; }
 
   /* Method cards + ratio box */
   .guide-reader .method-card,
   .guide-reader .method-rec-block,
   .guide-reader .freckle-note,
   .guide-reader .ratio-box {
-    background: #fff !important; color: #222 !important;
-    border: 0.5pt solid #bbb !important; page-break-inside: avoid;
+    background: var(--surface2, #2a2a2a) !important; color: var(--text-muted, #aaa) !important;
+    border: 0.5pt solid var(--border, #3a3a3a) !important; page-break-inside: avoid;
   }
-  .guide-reader .method-card h4 { color: #111 !important; }
+  .guide-reader .method-card h4 { color: var(--text, #e8e8e8) !important; }
 
   /* Thinning reference */
   .guide-reader .thinning-card {
-    background: #f9f9f9 !important; border: 0.5pt solid #ccc !important;
+    background: var(--surface2, #2a2a2a) !important; border: 0.5pt solid var(--border, #3a3a3a) !important;
     page-break-inside: avoid; padding: 2mm 3mm; margin: 1.5mm 0;
   }
-  .guide-reader .thinning-card h4 { color: #222 !important; font-size: 9pt !important; margin-bottom: 1mm; }
-  .guide-reader .thinning-card p { color: #333 !important; font-size: 8.5pt !important; }
+  .guide-reader .thinning-card h4 { color: var(--text, #e8e8e8) !important; font-size: 9pt !important; margin-bottom: 1mm; }
+  .guide-reader .thinning-card p { color: var(--text-muted, #aaa) !important; font-size: 8.5pt !important; }
   .guide-reader .nozzle-callout {
-    background: #f5f5f5 !important; border: 0.5pt solid #999 !important; page-break-inside: avoid;
+    background: var(--surface2, #2a2a2a) !important; border: 0.5pt solid var(--border, #3a3a3a) !important; page-break-inside: avoid;
   }
-  .guide-reader .nozzle-callout h4, .guide-reader .nozzle-callout p { color: #222 !important; }
+  .guide-reader .nozzle-callout h4, .guide-reader .nozzle-callout p { color: var(--text-muted, #aaa) !important; }
 
   .guide-reader .thin-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
   .guide-reader .thin-table th,
   .guide-reader .thin-table td {
-    border: 0.5pt solid #bbb !important; padding: 1mm 2mm;
-    color: #111 !important; background: #fff !important;
+    border: 0.5pt solid var(--border, #3a3a3a) !important; padding: 1mm 2mm;
+    color: var(--text, #e8e8e8) !important; background: var(--surface, #222) !important;
   }
   .guide-reader .thin-table th {
-    background: #eee !important; font-weight: bold;
-    -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+    background: var(--surface3, #333) !important; font-weight: bold;
   }
 
   /* Trouble grid */
   .guide-reader .trouble-card {
-    background: #f9f9f9 !important; border: 0.5pt solid #ccc !important; page-break-inside: avoid;
+    background: var(--surface2, #2a2a2a) !important; border: 0.5pt solid var(--border, #3a3a3a) !important; page-break-inside: avoid;
   }
-  .guide-reader .trouble-card h4, .guide-reader .trouble-card p { color: #222 !important; }
+  .guide-reader .trouble-card h4, .guide-reader .trouble-card p { color: var(--text-muted, #aaa) !important; }
 
   /* General cleanup */
-  .guide-reader a { color: #111 !important; text-decoration: none !important; }
+  .guide-reader a { color: var(--accent, #c0a060) !important; text-decoration: none !important; }
   .guide-reader img { max-width: 100% !important; }
-  .guide-reader .guide-footer { color: #444 !important; }
+  .guide-reader .guide-footer { color: var(--text-dim, #777) !important; }
 }
