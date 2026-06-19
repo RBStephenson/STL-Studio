@@ -142,42 +142,21 @@ ship v0.9.0 on the work above.
 
 ---
 
-## v0.10 — Variant-group management 🚧 In progress
-
-A focused milestone making variant groups fully manageable. Shipped: bulk
-set-group endpoint + multi-select groundwork
-([#374](https://github.com/RBStephenson/STL-Inventory/issues/374)), inline
-rename ([#191](https://github.com/RBStephenson/STL-Inventory/issues/191)) and
-group rename ([#183](https://github.com/RBStephenson/STL-Inventory/issues/183)),
-set the display thumbnail
-([#193](https://github.com/RBStephenson/STL-Inventory/issues/193)), assign one
-image to a whole group ([#184](https://github.com/RBStephenson/STL-Inventory/issues/184)),
-clear a model's image ([#192](https://github.com/RBStephenson/STL-Inventory/issues/192)),
-drag-to-group **merge** ([#136](https://github.com/RBStephenson/STL-Inventory/issues/136))
-and **multi-select drag**
-([#137](https://github.com/RBStephenson/STL-Inventory/issues/137)) and
-**keyboard accessibility** for the gesture
-([#139](https://github.com/RBStephenson/STL-Inventory/issues/139)), in-group
-Set-Thumbnail image-list caching
-([#303](https://github.com/RBStephenson/STL-Inventory/issues/303)),
-favorited/queued auto-promotion to the group rep
-([#401](https://github.com/RBStephenson/STL-Inventory/issues/401), Phase 1 of
-[#302](https://github.com/RBStephenson/STL-Inventory/issues/302)), and a Library
-list-path performance pass — SQL variant collapse, page-scoped variant counts,
-and supporting indexes
-([#392](https://github.com/RBStephenson/STL-Inventory/issues/392),
-[#393](https://github.com/RBStephenson/STL-Inventory/issues/393),
-[#394](https://github.com/RBStephenson/STL-Inventory/issues/394)).
-
-Still open:
+## v0.10 — Kitbash & painting depth 🚧 Planned
 
 | Issue | Item |
 |-------|------|
-| [#302](https://github.com/RBStephenson/STL-Inventory/issues/302) / [#399](https://github.com/RBStephenson/STL-Inventory/issues/399) | **Manual drag-to-reorder** models within a group (Phase 2; needs a persisted `variant_order` column) |
-| [#188](https://github.com/RBStephenson/STL-Inventory/issues/188) | **Nested variant groups** — group variant groups (the largest remaining item) |
-| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize library on disk** (deferred from v0.9) — umbrella: preview → apply with manifest/undo |
-| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Reorganize Phase 1** — preview-only manifest |
-| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Reorganize Phase 2** — apply, undo, conflict resolution (2a/2b/2c) |
+| [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs |
+| [#339](https://github.com/RBStephenson/STL-Inventory/issues/339) | **Paint mixes as first-class swatches** (Option B) — model a custom mix as its own swatch |
+| [#271](https://github.com/RBStephenson/STL-Inventory/issues/271) | **Painting round-trip coverage gaps** surfaced by the #261 importer |
+
+> The variant-group management cluster originally tracked under v0.10 (rename,
+> merge, drag-to-group + keyboard a11y, display thumbnail, image-list caching,
+> rep auto-promotion, and manual drag-to-reorder — #136/#137/#139/#183/#184/#191/
+> #192/#193/#302/#303/#374/#399) all landed on `main` ahead of the **v0.9.0** cut,
+> so it shipped as part of that release. Nested groups-within-groups
+> ([#188](https://github.com/RBStephenson/STL-Inventory/issues/188)) was closed as
+> out of scope — group merging already covers combining groups.
 
 ---
 
@@ -185,7 +164,6 @@ Still open:
 
 | Issue | Item |
 |-------|------|
-| [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs |
 | [#17](https://github.com/RBStephenson/STL-Inventory/issues/17) | **Notarize the macOS standalone binary** |
 
 ---
@@ -217,6 +195,18 @@ The painting module follows its own M0–M5 track from the
 - **M5 — Full-corpus import** — bulk-import the reference guide corpus.
 
 M4–M5 issues will be filed as each phase starts.
+
+---
+
+## Stretch goals / backlog
+
+Larger, well-defined efforts not tied to a near-term milestone.
+
+| Issue | Item |
+|-------|------|
+| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize / normalize the library on disk** (opt-in, preview-first, standalone-only — Docker mounts are read-only) — umbrella: preview → apply with manifest/undo |
+| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Reorganize Phase 1** — preview-only manifest |
+| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Reorganize Phase 2** — apply, undo, conflict resolution (2a/2b/2c) |
 
 ---
 
