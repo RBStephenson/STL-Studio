@@ -72,6 +72,16 @@ class TestInlinedHtml:
         assert "<!DOCTYPE html>" in html
         assert 'class="paint-bar"' in html
 
+    def test_print_css_is_dark_and_forces_colour(self, client, db, paint):
+        # #418: print/PDF keeps the dark page background (white-on-paper was
+        # unreadable) and must force browsers to paint backgrounds.
+        guide = _make_guide(client, db, paint["id"])
+        html = render_guide_pdf_html(db, guide)
+        print_block = html.split('<style media="print">', 1)[1].split("</style>", 1)[0]
+        assert "background: #1a1a1a !important" in print_block
+        assert "print-color-adjust: exact !important" in print_block
+        assert "color: #e8e8e8 !important" in print_block
+
 
 class TestEndpoint:
     def test_unknown_guide_404(self, client):

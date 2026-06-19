@@ -54,6 +54,7 @@ def _migrate_schema():
         ("guide_tabs", "skin_config", "JSON"),
         ("guide_tabs", "metals_config", "JSON"),
         ("guide_tabs", "callouts", "JSON DEFAULT '[]'"),
+        ("guide_tabs", "raw_blocks", "JSON DEFAULT '[]'"),
         ("guide_phases", "subtab_key", "TEXT"),
         ("guide_steps", "technique_label", "TEXT"),
         ("models", "print_status", "VARCHAR NOT NULL DEFAULT 'none'"),

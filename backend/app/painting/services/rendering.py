@@ -221,6 +221,53 @@ def _render_swatch(swatch, paints: dict[int, PaintInfo]) -> str:
     )
 
 
+def _fmt_parts(parts: float) -> str:
+    return str(int(parts)) if float(parts).is_integer() else f"{parts:g}"
+
+
+def _hex_to_rgb(h: str) -> tuple[int, int, int] | None:
+    s = h.lstrip("#")
+    if len(s) != 6:
+        return None
+    try:
+        return int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+    except ValueError:
+        return None
+
+
+def _blend_hex(hexes: list[str | None]) -> str | None:
+    """Mean RGB of the resolvable component colors — the mix chip's dot."""
+    rgbs = [rgb for h in hexes if h and (rgb := _hex_to_rgb(h))]
+    if not rgbs:
+        return None
+    n = len(rgbs)
+    r, g, b = (sum(c[i] for c in rgbs) // n for i in range(3))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _render_mix(components, paints: dict[int, PaintInfo]) -> str:
+    """A multi-paint mix as one swatch chip: blended dot, 'A + B' name, and a
+    ratio suffix when the parts aren't all equal (#339). Re-joining the names
+    restores the legacy swatch-name for the import round-trip."""
+    infos = [(paints.get(c.paint_id), c.parts) for c in components]
+    infos = [(info, parts) for info, parts in infos if info is not None]
+    if not infos:
+        return ""
+    names = " + ".join(f"{info.name} {info.code}".strip() for info, _ in infos)
+    parts = [p for _, p in infos]
+    if len(set(parts)) > 1:
+        names = f"{names} ({':'.join(_fmt_parts(p) for p in parts)})"
+    dot = _blend_hex([info.hex for info, _ in infos])
+    dot_style = f"background:{_attr(dot)}" if dot else ""
+    return (
+        '<div class="swatch">'
+        f'<div class="swatch-dot" style="{dot_style}"></div>'
+        '<div class="swatch-info">'
+        f'<div class="swatch-name">{_t(names)}</div>'
+        "</div></div>"
+    )
+
+
 def _render_step(buf: _Buf, step, number: int, paints: dict[int, PaintInfo]) -> None:
     tag = step.technique_tag or ""
     label = step.technique_label or (tag.title() if tag else "")
@@ -230,10 +277,12 @@ def _render_step(buf: _Buf, step, number: int, paints: dict[int, PaintInfo]) -> 
     buf.add(f"<h3>{_t(step.title)}</h3>")
     if step.body:
         buf.add(f"<p>{_html(step.body)}</p>")
-    if step.swatches:
+    if step.swatches or step.mix_components:
         buf.add('<div class="swatches">')
         for s in step.swatches:
             buf.add(_render_swatch(s, paints))
+        if step.mix_components:
+            buf.add(_render_mix(step.mix_components, paints))
         buf.add("</div>")
     if step.ratio_box:
         buf.add(f'<div class="ratio-box">{_t(step.ratio_box)}</div>')
@@ -332,6 +381,9 @@ def _render_tab(buf: _Buf, tab, paints: dict[int, PaintInfo], active: bool) -> N
     _render_callouts(buf, tab.callouts, ("text",))
     _render_value_map(buf, tab.value_map)
     _render_method_block(buf, tab.method_block)
+    # Verbatim unmodelled blocks (wargaming batch-stage / tier-card / etc., #271).
+    for rb in tab.raw_blocks or []:
+        buf.add(rb["html"])
 
     subtabs = tab.subtabs or []
     if subtabs:

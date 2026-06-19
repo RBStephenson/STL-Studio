@@ -28,7 +28,24 @@ export default function ImportGuideModal({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [result, setResult] = useState<{ guide: Guide; report: GuideImportReport } | null>(null);
+
+  const isHtmlFile = (file: File) =>
+    /\.html?$/i.test(file.name) || file.type === "text/html";
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (busy) return;
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    if (!isHtmlFile(file)) {
+      setError("Drop an HTML file (.html or .htm).");
+      return;
+    }
+    handleFile(file);
+  };
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -85,13 +102,17 @@ export default function ImportGuideModal({
                 any that don't match are dropped and listed below.
               </p>
               <label
-                className={`flex flex-col items-center gap-2 border border-dashed border-gray-700 rounded-lg px-6 py-8 text-center transition-colors ${
-                  busy ? "opacity-60" : "cursor-pointer hover:border-indigo-600"
-                }`}
+                data-testid="guide-dropzone"
+                onDragOver={(e) => { e.preventDefault(); if (!busy) setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                className={`flex flex-col items-center gap-2 border border-dashed rounded-lg px-6 py-8 text-center transition-colors ${
+                  busy ? "opacity-60 border-gray-700" : "cursor-pointer"
+                } ${dragOver ? "border-indigo-500 bg-indigo-950/30" : "border-gray-700 hover:border-indigo-600"}`}
               >
                 <Upload size={22} className="text-indigo-400" />
                 <span className="text-sm text-gray-300">
-                  {busy ? "Importing…" : "Choose an HTML file"}
+                  {busy ? "Importing…" : "Choose or drop an HTML file"}
                 </span>
                 <input
                   type="file"

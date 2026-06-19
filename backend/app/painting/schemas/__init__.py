@@ -226,6 +226,16 @@ class TabCallout(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class RawBlock(BaseModel):
+    """An unmodelled tab-level block captured verbatim so it round-trips without
+    a dedicated schema — e.g. wargaming batch-stage / tier-card / trouble-grid /
+    resin-callout (#271). `html` is the block's outer HTML, preserved as-is."""
+    css_class: str
+    html: str
+
+    model_config = {"extra": "forbid"}
+
+
 class SubTabDef(BaseModel):
     """One sub-tab (e.g. 'Pro Acryl' vs 'Expert Acrylics'); phases with a
     matching subtab_key render inside its .sub-content."""
@@ -442,6 +452,7 @@ class TabIn(BaseModel):
     value_map: Optional[ValueMap] = None
     subtabs: list[SubTabDef] = []
     callouts: list[TabCallout] = []
+    raw_blocks: list[RawBlock] = []
     method_block: Optional[MethodBlock] = None
     skin_config: Optional[SkinConfig] = None
     metals_config: Optional[MetalsConfig] = None
@@ -460,6 +471,7 @@ class TabRead(BaseModel):
     value_map: Optional[ValueMap] = None
     subtabs: list[SubTabDef] = []
     callouts: list[TabCallout] = []
+    raw_blocks: list[RawBlock] = []
     method_block: Optional[MethodBlock] = None
     skin_config: Optional[SkinConfig] = None
     metals_config: Optional[MetalsConfig] = None
