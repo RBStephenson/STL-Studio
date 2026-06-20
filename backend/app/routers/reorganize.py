@@ -15,12 +15,15 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import ReorganizeManifest
 from app.schemas import (
+    ReorganizeApplyRequest,
+    ReorganizeApplyResponse,
     ReorganizeEntry,
     ReorganizeFileMove,
     ReorganizePreviewResponse,
     ReorganizeStats,
 )
-from app.services import reorganize
+from app.services import reorganize, reorganize_apply, write_lock
+from app.services.reorganize_apply import ApplyError
 from app.services.reorganize_template import ReorganizeTemplateError
 
 router = APIRouter(prefix="/reorganize", tags=["reorganize"])
@@ -108,3 +111,25 @@ def preview(
     db.commit()
 
     return response
+
+
+@router.post("/apply", response_model=ReorganizeApplyResponse)
+def apply(body: ReorganizeApplyRequest, db: Session = Depends(get_db)) -> ReorganizeApplyResponse:
+    """Execute the selected entries of a previously-previewed manifest (#324, 2a).
+
+    Refused unless the deployment opts into write mode AND each destination probes
+    writable; aborts on drift; serialized against scans by the app-wide write lock.
+    """
+    try:
+        result = reorganize_apply.apply_manifest(db, body.manifest_id, body.entry_ids)
+    except write_lock.LibraryBusy as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ApplyError as e:
+        raise HTTPException(status_code=e.status, detail={"message": str(e), **e.detail})
+
+    return ReorganizeApplyResponse(
+        manifest_id=result.manifest_id,
+        moved_files=result.moved_files,
+        moved_models=result.moved_models,
+        undo_log=result.undo_log,
+    )

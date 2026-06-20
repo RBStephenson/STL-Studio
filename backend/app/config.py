@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     # MMF switched to OAuth-only — scraping is used instead
     mmf_api_key: str = ""
 
+    # Library reorganize apply (#324, Phase 2a) — the ONLY feature that moves
+    # user files on disk. Default OFF: a deployment must opt in explicitly, and
+    # even then apply re-probes each destination directory for writability at run
+    # time. The read-only Docker mount is the intended default safety posture, so
+    # this stays off unless a writable standalone deployment sets it.
+    reorganize_write_enabled: bool = False
+
     @property
     def stl_root_list(self) -> list[str]:
         return [r.strip() for r in self.stl_roots.split(",") if r.strip()]

@@ -38,6 +38,7 @@ from app.services.scan_rules import (
     IgnoreMatcher, load_ignore_matcher, load_tag_rules, load_parts_names,
 )
 from app.services.tag_sync import sync_model_tags
+from app.services import write_lock
 from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,9 @@ SLICER_EXTENSIONS = {
     ".fhd",        # Formware
 }
 
-_scan_lock = threading.Lock()
+# The "one scan at a time" gate is now the app-wide library write lock
+# (services/write_lock.py), so a scan and a reorganize apply/undo are mutually
+# exclusive — a scan must not prune/insert rows under a move in flight (#324).
 _state_lock = threading.Lock()
 # Serializes DB-mutating work across the parallel creator workers. SQLite allows
 # only one writer; without this, workers holding an open write transaction during
@@ -68,8 +71,8 @@ _scan_state: dict = {"running": False, "message": "idle", "models_found": 0, "fi
 _cancel_requested = False
 # Folders the user has explicitly split into per-child models (see PackOverride).
 # Loaded from the DB at the start of every scan; the walk treats these as
-# boundaries. Module-level because only one scan runs at a time (held by _scan_lock)
-# and threading it through every recursive call would be noisy.
+# boundaries. Module-level because only one scan runs at a time (held by the
+# library write lock) and threading it through every recursive call would be noisy.
 _pack_overrides: set[str] = set()
 # User-assigned character groupings keyed by model folder_path (see GroupOverride).
 # None value = explicitly ungrouped. Applied in _index_model instead of the heuristic.
@@ -112,7 +115,7 @@ def request_cancel():
 
 def scan_all_roots(db: Session | None = None):
     global _cancel_requested
-    if not _scan_lock.acquire(blocking=False):
+    if not write_lock.try_acquire_for_scan():
         return
     _cancel_requested = False
     with _state_lock:
@@ -183,7 +186,7 @@ def scan_all_roots(db: Session | None = None):
     finally:
         with _state_lock:
             _scan_state["running"] = False
-        _scan_lock.release()
+        write_lock.release_scan()
 
 
 def _cascade_delete_models(db: Session, ids: list[int], chunk: int = 500) -> None:
@@ -445,7 +448,7 @@ def scan_creator(creator_id: int):
     Runs single-threaded (one creator) and forces a full reindex so newly added
     or changed models under that creator are picked up."""
     global _cancel_requested
-    if not _scan_lock.acquire(blocking=False):
+    if not write_lock.try_acquire_for_scan():
         return
     _cancel_requested = False
     with _state_lock:
@@ -529,7 +532,7 @@ def scan_creator(creator_id: int):
     finally:
         with _state_lock:
             _scan_state["running"] = False
-        _scan_lock.release()
+        write_lock.release_scan()
 
 
 def split_pack(model_id: int) -> dict:
@@ -539,7 +542,7 @@ def split_pack(model_id: int) -> dict:
 
     Returns {"ok": bool, "created": int, "message": str}. Runs synchronously and
     holds the scan lock so it can't race a running scan."""
-    if not _scan_lock.acquire(blocking=False):
+    if not write_lock.try_acquire_for_scan():
         return {"ok": False, "created": 0, "message": "a scan is already running"}
     try:
         db = SessionLocal()
@@ -609,7 +612,7 @@ def split_pack(model_id: int) -> dict:
         logger.exception(f"Split pack failed: {e}")
         return {"ok": False, "created": 0, "message": f"error: {e}"}
     finally:
-        _scan_lock.release()
+        write_lock.release_scan()
 
 
 def _scan_root(root: ScanRoot, db: Session):

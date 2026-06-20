@@ -418,3 +418,19 @@ class ReorganizePreviewResponse(BaseModel):
     generated_at: str
     entries: list[ReorganizeEntry]
     stats: ReorganizeStats
+
+
+# --- Library reorganize, Phase 2a apply (#324) ----------------------------
+
+class ReorganizeApplyRequest(BaseModel):
+    manifest_id: str
+    entry_ids: list[int]              # model_ids to apply (must be eligible)
+
+    model_config = {"extra": "forbid"}
+
+
+class ReorganizeApplyResponse(BaseModel):
+    manifest_id: str
+    moved_files: int
+    moved_models: int
+    undo_log: str                     # path to the crash-safe recovery log
