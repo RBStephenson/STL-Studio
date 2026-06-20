@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ScanRoot, Creator
-from app.schemas import ScanStatus, ScanRootCreate, ScanRootUpdate
+from app.schemas import ScanStatus, ScanRootCreate, ScanRootUpdate, InboxScanRequest
 from app.services import scanner, layout
 from app.config import settings
 
@@ -55,7 +55,7 @@ def _bootstrap_roots() -> list[Path]:
 
 
 @router.get("/browse")
-def browse_dirs(path: str = "", db: Session = Depends(get_db)):
+def browse_dirs(path: str = "", mode: str = "", db: Session = Depends(get_db)):
     """List sub-directories for the Settings folder picker.
 
     With no path: Windows returns available drive letters; other OSes start at
@@ -69,7 +69,10 @@ def browse_dirs(path: str = "", db: Session = Depends(get_db)):
     """
     system = platform.system()
     roots = _configured_roots(db)
-    allowlist = roots or _bootstrap_roots()
+    # Inbox mode: browse outside configured scan roots so the user can pick an
+    # arbitrary import folder. Uses the same bootstrap allowlist as the first-run
+    # picker, which is already considered a safe exposure boundary.
+    allowlist = _bootstrap_roots() if mode == "inbox" else (roots or _bootstrap_roots())
 
     # Top level — drive list on Windows, home dir elsewhere.
     if not path:
@@ -156,6 +159,40 @@ def cancel_scan():
         raise HTTPException(status_code=409, detail="No scan running")
     scanner.request_cancel()
     return {"ok": True}
+
+
+@router.post("/inbox", response_model=ScanStatus)
+def start_inbox_scan(body: InboxScanRequest, db: Session = Depends(get_db)):
+    """Index an arbitrary source folder as inbox models without adding it as a scan root.
+
+    The folder must exist and must not already be a configured scan root (those
+    are for permanent indexing; inbox is one-shot). Models are indexed with
+    is_inbox=True so they can be filtered, enriched (#429), and later reorganized (#324).
+    """
+    status = scanner.get_status()
+    if status["running"]:
+        raise HTTPException(status_code=409, detail="Scan already running")
+
+    path = body.path.strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="Path is required")
+    p = Path(path)
+    if not p.exists():
+        raise HTTPException(status_code=400, detail="Path does not exist")
+    if not p.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+
+    configured = {Path(r.path) for r in db.query(ScanRoot).all()}
+    configured |= {Path(r) for r in settings.stl_root_list}
+    if p in configured:
+        raise HTTPException(
+            status_code=400,
+            detail="This path is already a scan root — use a regular scan instead",
+        )
+
+    thread = threading.Thread(target=scanner.scan_inbox_folder, args=(path,), daemon=True)
+    thread.start()
+    return ScanStatus(running=True, message="importing")
 
 
 @router.get("/status", response_model=ScanStatus)

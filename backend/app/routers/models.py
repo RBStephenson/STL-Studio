@@ -36,6 +36,7 @@ def _apply_filters(
     exclude_tag: str | None = None,
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
+    is_inbox: bool | None = None,
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
@@ -81,6 +82,8 @@ def _apply_filters(
         q = q.filter((Model.thumbnail_path == None) & (Model.thumbnail_url == None))
     if needs_review is not None:
         q = q.filter(Model.needs_review == needs_review)
+    if is_inbox is not None:
+        q = q.filter(Model.is_inbox == is_inbox)
     if nsfw is not None:
         q = q.filter(Model.nsfw == nsfw)
     if is_favorite is not None:
@@ -241,6 +244,7 @@ def list_models(
     exclude_tag: str | None = None,
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
+    is_inbox: bool | None = None,
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
@@ -256,7 +260,7 @@ def list_models(
         db.query(Model),
         search=search, creator_id=creator_id, exclude_creator_id=exclude_creator_id,
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
-        has_thumbnail=has_thumbnail, needs_review=needs_review,
+        has_thumbnail=has_thumbnail, needs_review=needs_review, is_inbox=is_inbox,
         nsfw=nsfw, is_favorite=is_favorite,
         print_status=print_status, exclude_printed=exclude_printed, min_rating=min_rating,
         excluded=excluded, added_within_days=added_within_days,
@@ -1062,6 +1066,7 @@ def get_neighbors(
     exclude_tag: str | None = None,
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
+    is_inbox: bool | None = None,
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
@@ -1082,7 +1087,7 @@ def get_neighbors(
         db.query(Model),
         search=search, creator_id=creator_id, exclude_creator_id=exclude_creator_id,
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
-        has_thumbnail=has_thumbnail, needs_review=needs_review,
+        has_thumbnail=has_thumbnail, needs_review=needs_review, is_inbox=is_inbox,
         nsfw=nsfw, is_favorite=is_favorite,
         print_status=print_status, exclude_printed=exclude_printed, min_rating=min_rating,
         excluded=excluded, added_within_days=added_within_days,

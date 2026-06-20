@@ -52,6 +52,7 @@ export interface Model {
   removed_auto_tags: string[];
   category: string | null;
   needs_review: boolean;
+  is_inbox: boolean;
   nsfw: boolean;
   excluded: boolean;
   is_favorite: boolean;
@@ -900,8 +901,19 @@ export const api = {
       request<ScanStatus>(`/scan/creator/${creatorId}`, { method: "POST" }),
     cancel: () => request<{ ok: boolean }>("/scan/cancel", { method: "POST" }),
     status: () => request<ScanStatus>("/scan/status"),
-    browse: (path?: string) =>
-      request<DirListing>(`/scan/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+    browse: (path?: string, mode?: string) => {
+      const params = new URLSearchParams();
+      if (path) params.set("path", path);
+      if (mode) params.set("mode", mode);
+      const qs = params.toString();
+      return request<DirListing>(`/scan/browse${qs ? `?${qs}` : ""}`);
+    },
+    startInboxScan: (path: string) =>
+      request<ScanStatus>("/scan/inbox", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      }),
     roots: () => request<ScanRoot[]>("/scan/roots"),
     addRoot: (path: string, layout?: string) =>
       request<ScanRoot>("/scan/roots", {

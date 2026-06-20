@@ -1,0 +1,172 @@
+import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
+import { FolderOpen, Play, Check, AlertCircle, Loader2, Inbox } from "lucide-react";
+import { api } from "../api/client";
+import FolderPicker from "../components/FolderPicker";
+
+type Phase = "idle" | "picking" | "running" | "done" | "error";
+
+export default function ImportPage() {
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [selectedPath, setSelectedPath] = useState<string>("");
+  const [statusMsg, setStatusMsg] = useState<string>("");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  useEffect(() => () => stopPolling(), []);
+
+  const startImport = async () => {
+    if (!selectedPath) return;
+    setPhase("running");
+    setStatusMsg("starting…");
+    try {
+      await api.scan.startInboxScan(selectedPath);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "failed to start";
+      setPhase("error");
+      setStatusMsg(msg);
+      return;
+    }
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await api.scan.status();
+        setStatusMsg(s.message ?? "");
+        if (!s.running) {
+          stopPolling();
+          if (s.message?.startsWith("error:")) {
+            setPhase("error");
+          } else {
+            setPhase("done");
+          }
+        }
+      } catch {
+        // transient; keep polling
+      }
+    }, 1500);
+  };
+
+  const reset = () => {
+    stopPolling();
+    setPhase("idle");
+    setSelectedPath("");
+    setStatusMsg("");
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto px-6 py-10 space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">
+          <Inbox size={22} className="text-indigo-400" />
+          Import Folder
+        </h1>
+        <p className="mt-2 text-sm text-gray-400">
+          Index an inbox folder without adding it as a permanent scan root.
+          Models are imported with an inbox flag so you can enrich and reorganize
+          them separately.
+        </p>
+      </div>
+
+      {/* Step 1 — pick folder */}
+      <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
+        <h2 className="font-semibold text-gray-200 text-sm uppercase tracking-wide">
+          1 — Choose a folder
+        </h2>
+        <div className="flex items-center gap-3">
+          <span className="flex-1 font-mono text-sm text-gray-300 truncate min-w-0 bg-gray-800 border border-gray-700 rounded px-3 py-2">
+            {selectedPath || <span className="text-gray-600">No folder selected</span>}
+          </span>
+          <button
+            onClick={() => setPhase("picking")}
+            disabled={phase === "running"}
+            className="flex items-center gap-1.5 px-4 py-2 rounded bg-gray-800 border border-gray-700 text-sm text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-40 transition-colors shrink-0"
+          >
+            <FolderOpen size={14} />
+            Browse
+          </button>
+        </div>
+      </section>
+
+      {/* Step 2 — import */}
+      <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
+        <h2 className="font-semibold text-gray-200 text-sm uppercase tracking-wide">
+          2 — Import
+        </h2>
+
+        {phase === "idle" && (
+          <button
+            onClick={startImport}
+            disabled={!selectedPath}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-medium transition-colors"
+          >
+            <Play size={14} />
+            Start import
+          </button>
+        )}
+
+        {phase === "running" && (
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Loader2 size={16} className="animate-spin text-indigo-400" />
+            <span>{statusMsg || "importing…"}</span>
+          </div>
+        )}
+
+        {phase === "done" && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm text-green-400">
+              <Check size={16} />
+              <span>{statusMsg || "done"}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <Link
+                to="/?is_inbox=true"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+              >
+                <Inbox size={14} />
+                View inbox models
+              </Link>
+              <button
+                onClick={reset}
+                className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm transition-colors"
+              >
+                Import another
+              </button>
+            </div>
+          </div>
+        )}
+
+        {phase === "error" && (
+          <div className="space-y-4">
+            <div className="flex items-start gap-2 text-sm text-red-400">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              <span>{statusMsg}</span>
+            </div>
+            <button
+              onClick={reset}
+              className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+      </section>
+
+      {phase === "picking" && (
+        <FolderPicker
+          mode="inbox"
+          onSelect={(path) => {
+            setSelectedPath(path);
+            setPhase("idle");
+          }}
+          onClose={() => setPhase("idle")}
+        />
+      )}
+    </div>
+  );
+}

@@ -49,6 +49,7 @@ class ModelRead(ModelBase):
     category: Optional[str] = None
     custom_attributes: dict = {}
     needs_review: bool = False
+    is_inbox: bool = False
     nsfw: bool = False
     excluded: bool = False
     is_favorite: bool = False
@@ -231,6 +232,10 @@ class BatchSetGroupBody(BaseModel):
     Powers group rename / merge / split / ungroup on the VariantGroup page."""
     model_ids: list[int]
     character: Optional[str] = None  # None = explicitly ungroup all; string = target group name
+
+
+class InboxScanRequest(BaseModel):
+    path: str
 
 
 class ScanRootCreate(BaseModel):

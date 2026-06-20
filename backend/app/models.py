@@ -102,6 +102,10 @@ class Model(Base):
 
     # Review state
     needs_review = Column(Boolean, default=False)  # scanner flagged low-confidence detection
+    # Inbox flag: set when the model was imported via the one-shot import-folder
+    # flow (#428) rather than a permanent scan root. Cleared once the model is
+    # moved into the managed library via reorganize apply (#324).
+    is_inbox = Column(Boolean, default=False, server_default="0", nullable=False, index=True)
 
     # User-hidden from the viewer. Files on disk are left untouched; the scanner
     # preserves this flag and never resurrects an excluded model on rescan.
