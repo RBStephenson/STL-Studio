@@ -299,6 +299,19 @@ class ImportPreviewResponse(BaseModel):
     packs: list[ImportPreviewPack]
 
 
+class SourceContentsEntry(BaseModel):
+    """An immediate subfolder of an import source (browse-first card data, #452)."""
+    name: str
+    path: str
+    already_imported: bool  # has inbox models already ingested under it
+
+
+class SourceContentsResponse(BaseModel):
+    source: str
+    is_flat: bool  # source itself holds STLs directly (single-pack layout)
+    entries: list[SourceContentsEntry]
+
+
 class DownloadZipRequest(BaseModel):
     file_ids: list[int]
     zip_name: str = "kit-build"

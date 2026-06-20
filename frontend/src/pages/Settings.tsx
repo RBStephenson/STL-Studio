@@ -52,6 +52,8 @@ export default function Settings() {
   const [newLayout, setNewLayout] = useState("{creator}");
   // Per-root in-progress layout edits, keyed by root id.
   const [layoutEdits, setLayoutEdits] = useState<Record<number, string>>({});
+  // Per-root in-progress library-name edits, keyed by root id (#452).
+  const [nameEdits, setNameEdits] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -140,6 +142,38 @@ export default function Settings() {
       flash("Layout updated — rescan to apply it", "ok");
     } catch (e: any) {
       flash(e?.message || "Invalid layout template — check the format", "err");
+    }
+  };
+
+  const saveName = async (root: ScanRoot) => {
+    const next = (nameEdits[root.id] ?? root.name ?? "").trim();
+    const clearEdit = () =>
+      setNameEdits((m) => {
+        const copy = { ...m };
+        delete copy[root.id];
+        return copy;
+      });
+    if (next === (root.name ?? "")) {
+      clearEdit();
+      return;
+    }
+    try {
+      await api.scan.updateRoot(root.id, { name: next });
+      clearEdit();
+      load();
+      flash("Library name updated", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Couldn't update the library name", "err");
+    }
+  };
+
+  const toggleWritable = async (root: ScanRoot) => {
+    try {
+      await api.scan.updateRoot(root.id, { is_writable: !root.is_writable });
+      load();
+      flash(root.is_writable ? "No longer an import destination" : "Marked as an import destination", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Couldn't update the library", "err");
     }
   };
 
@@ -399,6 +433,29 @@ export default function Settings() {
                     <span className={`text-xs truncate ${preview ? "text-gray-600" : "text-amber-400"}`}>
                       {preview ?? "needs exactly one {creator}, last"}
                     </span>
+                  </div>
+                  {/* Library name + import-destination toggle (#452) */}
+                  <div className="flex items-center gap-2 pl-[27px]">
+                    <label className="text-xs text-gray-500 shrink-0">Library</label>
+                    <input
+                      type="text"
+                      value={nameEdits[r.id] ?? r.name ?? ""}
+                      onChange={(e) => setNameEdits((m) => ({ ...m, [r.id]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      onBlur={() => saveName(r)}
+                      placeholder={r.path.split(/[\\/]/).filter(Boolean).pop() || "name"}
+                      spellCheck={false}
+                      className="w-40 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                    />
+                    <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none ml-2">
+                      <input
+                        type="checkbox"
+                        checked={r.is_writable}
+                        onChange={() => toggleWritable(r)}
+                        className="accent-indigo-500"
+                      />
+                      Import destination
+                    </label>
                   </div>
                 </div>
               );

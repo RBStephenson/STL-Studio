@@ -120,6 +120,52 @@ export interface ScanRoot {
   enabled: boolean;
   layout: string;
   last_scanned: string | null;
+  name: string | null;
+  is_writable: boolean;
+}
+
+export interface Library {
+  id: number;
+  path: string;
+  name: string;
+  is_writable: boolean;
+  write_enabled: boolean;
+}
+
+export interface SourceContentsEntry {
+  name: string;
+  path: string;
+  already_imported: boolean;
+}
+
+export interface SourceContents {
+  source: string;
+  is_flat: boolean;
+  entries: SourceContentsEntry[];
+}
+
+export interface ImportPreviewPack {
+  name: string;
+  source_path: string;
+  file_count: number;
+  model_ids: number[];
+  creator_name: string | null;
+  title: string | null;
+  character: string | null;
+  notes: string | null;
+  source_url: string | null;
+  tags: string[];
+}
+
+export interface ImportPreview {
+  source: string;
+  library_id: number | null;
+  packs: ImportPreviewPack[];
+}
+
+export interface SourceMapping {
+  source_path: string;
+  library_id: number;
 }
 
 export interface DriveStatusRoot {
@@ -915,13 +961,14 @@ export const api = {
         body: JSON.stringify({ path }),
       }),
     roots: () => request<ScanRoot[]>("/scan/roots"),
-    addRoot: (path: string, layout?: string) =>
+    libraries: () => request<Library[]>("/scan/libraries"),
+    addRoot: (path: string, layout?: string, opts?: { name?: string; is_writable?: boolean }) =>
       request<ScanRoot>("/scan/roots", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, layout: layout || "{creator}" }),
+        body: JSON.stringify({ path, layout: layout || "{creator}", ...opts }),
       }),
-    updateRoot: (id: number, body: { layout?: string; enabled?: boolean }) =>
+    updateRoot: (id: number, body: { layout?: string; enabled?: boolean; name?: string; is_writable?: boolean }) =>
       request<ScanRoot>(`/scan/roots/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -929,6 +976,26 @@ export const api = {
       }),
     removeRoot: (id: number) =>
       request<{ ok: boolean }>(`/scan/roots/${id}`, { method: "DELETE" }),
+  },
+  import: {
+    sourceContents: (source: string) =>
+      request<SourceContents>(`/import/source-contents?source=${encodeURIComponent(source)}`),
+    scanFolder: (path: string) =>
+      request<{ running: boolean; message: string }>("/import/scan-folder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      }),
+    preview: (source: string) =>
+      request<ImportPreview>(`/import/preview?source=${encodeURIComponent(source)}`),
+    getMapping: (path: string) =>
+      request<SourceMapping | null>(`/import/source-mapping?path=${encodeURIComponent(path)}`),
+    setMapping: (source_path: string, library_id: number) =>
+      request<SourceMapping>("/import/source-mapping", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_path, library_id }),
+      }),
   },
   settings: {
     get: () => request<AppSettings>("/settings"),

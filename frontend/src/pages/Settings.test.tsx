@@ -16,6 +16,8 @@ vi.mock("../api/client", () => ({
     scan: {
       roots: vi.fn().mockResolvedValue([]),
       addRoot: vi.fn().mockResolvedValue({}),
+      updateRoot: vi.fn().mockResolvedValue({}),
+      libraries: vi.fn().mockResolvedValue([]),
     },
     settings: {
       get: vi.fn().mockResolvedValue({
@@ -341,5 +343,38 @@ describe("Settings – Library page size (#32)", () => {
     await userEvent.click(await screen.findByRole("button", { name: "96" }));
 
     expect(api.settings.update).toHaveBeenCalledWith({ library_page_size: 96 });
+  });
+});
+
+describe("Settings – Library name + import destination (#452)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const root = {
+    id: 7, path: "/srv/minis", enabled: true, layout: "{creator}",
+    last_scanned: null, name: "minis", is_writable: false,
+  };
+
+  it("toggles is_writable via updateRoot", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.scan.roots).mockResolvedValue([root]);
+
+    render(<Settings />);
+
+    const checkbox = await screen.findByRole("checkbox", { name: /import destination/i });
+    await userEvent.click(checkbox);
+    expect(api.scan.updateRoot).toHaveBeenCalledWith(7, { is_writable: true });
+  });
+
+  it("saves a renamed library on blur", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.scan.roots).mockResolvedValue([root]);
+
+    render(<Settings />);
+
+    const input = await screen.findByDisplayValue("minis");
+    await userEvent.clear(input);
+    await userEvent.type(input, "terrain");
+    input.blur();
+    expect(api.scan.updateRoot).toHaveBeenCalledWith(7, { name: "terrain" });
   });
 });
