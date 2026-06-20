@@ -249,3 +249,58 @@ class TestPaintListing:
         assert len(page["items"]) == 3
         page2 = client.get("/painting/paints?page=2&page_size=3").json()
         assert len(page2["items"]) == 1
+
+
+class TestPaintUpdateUniqueness:
+    """Update must not create duplicate (paint_line_id, code) identities (#445)."""
+
+    def test_changing_code_to_existing_in_line_409(self, client, line):
+        mk_paint(client, line["id"], code="001", name="White")
+        p2 = mk_paint(client, line["id"], code="002", name="Black").json()
+        r = client.patch(f"/painting/paints/{p2['id']}", json={"code": "001"})
+        assert r.status_code == 409
+        assert "001" in r.json()["detail"]
+
+    def test_moving_paint_into_line_with_that_code_409(self, client):
+        brand = mk_brand(client)
+        line_a = mk_line(client, brand["id"], name="Line A")
+        line_b = mk_line(client, brand["id"], name="Line B")
+        mk_paint(client, line_a["id"], code="X1", name="In A")
+        p_b = mk_paint(client, line_b["id"], code="X1", name="In B").json()
+        r = client.patch(
+            f"/painting/paints/{p_b['id']}", json={"paint_line_id": line_a["id"]}
+        )
+        assert r.status_code == 409
+
+    def test_keeping_current_identity_ok(self, client, line):
+        p = mk_paint(client, line["id"], code="002", name="Black").json()
+        r = client.patch(f"/painting/paints/{p['id']}", json={"code": "002", "name": "Jet Black"})
+        assert r.status_code == 200
+        assert r.json()["name"] == "Jet Black"
+
+    def test_same_code_in_different_line_ok(self, client):
+        brand = mk_brand(client)
+        line_a = mk_line(client, brand["id"], name="Line A")
+        line_b = mk_line(client, brand["id"], name="Line B")
+        mk_paint(client, line_a["id"], code="002", name="A Black")
+        p_b = mk_paint(client, line_b["id"], code="999", name="B Black").json()
+        r = client.patch(f"/painting/paints/{p_b['id']}", json={"code": "002"})
+        assert r.status_code == 200
+
+
+class TestPaintCodeDbConstraint:
+    """The (paint_line_id, code) uniqueness barrier is enforced at the DB
+    level, not just the API (#442/#445)."""
+
+    def test_duplicate_line_code_raises_integrity_error(self, client, db):
+        from sqlalchemy.exc import IntegrityError
+        from app.painting.models import Paint
+
+        brand = mk_brand(client)
+        line = mk_line(client, brand["id"])
+        db.add(Paint(paint_line_id=line["id"], code="DUP", name="One", finish="matte"))
+        db.commit()
+        db.add(Paint(paint_line_id=line["id"], code="DUP", name="Two", finish="matte"))
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()

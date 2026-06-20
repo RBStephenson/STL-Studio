@@ -233,6 +233,23 @@ def update_paint(paint_id: int, body: PaintUpdate, db: Session = Depends(get_db)
         code = updates.get("code", paint.code)
         if (error := validate_code(code, line.code_pattern)) is not None:
             raise HTTPException(status_code=422, detail=error)
+        # Editing a code or moving the paint to another line must not collide
+        # with an existing (line, code) identity — the create path already
+        # guards this; the update path didn't (#445).
+        conflict = (
+            db.query(Paint)
+            .filter(
+                Paint.paint_line_id == line.id,
+                Paint.code == code,
+                Paint.id != paint.id,
+            )
+            .first()
+        )
+        if conflict is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Paint code '{code}' already exists in this line ({conflict.name})",
+            )
     for key, value in updates.items():
         setattr(paint, key, value)
     if "finish" in updates:

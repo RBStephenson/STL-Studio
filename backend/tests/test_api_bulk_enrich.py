@@ -1,7 +1,7 @@
 """Tests for PATCH /models/bulk/enrich (#429, #437)."""
 from unittest.mock import patch
 
-from app.models import GroupOverride
+from app.models import Creator, GroupOverride
 from tests.conftest import make_creator, make_model
 
 
@@ -79,6 +79,44 @@ class TestBulkEnrich:
         client.patch("/models/bulk/enrich", json={"ids": [a.id], "character": ""})
         db.refresh(a)
         assert a.character is None
+
+    def test_whitespace_only_creator_rejected(self, client, db):
+        """Regression (#439): a whitespace-only creator_name must 400 and
+        create no Creator row."""
+        _, a, _, _ = _setup(db)
+        before = db.query(Creator).count()
+        r = client.patch("/models/bulk/enrich", json={"ids": [a.id], "creator_name": "   "})
+        assert r.status_code == 400
+        assert db.query(Creator).count() == before
+
+    def test_creator_name_trimmed_before_resolution(self, client, db):
+        """Leading/trailing whitespace is stripped before lookup/creation, so a
+        padded name resolves to the existing creator rather than a new row."""
+        _, a, _, _ = _setup(db)
+        before = db.query(Creator).count()
+        r = client.patch(
+            "/models/bulk/enrich",
+            json={"ids": [a.id], "creator_name": "  Original Creator  "},
+        )
+        assert r.status_code == 200
+        assert db.query(Creator).count() == before  # no duplicate created
+        db.refresh(a)
+        detail = client.get(f"/models/{a.id}").json()
+        assert detail["creator"]["name"] == "Original Creator"
+
+    def test_differently_cased_creator_resolves_to_existing(self, client, db):
+        """Case-insensitive matching is preserved after trimming."""
+        _, a, _, _ = _setup(db)
+        before = db.query(Creator).count()
+        r = client.patch(
+            "/models/bulk/enrich",
+            json={"ids": [a.id], "creator_name": "ORIGINAL creator"},
+        )
+        assert r.status_code == 200
+        assert db.query(Creator).count() == before
+        db.refresh(a)
+        detail = client.get(f"/models/{a.id}").json()
+        assert detail["creator"]["name"] == "Original Creator"
 
     def test_route_not_matched_as_model_id(self, client, db):
         """Guard: /bulk/enrich must not be swallowed by /{model_id}/enrich."""

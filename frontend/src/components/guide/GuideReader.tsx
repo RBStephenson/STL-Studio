@@ -5,6 +5,7 @@ import {
 } from "../../api/client";
 import ThinningReference from "./ThinningReference";
 import { AirbrushSkills, BrushSkills } from "./SkillsTabs";
+import { sanitize, sanitizeUrl, sanitizeCss } from "../../lib/sanitizeHtml";
 import "./guide-reader.css";
 import "./guide-print.css"; // @media print: expands all tabs, applies print.css (#262)
 
@@ -107,7 +108,7 @@ function StepCard({ step, number }: { step: GuideStep; number: number }) {
     <div className="step">
       <span className={`step-number ${tag}`.trim()}>{numberText}</span>
       <h3>{step.title}</h3>
-      {step.body && <p dangerouslySetInnerHTML={{ __html: step.body }} />}
+      {step.body && <p dangerouslySetInnerHTML={{ __html: sanitize(step.body) }} />}
       {(step.swatches.length > 0 || step.mix_components.length > 0) && (
         <div className="swatches">
           {step.swatches.map((s) => <SwatchRow key={s.id} swatch={s} />)}
@@ -115,8 +116,8 @@ function StepCard({ step, number }: { step: GuideStep; number: number }) {
         </div>
       )}
       {step.ratio_box && <div className="ratio-box">{step.ratio_box}</div>}
-      {step.tip && <div className="tip" dangerouslySetInnerHTML={{ __html: step.tip }} />}
-      {step.warning && <div className="warning" dangerouslySetInnerHTML={{ __html: step.warning }} />}
+      {step.tip && <div className="tip" dangerouslySetInnerHTML={{ __html: sanitize(step.tip) }} />}
+      {step.warning && <div className="warning" dangerouslySetInnerHTML={{ __html: sanitize(step.warning) }} />}
     </div>
   );
 }
@@ -131,9 +132,9 @@ function Callouts({ callouts, kinds }: { callouts: TabCallout[]; kinds: TabCallo
         .filter((c) => kinds.includes(c.kind))
         .map((c, i) =>
           c.kind === "text" ? (
-            <p key={i} dangerouslySetInnerHTML={{ __html: c.html }} />
+            <p key={i} dangerouslySetInnerHTML={{ __html: sanitize(c.html) }} />
           ) : (
-            <div key={i} className={c.kind} dangerouslySetInnerHTML={{ __html: c.html }} />
+            <div key={i} className={c.kind} dangerouslySetInnerHTML={{ __html: sanitize(c.html) }} />
           ),
         )}
     </>
@@ -181,7 +182,7 @@ function MethodBlockView({ method }: { method: MethodBlock }) {
     <>
       <div className="phase-label">Method Selection</div>
       {method.recommendation && (
-        <div className="method-rec-block" dangerouslySetInnerHTML={{ __html: method.recommendation }} />
+        <div className="method-rec-block" dangerouslySetInnerHTML={{ __html: sanitize(method.recommendation) }} />
       )}
       {method.cards.length > 0 && (
         <div className="method-cards">
@@ -189,7 +190,7 @@ function MethodBlockView({ method }: { method: MethodBlock }) {
             <div className={card.recommended ? "method-card recommended" : "method-card"} key={i}>
               {card.badge && <span className="method-card-badge">{card.badge}</span>}
               <h4>{card.title}</h4>
-              {card.body && <p dangerouslySetInnerHTML={{ __html: card.body }} />}
+              {card.body && <p dangerouslySetInnerHTML={{ __html: sanitize(card.body) }} />}
               {card.pros && <span className="mc-pros">{card.pros}</span>}
               {card.cons && <span className="mc-cons">{card.cons}</span>}
               {card.best && <span className="mc-best">{card.best}</span>}
@@ -198,7 +199,7 @@ function MethodBlockView({ method }: { method: MethodBlock }) {
         </div>
       )}
       {method.freckle_note && (
-        <div className="freckle-note" dangerouslySetInnerHTML={{ __html: method.freckle_note }} />
+        <div className="freckle-note" dangerouslySetInnerHTML={{ __html: sanitize(method.freckle_note) }} />
       )}
     </>
   );
@@ -218,7 +219,7 @@ function TabPanel({
       {tab.section && (
         <div className="section-header">
           <h2>{tab.section.heading}</h2>
-          {tab.section.intro && <p dangerouslySetInnerHTML={{ __html: tab.section.intro }} />}
+          {tab.section.intro && <p dangerouslySetInnerHTML={{ __html: sanitize(tab.section.intro) }} />}
         </div>
       )}
       <Callouts callouts={callouts} kinds={["text"]} />
@@ -226,7 +227,7 @@ function TabPanel({
       {tab.method_block && <MethodBlockView method={tab.method_block} />}
       {(tab.raw_blocks ?? []).map((rb, i) => (
         // Verbatim unmodelled blocks (wargaming batch-stage / tier-card, #271).
-        <div key={i} dangerouslySetInnerHTML={{ __html: rb.html }} />
+        <div key={i} dangerouslySetInnerHTML={{ __html: sanitize(rb.html) }} />
       ))}
 
       {subtabs.length > 0 ? (
@@ -278,7 +279,10 @@ export default function GuideReader({ guide }: { guide: Guide }) {
   const brief = guide.character_brief?.philosophy;
   const pills = guide.paint_lines_used ?? [];
   const credit = guide.creator_credit;
-  const scopedHeadStyle = guide.head_style ? guide.head_style.replace(/:root/g, ".guide-reader") : "";
+  const scopedHeadStyle = guide.head_style
+    ? sanitizeCss(guide.head_style).replace(/:root/g, ".guide-reader")
+    : "";
+  const creditUrl = sanitizeUrl(credit?.url);
 
   return (
     <div className="guide-reader" style={themeVars(guide.theme)}>
@@ -296,11 +300,11 @@ export default function GuideReader({ guide }: { guide: Guide }) {
         {credit?.name && (
           <div className="creator-credit">
             Figure by <strong>{credit.name}</strong>
-            {credit.url && (
+            {creditUrl && (
               <>
                 {" · "}
-                <a href={credit.url} target="_blank" rel="noreferrer">
-                  {credit.link_text || credit.url}
+                <a href={creditUrl} target="_blank" rel="noreferrer">
+                  {credit.link_text || creditUrl}
                 </a>
               </>
             )}
@@ -322,7 +326,7 @@ export default function GuideReader({ guide }: { guide: Guide }) {
       )}
 
       <div className="container">
-        {brief && <div className="char-brief" dangerouslySetInnerHTML={{ __html: brief }} />}
+        {brief && <div className="char-brief" dangerouslySetInnerHTML={{ __html: sanitize(brief) }} />}
 
         {/* TAB NAV */}
         <div className="tabs" role="tablist">

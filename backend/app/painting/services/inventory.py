@@ -104,6 +104,7 @@ def parse_paintrack_csv(text: str) -> list[CsvRow]:
     width = len(header)
 
     rows: list[CsvRow] = []
+    seen_keys: dict[tuple[str, str, str], int] = {}  # identity -> first line seen
     for n, raw in enumerate(reader, start=2):
         if not raw or not any(cell.strip() for cell in raw):
             continue
@@ -120,9 +121,21 @@ def parse_paintrack_csv(text: str) -> list[CsvRow]:
             color = parse_color(raw[6]) if width == 7 else ""
         except ValueError as e:
             raise PaintRackFormatError(f"Line {n}: {e}")
-        rows.append(CsvRow(brand=brand, code=sku, name=name,
-                           paint_class=paint_class, size=size, count=count_n,
-                           color=color))
+        row = CsvRow(brand=brand, code=sku, name=name,
+                     paint_class=paint_class, size=size, count=count_n,
+                     color=color)
+        # Reject duplicate paint identities up front: applying them would
+        # double-insert (compute_diff emits each as added) or collapse onto
+        # one DB row, both of which break (line, code) uniqueness (#442).
+        if row.key in seen_keys:
+            ident = sku or f"name '{name}'"
+            raise PaintRackFormatError(
+                f"Line {n}: duplicate paint {ident} for {brand}"
+                f"{f' / {paint_class}' if paint_class else ''}"
+                f" — first seen on line {seen_keys[row.key]}"
+            )
+        seen_keys[row.key] = n
+        rows.append(row)
     return rows
 
 

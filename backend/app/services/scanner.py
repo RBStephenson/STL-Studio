@@ -1063,6 +1063,7 @@ def resolve_creator(name: str, db: Session) -> Creator:
     underscores are common in creator names ('My_Studio' would
     ilike-match 'MyXStudio') (#217).
     """
+    name = name.strip()
     creator = db.query(Creator).filter(func.lower(Creator.name) == name.lower()).first()
     if not creator:
         creator = Creator(name=name)
