@@ -9,7 +9,7 @@ JSON for list/dict columns, utcnow timestamps.
 """
 from sqlalchemy import (
     Column, Integer, String, Text, Float, DateTime, Boolean,
-    ForeignKey, JSON,
+    ForeignKey, JSON, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -45,6 +45,11 @@ class PaintLine(Base):
 class Paint(Base):
     """The inventory atom — one physical paint."""
     __tablename__ = "paints"
+    # A code is unique within its line; duplicate (line, code) identities make
+    # Paint Shelf lookup and PaintRack CSV sync ambiguous (#442/#445).
+    __table_args__ = (
+        UniqueConstraint("paint_line_id", "code", name="uq_paints_line_code"),
+    )
 
     id = Column(Integer, primary_key=True)
     paint_line_id = Column(Integer, ForeignKey("paint_lines.id"), nullable=False)

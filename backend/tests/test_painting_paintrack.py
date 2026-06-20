@@ -334,3 +334,37 @@ class TestExport:
         _import_all(client)
         exported = client.get("/painting/inventory/export.csv").text
         assert "Dirty Down,,Rust,,25 ml,1" in exported
+
+
+class TestDuplicateRejection:
+    """Duplicate paint identities in one CSV are rejected before preview/apply (#442)."""
+
+    def test_duplicate_sku_rejected_with_both_lines(self):
+        csv_text = "\n".join([
+            HEADER,
+            "Army Painter,WP3001,Matt Black,Warpaints Fanatic,18 ml,1",
+            "Army Painter,WP3001,Matt Black Again,Warpaints Fanatic,18 ml,1",
+        ]) + "\n"
+        with pytest.raises(inventory.PaintRackFormatError) as exc:
+            inventory.parse_paintrack_csv(csv_text)
+        msg = str(exc.value)
+        assert "WP3001" in msg
+        assert "line 2" in msg  # points back at the first occurrence
+
+    def test_duplicate_empty_sku_name_identity_rejected(self):
+        csv_text = "\n".join([
+            HEADER,
+            "Dirty Down,,Rust,,25 ml,1",
+            "Dirty Down,,Rust,,25 ml,2",
+        ]) + "\n"
+        with pytest.raises(inventory.PaintRackFormatError):
+            inventory.parse_paintrack_csv(csv_text)
+
+    def test_same_sku_different_line_is_not_duplicate(self):
+        csv_text = "\n".join([
+            HEADER,
+            "Army Painter,X1,Matt Black,Warpaints Fanatic,18 ml,1",
+            "Army Painter,X1,Other,Speedpaint,18 ml,1",  # different class/line
+        ]) + "\n"
+        rows = inventory.parse_paintrack_csv(csv_text)
+        assert len(rows) == 2
