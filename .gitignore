@@ -12,3 +12,7 @@ __pycache__/
 # Generated GitHub Wiki output (built by scripts/wiki/build_wiki.py)
 _wiki_build/
 AGENTS.md
+
+# Reorganize/import undo logs (written next to the DB; test artifacts)
+reorg_undo_*.log
+backend/reorg_undo_*.log
