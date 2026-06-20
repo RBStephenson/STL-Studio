@@ -187,6 +187,44 @@ class TestTemplateValidation:
         assert entry["proposed_dir"].endswith("Abe3D/Bust")
 
 
+class TestResolution:
+    def test_override_resolves_unclassifiable(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path, character=None)
+        base = client.get("/reorganize/preview").json()["entries"][0]
+        assert base["eligible"] is False and "character" in base["missing_fields"]
+
+        resp = client.post("/reorganize/preview", json={
+            "overrides": {str(m.id): {"character": "Harley"}},
+        })
+        assert resp.status_code == 200
+        entry = resp.json()["entries"][0]
+        assert entry["eligible"] is True
+        assert "character" not in entry["missing_fields"]
+        assert entry["proposed_dir"].endswith("Harley/Bust")
+
+    def test_suffix_breaks_a_collision(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        m1 = _model_with_file(db, tmp_path, title="Bust", filename="a.stl", subdir="v1")
+        m2 = _model_with_file(db, tmp_path, title="Bust", filename="b.stl", subdir="v2")
+        assert all(e["collision"] for e in client.get("/reorganize/preview").json()["entries"])
+
+        data = client.post("/reorganize/preview", json={
+            "overrides": {str(m2.id): {"suffix": "v2"}},
+        }).json()
+        by_id = {e["model_id"]: e for e in data["entries"]}
+        assert by_id[m1.id]["collision"] is False
+        assert by_id[m2.id]["collision"] is False
+        assert by_id[m2.id]["proposed_dir"].endswith("Bust v2")
+
+    def test_post_preview_persists_new_manifest(self, client, db, tmp_path):
+        from app.models import ReorganizeManifest
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path)
+        mid = client.post("/reorganize/preview", json={}).json()["manifest_id"]
+        assert db.query(ReorganizeManifest).filter_by(id=mid).first() is not None
+
+
 class TestStats:
     def test_stats_summary_counts(self, client, db, tmp_path):
         _root(db, tmp_path)

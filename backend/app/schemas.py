@@ -422,6 +422,25 @@ class ReorganizePreviewResponse(BaseModel):
 
 # --- Library reorganize, Phase 2a apply (#324) ----------------------------
 
+class ReorganizeOverride(BaseModel):
+    """User resolution for one flagged entry (Phase 2c). Any field left None
+    falls back to the model's metadata; suffix is appended to the title."""
+    creator: Optional[str] = None
+    character: Optional[str] = None
+    title: Optional[str] = None
+    suffix: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+class ReorganizePreviewRequest(BaseModel):
+    template: Optional[str] = None
+    root_id: Optional[int] = None
+    overrides: dict[int, ReorganizeOverride] = {}   # keyed by model_id
+
+    model_config = {"extra": "forbid"}
+
+
 class ReorganizeApplyRequest(BaseModel):
     manifest_id: str
     entry_ids: list[int]              # model_ids to apply (must be eligible)
