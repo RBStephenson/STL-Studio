@@ -113,6 +113,34 @@ class TestBrowseRootRestriction:
         assert resp.status_code == 403
 
 
+class TestIsUnderConfiguredRoot:
+    """Unit tests for the allowlist containment helper."""
+
+    def test_child_of_filesystem_root_is_allowed(self):
+        """Regression: a drive/filesystem root normpaths to a value that already
+        ends in a separator (e.g. 'F:\\' on Windows, '/' on Unix). Appending
+        os.sep doubled it, so every child of a drive root was wrongly rejected
+        and the folder picker couldn't descend past the drive."""
+        import os
+        from pathlib import Path
+        from app.routers.scan import _is_under_configured_root
+
+        root = Path(os.path.normpath(os.sep))  # filesystem root for this OS
+        child = root / "some_subfolder"
+
+        assert _is_under_configured_root(child, [root]) is True
+        assert _is_under_configured_root(root, [root]) is True
+
+    def test_sibling_prefix_is_not_matched(self):
+        """The fix must not over-match: 'C:/foobar' is not under 'C:/foo'."""
+        from pathlib import Path
+        from app.routers.scan import _is_under_configured_root
+
+        root = Path("/tmp/foo")
+        assert _is_under_configured_root(Path("/tmp/foobar"), [root]) is False
+        assert _is_under_configured_root(Path("/tmp/foo/bar"), [root]) is True
+
+
 class TestScanRoots:
     def test_add_root_defaults_to_creator_layout(self, client, tmp_path):
         resp = client.post("/scan/roots", json={"path": str(tmp_path)})

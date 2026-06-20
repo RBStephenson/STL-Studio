@@ -42,7 +42,10 @@ def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
     np = os.path.normpath(str(p))
     for root in roots:
         nr = os.path.normpath(str(root))
-        if np == nr or np.startswith(nr + os.sep):
+        # Drive roots (e.g. "F:\\") normpath to a value that already ends in a
+        # separator; appending os.sep would double it and break the prefix match
+        # for every child. Strip any trailing separator before joining.
+        if np == nr or np.startswith(nr.rstrip(os.sep) + os.sep):
             return True
     return False
 
