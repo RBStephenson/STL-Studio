@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Tag, Trash2, X, Check, Loader2, FolderOpen, EyeOff, AlertCircle } from "lucide-react";
+import { Tag, Trash2, X, Check, Loader2, FolderOpen, EyeOff, AlertCircle, Pencil } from "lucide-react";
 import { api, Collection } from "../api/client";
 import { useConfirm } from "../context/ConfirmContext";
 import { useToast } from "../context/ToastContext";
@@ -13,7 +13,7 @@ interface Props {
   collections: Collection[];
 }
 
-type Mode = "idle" | "add" | "remove" | "collection";
+type Mode = "idle" | "add" | "remove" | "collection" | "enrich";
 type Status = "idle" | "loading" | "success" | "error";
 
 function parseTags(raw: string): string[] {
@@ -32,11 +32,16 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
   const [colOpen, setColOpen] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
+  const [enrichCreator, setEnrichCreator] = useState("");
+  const [enrichCharacter, setEnrichCharacter] = useState("");
+  const [enrichTitle, setEnrichTitle] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const colInputRef = useRef<HTMLInputElement>(null);
+  const enrichCreatorRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (mode === "collection") { setColOpen(true); colInputRef.current?.focus(); }
+    else if (mode === "enrich") enrichCreatorRef.current?.focus();
     else if (mode !== "idle") inputRef.current?.focus();
   }, [mode]);
 
@@ -45,6 +50,9 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
     setTagInput("");
     setColSearch("");
     setColOpen(false);
+    setEnrichCreator("");
+    setEnrichCharacter("");
+    setEnrichTitle("");
     setStatus("idle");
     setMessage("");
   };
@@ -129,6 +137,27 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
     }
   };
 
+  const applyEnrich = async () => {
+    const fields: { creator_name?: string; character?: string; title?: string } = {};
+    if (enrichCreator.trim()) fields.creator_name = enrichCreator.trim();
+    if (enrichCharacter.trim()) fields.character = enrichCharacter.trim();
+    if (enrichTitle.trim()) fields.title = enrichTitle.trim();
+    if (Object.keys(fields).length === 0) return;
+
+    setStatus("loading");
+    try {
+      const res = await api.models.bulkEnrich(selectedIds, fields);
+      setStatus("success");
+      setMessage(`Updated ${res.updated} model${res.updated !== 1 ? "s" : ""}`);
+      onDone();
+      setTimeout(reset, 1800);
+    } catch {
+      setStatus("error");
+      setMessage("Failed — try again");
+      setTimeout(() => setStatus("idle"), 2500);
+    }
+  };
+
   const allSelected = selectedIds.length >= totalOnPage;
 
   return (
@@ -168,7 +197,7 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
         )}
 
         {/* Tag input area */}
-        {status === "idle" && mode !== "idle" && (
+        {status === "idle" && (mode === "add" || mode === "remove") && (
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <span className={`text-xs font-medium shrink-0 ${mode === "add" ? "text-green-400" : "text-red-400"}`}>
               {mode === "add" ? "Add:" : "Remove:"}
@@ -243,6 +272,48 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
           </div>
         )}
 
+        {/* Enrich panel */}
+        {status === "idle" && mode === "enrich" && (
+          <div className="flex items-center gap-2 flex-1 flex-wrap min-w-0">
+            <span className="text-xs font-medium text-indigo-400 shrink-0">Enrich:</span>
+            <input
+              ref={enrichCreatorRef}
+              type="text"
+              value={enrichCreator}
+              onChange={e => setEnrichCreator(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") applyEnrich(); if (e.key === "Escape") reset(); }}
+              placeholder="Creator"
+              className="w-32 bg-gray-800 border border-gray-600 rounded px-2.5 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+            />
+            <input
+              type="text"
+              value={enrichCharacter}
+              onChange={e => setEnrichCharacter(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") applyEnrich(); if (e.key === "Escape") reset(); }}
+              placeholder="Character"
+              className="w-32 bg-gray-800 border border-gray-600 rounded px-2.5 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+            />
+            <input
+              type="text"
+              value={enrichTitle}
+              onChange={e => setEnrichTitle(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") applyEnrich(); if (e.key === "Escape") reset(); }}
+              placeholder="Title"
+              className="w-40 bg-gray-800 border border-gray-600 rounded px-2.5 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+            />
+            <button
+              onClick={applyEnrich}
+              disabled={!enrichCreator.trim() && !enrichCharacter.trim() && !enrichTitle.trim()}
+              className="flex items-center gap-1 px-3 py-1 rounded text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 transition-colors shrink-0"
+            >
+              Apply
+            </button>
+            <button onClick={reset} className="text-gray-600 hover:text-gray-400 transition-colors shrink-0">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* Action buttons */}
         {status === "idle" && mode === "idle" && (
           <div className="flex flex-wrap items-center gap-2 ml-auto">
@@ -266,6 +337,13 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
             >
               <FolderOpen size={13} />
               Add to Collection
+            </button>
+            <button
+              onClick={() => setMode("enrich")}
+              className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+            >
+              <Pencil size={13} />
+              Enrich
             </button>
             <button
               onClick={markReview}

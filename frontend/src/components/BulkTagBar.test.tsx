@@ -9,6 +9,7 @@ vi.mock("../api/client", () => ({
       bulkTag: vi.fn(async () => ({ ok: true, updated: 2 })),
       bulkExclude: vi.fn(async () => ({ ok: true, updated: 2 })),
       bulkReview: vi.fn(async () => ({ ok: true, updated: 2 })),
+      bulkEnrich: vi.fn(async () => ({ ok: true, updated: 2 })),
     },
     collections: {
       bulkAddModels: vi.fn(async () => ({ ok: true })),
@@ -92,5 +93,62 @@ describe("BulkTagBar bulk actions (#164)", () => {
     fireEvent.change(screen.getByPlaceholderText("tag1, tag2, tag3…"), { target: { value: "foo, bar" } });
     fireEvent.click(screen.getByRole("button", { name: /apply/i }));
     await waitFor(() => expect(vi.mocked(api.models.bulkTag)).toHaveBeenCalledWith([1, 2], ["foo", "bar"], []));
+  });
+});
+
+describe("BulkTagBar enrich mode (#429)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows enrich button in idle mode", () => {
+    render(<BulkTagBar {...baseProps()} />);
+    expect(screen.getByRole("button", { name: /enrich/i })).toBeInTheDocument();
+  });
+
+  it("shows creator/character/title fields when enrich mode active", () => {
+    render(<BulkTagBar {...baseProps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
+    expect(screen.getByPlaceholderText("Creator")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Character")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Title")).toBeInTheDocument();
+  });
+
+  it("Apply is disabled when all fields empty", () => {
+    render(<BulkTagBar {...baseProps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
+    expect(screen.getByRole("button", { name: /apply/i })).toBeDisabled();
+  });
+
+  it("calls bulkEnrich with only filled fields", async () => {
+    render(<BulkTagBar {...baseProps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
+    fireEvent.change(screen.getByPlaceholderText("Creator"), { target: { value: "Some Creator" } });
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }));
+    await waitFor(() =>
+      expect(vi.mocked(api.models.bulkEnrich)).toHaveBeenCalledWith([1, 2], { creator_name: "Some Creator" })
+    );
+  });
+
+  it("calls bulkEnrich with all three fields when all provided", async () => {
+    render(<BulkTagBar {...baseProps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
+    fireEvent.change(screen.getByPlaceholderText("Creator"), { target: { value: "MC" } });
+    fireEvent.change(screen.getByPlaceholderText("Character"), { target: { value: "Orc" } });
+    fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "Big Pack" } });
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }));
+    await waitFor(() =>
+      expect(vi.mocked(api.models.bulkEnrich)).toHaveBeenCalledWith(
+        [1, 2],
+        { creator_name: "MC", character: "Orc", title: "Big Pack" }
+      )
+    );
+  });
+
+  it("resets to idle on Escape", () => {
+    render(<BulkTagBar {...baseProps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
+    fireEvent.keyDown(screen.getByPlaceholderText("Creator"), { key: "Escape" });
+    expect(screen.getByRole("button", { name: /enrich/i })).toBeInTheDocument();
   });
 });

@@ -5,9 +5,10 @@ import { api, DirListing } from "../api/client";
 interface Props {
   onSelect: (path: string) => void;
   onClose: () => void;
+  mode?: string; // passed to /scan/browse — "inbox" uses bootstrap allowlist
 }
 
-export default function FolderPicker({ onSelect, onClose }: Props) {
+export default function FolderPicker({ onSelect, onClose, mode }: Props) {
   const [listing, setListing] = useState<DirListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +17,7 @@ export default function FolderPicker({ onSelect, onClose }: Props) {
     setLoading(true);
     setError(null);
     api.scan
-      .browse(path)
+      .browse(path, mode)
       .then(setListing)
       .catch(() => setError("Can't open that folder (permission denied or unavailable)."))
       .finally(() => setLoading(false));

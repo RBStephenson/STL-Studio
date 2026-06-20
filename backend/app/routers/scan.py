@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ScanRoot, Creator
-from app.schemas import ScanStatus, ScanRootCreate, ScanRootUpdate
+from app.schemas import ScanStatus, ScanRootCreate, ScanRootUpdate, InboxScanRequest
 from app.services import scanner, layout
 from app.config import settings
 
@@ -31,7 +31,18 @@ def _configured_roots(db: Session) -> list[Path]:
 
 
 def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
-    return any(p.is_relative_to(root) for root in roots)
+    """True if ``p`` is lexically inside any allowed root.
+
+    Uses normpath (pure string math, no filesystem access) so the containment
+    check itself never touches disk — `..` segments are collapsed lexically,
+    which is sufficient for a local single-user app's allowlist guard.
+    """
+    np = os.path.normpath(str(p))
+    for root in roots:
+        nr = os.path.normpath(str(root))
+        if np == nr or np.startswith(nr + os.sep):
+            return True
+    return False
 
 
 # Safe top-level locations the first-run folder picker may browse before any
@@ -55,7 +66,7 @@ def _bootstrap_roots() -> list[Path]:
 
 
 @router.get("/browse")
-def browse_dirs(path: str = "", db: Session = Depends(get_db)):
+def browse_dirs(path: str = "", mode: str = "", db: Session = Depends(get_db)):
     """List sub-directories for the Settings folder picker.
 
     With no path: Windows returns available drive letters; other OSes start at
@@ -69,7 +80,10 @@ def browse_dirs(path: str = "", db: Session = Depends(get_db)):
     """
     system = platform.system()
     roots = _configured_roots(db)
-    allowlist = roots or _bootstrap_roots()
+    # Inbox mode: browse outside configured scan roots so the user can pick an
+    # arbitrary import folder. Uses the same bootstrap allowlist as the first-run
+    # picker, which is already considered a safe exposure boundary.
+    allowlist = _bootstrap_roots() if mode == "inbox" else (roots or _bootstrap_roots())
 
     # Top level — drive list on Windows, home dir elsewhere.
     if not path:
@@ -83,13 +97,18 @@ def browse_dirs(path: str = "", db: Session = Depends(get_db)):
             }
         path = str(Path.home())
 
-    p = Path(path)
-    if not p.exists() or not p.is_dir():
-        raise HTTPException(status_code=404, detail="Folder not found")
+    # Normalize lexically (collapses '..' without touching disk) before any
+    # filesystem access.
+    p = Path(os.path.normpath(path))
 
-    # Restrict browsing to the allowlist (configured roots, or bootstrap roots).
+    # Allowlist guard runs BEFORE any filesystem access: never stat or list a
+    # path outside the configured/bootstrap roots. Confining first keeps an
+    # out-of-allowlist path from ever reaching the filesystem calls below.
     if not _is_under_configured_root(p, allowlist):
         raise HTTPException(status_code=403, detail="Path is outside the allowed folders")
+
+    if not p.exists() or not p.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found")
 
     try:
         entries = sorted(
@@ -156,6 +175,76 @@ def cancel_scan():
         raise HTTPException(status_code=409, detail="No scan running")
     scanner.request_cancel()
     return {"ok": True}
+
+
+@router.post("/inbox", response_model=ScanStatus)
+def start_inbox_scan(body: InboxScanRequest, db: Session = Depends(get_db)):
+    """Index an arbitrary source folder as inbox models without adding it as a scan root.
+
+    The folder must exist and must not already be a configured scan root (those
+    are for permanent indexing; inbox is one-shot). Models are indexed with
+    is_inbox=True so they can be filtered, enriched (#429), and later reorganized (#324).
+    """
+    status = scanner.get_status()
+    if status["running"]:
+        raise HTTPException(status_code=409, detail="Scan already running")
+
+    path = body.path.strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="Path is required")
+    # Inbox import intentionally accepts an arbitrary folder the user selects
+    # (it is not confined to a scan root — that is the point of the feature).
+    # This is a local, single-user desktop app: the user is choosing their own
+    # folder. Normalize lexically (collapses '..' without touching disk).
+    norm = os.path.normpath(path)
+    p = Path(norm)
+    if not p.exists():
+        raise HTTPException(status_code=400, detail="Path does not exist")
+    if not p.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+
+    # Reject exact match, parent overlap, AND child overlap with any configured
+    # scan root. Lexical normpath comparison only (no filesystem access).
+    configured_norm: list[str] = [
+        os.path.normpath(r.path) for r in db.query(ScanRoot).all() if r.path
+    ]
+    configured_norm += [os.path.normpath(r) for r in settings.stl_root_list]
+    for root in configured_norm:
+        if (
+            norm == root
+            or norm.startswith(root + os.sep)
+            or root.startswith(norm + os.sep)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Path overlaps with a configured scan root — use a regular scan or choose a path outside the library",
+            )
+
+    # Acquire write lock synchronously so the HTTP response is authoritative:
+    # 200 means the scan is actually starting, not queued behind a lock the
+    # thread might silently fail to acquire.
+    if not scanner.prepare_inbox_scan():
+        raise HTTPException(
+            status_code=409,
+            detail="Library is busy — reorganize in progress, try again shortly",
+        )
+
+    # Pass the canonical, validated path across the worker boundary (not the raw
+    # request value). If the thread fails to launch, release the lock and reset
+    # state so a failed start doesn't wedge the library at running-forever.
+    try:
+        thread = threading.Thread(
+            target=scanner.scan_inbox_folder,
+            args=(str(p),),
+            kwargs={"_lock_already_held": True},
+            daemon=True,
+        )
+        thread.start()
+    except Exception as e:
+        scanner.abort_inbox_scan()
+        raise HTTPException(status_code=500, detail=f"Failed to start import: {e}")
+
+    return ScanStatus(running=True, message="importing")
 
 
 @router.get("/status", response_model=ScanStatus)

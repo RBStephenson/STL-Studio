@@ -11,7 +11,7 @@ from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
     ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl, FavoriteUpdate, RatingUpdate, QueueReorder, GroupReorder,
     PrintStatusUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate,
-    BulkExcludeUpdate, BulkReviewUpdate, SetGroupBody, BatchSetGroupBody,
+    BulkExcludeUpdate, BulkReviewUpdate, BulkEnrichUpdate, SetGroupBody, BatchSetGroupBody,
     GroupRepUpdate,
 )
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail, fetch_image_bytes, store_thumbnail
@@ -36,6 +36,7 @@ def _apply_filters(
     exclude_tag: str | None = None,
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
+    is_inbox: bool | None = None,
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
@@ -81,6 +82,8 @@ def _apply_filters(
         q = q.filter((Model.thumbnail_path == None) & (Model.thumbnail_url == None))
     if needs_review is not None:
         q = q.filter(Model.needs_review == needs_review)
+    if is_inbox is not None:
+        q = q.filter(Model.is_inbox == is_inbox)
     if nsfw is not None:
         q = q.filter(Model.nsfw == nsfw)
     if is_favorite is not None:
@@ -241,6 +244,7 @@ def list_models(
     exclude_tag: str | None = None,
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
+    is_inbox: bool | None = None,
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
@@ -256,7 +260,7 @@ def list_models(
         db.query(Model),
         search=search, creator_id=creator_id, exclude_creator_id=exclude_creator_id,
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
-        has_thumbnail=has_thumbnail, needs_review=needs_review,
+        has_thumbnail=has_thumbnail, needs_review=needs_review, is_inbox=is_inbox,
         nsfw=nsfw, is_favorite=is_favorite,
         print_status=print_status, exclude_printed=exclude_printed, min_rating=min_rating,
         excluded=excluded, added_within_days=added_within_days,
@@ -583,6 +587,29 @@ def bulk_review_models(body: BulkReviewUpdate, db: Session = Depends(get_db)):
     models_to_update = db.query(Model).filter(Model.id.in_(body.ids)).all()
     for model in models_to_update:
         model.needs_review = body.needs_review
+        model.updated_at = utcnow()
+    db.commit()
+    return {"ok": True, "updated": len(models_to_update)}
+
+
+@router.patch("/bulk/enrich")
+def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
+    """Set creator, character, and/or title across multiple models in one request.
+    Any field omitted from the payload is left unchanged on each model."""
+    if not body.ids:
+        raise HTTPException(status_code=400, detail="No model IDs provided")
+    if not any([body.creator_name, body.character is not None, body.title is not None]):
+        raise HTTPException(status_code=400, detail="At least one field to update must be provided")
+
+    creator_id = resolve_creator(body.creator_name, db).id if body.creator_name else None
+    models_to_update = db.query(Model).filter(Model.id.in_(body.ids)).all()
+    for model in models_to_update:
+        if creator_id is not None:
+            model.creator_id = creator_id
+        if body.character is not None:
+            model.character = body.character.strip() or None
+        if body.title is not None:
+            model.title = body.title.strip() or None
         model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "updated": len(models_to_update)}
@@ -1039,6 +1066,7 @@ def get_neighbors(
     exclude_tag: str | None = None,
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
+    is_inbox: bool | None = None,
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
@@ -1059,7 +1087,7 @@ def get_neighbors(
         db.query(Model),
         search=search, creator_id=creator_id, exclude_creator_id=exclude_creator_id,
         source_site=source_site, tag=tag, exclude_tag=exclude_tag,
-        has_thumbnail=has_thumbnail, needs_review=needs_review,
+        has_thumbnail=has_thumbnail, needs_review=needs_review, is_inbox=is_inbox,
         nsfw=nsfw, is_favorite=is_favorite,
         print_status=print_status, exclude_printed=exclude_printed, min_rating=min_rating,
         excluded=excluded, added_within_days=added_within_days,

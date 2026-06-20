@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Box, FolderOpen, Users, LayoutGrid, EyeOff, Eye, AlertTriangle, Settings, Printer, HelpCircle, Paintbrush, Palette, Tag } from "lucide-react";
+import { Box, FolderOpen, Users, LayoutGrid, EyeOff, Eye, AlertTriangle, Settings, Printer, HelpCircle, Paintbrush, Palette, Tag, Inbox } from "lucide-react";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { api } from "../api/client";
@@ -25,6 +25,7 @@ export default function Navbar() {
     { to: "/collections", label: "Collections", icon: FolderOpen,    badge: null },
     { to: "/queue",       label: "Queue",       icon: Printer,       badge: queueCount },
     { to: "/triage",      label: "Triage",      icon: AlertTriangle, badge: reviewCount },
+    { to: "/import",      label: "Import",      icon: Inbox,         badge: null },
     ...(appSettings.painting_guides_enabled ? [
       { to: "/painting/guides", label: "Guides",      icon: Paintbrush, badge: null },
       { to: "/painting/shelf",  label: "Paint Shelf", icon: Palette,    badge: null },

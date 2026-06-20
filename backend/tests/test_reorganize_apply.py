@@ -95,6 +95,66 @@ class TestApplyHappyPath:
         assert len(lines) == 1 and lines[0]["status"] == "done"
 
 
+class TestInboxEndToEnd:
+    """#428: an inbox model (outside every scan root) must be eligible in preview,
+    move into the managed library on apply (clearing is_inbox), and return to its
+    inbox source on undo (restoring is_inbox)."""
+
+    def test_inbox_preview_apply_undo(self, client, db, tmp_path, write_mode):
+        from app.models import Creator, ScanRoot
+
+        # Managed library = the destination scan root.
+        lib = tmp_path / "library"
+        lib.mkdir()
+        db.add(ScanRoot(path=str(lib).replace("\\", "/"), enabled=True))
+        db.commit()
+
+        # Inbox model lives OUTSIDE the scan root.
+        inbox = tmp_path / "loose" / "Bust"
+        inbox.mkdir(parents=True)
+        src_file = inbox / "head.stl"
+        src_file.write_bytes(b"solid\nendsolid\n")
+        src_str = str(src_file).replace("\\", "/")
+        inbox_str = str(inbox).replace("\\", "/")
+
+        creator = make_creator(db, name="Abe3D")
+        m = make_model(db, creator, name="Bust", character="Joker")
+        m.folder_path = inbox_str
+        m.title = "Bust"
+        m.is_inbox = True
+        db.commit()
+        make_stl_file(db, m, filename="head.stl", path=src_str)
+        db.commit()
+
+        # Preview: inbox model is eligible and anchored under the library root.
+        preview = _preview(client)
+        entry = next(e for e in preview["entries"] if e["model_id"] == m.id)
+        assert entry["eligible"] is True
+        assert entry["escapes_scan_root"] is False
+        assert entry["proposed_dir"].startswith(str(lib).replace("\\", "/"))
+        mid = preview["manifest_id"]
+        dest_file = entry["files"][0]["proposed_path"]
+
+        # Apply: file moves into the library; is_inbox cleared.
+        resp = client.post("/reorganize/apply",
+                           json={"manifest_id": mid, "entry_ids": [m.id]})
+        assert resp.status_code == 200, resp.text
+        assert os.path.exists(dest_file)
+        assert not os.path.exists(src_str)
+        db.refresh(m)
+        assert m.folder_path == entry["proposed_dir"]
+        assert m.is_inbox is False
+
+        # Undo: file returns to the inbox source; is_inbox restored.
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid})
+        assert resp.status_code == 200, resp.text
+        assert os.path.exists(src_str)
+        assert not os.path.exists(dest_file)
+        db.refresh(m)
+        assert m.folder_path == inbox_str
+        assert m.is_inbox is True
+
+
 class TestDrift:
     def test_aborts_when_source_changed(self, client, db, tmp_path, write_mode):
         _root(db, tmp_path)

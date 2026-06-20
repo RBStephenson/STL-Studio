@@ -154,6 +154,21 @@ def build_manifest(
         roots_q = roots_q.filter(ScanRoot.id == root_id)
     root_keys = [(_canon(r.path), _key(r.path)) for r in roots_q.all() if r.path]
 
+    # Managed destination root for inbox models: they live outside every scan
+    # root, so they can't anchor their proposed path to a containing root the way
+    # in-library models do. Anchor them at the primary (first enabled) scan root
+    # — that is the managed library they get moved into. None when no roots exist
+    # (then inbox models stay ineligible: nowhere to move them).
+    dest_root = None
+    primary = (
+        db.query(ScanRoot)
+        .filter(ScanRoot.enabled == True)  # noqa: E712
+        .order_by(ScanRoot.id)
+        .first()
+    )
+    if primary and primary.path:
+        dest_root = _canon(primary.path)
+
     pack_paths = [_canon(p) for (p,) in db.query(PackOverride.path).all() if p]
     group_paths = [_canon(p) for (p,) in db.query(GroupOverride.path).all() if p]
 
@@ -175,7 +190,7 @@ def build_manifest(
     entries: list[Entry] = []
     for m in models:
         entries.append(_build_entry(m, segments, root_keys, pack_paths, group_paths,
-                                    overrides.get(m.id)))
+                                    overrides.get(m.id), dest_root))
 
     _detect_collisions(entries)
     _detect_overlaps(entries)
@@ -189,6 +204,7 @@ def _build_entry(
     pack_paths: list[str],
     group_paths: list[str],
     override: dict | None = None,
+    dest_root: str | None = None,
 ) -> Entry:
     # User resolutions (Phase 2c) take precedence over model metadata and clear
     # the corresponding 'missing' flag.
@@ -233,10 +249,15 @@ def _build_entry(
     cur_key = _key(m.folder_path or "")
     scan_root = _scan_root_for(cur_key, root_keys)
 
-    # Destination is anchored at the model's scan root; if we can't place it under
-    # a known root we still render a relative proposal but flag the escape.
-    if scan_root:
-        proposed_dir = _canon(scan_root + "/" + "/".join(safe_parts))
+    # Inbox models live outside every scan root, so they anchor at the managed
+    # destination root rather than a containing root. In-library models anchor at
+    # the scan root that contains them (current behaviour).
+    anchor = dest_root if m.is_inbox else scan_root
+
+    # Destination is anchored at the resolved root; if we can't place it under a
+    # known root we still render a relative proposal but flag the escape.
+    if anchor:
+        proposed_dir = _canon(anchor + "/" + "/".join(safe_parts))
     else:
         proposed_dir = _canon("/".join(safe_parts))
 
@@ -268,12 +289,18 @@ def _build_entry(
     pack_refs = [p for p in pack_paths if _key(p) == cur_key or _key(p).startswith(cur_key + "/")]
     group_refs = [p for p in group_paths if _key(p) == cur_key or _key(p).startswith(cur_key + "/")]
 
-    escapes = scan_root is None and len(root_keys) > 0
-    # Even with a root, a literal-only template or '..'-laden value could escape;
-    # re-check the assembled destination stays under the root.
-    if scan_root is not None:
-        if not (_key(proposed_dir) == _key(scan_root)
-                or _key(proposed_dir).startswith(_key(scan_root) + "/")):
+    # Escape = no anchor root to place the model under. For in-library models that
+    # means it sits outside every scan root; for inbox models it means there is no
+    # managed destination root configured to move it into.
+    if m.is_inbox:
+        escapes = anchor is None
+    else:
+        escapes = scan_root is None and len(root_keys) > 0
+    # Even with an anchor, a literal-only template or '..'-laden value could
+    # escape; re-check the assembled destination stays under the anchor root.
+    if anchor is not None:
+        if not (_key(proposed_dir) == _key(anchor)
+                or _key(proposed_dir).startswith(_key(anchor) + "/")):
             escapes = True
 
     kind = _classify_kind(current_dir, proposed_dir)

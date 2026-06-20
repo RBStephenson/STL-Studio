@@ -63,6 +63,7 @@ def _migrate_schema():
         ("models", "removed_auto_tags", "JSON DEFAULT '[]'"),
         ("models", "image_manifest", "JSON"),
         ("models", "image_manifest_sig", "TEXT"),
+        ("models", "is_inbox", "BOOLEAN NOT NULL DEFAULT 0"),
     ]
     with engine.connect() as conn:
         table_cols: dict[str, set[str]] = {}

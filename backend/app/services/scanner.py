@@ -682,6 +682,7 @@ def _walk_for_models(
     last_scanned: datetime | None,
     parent_names: list[str] | None = None,
     layout_tags: list[str] | None = None,
+    is_inbox: bool = False,
 ):
     if not folder.is_dir():
         return
@@ -727,7 +728,7 @@ def _walk_for_models(
     if not is_creator_root and signals.is_product and has_any_stls:
         _index_model(folder, creator, db, creator_boundary, character,
                      stl_cache, auto_signals=signals, last_scanned=last_scanned,
-                     layout_tags=layout_tags)
+                     layout_tags=layout_tags, is_inbox=is_inbox)
         return
 
     # --- Step 2: has STLs + children look like parts ---
@@ -736,14 +737,14 @@ def _walk_for_models(
         if has_direct_stls and name_parser.children_look_like_parts(child_names):
             _index_model(folder, creator, db, creator_boundary, character,
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
-                         layout_tags=layout_tags)
+                         layout_tags=layout_tags, is_inbox=is_inbox)
             return
 
         # --- Step 3: deepest fallback — STLs here, nothing below ---
         if has_direct_stls and not any_child_stls:
             _index_model(folder, creator, db, creator_boundary, character,
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
-                         layout_tags=layout_tags)
+                         layout_tags=layout_tags, is_inbox=is_inbox)
             return
 
     # Not a leaf — recurse. Decide the variant-grouping "character" for each child by
@@ -816,7 +817,7 @@ def _walk_for_models(
         _walk_for_models(child, creator, db, creator_boundary,
                          character=child_character, parent_names=next_parents,
                          stl_cache=stl_cache, last_scanned=last_scanned,
-                         layout_tags=layout_tags)
+                         layout_tags=layout_tags, is_inbox=is_inbox)
 
 
 def _index_model(
@@ -829,6 +830,7 @@ def _index_model(
     auto_signals: name_parser.NameSignals | None = None,
     last_scanned: datetime | None = None,
     layout_tags: list[str] | None = None,
+    is_inbox: bool = False,
 ):
     folder_path = str(folder)
 
@@ -894,6 +896,9 @@ def _index_model(
                                 stl_cache=stl_cache)
 
             _index_stl_files(model, folder, db)
+
+        if is_inbox:
+            model.is_inbox = True
 
         model.updated_at = utcnow()
         sync_model_tags(model, db)
@@ -1064,3 +1069,128 @@ def resolve_creator(name: str, db: Session) -> Creator:
         db.add(creator)
         db.flush()
     return creator
+
+
+def prepare_inbox_scan() -> bool:
+    """Synchronously acquire write lock and mark scan state running.
+
+    Returns True if the lock was acquired and state set; False if the library is
+    busy. Call this in the request thread before starting the inbox daemon thread
+    so the HTTP response is authoritative: a 200 means the scan is actually
+    starting, not just queued behind a lock the thread might fail to acquire.
+    """
+    global _cancel_requested
+    if not write_lock.try_acquire_for_scan():
+        return False
+    _cancel_requested = False
+    with _state_lock:
+        _scan_state.update(running=True, message="importing", models_found=0, files_found=0, cancelled=False)
+    return True
+
+
+def abort_inbox_scan(message: str = "error: failed to start") -> None:
+    """Release the write lock and clear running state after prepare_inbox_scan()
+    succeeded but the worker thread failed to launch. Without this, a failed
+    thread.start() would leave the lock held and state stuck at running."""
+    with _state_lock:
+        _scan_state["running"] = False
+        _scan_state["message"] = message
+    write_lock.release_scan()
+
+
+def scan_inbox_folder(
+    path: str, db: Session | None = None, _lock_already_held: bool = False
+) -> None:
+    """Index an arbitrary folder as inbox models without adding it as a scan root.
+
+    Approach B: each immediate subdirectory that contains STL files is treated
+    as a creator-level boundary (mirrors how a scan root walks creator folders).
+    If the inbox root itself has direct STL files (flat layout), a single
+    '_Inbox' creator is used instead. All indexed models get is_inbox=True.
+
+    Runs synchronously — callers launch this in a daemon thread.
+    Pass _lock_already_held=True when the caller has already acquired the write
+    lock via prepare_inbox_scan() to avoid a double-acquire.
+    """
+    global _cancel_requested
+    if not _lock_already_held:
+        if not write_lock.try_acquire_for_scan():
+            logger.warning("Inbox scan skipped: library write lock is held")
+            return
+        _cancel_requested = False
+        with _state_lock:
+            _scan_state.update(running=True, message="importing", models_found=0, files_found=0, cancelled=False)
+    try:
+        own_db = db is None
+        _db = db or SessionLocal()
+        try:
+            inbox = Path(path)
+            _load_pack_overrides(_db)
+            _load_group_overrides(_db)
+            _load_scan_rules(_db)
+
+            if _has_stls(inbox, recurse=False):
+                # Flat layout: inbox root itself is the model (STLs directly inside)
+                creator = resolve_creator("_Inbox", _db)
+                _db.commit()
+                with _state_lock:
+                    _scan_state["message"] = "importing _Inbox"
+                _index_model(
+                    folder=inbox,
+                    creator=creator,
+                    db=_db,
+                    creator_boundary=None,
+                    character=None,
+                    stl_cache={},
+                    is_inbox=True,
+                )
+            else:
+                # Creator-structure layout: each immediate subdir with STLs is a creator
+                child_dirs = [d for d in sorted(inbox.iterdir()) if d.is_dir()]
+                creator_ids: dict[str, int] = {}
+                for child in child_dirs:
+                    if _has_stls(child, recurse=True):
+                        creator = _get_or_create_creator(child.name, _db)
+                        creator_ids[str(child)] = creator.id
+                _db.commit()
+
+                for child in child_dirs:
+                    if _cancel_requested:
+                        with _state_lock:
+                            _scan_state["message"] = "cancelled"
+                            _scan_state["cancelled"] = True
+                        break
+                    if str(child) not in creator_ids:
+                        continue
+                    with _state_lock:
+                        _scan_state["message"] = f"importing {child.name}"
+                    creator = _db.get(Creator, creator_ids[str(child)])
+                    _walk_for_models(
+                        folder=child,
+                        creator=creator,
+                        db=_db,
+                        creator_boundary=child,
+                        character=None,
+                        stl_cache={},
+                        last_scanned=None,
+                        is_inbox=True,
+                    )
+
+            if not _cancel_requested:
+                _prune_phantoms(_db)
+                with _state_lock:
+                    _scan_state["message"] = (
+                        f"done — {_scan_state['models_found']} models, "
+                        f"{_scan_state['files_found']} files"
+                    )
+        finally:
+            if own_db:
+                _db.close()
+    except Exception as e:
+        logger.exception(f"Inbox scan failed: {e}")
+        with _state_lock:
+            _scan_state["message"] = f"error: {e}"
+    finally:
+        with _state_lock:
+            _scan_state["running"] = False
+        write_lock.release_scan()
