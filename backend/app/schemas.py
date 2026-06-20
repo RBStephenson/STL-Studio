@@ -367,6 +367,9 @@ class ReorganizeFileMove(BaseModel):
     mtime_ns: int
     content_hash: Optional[str] = None
     fingerprint_method: FingerprintMethod
+    # Source absent/unreadable at preview — (size, mtime) are a zeroed sentinel,
+    # not a usable fingerprint for the Phase 2 drift check.
+    missing_file: bool = False
 
 
 class ReorganizeEntry(BaseModel):
@@ -393,6 +396,7 @@ class ReorganizeEntry(BaseModel):
     spans_multiple_dirs: bool
     is_symlink: bool
     escapes_scan_root: bool
+    missing_files_on_disk: bool = False
 
 
 class ReorganizeStats(BaseModel):

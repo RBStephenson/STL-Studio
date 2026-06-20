@@ -68,6 +68,10 @@ class FileMove:
     mtime_ns: int
     content_hash: str | None
     fingerprint_method: str
+    # Source file unreadable/absent at preview time. A zeroed (size, mtime) is
+    # then a sentinel, not a real fingerprint — Phase 2's drift check can't
+    # distinguish "gone" from "matches" without this flag, so the move is unsafe.
+    missing_file: bool
 
 
 @dataclass
@@ -91,6 +95,7 @@ class Entry:
     spans_multiple_dirs: bool
     is_symlink: bool
     escapes_scan_root: bool
+    missing_files_on_disk: bool
 
 
 @dataclass
@@ -112,14 +117,18 @@ def _scan_root_for(model_dir_key: str, root_keys: list[tuple[str, str]]) -> str 
     return None
 
 
-def _stat_file(path: str) -> tuple[int, int, bool]:
-    """Return (size_bytes, mtime_ns, is_symlink). Missing/unreadable → zeros."""
+def _stat_file(path: str) -> tuple[int, int, bool, bool]:
+    """Return (size_bytes, mtime_ns, is_symlink, missing).
+
+    On a missing/unreadable source the (size, mtime) are zeroed *and* missing is
+    True, so callers don't mistake the sentinel for a real fingerprint.
+    """
     try:
         is_link = os.path.islink(path)
         st = os.stat(path)
-        return st.st_size, st.st_mtime_ns, is_link
+        return st.st_size, st.st_mtime_ns, is_link, False
     except OSError:
-        return 0, 0, False
+        return 0, 0, False, True
 
 
 def build_manifest(
@@ -216,9 +225,11 @@ def _build_entry(
     files: list[FileMove] = []
     src_dirs: set[str] = set()
     is_symlink = False
+    missing_files_on_disk = False
     for f in m.stl_files:
-        size, mtime_ns, link = _stat_file(f.path)
+        size, mtime_ns, link, is_missing = _stat_file(f.path)
         is_symlink = is_symlink or link
+        missing_files_on_disk = missing_files_on_disk or is_missing
         src_dirs.add(_key(_parent(f.path)))
         files.append(FileMove(
             stl_file_id=f.id,
@@ -228,6 +239,7 @@ def _build_entry(
             mtime_ns=mtime_ns,
             content_hash=None,
             fingerprint_method="stat",
+            missing_file=is_missing,
         ))
     spans_multiple_dirs = len(src_dirs) > 1
 
@@ -248,7 +260,7 @@ def _build_entry(
     unclassifiable = bool(missing)
     eligible = not (
         unclassifiable or over_len or reserved or is_symlink
-        or spans_multiple_dirs or escapes
+        or spans_multiple_dirs or escapes or missing_files_on_disk
     )
 
     return Entry(
@@ -271,6 +283,7 @@ def _build_entry(
         spans_multiple_dirs=spans_multiple_dirs,
         is_symlink=is_symlink,
         escapes_scan_root=escapes,
+        missing_files_on_disk=missing_files_on_disk,
     )
 
 

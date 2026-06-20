@@ -47,6 +47,7 @@ function blockerChips(e: ReorganizeEntry): string[] {
   if (e.spans_multiple_dirs) chips.push("multi-dir");
   if (e.is_symlink) chips.push("symlink");
   if (e.escapes_scan_root) chips.push("escapes root");
+  if (e.missing_files_on_disk) chips.push("missing files");
   return chips;
 }
 

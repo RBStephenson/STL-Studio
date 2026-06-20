@@ -39,6 +39,7 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
                 mtime_ns=f.mtime_ns,
                 content_hash=f.content_hash,
                 fingerprint_method=f.fingerprint_method,
+                missing_file=f.missing_file,
             )
             for f in e.files
         ],
@@ -58,6 +59,7 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
         spans_multiple_dirs=e.spans_multiple_dirs,
         is_symlink=e.is_symlink,
         escapes_scan_root=e.escapes_scan_root,
+        missing_files_on_disk=e.missing_files_on_disk,
     )
 
 

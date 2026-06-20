@@ -154,6 +154,23 @@ class TestSpansMultipleDirs:
         assert entry["eligible"] is False
 
 
+class TestMissingFile:
+    def test_absent_source_file_flagged_and_ineligible(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path, filename="head.stl")
+        # Delete the file on disk after indexing — simulates a source that has
+        # gone missing by preview time.
+        (tmp_path / "Abe3D" / "Joker" / "Bust" / "head.stl").unlink()
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        assert entry["files"][0]["missing_file"] is True
+        # Zeroed sentinel, not a real fingerprint.
+        assert entry["files"][0]["size_bytes"] == 0
+        assert entry["files"][0]["mtime_ns"] == 0
+        assert entry["missing_files_on_disk"] is True
+        assert entry["eligible"] is False
+
+
 class TestTemplateValidation:
     def test_malformed_template_returns_400(self, client, db, tmp_path):
         _root(db, tmp_path)

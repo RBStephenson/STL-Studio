@@ -592,6 +592,7 @@ export interface ReorganizeFileMove {
   mtime_ns: number;
   content_hash: string | null;
   fingerprint_method: "stat" | "content_hash";
+  missing_file: boolean;
 }
 
 export interface ReorganizeEntry {
@@ -614,6 +615,7 @@ export interface ReorganizeEntry {
   spans_multiple_dirs: boolean;
   is_symlink: boolean;
   escapes_scan_root: boolean;
+  missing_files_on_disk: boolean;
 }
 
 export interface ReorganizeStats {
