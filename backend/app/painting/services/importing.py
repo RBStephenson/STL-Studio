@@ -27,6 +27,9 @@ from bs4 import BeautifulSoup, Tag
 from sqlalchemy.orm import Session
 
 from app.painting.models import Paint, PaintBrand, PaintLine
+from app.painting.services.sanitize import (
+    sanitize_css, sanitize_html, sanitize_url,
+)
 
 # Tabs whose bodies skills-reference.js builds at runtime — not guide data, so
 # the importer skips them (mirrors the exporter emitting placeholders).
@@ -219,10 +222,16 @@ def _txt(node: Optional[Tag]) -> str:
 
 
 def _inner_html(node: Optional[Tag]) -> str:
-    """Concatenated inner HTML of a node (preserves authored <strong>/<em>/<a>)."""
+    """Concatenated inner HTML of a node, sanitized (#440).
+
+    Preserves authored <strong>/<em>/<a> but strips scripts, event handlers,
+    unsafe URLs, and inline styles before the value can reach the Guide
+    Reader's dangerouslySetInnerHTML sinks.
+    """
     if node is None:
         return ""
-    return "".join(str(c) for c in node.children).strip()
+    raw = "".join(str(c) for c in node.children).strip()
+    return sanitize_html(raw)
 
 
 def _bg_color(style: Optional[str]) -> Optional[str]:
@@ -554,7 +563,7 @@ def _parse_raw_blocks(content: Tag) -> list[dict]:
         classes = set(_classes(child))
         if classes.isdisjoint(_KNOWN_TAB_CHILD):
             css = sorted(classes)[0] if classes else child.name
-            out.append({"css_class": css, "html": str(child)})
+            out.append({"css_class": css, "html": sanitize_html(str(child))})
     return out
 
 
@@ -569,7 +578,9 @@ def _parse_creator_credit(node: Tag) -> Optional[dict]:
     if strong is not None:
         credit["name"] = _txt(strong)
     if a is not None:
-        credit["url"] = a.get("href")
+        url = sanitize_url(a.get("href"))
+        if url is not None:
+            credit["url"] = url
         credit["link_text"] = _txt(a)
     return credit
 
@@ -621,7 +632,9 @@ def import_guide_html(html: str, *, slug: str,
 
     style = soup.find("style")
     if style is not None and style.string:
-        draft["head_style"] = style.string.strip()
+        head_style = sanitize_css(style.string.strip())
+        if head_style:
+            draft["head_style"] = head_style
 
     pills = []
     for pill in soup.select(".paint-bar .paint-pill"):
