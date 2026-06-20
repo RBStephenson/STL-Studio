@@ -166,17 +166,18 @@ hide-printed filter with variant grouping preserved.
 
 ---
 
-## v0.11 — Library reorganize 🚧 In progress
+## v0.11 — Library reorganize ✅ Complete
 
 The opt-in, preview-first **reorganize / normalize-on-disk** epic (standalone-only —
-Docker mounts are read-only). Ships in two phases against a persisted, identified
-manifest so the apply step can verify non-drift rather than blindly recompute.
+Docker mounts are read-only). Built against a persisted, identified manifest so the
+apply step executes and verifies the *approved* plan rather than blindly recomputing.
+Shipped in **v0.11.0**.
 
 | Issue | Item |
 |-------|------|
-| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize / normalize the library on disk** — umbrella: preview → apply with manifest/undo |
-| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Phase 1 — preview-only manifest** ([PR #426](https://github.com/RBStephenson/STL-Inventory/pull/426)) — per-file move sets, real `(size, mtime)` fingerprints, sanitization/collision/escape/override-reference flags; no files moved |
-| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Phase 2 — apply, undo, conflict resolution** (2a/2b/2c) — execute the approved manifest with per-file drift verification + abort-on-drift, write-mode guard, and an undo log |
+| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize / normalize the library on disk** — umbrella: preview → resolve → apply with undo |
+| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Phase 1 — preview manifest** ([#426](https://github.com/RBStephenson/STL-Inventory/pull/426)) — per-file move sets, real `(size, mtime)` fingerprints, sanitization/collision/escape/override-reference flags; no files moved |
+| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Phase 2 — apply, undo, resolution** — 2a apply ([#431](https://github.com/RBStephenson/STL-Inventory/pull/431): drift abort, EXDEV-safe move, crash-safe undo log, scan-root confinement), 2b undo ([#432](https://github.com/RBStephenson/STL-Inventory/pull/432): idempotent reverse with verify-before-revert), 2c resolution + wired apply/undo UI ([#433](https://github.com/RBStephenson/STL-Inventory/pull/433)) |
 
 ---
 

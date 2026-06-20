@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Tag, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Tag, FolderSync, type LucideIcon,
 } from "lucide-react";
 
 /** A keyboard key, styled like the hints elsewhere in the app. */
@@ -572,6 +572,61 @@ const SECTIONS: Section[] = [
         folder. This is also where standalone users point the app at their drives for the
         first time, and it's home to <strong>Data Management</strong> (below).
       </p>
+    ),
+  },
+  {
+    id: "reorganize",
+    title: "Reorganize library",
+    icon: FolderSync,
+    body: (
+      <>
+        <p>
+          <strong>Settings → Library Tools → Reorganize Library</strong> (or navigate
+          to <code>/reorganize</code>) tidies your files on disk to match a folder
+          template — by default <code>{"{creator}/{character}/{title}"}</code>.
+        </p>
+        <p className="font-medium text-gray-200">How it works</p>
+        <ul>
+          <li>
+            <strong>Preview first.</strong> The page shows a per-model plan: which
+            files would move, where, and what kind of operation it is (move, rename,
+            case rename, or already in place). No files are touched yet.
+          </li>
+          <li>
+            <strong>Resolve flagged rows.</strong> Rows marked{" "}
+            <em>unclassifiable</em> (missing creator, character, or title),{" "}
+            <em>collision</em>, <em>over-length</em>, or <em>reserved name</em> are
+            ineligible to apply. Click the row to expand it and fill in the{" "}
+            <strong>creator / character / title / suffix</strong> override fields.
+            The preview re-runs automatically with your values, and a resolved row
+            becomes eligible.
+          </li>
+          <li>
+            <strong>Select and apply.</strong> Tick the checkboxes on eligible rows,
+            then click <strong>Apply</strong>. The app verifies each file's size and
+            modification time against the preview fingerprint first — if anything
+            drifted on disk, the whole batch aborts safely. All moves complete before
+            the catalog is updated.
+          </li>
+          <li>
+            <strong>Undo.</strong> After a successful apply, an{" "}
+            <strong>Undo last apply</strong> button appears. It reads the apply log
+            and reverses every move. Running it twice is safe — already-reversed files
+            are skipped, not double-moved.
+          </li>
+        </ul>
+        <p>
+          The filter tabs (<em>Moves</em>, <em>Collisions</em>,{" "}
+          <em>Unclassifiable</em>, <em>Blocked</em>, <em>Already In Place</em>) let
+          you focus on what needs attention.
+        </p>
+        <p className="text-gray-500">
+          Apply moves real files on disk.{" "}
+          <strong>Standalone-only</strong> — it is disabled in the Docker build where
+          library mounts are read-only. Back up your library (and your database) before
+          applying a large reorganize.
+        </p>
+      </>
     ),
   },
   {

@@ -417,6 +417,31 @@ as the standalone HTML version.
   shows a **Guide** badge on its Library card and a **Painting guide** button on
   its detail page, and the guide links back to its model.
 
+## Reorganize library
+
+**Settings → Library Tools → Reorganize Library** (or **/reorganize**) tidies your
+files on disk to match a folder template — by default
+`{creator}/{character}/{title}`.
+
+- **Preview first.** The page shows exactly where every model *would* move, one row
+  each, with a move-kind chip (move / rename / case rename / in place / merge) and
+  blocker chips for anything unsafe (collision, over-length or reserved name,
+  unclassifiable, symlink, multi-directory, escapes-scan-root, missing files).
+  Nothing is touched until you apply.
+- **Resolve flagged rows.** Expand an ineligible row to supply a missing
+  creator/character/title or add a suffix that breaks a collision or shortens an
+  over-long/reserved name. The preview regenerates as you type.
+- **Apply.** Tick the eligible rows and **Apply**. The app verifies each file
+  hasn't changed since the preview (aborting the whole batch on any drift), moves
+  files safely across drives, and repaths the index — packs and manual character
+  groupings are carried along, not orphaned.
+- **Undo.** **Undo last apply** reverses the batch, skipping anything you've since
+  edited or that now sits where a file would return.
+
+Apply moves real files, so it is **standalone-only and opt-in**: it stays disabled
+unless the deployment enables write mode and the destination is actually writable
+(the read-only Docker mount can never apply). Preview and resolve work everywhere.
+
 ## Settings
 
 At **/settings** you manage your **scan roots** — the top-level folder paths the
