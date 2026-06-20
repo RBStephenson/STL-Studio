@@ -118,7 +118,9 @@ class TestImportPreview:
 class TestImportConfirm:
     def test_applies_adds_and_is_idempotent(self, client, db):
         result = _import_all(client)
-        assert result["applied"] == {"added": 12, "changed": 0, "removed": 0}
+        assert result["applied"] == {
+            "added": 12, "changed": 0, "removed": 0, "skipped_removed": [],
+        }
         assert db.query(Paint).count() == 12
         # Brands and lines created on the fly; empty class is a real line.
         pro = db.query(PaintBrand).filter(PaintBrand.name == "Pro Acryl").one()
@@ -334,6 +336,57 @@ class TestExport:
         _import_all(client)
         exported = client.get("/painting/inventory/export.csv").text
         assert "Dirty Down,,Rust,,25 ml,1" in exported
+
+
+class TestRemovalGuardsGuideReferences:
+    """CSV removal must not delete paints referenced by a guide (#441)."""
+
+    def _seed_referenced_paint(self, db):
+        """Import the corpus, then point a guide swatch at one PaintRack paint."""
+        from app.painting.models import (
+            Guide, GuideTab, GuidePhase, GuideStep, GuideSwatch, Paint,
+        )
+        rust = db.query(Paint).filter(Paint.name == "Rust").one()
+        guide = Guide(slug="g", title="G", status="draft")
+        db.add(guide); db.flush()
+        tab = GuideTab(guide_id=guide.id, name="T", sort_order=0); db.add(tab); db.flush()
+        phase = GuidePhase(tab_id=tab.id, label="", sort_order=0); db.add(phase); db.flush()
+        step = GuideStep(phase_id=phase.id, title="S", sort_order=0); db.add(step); db.flush()
+        db.add(GuideSwatch(step_id=step.id, paint_id=rust.id, sort_order=0))
+        db.commit()
+        return rust
+
+    def test_referenced_paint_skipped_not_deleted(self, client, db):
+        from app.painting.models import Paint
+        _import_all(client)
+        rust = self._seed_referenced_paint(db)
+        # Re-import a CSV that omits Rust, requesting removals.
+        csv_no_rust = "\n".join(
+            line for line in CSV_V1.splitlines() if "Rust" not in line
+        ) + "\n"
+        r = _upload(client, "/painting/inventory/import/confirm", csv_no_rust,
+                    apply_removed="true")
+        assert r.status_code == 200, r.text
+        applied = r.json()["applied"]
+        skipped_ids = [s["paint_id"] for s in applied["skipped_removed"]]
+        assert rust.id in skipped_ids
+        # Still present in the DB.
+        assert db.get(Paint, rust.id) is not None
+
+    def test_unreferenced_paint_still_removed(self, client, db):
+        from app.painting.models import Paint
+        _import_all(client)
+        self._seed_referenced_paint(db)  # only Rust is referenced
+        csv_drop_two = "\n".join(
+            line for line in CSV_V1.splitlines()
+            if "Rust" not in line and "Glossy Black" not in line
+        ) + "\n"
+        r = _upload(client, "/painting/inventory/import/confirm", csv_drop_two,
+                    apply_removed="true")
+        applied = r.json()["applied"]
+        assert applied["removed"] == 1  # Glossy Black removed
+        assert {s["name"] for s in applied["skipped_removed"]} == {"Rust"}
+        assert db.query(Paint).filter(Paint.name == "Glossy Black").first() is None
 
 
 class TestDuplicateRejection:
