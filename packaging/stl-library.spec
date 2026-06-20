@@ -27,6 +27,9 @@ a = Analysis(
         (str(FRONTEND_DIST), "dist"),
         # Bundle the backend app package (needed for relative imports)
         (str(BACKEND / "app"), "app"),
+        # Alembic migrations (ini + env + versions)
+        (str(BACKEND / "alembic.ini"), "."),
+        (str(BACKEND / "alembic"), "alembic"),
     ],
     hiddenimports=[
         # uvicorn internals that PyInstaller misses

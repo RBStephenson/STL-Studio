@@ -172,8 +172,16 @@ def _run_migrations() -> None:
     from alembic.config import Config
     from alembic import command
 
+    import sys
+
     logger = logging.getLogger(__name__)
-    alembic_cfg = Config(Path(__file__).parent.parent / "alembic.ini")
+    if getattr(sys, "frozen", False):
+        # PyInstaller bundle: alembic.ini and alembic/ are extracted to sys._MEIPASS
+        base = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    else:
+        base = Path(__file__).parent.parent
+    alembic_cfg = Config(base / "alembic.ini")
+    alembic_cfg.set_main_option("script_location", str(base / "alembic"))
 
     with engine.connect() as conn:
         tables = {
