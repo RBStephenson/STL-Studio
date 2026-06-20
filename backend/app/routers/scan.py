@@ -31,15 +31,17 @@ def _configured_roots(db: Session) -> list[Path]:
 
 
 def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
-    """True if ``p`` resolves inside any allowed root. Both sides are resolved so
-    symlinked / relative / case-variant roots compare correctly."""
-    rp = p.resolve()
+    """True if ``p`` is lexically inside any allowed root.
+
+    Uses normpath (pure string math, no filesystem access) so the containment
+    check itself never touches disk — `..` segments are collapsed lexically,
+    which is sufficient for a local single-user app's allowlist guard.
+    """
+    np = os.path.normpath(str(p))
     for root in roots:
-        try:
-            if rp == root.resolve() or rp.is_relative_to(root.resolve()):
-                return True
-        except OSError:
-            continue
+        nr = os.path.normpath(str(root))
+        if np == nr or np.startswith(nr + os.sep):
+            return True
     return False
 
 
@@ -95,8 +97,9 @@ def browse_dirs(path: str = "", mode: str = "", db: Session = Depends(get_db)):
             }
         path = str(Path.home())
 
-    # Resolve to a canonical absolute path (collapses .. and symlinks).
-    p = Path(path).resolve()
+    # Normalize lexically (collapses '..' without touching disk) before any
+    # filesystem access.
+    p = Path(os.path.normpath(path))
 
     # Allowlist guard runs BEFORE any filesystem access: never stat or list a
     # path outside the configured/bootstrap roots. Confining first keeps an
@@ -191,29 +194,27 @@ def start_inbox_scan(body: InboxScanRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Path is required")
     # Inbox import intentionally accepts an arbitrary folder the user selects
     # (it is not confined to a scan root — that is the point of the feature).
-    # Resolve to a canonical absolute path (collapses .. and symlinks). This is
-    # a local, single-user desktop app: the user is choosing their own folder.
-    p = Path(path).resolve()
+    # This is a local, single-user desktop app: the user is choosing their own
+    # folder. Normalize lexically (collapses '..' without touching disk).
+    norm = os.path.normpath(path)
+    p = Path(norm)
     if not p.exists():
         raise HTTPException(status_code=400, detail="Path does not exist")
     if not p.is_dir():
         raise HTTPException(status_code=400, detail="Path is not a directory")
 
     # Reject exact match, parent overlap, AND child overlap with any configured
-    # scan root (resolved to canonical paths to handle case, symlinks, relative paths).
-    configured_resolved: list[Path] = []
-    for r in db.query(ScanRoot).all():
-        try:
-            configured_resolved.append(Path(r.path).resolve())
-        except Exception:
-            pass
-    for r in settings.stl_root_list:
-        try:
-            configured_resolved.append(Path(r).resolve())
-        except Exception:
-            pass
-    for root in configured_resolved:
-        if p == root or p.is_relative_to(root) or root.is_relative_to(p):
+    # scan root. Lexical normpath comparison only (no filesystem access).
+    configured_norm: list[str] = [
+        os.path.normpath(r.path) for r in db.query(ScanRoot).all() if r.path
+    ]
+    configured_norm += [os.path.normpath(r) for r in settings.stl_root_list]
+    for root in configured_norm:
+        if (
+            norm == root
+            or norm.startswith(root + os.sep)
+            or root.startswith(norm + os.sep)
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="Path overlaps with a configured scan root — use a regular scan or choose a path outside the library",
