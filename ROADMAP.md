@@ -166,6 +166,36 @@ hide-printed filter with variant grouping preserved.
 
 ---
 
+## v0.11 — Library reorganize 🚧 In progress
+
+The opt-in, preview-first **reorganize / normalize-on-disk** epic (standalone-only —
+Docker mounts are read-only). Ships in two phases against a persisted, identified
+manifest so the apply step can verify non-drift rather than blindly recompute.
+
+| Issue | Item |
+|-------|------|
+| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize / normalize the library on disk** — umbrella: preview → apply with manifest/undo |
+| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Phase 1 — preview-only manifest** ([PR #426](https://github.com/RBStephenson/STL-Inventory/pull/426)) — per-file move sets, real `(size, mtime)` fingerprints, sanitization/collision/escape/override-reference flags; no files moved |
+| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Phase 2 — apply, undo, conflict resolution** (2a/2b/2c) — execute the approved manifest with per-file drift verification + abort-on-drift, write-mode guard, and an undo log |
+
+---
+
+## v0.12 — Import-and-organize pipeline — Planned
+
+The end-to-end **import → enrich → organize** workflow for loose, badly-named, or
+unknown-creator files. Reorganize (v0.11) is only the last mile; these add the
+import and bulk-enrich steps that make unorganized files eligible to file away.
+Both children reuse the v0.11 Phase 2 apply/move engine, so this milestone
+sequences behind [#324](https://github.com/RBStephenson/STL-Inventory/issues/324).
+
+| Issue | Item |
+|-------|------|
+| [#427](https://github.com/RBStephenson/STL-Inventory/issues/427) | **Epic — import-and-organize pipeline** for loose/unknown files |
+| [#428](https://github.com/RBStephenson/STL-Inventory/issues/428) | **Child A — one-shot import folder → library** (move-in ingest, not a permanent scan root) |
+| [#429](https://github.com/RBStephenson/STL-Inventory/issues/429) | **Child B — bulk-enrich metadata** (set creator/character/title across a selection — the bridge to reorganize-eligibility) |
+
+---
+
 ## v1.0 — Planned
 
 | Issue | Item |
@@ -212,9 +242,6 @@ Larger, well-defined efforts not tied to a near-term milestone.
 | Issue | Item |
 |-------|------|
 | [#16](https://github.com/RBStephenson/STL-Inventory/issues/16) | **Cross-model kit building (kitbash)** — assemble a character from parts across multiple packs; needs cross-model part-picker UI design |
-| [#29](https://github.com/RBStephenson/STL-Inventory/issues/29) | **Reorganize / normalize the library on disk** (opt-in, preview-first, standalone-only — Docker mounts are read-only) — umbrella: preview → apply with manifest/undo |
-| [#323](https://github.com/RBStephenson/STL-Inventory/issues/323) | **Reorganize Phase 1** — preview-only manifest |
-| [#324](https://github.com/RBStephenson/STL-Inventory/issues/324) | **Reorganize Phase 2** — apply, undo, conflict resolution (2a/2b/2c) |
 
 ---
 
