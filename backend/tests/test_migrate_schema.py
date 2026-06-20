@@ -31,6 +31,15 @@ def _drop_column(engine, table: str, column: str) -> None:
         conn.commit()
 
 
+def _run_migrate(engine):
+    real_engine = main_mod.engine
+    try:
+        main_mod.engine = engine
+        main_mod._migrate_schema()
+    finally:
+        main_mod.engine = real_engine
+
+
 class TestMigrateSchemaIsInbox:
     def test_is_inbox_added_to_pre_alembic_db(self):
         """_migrate_schema must add models.is_inbox to a DB that lacks it."""
@@ -46,15 +55,37 @@ class TestMigrateSchemaIsInbox:
             assert "is_inbox" not in _col_names(conn, "models"), \
                 "precondition: column should be absent before migration"
 
-        real_engine = main_mod.engine
-        try:
-            main_mod.engine = engine
-            main_mod._migrate_schema()
-        finally:
-            main_mod.engine = real_engine
+        _run_migrate(engine)
 
         with engine.connect() as conn:
             assert "is_inbox" in _col_names(conn, "models"), \
                 "_migrate_schema must add models.is_inbox"
+
+        engine.dispose()
+
+
+class TestMigrateSchemaLibraries:
+    """Child A (#450): scan_roots.name + is_writable on a pre-Alembic DB."""
+
+    def test_library_columns_added_to_pre_alembic_db(self):
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        _drop_column(engine, "scan_roots", "name")
+        _drop_column(engine, "scan_roots", "is_writable")
+
+        with engine.connect() as conn:
+            cols = _col_names(conn, "scan_roots")
+            assert "name" not in cols and "is_writable" not in cols
+
+        _run_migrate(engine)
+
+        with engine.connect() as conn:
+            cols = _col_names(conn, "scan_roots")
+            assert "name" in cols, "_migrate_schema must add scan_roots.name"
+            assert "is_writable" in cols, "_migrate_schema must add scan_roots.is_writable"
 
         engine.dispose()

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.database import Base, engine, SessionLocal
-from app.routers import models, scan, files, collections, scrape, enrich, database, settings, reorganize
+from app.routers import models, scan, files, collections, scrape, enrich, database, settings, reorganize, imports
 # Registers the paint_*/guide_* tables on Base before create_all below.
 from app.painting import models as painting_models  # noqa: F401
 from app.painting.routers import router as painting_router
@@ -31,6 +31,8 @@ def _migrate_schema():
         ("models", "variant_order", "INTEGER"),
         ("models", "excluded", "BOOLEAN DEFAULT 0"),
         ("scan_roots", "layout", "VARCHAR NOT NULL DEFAULT '{creator}'"),
+        ("scan_roots", "name", "VARCHAR"),
+        ("scan_roots", "is_writable", "BOOLEAN NOT NULL DEFAULT 0"),
         ("paints", "size", "TEXT"),
         ("paints", "count", "INTEGER DEFAULT 1"),
         # Painting M2 #268 added these to guide tables that M0/#258 had already
@@ -287,6 +289,7 @@ def create_app(api_prefix: str = "") -> FastAPI:
         database.router,
         settings.router,
         reorganize.router,
+        imports.router,
         painting_router,
         _health_router,
     ):

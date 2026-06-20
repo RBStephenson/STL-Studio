@@ -241,11 +241,40 @@ class InboxScanRequest(BaseModel):
 class ScanRootCreate(BaseModel):
     path: str
     layout: str = "{creator}"
+    name: Optional[str] = None
+    is_writable: bool = False
 
 
 class ScanRootUpdate(BaseModel):
     layout: Optional[str] = None
     enabled: Optional[bool] = None
+    name: Optional[str] = None
+    is_writable: Optional[bool] = None
+
+
+class LibraryRead(BaseModel):
+    """A scan root usable as an import destination (#450)."""
+    id: int
+    path: str
+    name: str
+    is_writable: bool
+    write_enabled: bool  # deployment-level reorganize_write_enabled flag
+
+    class Config:
+        from_attributes = True
+
+
+class SourceMappingRead(BaseModel):
+    source_path: str
+    library_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class SourceMappingSet(BaseModel):
+    source_path: str
+    library_id: int
 
 
 class DownloadZipRequest(BaseModel):

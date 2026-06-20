@@ -13,10 +13,29 @@ class ScanRoot(Base):
     id = Column(Integer, primary_key=True)
     path = Column(String, unique=True, nullable=False)
     enabled = Column(Boolean, default=True)
+    # Human-readable label ("minis") shown as a Library in the import flow (#450).
+    # Nullable; the API backfills a basename default for legacy rows.
+    name = Column(String, nullable=True)
+    # Marks this root as a managed import *destination* — a "library" files can be
+    # moved into (#450). Default off: the actual disk-write probe + config flag are
+    # still enforced at apply time (reorganize_apply._probe_writable, #324).
+    is_writable = Column(Boolean, nullable=False, default=False, server_default="0")
     # Folder-layout template (see services/layout.py). Describes the path levels
     # down to the creator; the scanner detects models heuristically below it.
     layout = Column(String, nullable=False, default="{creator}", server_default="{creator}")
     last_scanned = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class ImportSourceMapping(Base):
+    """Persisted mapping from an import source root folder to a destination
+    library (#450). Set once per source root; pack cards under it inherit the
+    destination, and the import dropdown pre-fills (but stays editable)."""
+    __tablename__ = "import_source_mappings"
+
+    id = Column(Integer, primary_key=True)
+    source_path = Column(String, unique=True, nullable=False)
+    library_id = Column(Integer, ForeignKey("scan_roots.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime, default=utcnow)
 
 
