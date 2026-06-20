@@ -75,17 +75,68 @@ else:
 # ---------------------------------------------------------------------------
 
 PORT = 8484
+HOST = "127.0.0.1"
+URL = f"http://{HOST}:{PORT}"
+WINDOW_TITLE = "STL Inventory"
+
+# Opt out of the native window (e.g. headless / debugging): STL_NO_WINDOW=1
+# falls back to opening the user's default browser.
+NO_WINDOW = os.environ.get("STL_NO_WINDOW") == "1"
 
 
-def _open_browser():
-    time.sleep(2.0)
-    webbrowser.open(f"http://localhost:{PORT}")
+def _run_server():
+    """Run uvicorn. Used as the background thread when a native window owns
+    the main thread, or as the blocking call in browser-fallback mode."""
+    import uvicorn
+
+    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
+
+
+def _wait_for_server(timeout: float = 15.0) -> bool:
+    """Poll the TCP port until uvicorn is accepting connections (or timeout)."""
+    import socket
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            if s.connect_ex((HOST, PORT)) == 0:
+                return True
+        time.sleep(0.1)
+    return False
+
+
+def _open_browser_when_ready():
+    if _wait_for_server():
+        webbrowser.open(URL)
+
+
+def _run_with_window():
+    """Serve in a background thread and open a native desktop window.
+
+    Returns False if pywebview isn't available so the caller can fall back to
+    the browser. The webview owns the main thread (a platform requirement).
+    """
+    try:
+        import webview  # pywebview
+    except ImportError:
+        return False
+
+    threading.Thread(target=_run_server, daemon=True).start()
+    if not _wait_for_server():
+        print("Server did not start in time; falling back to browser.")
+        return False
+
+    webview.create_window(WINDOW_TITLE, URL, width=1400, height=900, min_size=(900, 600))
+    webview.start()  # blocks until the window is closed
+    return True
 
 
 if __name__ == "__main__":
-    import uvicorn
-
-    print(f"STL Library running at http://localhost:{PORT}")
+    print(f"STL Library running at {URL}")
     print(f"Data stored in: {data_dir}")
-    threading.Thread(target=_open_browser, daemon=True).start()
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+
+    if NO_WINDOW or not _run_with_window():
+        # Browser fallback: open the page once the server is up, then serve.
+        threading.Thread(target=_open_browser_when_ready, daemon=True).start()
+        _run_server()

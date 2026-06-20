@@ -71,6 +71,13 @@ a = Analysis(
         "watchdog",
         "watchdog.observers",
         "watchdog.observers.polling",
+        # Desktop window (#463). pywebview lazy-imports its platform backend;
+        # PyInstaller can't see it statically. Windows uses EdgeChromium via
+        # pythonnet (clr); other platforms pull their own backend.
+        "webview",
+        "webview.platforms.edgechromium",
+        "webview.platforms.winforms",
+        "clr",
     ],
     hookspath=[],
     hooksconfig={},

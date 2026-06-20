@@ -1,0 +1,12 @@
+# Desktop (standalone) build extras — NOT needed for the Docker/web deployment.
+#
+# pywebview wraps a native OS webview around the local server so the standalone
+# build opens as a desktop window instead of the user's browser (#463).
+#   - Windows: uses WebView2 (bundled with Windows 11).
+#   - macOS:   uses WKWebView (system framework).
+#   - Linux:   needs a GTK or Qt backend (e.g. pip install pywebview[gtk]
+#              plus the system PyGObject/WebKitGTK packages).
+#
+# Install on top of backend/requirements.txt:
+#   pip install -r backend/requirements.txt -r packaging/requirements-desktop.txt
+pywebview==5.4
