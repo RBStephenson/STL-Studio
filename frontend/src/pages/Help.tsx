@@ -397,38 +397,51 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          <strong>Import</strong> (nav bar, at <code>/import</code>) does a one-shot index
-          of an arbitrary folder <strong>without</strong> adding it as a permanent scan
-          root — for loose downloads, an unzipped pack, or unsorted files you want in the
-          catalog but not re-scanned every run.
+          <strong>Import</strong> (nav bar, at <code>/import</code>) brings an arbitrary
+          folder of loose downloads or an unzipped pack into the catalog{" "}
+          <strong>without</strong> adding it as a permanent scan root, then files it into a
+          managed library on disk — the full <em>import → enrich → organize</em> pipeline
+          on one screen.
+        </p>
+        <p>
+          <strong>First, set up a library.</strong> A <em>library</em> is a folder you've
+          named and marked as an <strong>Import destination</strong> in{" "}
+          <a href="#settings">Settings</a> (a folder card → <strong>Library</strong> name +{" "}
+          <strong>Import destination</strong> checkbox). Only those appear as a move target.
         </p>
         <ul>
           <li>
-            <strong>Pick a folder</strong> with the browser, then <strong>Start
-            import</strong>. Progress shows inline and the Library refreshes when it's done.
+            <strong>Pick a source folder</strong> at <code>/import</code> →{" "}
+            <strong>Preview packs</strong>. You land on the <strong>Import Preview</strong>{" "}
+            screen with <strong>one card per pack</strong> (each immediate subfolder).
           </li>
           <li>
-            <strong>Structure</strong> — each immediate subdirectory is treated as a
-            creator (the same convention scans use). Files sitting directly in the chosen
-            folder land under a single <code>_Inbox</code> creator.
+            <strong>Choose the destination Library</strong> once. It's saved as a{" "}
+            <strong>source → library mapping</strong> — every pack inherits it and it
+            pre-fills next time.
           </li>
           <li>
-            <strong>Inbox flag</strong> — imported models are marked as <strong>inbox</strong>.
-            The <code>?is_inbox=1</code> Library filter (linked from the import "done"
-            screen) shows just these, so you can review them separately.
+            <strong>Enrich + Import each pack</strong> — expand a card, set{" "}
+            <strong>Creator / Character / Title / Tags</strong>, then <strong>Import</strong>{" "}
+            (ingests that pack as inbox models and applies the metadata).
           </li>
           <li>
-            <strong>The pipeline</strong> — import is the front of{" "}
-            <em>import → enrich → organize</em>: bring loose files in, use{" "}
-            <a href="#bulk-tags">Bulk → Enrich</a> to set creator/character/title, then{" "}
-            <a href="#reorganize">Reorganize</a> to file them into the managed library on
-            disk. Inbox models anchor at your primary scan root, move in on apply (the
-            inbox flag clears), and revert cleanly on undo.
+            <strong>Move them in</strong> — the{" "}
+            <strong>"Move N imported packs → library"</strong> bar files the packs into the
+            library on disk (drift-checked, with undo). The inbox flag clears as they land;
+            blocked packs are reported as skipped.
+          </li>
+          <li>
+            <strong>Quick import (whole folder)</strong> — the original one-shot index of
+            the entire source in one pass, when you don't need per-pack review. Imported
+            models are flagged <strong>inbox</strong> (the <code>?is_inbox=1</code> Library
+            filter shows them).
           </li>
         </ul>
         <p className="text-gray-500">
-          Like Reorganize, the move step is <strong>standalone-only</strong> (Docker mounts
-          are read-only); importing and enriching work everywhere.
+          Like <a href="#reorganize">Reorganize</a>, the move step is{" "}
+          <strong>standalone-only</strong> (Docker mounts are read-only) and needs write
+          mode; importing and enriching work everywhere.
         </p>
       </>
     ),

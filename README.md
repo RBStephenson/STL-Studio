@@ -143,11 +143,12 @@ Enable under **Settings → Painting Guides** — adds **Guides** and **Paint Sh
 - **Model links** — guides appear as a badge on Library cards and a button on model detail pages.
 
 ### Import Folder (`/import`)
-- One-shot import of an arbitrary folder **without** adding it as a permanent scan root — for loose downloads, a dumped ZIP, or unsorted files
-- Each immediate subdirectory is treated as a creator; flat files in the root land under a single `_Inbox` creator
-- Imported models are flagged as **inbox** (`?is_inbox=1` filter in the Library) so you can enrich and reorganize them separately
-- Pairs with **Bulk Enrich** → **Reorganize**: import loose files, fill in creator/character/title, then file them into the managed library on disk. Inbox models move into the primary scan root on apply and revert cleanly on undo
-- Standalone-only writes apply (Docker mounts are read-only for reorganize)
+- Brings an arbitrary folder (loose downloads, a dumped ZIP, unsorted files) into the catalog **without** adding it as a permanent scan root, then files it into a managed library on disk — the full **import → enrich → organize** pipeline on one screen
+- **Import Preview** (`Preview packs`) shows **one card per pack** (each source subfolder); enrich each with creator/character/title/tags, pick a destination **Library**, and **Import**
+- **Libraries** — name a folder and tick **Import destination** in Settings; a source→library mapping is saved per source and inherited by its packs
+- **Move N imported packs → library** files them into the chosen library via the reorganize engine (drift-checked, with undo); the **inbox** flag clears as they land
+- **Quick import (whole folder)** keeps the original one-shot index; imported models are flagged **inbox** (`?is_inbox=1` filter)
+- The move step is standalone-only and needs write mode (Docker mounts are read-only); import + enrich work everywhere
 
 ### Scan
 - **Parallel** — scans up to 4 creator directories concurrently for faster indexing on large libraries

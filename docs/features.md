@@ -320,26 +320,44 @@ floating bar appears with bulk actions across the whole selection at once:
 
 ## Import folder
 
-**Import** (in the nav, at **/import**) does a one-shot index of an arbitrary
-folder **without** adding it as a permanent scan root — for loose downloads, an
-unzipped pack, or a pile of unsorted files you want in the catalog but don't
-want scanned on every run.
+**Import** (in the nav, at **/import**) brings an arbitrary folder of loose
+downloads, an unzipped pack, or a pile of unsorted files into the catalog
+**without** adding it as a permanent scan root — then files them into a managed
+library on disk. It implements the full **import → enrich → organize** pipeline.
 
-- **Pick a folder** with the browser, then **Start import**. Progress shows
-  inline; the Library refreshes when it finishes.
-- **Structure** — each immediate subdirectory is treated as a creator (the same
-  one-level-per-creator convention scans use). Files sitting directly in the
-  chosen folder land under a single `_Inbox` creator.
-- **Inbox flag** — imported models are marked as **inbox**. The Library's
-  `?is_inbox=1` filter (linked from the import "done" screen) shows just these,
-  so you can review, enrich, and file them separately from your settled library.
-- **The pipeline** — import is the front of **import → enrich → organize**:
-  bring loose files in, use **Bulk → Enrich** to set creator/character/title,
-  then **Reorganize** to move them into the managed library on disk. Inbox models
-  anchor at your primary scan root, move in on apply (the inbox flag clears), and
-  revert cleanly on undo.
-- Like Reorganize, the move step is **standalone-only** (Docker mounts are
-  read-only); importing and enriching work everywhere.
+### Libraries (the import destination)
+
+A **library** is a scan root you've named and marked as an **import
+destination** (Settings → a folder card → set a **Library** name and tick
+**Import destination**). Only writable libraries can receive imported files —
+see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
+
+### The flow
+
+1. **Pick a source folder** at **/import** → **Preview packs**. This opens the
+   **Import Preview** screen (`/import/preview`).
+2. **One card per pack** — each immediate subfolder of the source is a pack card
+   (files directly in the source form a single pack).
+3. **Choose the destination Library** once from the dropdown. The choice is
+   saved as a **source → library mapping**: every pack under that source inherits
+   it, and the dropdown pre-fills (but stays editable) next time.
+4. **Enrich each pack** — expand a card to set **Creator, Character, Title, and
+   Tags**, then click **Import**. That ingests just that pack's folder as inbox
+   models and applies the metadata.
+5. **Move them in** — a **"Move N imported packs → {library}"** bar files the
+   imported packs into the destination library on disk (drift-checked, with
+   undo). The **inbox** flag clears as each pack lands.
+
+### Notes
+
+- **Quick import (whole folder)** on `/import` keeps the original one-shot index
+  of the entire source in a single pass (each immediate subdir = a creator,
+  loose files → an `_Inbox` creator) — handy when you don't need per-pack review.
+- **Inbox flag** — un-filed imports are marked **inbox**; the Library's
+  `?is_inbox=1` filter shows just these.
+- The **move** step is **standalone-only** (Docker mounts are read-only) and
+  requires write mode; importing and enriching work everywhere. Packs missing a
+  creator/character (or otherwise blocked) are reported as skipped, not moved.
 
 ## Creators & per-creator rescan
 

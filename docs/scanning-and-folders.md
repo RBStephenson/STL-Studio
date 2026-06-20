@@ -159,3 +159,25 @@ rules) are picked up even on unchanged folders.
 
 A **per-creator rescan** always does a full reindex of that creator, so it's the
 reliable way to force everything for one creator to be re-read.
+
+## Libraries (import destinations)
+
+A **library** is a scan root you've given a name and marked as a writable
+**import destination**. It's the folder the [Import](features.md#import-folder)
+flow files packs into.
+
+Configure one in **Settings**, on a folder's card:
+
+- **Library** — a display name (e.g. `minis`). Shown in the import screen's
+  destination dropdown; defaults to the folder's basename if left blank.
+- **Import destination** — tick this to mark the folder writable as a move
+  target. Only ticked folders appear in the import dropdown. Untouched folders
+  remain index-only (scanned in place, never moved into).
+
+If the destination drive isn't a scan root yet, add it first under **Settings →
+Add a Folder**, then name it and tick **Import destination**.
+
+Marking a folder an import destination only makes it *eligible*. The actual
+on-disk move still requires **write mode** (`reorganize_write_enabled`) — the
+read-only Docker default refuses moves; standalone builds opt in. This mirrors
+[Reorganize](features.md#reorganize-library)'s safety posture.

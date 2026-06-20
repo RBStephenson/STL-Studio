@@ -186,13 +186,28 @@ Shipped in **v0.11.0**.
 The end-to-end **import → enrich → organize** workflow for loose, badly-named, or
 unknown-creator files. Reorganize (v0.11) is only the last mile; these add the
 import and bulk-enrich steps that make unorganized files eligible to file away.
-Both children reuse the v0.11 Phase 2 apply/move engine.
+All of it reuses the v0.11 Phase 2 apply/move engine — no second mover.
+
+Shipped in **v0.12.0**.
+
+The first epic (#427) landed the building blocks — one-shot inbox import and
+bulk-enrich. The second epic (#449) fused them into a single browse-first
+**Import Preview** screen with named libraries and a batch move.
 
 | Issue | Item |
 |-------|------|
-| [#427](https://github.com/RBStephenson/STL-Inventory/issues/427) | **Epic — import-and-organize pipeline** for loose/unknown files |
-| [#428](https://github.com/RBStephenson/STL-Inventory/issues/428) | **Child A — one-shot import folder → library** ([#446](https://github.com/RBStephenson/STL-Inventory/pull/446)) — index an arbitrary folder as inbox models (`is_inbox` flag) without adding it as a permanent scan root; each immediate subdir is treated as a creator. Inbox models anchor at the primary scan root in reorganize, move into the managed library on apply (clearing `is_inbox`), and restore on undo |
-| [#429](https://github.com/RBStephenson/STL-Inventory/issues/429) | **Child B — bulk-enrich metadata** ([#436](https://github.com/RBStephenson/STL-Inventory/pull/436)) — `PATCH /models/bulk/enrich` sets creator/character/title across a multi-selection; the Enrich mode in the bulk toolbar — the bridge to reorganize-eligibility |
+| [#427](https://github.com/RBStephenson/STL-Inventory/issues/427) | **Epic — import-and-organize building blocks** for loose/unknown files |
+| [#428](https://github.com/RBStephenson/STL-Inventory/issues/428) | **One-shot import folder → library** ([#446](https://github.com/RBStephenson/STL-Inventory/pull/446)) — index an arbitrary folder as inbox models (`is_inbox` flag) without adding it as a permanent scan root; each immediate subdir is treated as a creator. Inbox models anchor in the managed library on reorganize apply (clearing `is_inbox`), and restore on undo |
+| [#429](https://github.com/RBStephenson/STL-Inventory/issues/429) | **Bulk-enrich metadata** ([#436](https://github.com/RBStephenson/STL-Inventory/pull/436)) — `PATCH /models/bulk/enrich` sets creator/character/title across a multi-selection; the Enrich mode in the bulk toolbar — the bridge to reorganize-eligibility |
+| [#449](https://github.com/RBStephenson/STL-Inventory/issues/449) | **Epic — Import Preview screen** — browse-first folder → library with inline enrich |
+| [#450](https://github.com/RBStephenson/STL-Inventory/issues/450) | **Named libraries + source→library mapping** ([#454](https://github.com/RBStephenson/STL-Inventory/pull/454)) — a library is a named, writable scan root; a source folder maps to a destination library, inherited by its packs |
+| [#451](https://github.com/RBStephenson/STL-Inventory/issues/451) | **Pack-grouped preview projection** ([#455](https://github.com/RBStephenson/STL-Inventory/pull/455)) — `GET /import/preview` groups inbox models into one card per pack with inherited destination |
+| [#452](https://github.com/RBStephenson/STL-Inventory/issues/452) | **Import Preview UI** ([#457](https://github.com/RBStephenson/STL-Inventory/pull/457), [#459](https://github.com/RBStephenson/STL-Inventory/pull/459)) — browse-first pack cards, inline metadata editor, destination dropdown, per-card import; library name/writable toggle in Settings |
+| [#453](https://github.com/RBStephenson/STL-Inventory/issues/453) | **Stage + batch apply** ([#460](https://github.com/RBStephenson/STL-Inventory/pull/460)) — `POST /import/apply` moves imported packs into their mapped library via the reorganize engine (drift + undo, `is_inbox` cleared) |
+
+Follow-up polish (backlog): [#458](https://github.com/RBStephenson/STL-Inventory/issues/458)
+(Notes / Source URL + Fetch / Collections on pack cards),
+[#456](https://github.com/RBStephenson/STL-Inventory/issues/456) (per-pack file counts).
 
 ---
 
