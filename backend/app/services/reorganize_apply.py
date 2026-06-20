@@ -394,10 +394,18 @@ def _parent(path: str) -> str:
 
 
 def undo_log_path(manifest_id: str) -> Path:
-    """Validated path of a manifest's undo log. ``manifest_id`` is allow-listed
-    first so the request-supplied value can't traverse out of the data dir."""
+    """Validated path of a manifest's undo log.
+
+    ``manifest_id`` is allow-listed to the generated token, then the assembled
+    path is normalized and re-confined under the data dir — the same containment
+    barrier the move paths use — so the request-supplied value provably can't
+    traverse out (belt and braces, and a sanitizer CodeQL recognizes)."""
     safe = _validate_manifest_id(manifest_id)
-    return write_lock.data_dir() / f"reorg_undo_{safe}.log"
+    base = os.path.normpath(os.path.abspath(str(write_lock.data_dir())))
+    candidate = os.path.normpath(os.path.abspath(os.path.join(base, f"reorg_undo_{safe}.log")))
+    if not (candidate == base or candidate.startswith(base + os.sep)):
+        raise ApplyError("Invalid manifest id", status=400)
+    return Path(candidate)
 
 
 def _read_undo_log(manifest_id: str) -> list[dict]:
