@@ -277,6 +277,28 @@ class SourceMappingSet(BaseModel):
     library_id: int
 
 
+class ImportPreviewPack(BaseModel):
+    """One pack card in the import preview — a top-level source subfolder (#451)."""
+    name: str
+    source_path: str
+    file_count: int
+    model_ids: list[int]
+    # Representative metadata: the common value across the pack's models, or None
+    # when they disagree (Child C bulk-sets a single value for the whole pack).
+    creator_name: Optional[str] = None
+    title: Optional[str] = None
+    character: Optional[str] = None
+    notes: Optional[str] = None
+    source_url: Optional[str] = None
+    tags: list[str] = []
+
+
+class ImportPreviewResponse(BaseModel):
+    source: str
+    library_id: Optional[int] = None  # inherited destination from the source mapping
+    packs: list[ImportPreviewPack]
+
+
 class DownloadZipRequest(BaseModel):
     file_ids: list[int]
     zip_name: str = "kit-build"
