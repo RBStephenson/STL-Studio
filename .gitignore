@@ -11,3 +11,4 @@ __pycache__/
 .claude/
 # Generated GitHub Wiki output (built by scripts/wiki/build_wiki.py)
 _wiki_build/
+AGENTS.md
