@@ -31,7 +31,16 @@ def _configured_roots(db: Session) -> list[Path]:
 
 
 def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
-    return any(p.is_relative_to(root) for root in roots)
+    """True if ``p`` resolves inside any allowed root. Both sides are resolved so
+    symlinked / relative / case-variant roots compare correctly."""
+    rp = p.resolve()
+    for root in roots:
+        try:
+            if rp == root.resolve() or rp.is_relative_to(root.resolve()):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 # Safe top-level locations the first-run folder picker may browse before any
@@ -86,15 +95,17 @@ def browse_dirs(path: str = "", mode: str = "", db: Session = Depends(get_db)):
             }
         path = str(Path.home())
 
-    # Resolve to a canonical absolute path (eliminates .. traversal) before
-    # any existence or allowlist check, so CodeQL sees the sanitisation.
+    # Resolve to a canonical absolute path (collapses .. and symlinks).
     p = Path(path).resolve()
-    if not p.exists() or not p.is_dir():
-        raise HTTPException(status_code=404, detail="Folder not found")
 
-    # Restrict browsing to the allowlist (configured roots, or bootstrap roots).
+    # Allowlist guard runs BEFORE any filesystem access: never stat or list a
+    # path outside the configured/bootstrap roots. Confining first keeps an
+    # out-of-allowlist path from ever reaching the filesystem calls below.
     if not _is_under_configured_root(p, allowlist):
         raise HTTPException(status_code=403, detail="Path is outside the allowed folders")
+
+    if not p.exists() or not p.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found")
 
     try:
         entries = sorted(
@@ -178,8 +189,10 @@ def start_inbox_scan(body: InboxScanRequest, db: Session = Depends(get_db)):
     path = body.path.strip()
     if not path:
         raise HTTPException(status_code=400, detail="Path is required")
-    # Resolve to canonical absolute path (eliminates .. traversal) before any
-    # filesystem or allowlist check, so CodeQL sees the sanitisation boundary.
+    # Inbox import intentionally accepts an arbitrary folder the user selects
+    # (it is not confined to a scan root — that is the point of the feature).
+    # Resolve to a canonical absolute path (collapses .. and symlinks). This is
+    # a local, single-user desktop app: the user is choosing their own folder.
     p = Path(path).resolve()
     if not p.exists():
         raise HTTPException(status_code=400, detail="Path does not exist")
