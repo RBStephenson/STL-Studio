@@ -579,6 +579,64 @@ export interface ScrapePreview {
   download_count: number | null;
 }
 
+// --- Library reorganize, Phase 1 preview (#323) ---
+export type ReorganizeMoveKind = "move" | "rename" | "case_rename" | "in_place" | "merge";
+export type ReorganizeCollisionKind =
+  | "none" | "exact" | "case_only" | "unicode_only" | "legitimate_duplicate";
+
+export interface ReorganizeFileMove {
+  stl_file_id: number;
+  current_path: string;
+  proposed_path: string;
+  size_bytes: number;
+  mtime_ns: number;
+  content_hash: string | null;
+  fingerprint_method: "stat" | "content_hash";
+}
+
+export interface ReorganizeEntry {
+  model_id: number;
+  model_name: string;
+  files: ReorganizeFileMove[];
+  kind: ReorganizeMoveKind;
+  proposed_dir: string;
+  eligible: boolean;
+  pack_override_paths: string[];
+  group_override_paths: string[];
+  collision: boolean;
+  collision_kind: ReorganizeCollisionKind;
+  collision_with: number[];
+  unclassifiable: boolean;
+  missing_fields: string[];
+  over_length: boolean;
+  reserved_name: boolean;
+  overlaps_other: boolean;
+  spans_multiple_dirs: boolean;
+  is_symlink: boolean;
+  escapes_scan_root: boolean;
+}
+
+export interface ReorganizeStats {
+  total: number;
+  eligible: number;
+  moves_needed: number;
+  already_in_place: number;
+  collisions: number;
+  unclassifiable: number;
+  over_length: number;
+  reserved: number;
+  overlaps: number;
+  blocked: number;
+}
+
+export interface ReorganizePreview {
+  manifest_id: string;
+  template: string;
+  generated_at: string;
+  entries: ReorganizeEntry[];
+  stats: ReorganizeStats;
+}
+
 export const api = {
   models: {
     list: (params: Record<string, string | number | boolean>) => {
@@ -755,6 +813,15 @@ export const api = {
         method: "POST",
       }),
     driveStatus: () => request<DriveStatus>("/files/drive-status"),
+  },
+  reorganize: {
+    preview: (template?: string, rootId?: number) => {
+      const p = new URLSearchParams();
+      if (template) p.set("template", template);
+      if (rootId != null) p.set("root_id", String(rootId));
+      const qs = p.toString();
+      return request<ReorganizePreview>(`/reorganize/preview${qs ? `?${qs}` : ""}`);
+    },
   },
   scrape: {
     fetchUrl: (url: string) =>
