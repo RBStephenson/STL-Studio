@@ -125,7 +125,7 @@ export default function ImportPage() {
             </div>
             <div className="flex items-center gap-3">
               <Link
-                to="/?is_inbox=true"
+                to="/?is_inbox=1"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
               >
                 <Inbox size={14} />

@@ -161,6 +161,7 @@ export default function Library() {
   const printStatusParam = searchParams.get("print_status") ?? "";
   const excludePrinted = searchParams.get("exclude_printed") === "1";
   const excludedParam = searchParams.get("excluded") === "1";
+  const inboxParam   = searchParams.get("is_inbox") === "1";
   const minRating    = searchParams.get("min_rating") ?? "";  // "" | "1".."5" (#167)
   const addedDays    = searchParams.get("added_days") ?? ""; // "Recently added" window (#170)
   const sortParam    = searchParams.get("sort") ?? "";       // "" | "name" | "added" | "creator" (#247)
@@ -308,6 +309,7 @@ export default function Library() {
       if (printStatusParam) params.print_status  = printStatusParam;
       if (excludePrinted) params.exclude_printed = true;
       if (excludedParam) params.excluded    = true;
+      if (inboxParam)   params.is_inbox   = true;
       if (minRating)   params.min_rating   = minRating;
       if (addedDays)   params.added_within_days = addedDays;
       if (effectiveSort && effectiveSort !== "name") params.sort = effectiveSort;
@@ -318,7 +320,7 @@ export default function Library() {
     } finally {
       if (fetchId === fetchIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, printStatusParam, excludePrinted, excludedParam, minRating, addedDays, effectiveSort]);
+  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, printStatusParam, excludePrinted, excludedParam, inboxParam, minRating, addedDays, effectiveSort]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);

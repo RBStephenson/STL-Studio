@@ -186,15 +186,41 @@ def start_inbox_scan(body: InboxScanRequest, db: Session = Depends(get_db)):
     if not p.is_dir():
         raise HTTPException(status_code=400, detail="Path is not a directory")
 
-    configured = {Path(r.path) for r in db.query(ScanRoot).all()}
-    configured |= {Path(r) for r in settings.stl_root_list}
-    if p in configured:
+    # Reject exact match, parent overlap, AND child overlap with any configured
+    # scan root (resolved to canonical paths to handle case, symlinks, relative paths).
+    configured_resolved: list[Path] = []
+    for r in db.query(ScanRoot).all():
+        try:
+            configured_resolved.append(Path(r.path).resolve())
+        except Exception:
+            pass
+    for r in settings.stl_root_list:
+        try:
+            configured_resolved.append(Path(r).resolve())
+        except Exception:
+            pass
+    for root in configured_resolved:
+        if p == root or p.is_relative_to(root) or root.is_relative_to(p):
+            raise HTTPException(
+                status_code=400,
+                detail="Path overlaps with a configured scan root — use a regular scan or choose a path outside the library",
+            )
+
+    # Acquire write lock synchronously so the HTTP response is authoritative:
+    # 200 means the scan is actually starting, not queued behind a lock the
+    # thread might silently fail to acquire.
+    if not scanner.prepare_inbox_scan():
         raise HTTPException(
-            status_code=400,
-            detail="This path is already a scan root — use a regular scan instead",
+            status_code=409,
+            detail="Library is busy — reorganize in progress, try again shortly",
         )
 
-    thread = threading.Thread(target=scanner.scan_inbox_folder, args=(path,), daemon=True)
+    thread = threading.Thread(
+        target=scanner.scan_inbox_folder,
+        args=(path,),
+        kwargs={"_lock_already_held": True},
+        daemon=True,
+    )
     thread.start()
     return ScanStatus(running=True, message="importing")
 

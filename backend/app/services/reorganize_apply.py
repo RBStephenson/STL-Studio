@@ -226,13 +226,16 @@ def _probe_writable(dirs: set[str], roots: list[str]) -> None:
             )
 
 
-def _verify_no_drift(selected: list[dict], stat_fn: StatFn, roots: list[str]) -> None:
+def _verify_no_drift(
+    selected: list[dict], stat_fn: StatFn, roots: list[str], src_roots: list[str] | None = None
+) -> None:
     """Re-stat every source; abort the whole batch on any fingerprint mismatch."""
+    _src = src_roots if src_roots is not None else roots
     drifted: list[str] = []
     for entry in selected:
         for f in entry["files"]:
             try:
-                size, mtime_ns = stat_fn(_confine(f["current_path"], roots))
+                size, mtime_ns = stat_fn(_confine(f["current_path"], _src))
             except OSError:
                 drifted.append(f["current_path"])
                 continue
@@ -275,22 +278,33 @@ def apply_manifest(
     selected = _select_entries(payload, entry_ids)
     roots = _allowed_roots(db)
 
+    # Inbox models live outside scan roots — their source dirs must be allowed as
+    # move sources (only). Destinations must still be within a scan root.
+    inbox_src_dirs: list[str] = []
+    for entry in selected:
+        m = db.get(Model, entry["model_id"])
+        if m and m.is_inbox and m.folder_path:
+            inbox_src_dirs.append(
+                os.path.normpath(os.path.abspath(_os_native(m.folder_path)))
+            )
+    src_roots = roots + inbox_src_dirs
+
     dest_dirs = {e["proposed_dir"] for e in selected}
     _probe_writable(dest_dirs, roots)
 
     # Hold the app-wide write lock for the whole operation: no scan may prune or
     # insert rows under the move, and no second apply/undo may interleave.
     with write_lock.library_write("apply", timeout=0.0):
-        _verify_no_drift(selected, stat_fn, roots)
+        _verify_no_drift(selected, stat_fn, roots, src_roots=src_roots)
 
         log = _UndoLog(manifest_id)
         moved = 0
         try:
             for f in _ordered_moves(selected):
-                # Confine both ends to a scan root before touching disk — the
-                # value the move operates on is now validated, not raw manifest
-                # data. Canonical paths still go to the log/DB.
-                src = _confine(f["current_path"], roots)
+                # Source may be an inbox dir (outside scan roots); destination
+                # must always be within a scan root. The value the move operates
+                # on is now validated, not raw manifest data.
+                src = _confine(f["current_path"], src_roots)
                 dst = _confine(f["proposed_path"], roots)
                 move_fn(src, dst)
                 # Record only AFTER the move completes — the log is the recovery
@@ -326,6 +340,7 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
         model = db.get(Model, entry["model_id"])
         if model is not None:
             model.folder_path = entry["proposed_dir"]
+            model.is_inbox = False   # moved into the managed library
             model.updated_at = utcnow()
         for f in entry["files"]:
             stl = db.get(STLFile, f["stl_file_id"])
@@ -455,14 +470,17 @@ def undo_manifest(
         # deepest-source-first so a re-created parent never blocks a child.
         for rec in reversed(records):
             to, frm = rec["to"], rec["from"]
-            # Confine both ends to a scan root before any disk access — a tampered
-            # log can't drive a move outside the library. Reason out on escape.
+            # The "to" path (current file location after apply) must be inside a
+            # scan root — confine it strictly. The "frm" path (original location,
+            # written by apply) may be an inbox dir outside scan roots; the undo
+            # log lives in the app data dir and is not user-controlled, so we
+            # normalize without re-confining to a scan root.
             try:
                 to_n = _confine(to, roots)
-                frm_n = _confine(frm, roots)
             except ApplyError:
                 skipped.append({"path": to, "reason": "escapes_roots"})
                 continue
+            frm_n = os.path.normpath(os.path.abspath(_os_native(frm)))
 
             if not os.path.exists(to_n):
                 # Already reversed (idempotent re-run) or never landed.
@@ -489,7 +507,7 @@ def undo_manifest(
                 continue
             reversed_moves.append((to, frm))
 
-        _repath_db_undo(db, reversed_moves)
+        _repath_db_undo(db, reversed_moves, roots)
         return UndoResult(
             manifest_id=manifest_id,
             reversed_files=len(reversed_moves),
@@ -497,7 +515,9 @@ def undo_manifest(
         )
 
 
-def _repath_db_undo(db: Session, reversed_moves: list[tuple[str, str]]) -> None:
+def _repath_db_undo(
+    db: Session, reversed_moves: list[tuple[str, str]], roots: list[str]
+) -> None:
     """Point STLFile.path / Model.folder_path and the path-keyed overrides back to
     the pre-apply locations, in one transaction. The log only carries paths, so
     rows are found by their current (``to``) path."""
@@ -510,6 +530,12 @@ def _repath_db_undo(db: Session, reversed_moves: list[tuple[str, str]]) -> None:
         model = db.get(Model, stl.model_id)
         if model is not None:
             model.folder_path = _parent(frm)
+            # If the original location is outside every scan root, this was an
+            # inbox model — restore the flag so the model surfaces in inbox views.
+            frm_dir = os.path.normpath(os.path.abspath(_os_native(_parent(frm))))
+            model.is_inbox = bool(frm_dir and all(
+                frm_dir != r and not frm_dir.startswith(r + os.sep) for r in roots
+            ))
             model.updated_at = utcnow()
         override_dirs.add((_parent(to), _parent(frm)))
 

@@ -1071,7 +1071,26 @@ def resolve_creator(name: str, db: Session) -> Creator:
     return creator
 
 
-def scan_inbox_folder(path: str, db: Session | None = None) -> None:
+def prepare_inbox_scan() -> bool:
+    """Synchronously acquire write lock and mark scan state running.
+
+    Returns True if the lock was acquired and state set; False if the library is
+    busy. Call this in the request thread before starting the inbox daemon thread
+    so the HTTP response is authoritative: a 200 means the scan is actually
+    starting, not just queued behind a lock the thread might fail to acquire.
+    """
+    global _cancel_requested
+    if not write_lock.try_acquire_for_scan():
+        return False
+    _cancel_requested = False
+    with _state_lock:
+        _scan_state.update(running=True, message="importing", models_found=0, files_found=0, cancelled=False)
+    return True
+
+
+def scan_inbox_folder(
+    path: str, db: Session | None = None, _lock_already_held: bool = False
+) -> None:
     """Index an arbitrary folder as inbox models without adding it as a scan root.
 
     Approach B: each immediate subdirectory that contains STL files is treated
@@ -1080,14 +1099,17 @@ def scan_inbox_folder(path: str, db: Session | None = None) -> None:
     '_Inbox' creator is used instead. All indexed models get is_inbox=True.
 
     Runs synchronously — callers launch this in a daemon thread.
+    Pass _lock_already_held=True when the caller has already acquired the write
+    lock via prepare_inbox_scan() to avoid a double-acquire.
     """
     global _cancel_requested
-    if not write_lock.try_acquire_for_scan():
-        logger.warning("Inbox scan skipped: library write lock is held")
-        return
-    _cancel_requested = False
-    with _state_lock:
-        _scan_state.update(running=True, message="importing", models_found=0, files_found=0, cancelled=False)
+    if not _lock_already_held:
+        if not write_lock.try_acquire_for_scan():
+            logger.warning("Inbox scan skipped: library write lock is held")
+            return
+        _cancel_requested = False
+        with _state_lock:
+            _scan_state.update(running=True, message="importing", models_found=0, files_found=0, cancelled=False)
     try:
         own_db = db is None
         _db = db or SessionLocal()

@@ -56,6 +56,24 @@ class TestInboxScanValidation:
             assert r.status_code == 400
             assert "scan root" in r.json()["detail"].lower()
 
+    def test_child_of_scan_root_returns_400(self, client, db):
+        """Inbox path is a subdirectory of a scan root — overlap rejected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            child = os.path.join(tmpdir, "sub")
+            os.makedirs(child)
+            client.post("/scan/roots", json={"path": tmpdir, "layout": "{creator}"})
+            r = client.post("/scan/inbox", json={"path": child})
+            assert r.status_code == 400
+
+    def test_parent_of_scan_root_returns_400(self, client, db):
+        """Inbox path is an ancestor of a scan root — overlap rejected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            child = os.path.join(tmpdir, "lib")
+            os.makedirs(child)
+            client.post("/scan/roots", json={"path": child, "layout": "{creator}"})
+            r = client.post("/scan/inbox", json={"path": tmpdir})
+            assert r.status_code == 400
+
 
 # ---------------------------------------------------------------------------
 # POST /scan/inbox — scan already running
@@ -67,6 +85,19 @@ class TestInboxScanConflict:
             with tempfile.TemporaryDirectory() as tmpdir:
                 r = client.post("/scan/inbox", json={"path": tmpdir})
         assert r.status_code == 409
+
+    def test_409_when_write_lock_held(self, client, db):
+        """Lock acquired synchronously in endpoint — 409 before thread starts."""
+        from unittest.mock import MagicMock
+        mock_settings = MagicMock()
+        mock_settings.stl_root_list = []
+        with patch("app.services.scanner.prepare_inbox_scan", return_value=False), \
+             patch("app.routers.scan._configured_roots", return_value=[]), \
+             patch("app.routers.scan.settings", mock_settings):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                r = client.post("/scan/inbox", json={"path": tmpdir})
+        assert r.status_code == 409
+        assert "busy" in r.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------
