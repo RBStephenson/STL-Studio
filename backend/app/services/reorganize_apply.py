@@ -25,6 +25,7 @@ mid-batch crash, and drift without a second real filesystem.
 import errno
 import json
 import os
+import re
 import shutil
 import unicodedata
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import GroupOverride, Model, PackOverride, ReorganizeManifest, STLFile
+from app.models import GroupOverride, Model, PackOverride, ReorganizeManifest, ScanRoot, STLFile
 from app.services import write_lock
 from app.utils import utcnow
 
@@ -72,6 +73,46 @@ def _stat(path: str) -> tuple[int, int]:
 def _key(path: str) -> str:
     """Case-insensitive identity key (matches the Phase 1 builder's casefold key)."""
     return unicodedata.normalize("NFC", path or "").replace("\\", "/").casefold()
+
+
+# Manifest ids are generated as ``uuid4().hex`` (32 lowercase hex chars). The id
+# arrives from the request body and is interpolated into the undo-log *filename*,
+# so it must be allow-listed before any path use — otherwise a value like
+# ``../../etc`` would escape the data dir (path traversal). Reject anything that
+# isn't exactly the expected token.
+_MANIFEST_ID_RE = re.compile(r"\A[0-9a-f]{32}\Z")
+
+
+def _validate_manifest_id(manifest_id: str) -> str:
+    if not _MANIFEST_ID_RE.match(manifest_id or ""):
+        raise ApplyError("Invalid manifest id", status=400)
+    return manifest_id
+
+
+def _allowed_roots(db: Session) -> list[str]:
+    """Normalized scan-root directories — the only places apply/undo may touch.
+
+    Every move source and destination must resolve inside one of these. Phase 1
+    already marks scan-root escapes ineligible, but apply executes a *persisted*
+    manifest, so re-confining here defends against a tampered manifest row and
+    keeps the path a move operates on from being uncontrolled user data."""
+    return [os.path.normpath(os.path.abspath(r.path))
+            for r in db.query(ScanRoot).all() if r.path]
+
+
+def _confine(raw: str, roots: list[str]) -> str:
+    """Normalize a manifest path and assert it lives under an allowed scan root.
+
+    Returns the normalized OS-native path to use for the actual file operation
+    (reassigning to the validated value is the path-traversal barrier). Raises if
+    the path escapes every root. Uses normpath (lexical, case-preserving) — never
+    realpath — so case-only renames aren't canonicalized away."""
+    native = os.path.normpath(os.path.abspath(_os_native(raw)))
+    for root in roots:
+        if native == root or native.startswith(root + os.sep):
+            return native
+    raise ApplyError(f"Path escapes the allowed scan roots: {raw}", status=400,
+                     detail={"path": raw})
 
 
 def _safe_move(src: str, dst: str) -> None:
@@ -120,7 +161,7 @@ class _UndoLog:
     move could relocate), so a kill mid-batch leaves a replayable partial log."""
 
     def __init__(self, manifest_id: str):
-        self.path = write_lock.data_dir() / f"reorg_undo_{manifest_id}.log"
+        self.path = undo_log_path(manifest_id)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = open(self.path, "a", encoding="utf-8")
 
@@ -163,12 +204,12 @@ def _select_entries(payload: dict, entry_ids: list[int]) -> list[dict]:
     return selected
 
 
-def _probe_writable(dirs: set[str]) -> None:
+def _probe_writable(dirs: set[str], roots: list[str]) -> None:
     """Create+delete a temp file under each destination's nearest existing
     ancestor. Re-run at apply time because permissions vary per subtree and the
     read-only Docker mount must fail here, not after a partial move."""
     for d in sorted(dirs):
-        target = Path(_os_native(d))
+        target = Path(_confine(d, roots))
         while not target.exists():
             parent = target.parent
             if parent == target:
@@ -185,13 +226,13 @@ def _probe_writable(dirs: set[str]) -> None:
             )
 
 
-def _verify_no_drift(selected: list[dict], stat_fn: StatFn) -> None:
+def _verify_no_drift(selected: list[dict], stat_fn: StatFn, roots: list[str]) -> None:
     """Re-stat every source; abort the whole batch on any fingerprint mismatch."""
     drifted: list[str] = []
     for entry in selected:
         for f in entry["files"]:
             try:
-                size, mtime_ns = stat_fn(f["current_path"])
+                size, mtime_ns = stat_fn(_confine(f["current_path"], roots))
             except OSError:
                 drifted.append(f["current_path"])
                 continue
@@ -228,23 +269,30 @@ def apply_manifest(
             "Reorganize apply is disabled — this deployment is read-only",
             status=403,
         )
+    _validate_manifest_id(manifest_id)
 
     payload = _load_manifest(db, manifest_id)
     selected = _select_entries(payload, entry_ids)
+    roots = _allowed_roots(db)
 
     dest_dirs = {e["proposed_dir"] for e in selected}
-    _probe_writable(dest_dirs)
+    _probe_writable(dest_dirs, roots)
 
     # Hold the app-wide write lock for the whole operation: no scan may prune or
     # insert rows under the move, and no second apply/undo may interleave.
     with write_lock.library_write("apply", timeout=0.0):
-        _verify_no_drift(selected, stat_fn)
+        _verify_no_drift(selected, stat_fn, roots)
 
         log = _UndoLog(manifest_id)
         moved = 0
         try:
             for f in _ordered_moves(selected):
-                move_fn(f["current_path"], f["proposed_path"])
+                # Confine both ends to a scan root before touching disk — the
+                # value the move operates on is now validated, not raw manifest
+                # data. Canonical paths still go to the log/DB.
+                src = _confine(f["current_path"], roots)
+                dst = _confine(f["proposed_path"], roots)
+                move_fn(src, dst)
                 # Record only AFTER the move completes — the log is the recovery
                 # source of truth, so it must reflect reality on disk.
                 log.record(f["current_path"], f["proposed_path"], f["size_bytes"], f["mtime_ns"])
@@ -329,3 +377,144 @@ def _prune_empty_sources(selected: list[dict]) -> None:
                 native.rmdir()
         except OSError:
             pass
+
+
+# --- Phase 2b: undo --------------------------------------------------------
+
+
+@dataclass
+class UndoResult:
+    manifest_id: str
+    reversed_files: int
+    skipped: list[dict]               # [{path, reason}] entries left in place
+
+
+def _parent(path: str) -> str:
+    return path.rsplit("/", 1)[0] if "/" in path else ""
+
+
+def undo_log_path(manifest_id: str) -> Path:
+    """Validated path of a manifest's undo log.
+
+    ``manifest_id`` is allow-listed to the generated token, then the assembled
+    path is normalized and re-confined under the data dir — the same containment
+    barrier the move paths use — so the request-supplied value provably can't
+    traverse out (belt and braces, and a sanitizer CodeQL recognizes)."""
+    safe = _validate_manifest_id(manifest_id)
+    base = write_lock.data_dir().resolve()
+    candidate = (base / f"reorg_undo_{safe}.log").resolve()
+    # The log is a single file directly under the data dir; its resolved parent
+    # must be exactly that dir. resolve() + parent-equality is the path-traversal
+    # barrier CodeQL models (plain normpath/startswith was not recognized).
+    if candidate.parent != base:
+        raise ApplyError("Invalid manifest id", status=400)
+    return candidate
+
+
+def _read_undo_log(manifest_id: str) -> list[dict]:
+    path = undo_log_path(manifest_id)
+    if not path.exists():
+        raise ApplyError("No undo log for this manifest — nothing to undo", status=404)
+    records: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            records.append(json.loads(line))
+    return records
+
+
+def undo_manifest(
+    db: Session,
+    manifest_id: str,
+    *,
+    move_fn: MoveFn = _safe_move,
+    stat_fn: StatFn = _stat,
+) -> UndoResult:
+    """Reverse a completed apply by replaying its undo log to → from in reverse.
+
+    Idempotent and partial-apply safe: each step is re-derived from the log plus
+    current disk state, never assumed. A destination (``to``) that's missing,
+    drifted, or whose origin (``from``) is now occupied is skipped and reported,
+    not forced. Running undo twice simply skips everything the first run already
+    reversed.
+    """
+    if not settings.reorganize_write_enabled:
+        raise ApplyError(
+            "Reorganize apply is disabled — this deployment is read-only",
+            status=403,
+        )
+
+    records = _read_undo_log(manifest_id)
+    roots = _allowed_roots(db)
+
+    with write_lock.library_write("undo", timeout=0.0):
+        skipped: list[dict] = []
+        reversed_moves: list[tuple[str, str]] = []   # (to, from) that succeeded
+
+        # Reverse order: a move made last is undone first, mirroring apply's
+        # deepest-source-first so a re-created parent never blocks a child.
+        for rec in reversed(records):
+            to, frm = rec["to"], rec["from"]
+            # Confine both ends to a scan root before any disk access — a tampered
+            # log can't drive a move outside the library. Reason out on escape.
+            try:
+                to_n = _confine(to, roots)
+                frm_n = _confine(frm, roots)
+            except ApplyError:
+                skipped.append({"path": to, "reason": "escapes_roots"})
+                continue
+
+            if not os.path.exists(to_n):
+                # Already reversed (idempotent re-run) or never landed.
+                skipped.append({"path": to, "reason": "missing"})
+                continue
+            try:
+                size, mtime_ns = stat_fn(to_n)
+            except OSError:
+                skipped.append({"path": to, "reason": "unreadable"})
+                continue
+            if size != rec["size_bytes"] or mtime_ns != rec["mtime_ns"]:
+                # User edited/replaced the file after apply — don't move blind.
+                skipped.append({"path": to, "reason": "drift"})
+                continue
+            if os.path.exists(frm_n) and _key(frm) != _key(to):
+                # Something new occupies the original location — refuse to clobber.
+                skipped.append({"path": to, "reason": "origin_occupied"})
+                continue
+
+            try:
+                move_fn(to_n, frm_n)
+            except Exception as e:
+                skipped.append({"path": to, "reason": f"move_failed: {e}"})
+                continue
+            reversed_moves.append((to, frm))
+
+        _repath_db_undo(db, reversed_moves)
+        return UndoResult(
+            manifest_id=manifest_id,
+            reversed_files=len(reversed_moves),
+            skipped=skipped,
+        )
+
+
+def _repath_db_undo(db: Session, reversed_moves: list[tuple[str, str]]) -> None:
+    """Point STLFile.path / Model.folder_path and the path-keyed overrides back to
+    the pre-apply locations, in one transaction. The log only carries paths, so
+    rows are found by their current (``to``) path."""
+    override_dirs: set[tuple[str, str]] = set()   # (proposed_dir, source_dir)
+    for to, frm in reversed_moves:
+        stl = db.query(STLFile).filter(STLFile.path == to).first()
+        if stl is None:
+            continue
+        stl.path = frm
+        model = db.get(Model, stl.model_id)
+        if model is not None:
+            model.folder_path = _parent(frm)
+            model.updated_at = utcnow()
+        override_dirs.add((_parent(to), _parent(frm)))
+
+    for proposed_dir, source_dir in override_dirs:
+        if proposed_dir and source_dir:
+            _repath_overrides(db, PackOverride, proposed_dir, source_dir)
+            _repath_overrides(db, GroupOverride, proposed_dir, source_dir)
+    db.commit()

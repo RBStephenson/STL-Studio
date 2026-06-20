@@ -216,6 +216,133 @@ class TestConcurrentScanRejected:
             write_lock.release_scan()
 
 
+def _apply(client, mid, ids):
+    return client.post("/reorganize/apply", json={"manifest_id": mid, "entry_ids": ids})
+
+
+class TestUndo:
+    def test_undo_restores_files_and_db(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m = _seed(db, tmp_path)
+        preview = _preview(client)
+        mid = preview["manifest_id"]
+        entry = preview["entries"][0]
+        src = entry["files"][0]["current_path"]
+        dst = entry["files"][0]["proposed_path"]
+        assert _apply(client, mid, [m.id]).status_code == 200
+        assert os.path.exists(dst) and not os.path.exists(src)
+
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid})
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["reversed_files"] == 1
+        assert data["skipped"] == []
+        # File back at source, destination gone.
+        assert os.path.exists(src) and not os.path.exists(dst)
+        db.refresh(m)
+        # folder_path restored to the original source dir.
+        assert m.folder_path == src.rsplit("/", 1)[0]
+
+    def test_undo_is_idempotent(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m = _seed(db, tmp_path)
+        mid = _preview(client)["manifest_id"]
+        _apply(client, mid, [m.id])
+        first = client.post("/reorganize/undo", json={"manifest_id": mid}).json()
+        assert first["reversed_files"] == 1
+        # Second run: nothing left to reverse, everything skipped (not an error).
+        second = client.post("/reorganize/undo", json={"manifest_id": mid}).json()
+        assert second["reversed_files"] == 0
+        assert all(s["reason"] == "missing" for s in second["skipped"])
+
+    def test_undo_skips_drifted_destination(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m = _seed(db, tmp_path)
+        preview = _preview(client)
+        mid = preview["manifest_id"]
+        dst = preview["entries"][0]["files"][0]["proposed_path"]
+        _apply(client, mid, [m.id])
+        # User edits the moved file after apply.
+        with open(dst, "ab") as fh:
+            fh.write(b"EDIT")
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid}).json()
+        assert resp["reversed_files"] == 0
+        assert resp["skipped"][0]["reason"] == "drift"
+        assert os.path.exists(dst)  # left in place
+
+    def test_undo_refuses_to_clobber_occupied_origin(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m = _seed(db, tmp_path)
+        preview = _preview(client)
+        mid = preview["manifest_id"]
+        src = preview["entries"][0]["files"][0]["current_path"]
+        _apply(client, mid, [m.id])
+        # Something new appears at the original location.
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+        with open(src, "wb") as fh:
+            fh.write(b"new occupant")
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid}).json()
+        assert resp["reversed_files"] == 0
+        assert resp["skipped"][0]["reason"] == "origin_occupied"
+        assert open(src, "rb").read() == b"new occupant"
+
+    def test_undo_no_log_is_404(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        _seed(db, tmp_path)
+        mid = _preview(client)["manifest_id"]  # previewed but never applied
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid})
+        assert resp.status_code == 404
+
+    def test_undo_refused_when_disabled(self, client, db, tmp_path, write_mode, monkeypatch):
+        _root(db, tmp_path)
+        m = _seed(db, tmp_path)
+        mid = _preview(client)["manifest_id"]
+        _apply(client, mid, [m.id])
+        monkeypatch.setattr(settings, "reorganize_write_enabled", False)
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid})
+        assert resp.status_code == 403
+
+
+class TestManifestIdValidation:
+    @pytest.mark.parametrize("bad_id", ["../../etc/passwd", "abc", "../" * 5, "g" * 32])
+    def test_apply_rejects_non_token_manifest_id(self, client, db, tmp_path, write_mode, bad_id):
+        _root(db, tmp_path)
+        _seed(db, tmp_path)
+        resp = client.post("/reorganize/apply", json={"manifest_id": bad_id, "entry_ids": []})
+        assert resp.status_code == 400
+
+    def test_undo_rejects_non_token_manifest_id(self, client, db, tmp_path, write_mode):
+        resp = client.post("/reorganize/undo", json={"manifest_id": "../../evil"})
+        assert resp.status_code == 400
+
+
+class TestPathConfinement:
+    def test_confine_rejects_outside_root(self, tmp_path):
+        from app.services.reorganize_apply import _confine
+        root = os.path.normpath(os.path.abspath(str(tmp_path)))
+        # Inside → returned normalized.
+        inside = str(tmp_path / "Abe3D" / "head.stl")
+        assert _confine(inside, [root]).startswith(root)
+        # Outside / traversal → rejected.
+        with pytest.raises(ApplyError):
+            _confine("/etc/passwd", [root])
+        with pytest.raises(ApplyError):
+            _confine(str(tmp_path / ".." / "evil.stl"), [root])
+
+    def test_apply_aborts_when_paths_escape_roots(self, client, db, tmp_path, write_mode):
+        from app.models import ScanRoot
+        _root(db, tmp_path)
+        m = _seed(db, tmp_path)
+        mid = _preview(client)["manifest_id"]
+        # Drop the scan root → nothing is confined anymore → apply must refuse,
+        # not move files to paths it can no longer vouch for (tampered-manifest
+        # defense-in-depth).
+        db.query(ScanRoot).delete()
+        db.commit()
+        resp = client.post("/reorganize/apply", json={"manifest_id": mid, "entry_ids": [m.id]})
+        assert resp.status_code == 400
+
+
 class TestOverrideRepath:
     def test_pack_and_group_overrides_repathed(self, db, tmp_path, write_mode, client):
         _root(db, tmp_path)

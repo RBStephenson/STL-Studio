@@ -434,3 +434,20 @@ class ReorganizeApplyResponse(BaseModel):
     moved_files: int
     moved_models: int
     undo_log: str                     # path to the crash-safe recovery log
+
+
+class ReorganizeUndoRequest(BaseModel):
+    manifest_id: str
+
+    model_config = {"extra": "forbid"}
+
+
+class ReorganizeUndoSkip(BaseModel):
+    path: str
+    reason: str                       # missing | drift | origin_occupied | …
+
+
+class ReorganizeUndoResponse(BaseModel):
+    manifest_id: str
+    reversed_files: int
+    skipped: list[ReorganizeUndoSkip]

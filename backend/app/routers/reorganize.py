@@ -21,6 +21,9 @@ from app.schemas import (
     ReorganizeFileMove,
     ReorganizePreviewResponse,
     ReorganizeStats,
+    ReorganizeUndoRequest,
+    ReorganizeUndoResponse,
+    ReorganizeUndoSkip,
 )
 from app.services import reorganize, reorganize_apply, write_lock
 from app.services.reorganize_apply import ApplyError
@@ -132,4 +135,26 @@ def apply(body: ReorganizeApplyRequest, db: Session = Depends(get_db)) -> Reorga
         moved_files=result.moved_files,
         moved_models=result.moved_models,
         undo_log=result.undo_log,
+    )
+
+
+@router.post("/undo", response_model=ReorganizeUndoResponse)
+def undo(body: ReorganizeUndoRequest, db: Session = Depends(get_db)) -> ReorganizeUndoResponse:
+    """Reverse a completed apply by replaying its undo log (#324, 2b).
+
+    Idempotent and partial-apply safe: drifted / missing / origin-occupied files
+    are skipped and reported, never forced. Same write-mode guard and app-wide
+    lock as apply.
+    """
+    try:
+        result = reorganize_apply.undo_manifest(db, body.manifest_id)
+    except write_lock.LibraryBusy as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ApplyError as e:
+        raise HTTPException(status_code=e.status, detail={"message": str(e), **e.detail})
+
+    return ReorganizeUndoResponse(
+        manifest_id=result.manifest_id,
+        reversed_files=result.reversed_files,
+        skipped=[ReorganizeUndoSkip(**s) for s in result.skipped],
     )
