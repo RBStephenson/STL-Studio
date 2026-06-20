@@ -35,6 +35,8 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
   const [enrichCreator, setEnrichCreator] = useState("");
   const [enrichCharacter, setEnrichCharacter] = useState("");
   const [enrichTitle, setEnrichTitle] = useState("");
+  const [clearCharacter, setClearCharacter] = useState(false);
+  const [clearTitle, setClearTitle] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const colInputRef = useRef<HTMLInputElement>(null);
   const enrichCreatorRef = useRef<HTMLInputElement>(null);
@@ -53,6 +55,8 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
     setEnrichCreator("");
     setEnrichCharacter("");
     setEnrichTitle("");
+    setClearCharacter(false);
+    setClearTitle(false);
     setStatus("idle");
     setMessage("");
   };
@@ -140,8 +144,10 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
   const applyEnrich = async () => {
     const fields: { creator_name?: string; character?: string; title?: string } = {};
     if (enrichCreator.trim()) fields.creator_name = enrichCreator.trim();
-    if (enrichCharacter.trim()) fields.character = enrichCharacter.trim();
-    if (enrichTitle.trim()) fields.title = enrichTitle.trim();
+    if (clearCharacter) fields.character = "";
+    else if (enrichCharacter.trim()) fields.character = enrichCharacter.trim();
+    if (clearTitle) fields.title = "";
+    else if (enrichTitle.trim()) fields.title = enrichTitle.trim();
     if (Object.keys(fields).length === 0) return;
 
     setStatus("loading");
@@ -287,23 +293,41 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
             />
             <input
               type="text"
-              value={enrichCharacter}
+              value={clearCharacter ? "" : enrichCharacter}
               onChange={e => setEnrichCharacter(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") applyEnrich(); if (e.key === "Escape") reset(); }}
-              placeholder="Character"
-              className="w-32 bg-gray-800 border border-gray-600 rounded px-2.5 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-            />
-            <input
-              type="text"
-              value={enrichTitle}
-              onChange={e => setEnrichTitle(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") applyEnrich(); if (e.key === "Escape") reset(); }}
-              placeholder="Title"
-              className="w-40 bg-gray-800 border border-gray-600 rounded px-2.5 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              placeholder={clearCharacter ? "— clearing —" : "Character"}
+              disabled={clearCharacter}
+              className="w-32 bg-gray-800 border border-gray-600 rounded px-2.5 py-1 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 disabled:opacity-40"
             />
             <button
+              type="button"
+              onClick={() => { setClearCharacter(v => !v); setEnrichCharacter(""); }}
+              title={clearCharacter ? "Cancel clear character" : "Clear character"}
+              className={`px-1.5 py-1 rounded text-xs transition-colors shrink-0 ${clearCharacter ? "bg-red-700 text-white" : "bg-gray-700 text-gray-400 hover:text-red-400"}`}
+            >
+              ✕
+            </button>
+            <input
+              type="text"
+              value={clearTitle ? "" : enrichTitle}
+              onChange={e => setEnrichTitle(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") applyEnrich(); if (e.key === "Escape") reset(); }}
+              placeholder={clearTitle ? "— clearing —" : "Title"}
+              disabled={clearTitle}
+              className="w-40 bg-gray-800 border border-gray-600 rounded px-2.5 py-1 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 disabled:opacity-40"
+            />
+            <button
+              type="button"
+              onClick={() => { setClearTitle(v => !v); setEnrichTitle(""); }}
+              title={clearTitle ? "Cancel clear title" : "Clear title"}
+              className={`px-1.5 py-1 rounded text-xs transition-colors shrink-0 ${clearTitle ? "bg-red-700 text-white" : "bg-gray-700 text-gray-400 hover:text-red-400"}`}
+            >
+              ✕
+            </button>
+            <button
               onClick={applyEnrich}
-              disabled={!enrichCreator.trim() && !enrichCharacter.trim() && !enrichTitle.trim()}
+              disabled={!enrichCreator.trim() && !enrichCharacter.trim() && !enrichTitle.trim() && !clearCharacter && !clearTitle}
               className="flex items-center gap-1 px-3 py-1 rounded text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 transition-colors shrink-0"
             >
               Apply
