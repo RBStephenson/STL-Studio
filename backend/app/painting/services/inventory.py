@@ -293,6 +293,27 @@ def _resolve_line(db: Session, cache: dict, brand_name: str, class_name: str) ->
     return line
 
 
+def _guide_referenced_paint_ids(db: Session, paint_ids: list[int]) -> set[int]:
+    """Subset of ``paint_ids`` referenced by a guide swatch or mix component.
+
+    Deleting a referenced paint would orphan those rows (SQLite FK enforcement
+    is off), so CSV removal must skip them — the same protection
+    DELETE /painting/paints/{id} applies manually (#441)."""
+    from app.painting.models import GuideMixComponent, GuideSwatch
+
+    if not paint_ids:
+        return set()
+    swatch = {
+        pid for (pid,) in db.query(GuideSwatch.paint_id)
+        .filter(GuideSwatch.paint_id.in_(paint_ids)).distinct()
+    }
+    mix = {
+        pid for (pid,) in db.query(GuideMixComponent.paint_id)
+        .filter(GuideMixComponent.paint_id.in_(paint_ids)).distinct()
+    }
+    return swatch | mix
+
+
 def apply_diff(
     db: Session,
     rows: list[CsvRow],
@@ -303,11 +324,12 @@ def apply_diff(
     source_label: str,
 ) -> dict:
     """Recompute the diff against current data and apply the selected parts.
-    Returns counts. Stateless by design: the confirm endpoint re-sends the
-    CSV, so nothing is trusted from the preview round-trip."""
+    Returns counts plus ``skipped_removed`` — referenced paints that could not
+    be deleted. Stateless by design: the confirm endpoint re-sends the CSV, so
+    nothing is trusted from the preview round-trip."""
     diff = compute_diff(db, rows)
     rows_by_key = {row.key: row for row in rows}
-    counts = {"added": 0, "changed": 0, "removed": 0}
+    counts: dict = {"added": 0, "changed": 0, "removed": 0, "skipped_removed": []}
     line_cache: dict = {}
 
     if apply_added:
@@ -345,11 +367,21 @@ def apply_diff(
             counts["changed"] += 1
 
     if apply_removed:
+        removable_ids = [item["paint_id"] for item in diff["removed"]]
+        referenced = _guide_referenced_paint_ids(db, removable_ids)
         for item in diff["removed"]:
             paint = db.get(Paint, item["paint_id"])
-            if paint is not None:
-                db.delete(paint)
-                counts["removed"] += 1
+            if paint is None:
+                continue
+            if paint.id in referenced:
+                # A guide swatch/mix points at this paint — never delete it.
+                counts["skipped_removed"].append({
+                    "paint_id": paint.id, "code": paint.code, "name": paint.name,
+                    "reason": "referenced by a guide",
+                })
+                continue
+            db.delete(paint)
+            counts["removed"] += 1
 
     db.commit()
     return counts
