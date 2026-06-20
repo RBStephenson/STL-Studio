@@ -303,6 +303,19 @@ class TestUndo:
         assert resp.status_code == 403
 
 
+class TestManifestIdValidation:
+    @pytest.mark.parametrize("bad_id", ["../../etc/passwd", "abc", "../" * 5, "g" * 32])
+    def test_apply_rejects_non_token_manifest_id(self, client, db, tmp_path, write_mode, bad_id):
+        _root(db, tmp_path)
+        _seed(db, tmp_path)
+        resp = client.post("/reorganize/apply", json={"manifest_id": bad_id, "entry_ids": []})
+        assert resp.status_code == 400
+
+    def test_undo_rejects_non_token_manifest_id(self, client, db, tmp_path, write_mode):
+        resp = client.post("/reorganize/undo", json={"manifest_id": "../../evil"})
+        assert resp.status_code == 400
+
+
 class TestOverrideRepath:
     def test_pack_and_group_overrides_repathed(self, db, tmp_path, write_mode, client):
         _root(db, tmp_path)

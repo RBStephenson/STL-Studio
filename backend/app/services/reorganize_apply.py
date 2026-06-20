@@ -25,6 +25,7 @@ mid-batch crash, and drift without a second real filesystem.
 import errno
 import json
 import os
+import re
 import shutil
 import unicodedata
 from dataclasses import dataclass
@@ -74,6 +75,20 @@ def _key(path: str) -> str:
     return unicodedata.normalize("NFC", path or "").replace("\\", "/").casefold()
 
 
+# Manifest ids are generated as ``uuid4().hex`` (32 lowercase hex chars). The id
+# arrives from the request body and is interpolated into the undo-log *filename*,
+# so it must be allow-listed before any path use — otherwise a value like
+# ``../../etc`` would escape the data dir (path traversal). Reject anything that
+# isn't exactly the expected token.
+_MANIFEST_ID_RE = re.compile(r"\A[0-9a-f]{32}\Z")
+
+
+def _validate_manifest_id(manifest_id: str) -> str:
+    if not _MANIFEST_ID_RE.match(manifest_id or ""):
+        raise ApplyError("Invalid manifest id", status=400)
+    return manifest_id
+
+
 def _safe_move(src: str, dst: str) -> None:
     """Move one file from src to dst with the safety guarantees above.
 
@@ -120,7 +135,7 @@ class _UndoLog:
     move could relocate), so a kill mid-batch leaves a replayable partial log."""
 
     def __init__(self, manifest_id: str):
-        self.path = write_lock.data_dir() / f"reorg_undo_{manifest_id}.log"
+        self.path = undo_log_path(manifest_id)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = open(self.path, "a", encoding="utf-8")
 
@@ -228,6 +243,7 @@ def apply_manifest(
             "Reorganize apply is disabled — this deployment is read-only",
             status=403,
         )
+    _validate_manifest_id(manifest_id)
 
     payload = _load_manifest(db, manifest_id)
     selected = _select_entries(payload, entry_ids)
@@ -346,7 +362,10 @@ def _parent(path: str) -> str:
 
 
 def undo_log_path(manifest_id: str) -> Path:
-    return write_lock.data_dir() / f"reorg_undo_{manifest_id}.log"
+    """Validated path of a manifest's undo log. ``manifest_id`` is allow-listed
+    first so the request-supplied value can't traverse out of the data dir."""
+    safe = _validate_manifest_id(manifest_id)
+    return write_lock.data_dir() / f"reorg_undo_{safe}.log"
 
 
 def _read_undo_log(manifest_id: str) -> list[dict]:
