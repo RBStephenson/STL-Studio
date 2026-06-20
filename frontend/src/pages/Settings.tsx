@@ -546,8 +546,8 @@ export default function Settings() {
           className="flex items-center gap-2 text-sm text-gray-300 hover:text-indigo-300 bg-gray-900 border border-gray-800 hover:border-indigo-700 rounded-lg px-4 py-3 self-start transition-colors w-fit"
         >
           <FolderTree size={15} className="text-indigo-400" />
-          Reorganize Library (preview)
-          <span className="text-xs text-gray-600">— see a proposed tidy layout; no files are moved</span>
+          Reorganize Library
+          <span className="text-xs text-gray-600">— preview a tidy layout, resolve flags, then apply</span>
         </Link>
       </section>
 

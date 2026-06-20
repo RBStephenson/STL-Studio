@@ -19,6 +19,7 @@ from app.schemas import (
     ReorganizeApplyResponse,
     ReorganizeEntry,
     ReorganizeFileMove,
+    ReorganizePreviewRequest,
     ReorganizePreviewResponse,
     ReorganizeStats,
     ReorganizeUndoRequest,
@@ -84,27 +85,25 @@ def _compute_stats(entries: list[ReorganizeEntry]) -> ReorganizeStats:
     )
 
 
-@router.get("/preview", response_model=ReorganizePreviewResponse)
-def preview(
-    template: str | None = Query(None),
-    root_id: int | None = Query(None),
-    db: Session = Depends(get_db),
+def _build_and_persist(
+    db: Session,
+    template: str | None,
+    root_id: int | None,
+    overrides: dict[int, dict] | None,
 ) -> ReorganizePreviewResponse:
     try:
-        manifest = reorganize.build_manifest(db, template, root_id)
+        manifest = reorganize.build_manifest(db, template, root_id, overrides)
     except ReorganizeTemplateError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     entries = [_entry_to_schema(e) for e in manifest.entries]
-    stats = _compute_stats(entries)
     response = ReorganizePreviewResponse(
         manifest_id=uuid.uuid4().hex,
         template=manifest.template,
         generated_at=datetime.now(timezone.utc).isoformat(),
         entries=entries,
-        stats=stats,
+        stats=_compute_stats(entries),
     )
-
     # Persist the immutable artifact so Phase 2 can execute + verify it.
     db.add(ReorganizeManifest(
         id=response.manifest_id,
@@ -112,8 +111,27 @@ def preview(
         payload=response.model_dump(),
     ))
     db.commit()
-
     return response
+
+
+@router.get("/preview", response_model=ReorganizePreviewResponse)
+def preview(
+    template: str | None = Query(None),
+    root_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+) -> ReorganizePreviewResponse:
+    return _build_and_persist(db, template, root_id, None)
+
+
+@router.post("/preview", response_model=ReorganizePreviewResponse)
+def preview_with_overrides(
+    body: ReorganizePreviewRequest, db: Session = Depends(get_db),
+) -> ReorganizePreviewResponse:
+    """Regenerate the manifest with per-entry user resolutions (Phase 2c). A
+    resolved manifest is a new persisted artifact with its own fingerprint
+    baseline, so apply/undo verify against exactly what the user approved."""
+    overrides = {mid: ov.model_dump(exclude_none=True) for mid, ov in body.overrides.items()}
+    return _build_and_persist(db, body.template, body.root_id, overrides)
 
 
 @router.post("/apply", response_model=ReorganizeApplyResponse)

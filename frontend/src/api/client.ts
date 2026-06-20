@@ -14,7 +14,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options);
   if (!res.ok) {
     let detail: string | undefined;
-    try { detail = (await res.json()).detail; } catch { /* ignore */ }
+    try {
+      const d = (await res.json()).detail;
+      // Some endpoints return a structured detail ({message, ...}); surface the
+      // message rather than "[object Object]".
+      detail = typeof d === "string" ? d : d?.message;
+    } catch { /* ignore */ }
     throw new ApiError(res.status, detail || `${res.status} ${res.statusText}`);
   }
   return res.json();
@@ -639,6 +644,32 @@ export interface ReorganizePreview {
   stats: ReorganizeStats;
 }
 
+// Phase 2c resolution + apply/undo.
+export interface ReorganizeOverride {
+  creator?: string;
+  character?: string;
+  title?: string;
+  suffix?: string;
+}
+
+export interface ReorganizeApplyResult {
+  manifest_id: string;
+  moved_files: number;
+  moved_models: number;
+  undo_log: string;
+}
+
+export interface ReorganizeUndoSkip {
+  path: string;
+  reason: string;
+}
+
+export interface ReorganizeUndoResult {
+  manifest_id: string;
+  reversed_files: number;
+  skipped: ReorganizeUndoSkip[];
+}
+
 export const api = {
   models: {
     list: (params: Record<string, string | number | boolean>) => {
@@ -824,6 +855,28 @@ export const api = {
       const qs = p.toString();
       return request<ReorganizePreview>(`/reorganize/preview${qs ? `?${qs}` : ""}`);
     },
+    previewWithOverrides: (body: {
+      template?: string;
+      root_id?: number;
+      overrides: Record<number, ReorganizeOverride>;
+    }) =>
+      request<ReorganizePreview>("/reorganize/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    apply: (manifest_id: string, entry_ids: number[]) =>
+      request<ReorganizeApplyResult>("/reorganize/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manifest_id, entry_ids }),
+      }),
+    undo: (manifest_id: string) =>
+      request<ReorganizeUndoResult>("/reorganize/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manifest_id }),
+      }),
   },
   scrape: {
     fetchUrl: (url: string) =>

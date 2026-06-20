@@ -135,9 +135,17 @@ def build_manifest(
     db: Session,
     template: str | None,
     root_id: int | None = None,
+    overrides: dict[int, dict] | None = None,
 ) -> Manifest:
     """Build the reorganize preview manifest. Raises ReorganizeTemplateError on
-    a malformed template (caller maps to 4xx)."""
+    a malformed template (caller maps to 4xx).
+
+    ``overrides`` (Phase 2c) maps a model_id to user resolutions for that entry:
+    ``creator`` / ``character`` / ``title`` substitutions (fix unclassifiable) and
+    an optional ``suffix`` appended to the title segment (dodge a collision /
+    shorten an over-length or reserved name). A regenerated manifest with
+    overrides is a fresh artifact with its own fingerprint baseline."""
+    overrides = overrides or {}
     segments = parse_template(template)
     canonical_template = "/".join(segments)
 
@@ -166,7 +174,8 @@ def build_manifest(
 
     entries: list[Entry] = []
     for m in models:
-        entries.append(_build_entry(m, segments, root_keys, pack_paths, group_paths))
+        entries.append(_build_entry(m, segments, root_keys, pack_paths, group_paths,
+                                    overrides.get(m.id)))
 
     _detect_collisions(entries)
     _detect_overlaps(entries)
@@ -179,22 +188,34 @@ def _build_entry(
     root_keys: list[tuple[str, str]],
     pack_paths: list[str],
     group_paths: list[str],
+    override: dict | None = None,
 ) -> Entry:
+    # User resolutions (Phase 2c) take precedence over model metadata and clear
+    # the corresponding 'missing' flag.
+    override = override or {}
+    ov_creator = (override.get("creator") or "").strip()
+    ov_character = (override.get("character") or "").strip()
+    ov_title = (override.get("title") or "").strip()
+    ov_suffix = (override.get("suffix") or "").strip()
+
     # Resolve template field values, tracking which fell back to a sentinel.
     missing: list[str] = []
-    creator_name = (m.creator.name if m.creator else "") or ""
+    creator_name = ov_creator or (m.creator.name if m.creator else "") or ""
     if not creator_name:
         creator_name = UNKNOWN_CREATOR
         missing.append("creator")
-    character = m.character or ""
+    character = ov_character or m.character or ""
     if not character:
         character = UNKNOWN_CHARACTER
         missing.append("character")
-    title = m.title or m.name or ""
-    if not (m.title or "").strip():
+    title = ov_title or m.title or m.name or ""
+    if not (ov_title or (m.title or "").strip()):
         # title fell back to folder name — only 'missing' if that's also empty
         if not (m.name or "").strip():
             missing.append("title")
+    # Suffix dodges a collision / shortens an over-length or reserved name.
+    if ov_suffix:
+        title = f"{title} {ov_suffix}"
 
     values = {"creator": creator_name, "character": character, "title": title}
     rendered = render_segments(segments, values)
