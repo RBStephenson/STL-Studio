@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import {
   Inbox, RefreshCw, ChevronDown, ChevronRight, Check, Loader2,
-  AlertCircle, Package, ArrowLeft,
+  AlertCircle, Package, ArrowLeft, Download,
 } from "lucide-react";
-import { api, Library, ImportPreviewPack, SourceContentsEntry } from "../api/client";
+import { api, Library, ImportPreviewPack, SourceContentsEntry, Collection } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import TagInput from "../components/TagInput";
 
@@ -15,17 +15,25 @@ interface CardFields {
   character: string;
   title: string;
   tags: string[];
+  notes: string;
+  sourceUrl: string;
+  collectionIds: number[];
 }
 
-const EMPTY_FIELDS: CardFields = { creator: "", character: "", title: "", tags: [] };
+const EMPTY_FIELDS: CardFields = {
+  creator: "", character: "", title: "", tags: [], notes: "", sourceUrl: "", collectionIds: [],
+};
 
 function fieldsFromPack(p: ImportPreviewPack | undefined): CardFields {
-  if (!p) return { ...EMPTY_FIELDS };
+  if (!p) return { ...EMPTY_FIELDS, tags: [], collectionIds: [] };
   return {
     creator: p.creator_name ?? "",
     character: p.character ?? "",
     title: p.title ?? "",
     tags: p.tags ?? [],
+    notes: p.notes ?? "",
+    sourceUrl: p.source_url ?? "",
+    collectionIds: [],
   };
 }
 
@@ -39,6 +47,7 @@ export default function ImportPreviewPage() {
   const [flatFileCount, setFlatFileCount] = useState(0); // root STL count for the flat card (#456)
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [libraryId, setLibraryId] = useState<number | null>(null);
+  const [collections, setCollections] = useState<Collection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +55,7 @@ export default function ImportPreviewPage() {
   const [fields, setFields] = useState<Record<string, CardFields>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<Record<string, ImportStatus>>({});
+  const [fetching, setFetching] = useState<Record<string, boolean>>({}); // per-card scrape in flight
 
   const [applying, setApplying] = useState(false);
 
@@ -57,17 +67,19 @@ export default function ImportPreviewPage() {
     setLoading(true);
     setError(null);
     try {
-      const [contents, libs, mapping, preview] = await Promise.all([
+      const [contents, libs, mapping, preview, cols] = await Promise.all([
         api.import.sourceContents(source),
         api.scan.libraries(),
         api.import.getMapping(source),
         api.import.preview(source),
+        api.collections.list(),
       ]);
       setEntries(contents.entries);
       setIsFlat(contents.is_flat);
       setFlatFileCount(contents.file_count);
       setLibraries(libs);
       setLibraryId(mapping?.library_id ?? null);
+      setCollections(cols);
 
       const packByPath = new Map(preview.packs.map((p) => [p.source_path, p]));
       const cards: SourceContentsEntry[] = contents.is_flat
@@ -101,6 +113,31 @@ export default function ImportPreviewPage() {
   const setField = (path: string, patch: Partial<CardFields>) =>
     setFields((m) => ({ ...m, [path]: { ...(m[path] ?? EMPTY_FIELDS), ...patch } }));
 
+  // Storefront scrape (#458): populate the card's metadata from the Source URL,
+  // mirroring MetadataEditor. Scrape carries no `notes`, so Notes stays manual.
+  const fetchMeta = async (path: string) => {
+    const f = fields[path] ?? EMPTY_FIELDS;
+    const url = f.sourceUrl.trim();
+    if (!url) return;
+    setFetching((m) => ({ ...m, [path]: true }));
+    try {
+      const s = await api.scrape.fetchUrl(url);
+      setField(path, {
+        title: s.title || f.title,
+        creator: s.creator_name || f.creator,
+        sourceUrl: s.source_url || url,
+        tags: [...new Set([...f.tags, ...s.tags])],
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error && e.message.includes("400")
+        ? "URL not recognised — only Gumroad, Cults3D and MyMiniFactory are supported."
+        : "Couldn't fetch metadata from that URL.";
+      toast(msg, "error");
+    } finally {
+      setFetching((m) => ({ ...m, [path]: false }));
+    }
+  };
+
   const waitForScan = () =>
     new Promise<void>((resolve, reject) => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -127,12 +164,19 @@ export default function ImportPreviewPage() {
       const ids = preview.packs.flatMap((p) => p.model_ids);
       const f = fields[entry.path] ?? EMPTY_FIELDS;
       if (ids.length) {
-        const enrich: { creator_name?: string; character?: string; title?: string } = {};
+        const enrich: {
+          creator_name?: string; character?: string; title?: string;
+          notes?: string; source_url?: string;
+        } = {};
         if (f.creator.trim()) enrich.creator_name = f.creator.trim();
         if (f.character.trim()) enrich.character = f.character.trim();
         if (f.title.trim()) enrich.title = f.title.trim();
+        if (f.notes.trim()) enrich.notes = f.notes.trim();
+        if (f.sourceUrl.trim()) enrich.source_url = f.sourceUrl.trim();
         if (Object.keys(enrich).length) await api.models.bulkEnrich(ids, enrich);
         if (f.tags.length) await api.models.bulkTag(ids, f.tags, []);
+        // Collections need the post-ingest model ids, so they apply last (#458).
+        for (const colId of f.collectionIds) await api.collections.bulkAddModels(colId, ids);
       }
       setStatus((m) => ({ ...m, [entry.path]: "done" }));
       toast(`Imported "${entry.name}".`, "success");
@@ -294,6 +338,60 @@ export default function ImportPreviewPage() {
                       <TagInput value={f.tags} onChange={(tags) => setField(c.path, { tags })} suggestions={[]} />
                     </Field>
                   </div>
+                  <div className="col-span-2">
+                    <Field label="Source URL">
+                      <div className="flex gap-2">
+                        <input value={f.sourceUrl} placeholder="https://…" type="url"
+                          onChange={(e) => setField(c.path, { sourceUrl: e.target.value })}
+                          className="flex-1 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none" />
+                        <button
+                          onClick={() => fetchMeta(c.path)}
+                          disabled={!f.sourceUrl.trim() || fetching[c.path]}
+                          title="Fetch metadata from this URL"
+                          className="flex items-center gap-1 text-xs px-2 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-50 shrink-0"
+                        >
+                          {fetching[c.path] ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                          Fetch
+                        </button>
+                      </div>
+                    </Field>
+                  </div>
+                  <div className="col-span-2">
+                    <Field label="Notes">
+                      <textarea value={f.notes} placeholder="Notes about this pack…" rows={2}
+                        onChange={(e) => setField(c.path, { notes: e.target.value })}
+                        className="w-full bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none resize-y" />
+                    </Field>
+                  </div>
+                  {collections.length > 0 && (
+                    <div className="col-span-2">
+                      <Field label="Collections">
+                        <div className="flex flex-wrap gap-1.5">
+                          {collections.map((col) => {
+                            const on = f.collectionIds.includes(col.id);
+                            return (
+                              <button
+                                key={col.id}
+                                onClick={() => setField(c.path, {
+                                  collectionIds: on
+                                    ? f.collectionIds.filter((id) => id !== col.id)
+                                    : [...f.collectionIds, col.id],
+                                })}
+                                aria-pressed={on}
+                                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                                  on
+                                    ? "bg-indigo-600/30 border-indigo-500 text-indigo-200"
+                                    : "bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-400"
+                                }`}
+                              >
+                                {col.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </Field>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

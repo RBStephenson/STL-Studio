@@ -843,7 +843,7 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids, needs_review }),
       }),
-    bulkEnrich: (ids: number[], fields: { creator_name?: string; character?: string; title?: string }) =>
+    bulkEnrich: (ids: number[], fields: { creator_name?: string; character?: string; title?: string; notes?: string; source_url?: string }) =>
       request<{ ok: boolean; updated: number }>("/models/bulk/enrich", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

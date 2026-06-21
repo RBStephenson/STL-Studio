@@ -603,7 +603,10 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
     creator_name = body.creator_name.strip() if body.creator_name is not None else None
     if body.creator_name is not None and not creator_name:
         raise HTTPException(status_code=400, detail="Creator name cannot be blank")
-    if not any([creator_name, body.character is not None, body.title is not None]):
+    if not any([
+        creator_name, body.character is not None, body.title is not None,
+        body.notes is not None, body.source_url is not None,
+    ]):
         raise HTTPException(status_code=400, detail="At least one field to update must be provided")
 
     if scanner.get_status()["running"]:
@@ -620,6 +623,12 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
             _apply_group_override(db, model, character)
         if body.title is not None:
             model.title = body.title.strip() or None
+        if body.notes is not None:
+            model.notes = body.notes.strip() or None
+        if body.source_url is not None:
+            model.source_url = body.source_url.strip() or None
+            if model.source_url:
+                propagate_source_url(db, model)
         model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "updated": len(models_to_update)}

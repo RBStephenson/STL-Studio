@@ -221,6 +221,8 @@ class BulkEnrichUpdate(BaseModel):
     creator_name: Optional[str] = None
     character: Optional[str] = None
     title: Optional[str] = None
+    notes: Optional[str] = None
+    source_url: Optional[str] = None
 
 
 class SetGroupBody(BaseModel):

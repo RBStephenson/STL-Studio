@@ -42,6 +42,37 @@ class TestBulkEnrich:
         assert a.title == "Epic Set"
         assert b.title == "Epic Set"
 
+    def test_sets_notes_on_selected_models(self, client, db):
+        _, a, b, c = _setup(db)
+        r = client.patch("/models/bulk/enrich", json={"ids": [a.id, b.id], "notes": "From pack X"})
+        assert r.status_code == 200
+        db.refresh(a); db.refresh(b); db.refresh(c)
+        assert a.notes == "From pack X"
+        assert b.notes == "From pack X"
+        assert c.notes is None  # unselected — unchanged
+
+    def test_sets_source_url_on_selected_models(self, client, db):
+        _, a, b, _ = _setup(db)
+        url = "https://www.myminifactory.com/object/123"
+        r = client.patch("/models/bulk/enrich", json={"ids": [a.id, b.id], "source_url": url})
+        assert r.status_code == 200
+        db.refresh(a); db.refresh(b)
+        assert a.source_url == url
+        assert b.source_url == url
+
+    def test_blank_notes_clears_field(self, client, db):
+        _, a, _, _ = _setup(db)
+        client.patch("/models/bulk/enrich", json={"ids": [a.id], "notes": "temp"})
+        client.patch("/models/bulk/enrich", json={"ids": [a.id], "notes": "  "})
+        db.refresh(a)
+        assert a.notes is None  # whitespace-only collapses to NULL
+
+    def test_notes_only_is_a_valid_update(self, client, db):
+        """notes/source_url count toward the 'at least one field' guard (#458)."""
+        _, a, _, _ = _setup(db)
+        r = client.patch("/models/bulk/enrich", json={"ids": [a.id], "notes": "n"})
+        assert r.status_code == 200
+
     def test_partial_fields_only_touches_provided(self, client, db):
         creator, a, _, _ = _setup(db)
         client.patch("/models/bulk/enrich", json={"ids": [a.id], "character": "Elf"})

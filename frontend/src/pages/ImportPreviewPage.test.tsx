@@ -24,6 +24,13 @@ vi.mock("../api/client", () => ({
       bulkEnrich: vi.fn().mockResolvedValue({ ok: true, updated: 2 }),
       bulkTag: vi.fn().mockResolvedValue({ ok: true, updated: 2 }),
     },
+    scrape: {
+      fetchUrl: vi.fn(),
+    },
+    collections: {
+      list: vi.fn(),
+      bulkAddModels: vi.fn().mockResolvedValue(undefined),
+    },
   },
 }));
 
@@ -47,6 +54,9 @@ function setup(opts: { mapping?: { source_path: string; library_id: number } | n
   ]);
   vi.mocked(api.import.getMapping).mockResolvedValue(opts.mapping ?? null);
   vi.mocked(api.import.preview).mockResolvedValue({ source: "/src", library_id: null, packs: [PACK] });
+  vi.mocked(api.collections.list).mockResolvedValue([
+    { id: 7, name: "Heroes", description: null, cover_image_path: null, model_count: 0, created_at: "" },
+  ]);
 
   return render(
     <MemoryRouter initialEntries={["/import/preview?source=/src"]}>
@@ -133,5 +143,55 @@ describe("ImportPreviewPage (#452 C2)", () => {
       { timeout: 5000 }
     );
     expect(await screen.findByText("Imported", {}, { timeout: 5000 })).toBeInTheDocument();
+  });
+
+  it("persists notes and source_url through bulkEnrich on import (#458)", async () => {
+    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    await screen.findByText("PackA");
+    fireEvent.click(screen.getByLabelText("Expand"));
+
+    fireEvent.change(await screen.findByPlaceholderText("Notes about this pack…"), { target: { value: "Pack notes" } });
+    fireEvent.change(screen.getByPlaceholderText("https://…"), { target: { value: "https://cults3d.com/x" } });
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(
+      () => expect(api.models.bulkEnrich).toHaveBeenCalledWith(
+        [1, 2], { notes: "Pack notes", source_url: "https://cults3d.com/x" },
+      ),
+      { timeout: 5000 }
+    );
+  });
+
+  it("Fetch populates fields from the storefront scrape (#458)", async () => {
+    vi.mocked(api.scrape.fetchUrl).mockResolvedValue({
+      title: "Scraped Title", description: null, source_url: "https://cults3d.com/x",
+      source_site: "cults3d", external_id: null, creator_name: "Scraped Creator",
+      thumbnail_url: null, image_urls: [], tags: ["resin"], category: null, license: null,
+      like_count: null, download_count: null,
+    });
+    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    await screen.findByText("PackA");
+    fireEvent.click(screen.getByLabelText("Expand"));
+
+    fireEvent.change(await screen.findByPlaceholderText("https://…"), { target: { value: "https://cults3d.com/x" } });
+    fireEvent.click(screen.getByRole("button", { name: /fetch/i }));
+
+    await waitFor(() => expect(api.scrape.fetchUrl).toHaveBeenCalledWith("https://cults3d.com/x"));
+    expect(await screen.findByDisplayValue("Scraped Title")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Scraped Creator")).toBeInTheDocument();
+  });
+
+  it("assigns the pack to a selected collection after ingest (#458)", async () => {
+    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    await screen.findByText("PackA");
+    fireEvent.click(screen.getByLabelText("Expand"));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Heroes" }));
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(
+      () => expect(api.collections.bulkAddModels).toHaveBeenCalledWith(7, [1, 2]),
+      { timeout: 5000 }
+    );
   });
 });
