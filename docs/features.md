@@ -128,6 +128,13 @@ group as well as individual variants:
   - **Set image** — paste an image URL (or a product-page link, whose preview
     image is used) to give *every* selected variant the same thumbnail. The
     image is downloaded once and applied to all of them.
+  - **Set store page** — paste a store/product URL to write it as the
+    **source link** on the selected variants. Variants of one figure usually
+    share a single store listing, so this fills the store page across them in
+    one step. It applies to exactly the variants you've ticked (overwriting any
+    existing link on those) and leaves unticked siblings alone — so you can set
+    one listing on most variants while keeping a different link on the odd one
+    out.
   - **Ungroup** — pull the selected models out of the group, making them
     standalone models in the Library.
 - **Per-card actions** — below each card, **Move to group** (with name

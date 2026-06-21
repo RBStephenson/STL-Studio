@@ -142,27 +142,43 @@ ship v0.9.0 on the work above.
 
 ---
 
-## v0.10 — Painting depth 🚧 In progress
+## v0.10 — Painting depth & variant-group management ✅ Complete
 
-| Issue | Item |
-|-------|------|
-| [#339](https://github.com/RBStephenson/STL-Inventory/issues/339) | **Paint mixes as swatches** — true mix modelling: nullable paint_id, ratios, round-trip, blended chip |
-| [#271](https://github.com/RBStephenson/STL-Inventory/issues/271) | **Painting round-trip coverage gaps** — step 3: byte-fidelity for series-badge filenames, skills-tab bodies, and `GUIDE_THINNING` literal |
+Released as **v0.10.0**. Painting depth: paint mixes as first-class swatches
+([#339](https://github.com/RBStephenson/STL-Inventory/issues/339)), guide-import
+paint resolution — map/force-add/skip unresolved paints before committing
+([#417](https://github.com/RBStephenson/STL-Inventory/issues/417)),
+drag-and-drop HTML guide import
+([#413](https://github.com/RBStephenson/STL-Inventory/issues/413)), and a dark,
+readable print/PDF guide stylesheet
+([#418](https://github.com/RBStephenson/STL-Inventory/issues/418)).
 
-Already landed since v0.9.0: drag-and-drop HTML guide import
-([#413](https://github.com/RBStephenson/STL-Inventory/issues/413)), guide-import
-paint resolution UI ([#417](https://github.com/RBStephenson/STL-Inventory/issues/417)
-— map/force-add/skip unresolved paints before committing), inline tag editing on
-model detail ([#411](https://github.com/RBStephenson/STL-Inventory/issues/411)), and
-hide-printed filter with variant grouping preserved.
-
-> The variant-group management cluster originally tracked under v0.10 (rename,
-> merge, drag-to-group + keyboard a11y, display thumbnail, image-list caching,
-> rep auto-promotion, and manual drag-to-reorder — #136/#137/#139/#183/#184/#191/
-> #192/#193/#302/#303/#374/#399) all landed on `main` ahead of the **v0.9.0** cut,
-> so it shipped as part of that release. Nested groups-within-groups
-> ([#188](https://github.com/RBStephenson/STL-Inventory/issues/188)) was closed as
-> out of scope — group merging already covers combining groups.
+The **variant-group management** cluster also landed in full: rename groups
+([#183](https://github.com/RBStephenson/STL-Inventory/issues/183)), one image for
+a whole group ([#184](https://github.com/RBStephenson/STL-Inventory/issues/184)),
+inline rename ([#191](https://github.com/RBStephenson/STL-Inventory/issues/191)),
+quick clear-image ([#192](https://github.com/RBStephenson/STL-Inventory/issues/192)),
+pick the display thumbnail
+([#193](https://github.com/RBStephenson/STL-Inventory/issues/193)), drag-to-group
+merge / multi-select / keyboard accessibility
+([#136](https://github.com/RBStephenson/STL-Inventory/issues/136),
+[#137](https://github.com/RBStephenson/STL-Inventory/issues/137),
+[#139](https://github.com/RBStephenson/STL-Inventory/issues/139)), the bulk
+set-group endpoint ([#374](https://github.com/RBStephenson/STL-Inventory/issues/374)),
+manual within-group ordering + rep auto-promotion
+([#302](https://github.com/RBStephenson/STL-Inventory/issues/302),
+[#399](https://github.com/RBStephenson/STL-Inventory/issues/399),
+[#401](https://github.com/RBStephenson/STL-Inventory/issues/401)), and in-group
+image caching ([#303](https://github.com/RBStephenson/STL-Inventory/issues/303)) —
+plus inline tag editing on model detail
+([#411](https://github.com/RBStephenson/STL-Inventory/issues/411)) and
+variant-collapse / default-sort performance work
+([#392](https://github.com/RBStephenson/STL-Inventory/issues/392),
+[#393](https://github.com/RBStephenson/STL-Inventory/issues/393),
+[#394](https://github.com/RBStephenson/STL-Inventory/issues/394)).
+Nested groups-within-groups
+([#188](https://github.com/RBStephenson/STL-Inventory/issues/188)) was closed as
+out of scope — group merging already covers combining groups.
 
 ---
 
@@ -190,24 +206,20 @@ All of it reuses the v0.11 Phase 2 apply/move engine — no second mover.
 
 Shipped in **v0.12.0**.
 
-The first epic (#427) landed the building blocks — one-shot inbox import and
-bulk-enrich. The second epic (#449) fused them into a single browse-first
-**Import Preview** screen with named libraries and a batch move.
+The epic (#427) landed the building blocks — one-shot inbox import and
+bulk-enrich — plus the Import Preview **foundation**: named libraries with a
+source→library mapping, the pack-grouped preview projection, and stage + batch
+apply through the reorganize engine. The browse-first **Import Preview screen**
+itself (#449) completed in **v0.13** (below).
 
 | Issue | Item |
 |-------|------|
 | [#427](https://github.com/RBStephenson/STL-Inventory/issues/427) | **Epic — import-and-organize building blocks** for loose/unknown files |
 | [#428](https://github.com/RBStephenson/STL-Inventory/issues/428) | **One-shot import folder → library** ([#446](https://github.com/RBStephenson/STL-Inventory/pull/446)) — index an arbitrary folder as inbox models (`is_inbox` flag) without adding it as a permanent scan root; each immediate subdir is treated as a creator. Inbox models anchor in the managed library on reorganize apply (clearing `is_inbox`), and restore on undo |
 | [#429](https://github.com/RBStephenson/STL-Inventory/issues/429) | **Bulk-enrich metadata** ([#436](https://github.com/RBStephenson/STL-Inventory/pull/436)) — `PATCH /models/bulk/enrich` sets creator/character/title across a multi-selection; the Enrich mode in the bulk toolbar — the bridge to reorganize-eligibility |
-| [#449](https://github.com/RBStephenson/STL-Inventory/issues/449) | **Epic — Import Preview screen** — browse-first folder → library with inline enrich |
 | [#450](https://github.com/RBStephenson/STL-Inventory/issues/450) | **Named libraries + source→library mapping** ([#454](https://github.com/RBStephenson/STL-Inventory/pull/454)) — a library is a named, writable scan root; a source folder maps to a destination library, inherited by its packs |
 | [#451](https://github.com/RBStephenson/STL-Inventory/issues/451) | **Pack-grouped preview projection** ([#455](https://github.com/RBStephenson/STL-Inventory/pull/455)) — `GET /import/preview` groups inbox models into one card per pack with inherited destination |
-| [#452](https://github.com/RBStephenson/STL-Inventory/issues/452) | **Import Preview UI** ([#457](https://github.com/RBStephenson/STL-Inventory/pull/457), [#459](https://github.com/RBStephenson/STL-Inventory/pull/459)) — browse-first pack cards, inline metadata editor, destination dropdown, per-card import; library name/writable toggle in Settings |
 | [#453](https://github.com/RBStephenson/STL-Inventory/issues/453) | **Stage + batch apply** ([#460](https://github.com/RBStephenson/STL-Inventory/pull/460)) — `POST /import/apply` moves imported packs into their mapped library via the reorganize engine (drift + undo, `is_inbox` cleared) |
-
-Follow-up polish (backlog): [#458](https://github.com/RBStephenson/STL-Inventory/issues/458)
-(Notes / Source URL + Fetch / Collections on pack cards),
-[#456](https://github.com/RBStephenson/STL-Inventory/issues/456) (per-pack file counts).
 
 **Post-release hardening** (v0.12.1 – v0.12.3) — bulk-enrich and painting-guide
 fixes shipped after the feature line:
@@ -227,10 +239,80 @@ guide-import overrides + no silent drop of undecided paints).
 
 ---
 
-## v1.0 — Planned
+## v0.13 — Import Preview screen & painting mix swatches ✅ Complete
 
-Scope TBD. macOS notarization ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17))
-moved to the backlog — deferred until there's appetite for the Apple Developer
+Released as **v0.13.0**. Completed the browse-first **Import Preview** screen on
+top of the v0.12 foundation, and added true paint-mix modelling.
+
+| Issue | Item |
+|-------|------|
+| [#449](https://github.com/RBStephenson/STL-Inventory/issues/449) | **Epic — Import Preview screen** — browse-first folder → library with inline enrich |
+| [#452](https://github.com/RBStephenson/STL-Inventory/issues/452) | **Import Preview UI** ([#457](https://github.com/RBStephenson/STL-Inventory/pull/457), [#459](https://github.com/RBStephenson/STL-Inventory/pull/459)) — pack cards, inline metadata editor, destination dropdown, per-card import; library name/writable toggle in Settings |
+| [#456](https://github.com/RBStephenson/STL-Inventory/issues/456) | **Per-pack file counts** in the preview cards |
+| [#458](https://github.com/RBStephenson/STL-Inventory/issues/458) | **Pack-card C3** — Notes, Source URL + Fetch, and Collections on pack cards |
+| [#425](https://github.com/RBStephenson/STL-Inventory/issues/425) | **True mix swatches (Option B)** — nullable `paint_id`, mix components with ratios, round-trip, blended-dot chip |
+| [#271](https://github.com/RBStephenson/STL-Inventory/issues/271) | **Painting round-trip coverage** — sub-content callouts and wargaming raw-block capture closed the importer gaps surfaced across the corpus |
+
+---
+
+## v0.14 — Desktop shell & painting/variant polish ✅ Complete
+
+Released as **v0.14.0**.
+
+| Issue | Item |
+|-------|------|
+| [#463](https://github.com/RBStephenson/STL-Inventory/issues/463) | **Desktop app shell** — the standalone build opens in a native window via **pywebview** (WebView2 on Windows), with an automatic fall-back to the default browser; `STL_NO_WINDOW=1` forces browser mode |
+| [#500](https://github.com/RBStephenson/STL-Inventory/issues/500) | **Variant group: bulk-set store page** ([#501](https://github.com/RBStephenson/STL-Inventory/pull/501)) — set one store/product URL across the selected variants of a group in a single step (selection-scoped, overwriting) |
+| [#425](https://github.com/RBStephenson/STL-Inventory/issues/425) → [#477](https://github.com/RBStephenson/STL-Inventory/issues/477) | **Nullable `paint_id` for unresolved single swatches** — an unresolved single-paint swatch is kept by name rather than dropped, like mix components |
+| [#415](https://github.com/RBStephenson/STL-Inventory/issues/415) | **Back-reference mix components** — closed as covered by #425 (unresolved components round-trip as named rows; no real corpus cases warranted a structural ref) |
+
+---
+
+## v0.15 — In-app guide authoring 🗓 Planned
+
+Extends the structured guide editor (shipped in v0.8) into a complete
+from-scratch authoring path, so a guide can be built and published entirely in
+the app without hand-writing HTML.
+
+| Issue | Item |
+|-------|------|
+| [#484](https://github.com/RBStephenson/STL-Inventory/issues/484) | **Epic — in-app authoring & validation** |
+| [#487](https://github.com/RBStephenson/STL-Inventory/issues/487) | Guide-start wizard |
+| [#488](https://github.com/RBStephenson/STL-Inventory/issues/488) | Structured editor — inventory-backed swatch picker, value%/reorder |
+| [#489](https://github.com/RBStephenson/STL-Inventory/issues/489) | Validation panel — wire the validator; block publish on errors |
+| [#490](https://github.com/RBStephenson/STL-Inventory/issues/490) | Series-bundle PDF + reward stamping |
+
+---
+
+## v0.16 — AI drafts & color match 🗓 Planned
+
+The painting module's headline workflow: an LLM produces a first-draft guide as
+structured data, you edit it, and a colour-match studio suggests owned paints
+from a reference image. Domain rules are captured in
+[`docs/painting/reference/figure-painting-skill.md`](docs/painting/reference/figure-painting-skill.md).
+
+| Issue | Item |
+|-------|------|
+| [#485](https://github.com/RBStephenson/STL-Inventory/issues/485) | **Epic — AI draft & color match** |
+| [#491](https://github.com/RBStephenson/STL-Inventory/issues/491) | Generation service — Claude → GuideDraft, async `/draft` (`generation.py`) |
+| [#492](https://github.com/RBStephenson/STL-Inventory/issues/492) | Draft → edit diff flow |
+| [#493](https://github.com/RBStephenson/STL-Inventory/issues/493) | Color-match studio — Lab / CIEDE2000 / k-means (`colormatch.py`) |
+| [#494](https://github.com/RBStephenson/STL-Inventory/issues/494) | Reference-image pipeline — fallback chain + provenance (`images.py`) |
+| [#498](https://github.com/RBStephenson/STL-Inventory/issues/498) | Port domain rules + reference tables into the prompt/validator |
+
+All AI capabilities are bring-your-own-API-key; no keys ship in the repo or build.
+
+---
+
+## v1.0 — Painting full-corpus & wargaming 🗓 Planned
+
+| Issue | Item |
+|-------|------|
+| [#486](https://github.com/RBStephenson/STL-Inventory/issues/486) | **Painting M5 — full-corpus import & polish** — bulk-import the reference guide corpus as reviewed drafts, calibrate the validator, print/PDF + accessibility pass |
+| [#409](https://github.com/RBStephenson/STL-Inventory/issues/409) | **Structured wargaming guide type** — `guide_type` discriminator + quality tiers / batch workflow / basing |
+
+macOS notarization ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17))
+sits in the backlog — deferred until there's appetite for the Apple Developer
 Program cost.
 
 ---
@@ -257,12 +339,21 @@ The painting module follows its own M0–M5 track from the
   import/authoring UI ([#277](https://github.com/RBStephenson/STL-Inventory/issues/277)),
   structured editor ([#329](https://github.com/RBStephenson/STL-Inventory/issues/329)),
   Playwright PDF export ([#320](https://github.com/RBStephenson/STL-Inventory/issues/320)).
-- **M4 — AI drafts + color match** — generate guide drafts and match swatches to
-  shelf paints (`generation.py` / `colormatch.py` are stubs today).
-- **M5 — Full-corpus import** — bulk-import the reference guide corpus. Includes the
-  remaining round-trip gaps tracked under [#271](https://github.com/RBStephenson/STL-Inventory/issues/271).
+- **Authoring polish** (milestone **v0.15**, epic [#484](https://github.com/RBStephenson/STL-Inventory/issues/484)) —
+  a from-scratch guide wizard, a validation panel, and series-bundle PDF, building
+  on the M3 editor.
+- **M4 — AI drafts + color match** (milestone **v0.16**, epic [#485](https://github.com/RBStephenson/STL-Inventory/issues/485)) —
+  the Claude generation service (`generation.py`), draft→edit flow, the color-match
+  studio (`colormatch.py`), and the reference-image pipeline (`images.py`); all
+  three services are stubs today. Domain rules are captured in
+  [`docs/painting/reference/figure-painting-skill.md`](docs/painting/reference/figure-painting-skill.md).
+- **M5 — Full-corpus import & polish** (milestone **v1.0**, epic [#486](https://github.com/RBStephenson/STL-Inventory/issues/486)) —
+  bulk-import the reference guide corpus as reviewed drafts, calibrate the
+  validator, and do the print/PDF + accessibility pass.
 
-M4–M5 issues will be filed as each phase starts.
+The shared skills tabs are reference content rendered from a built-in port;
+fleshing out the sparse **Brush Skills** tab is tracked in
+[#483](https://github.com/RBStephenson/STL-Inventory/issues/483) (backlog).
 
 ---
 
