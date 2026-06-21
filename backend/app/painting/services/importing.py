@@ -594,6 +594,62 @@ def _parse_creator_credit(node: Tag) -> Optional[dict]:
     return credit
 
 
+def _js_object_to_json(src: str) -> str:
+    """Normalize a JS object literal into JSON (#271). The real corpus writes
+    `window.GUIDE_THINNING` as a JS literal — unquoted keys, single-quoted
+    strings, trailing commas — which `json.loads` rejects; our own exporter emits
+    valid JSON, so this only bridges legacy input.
+
+    A single left-to-right scan that tracks string state, so transformations never
+    fire inside string contents (an apostrophe in a value, a `:` in prose):
+    single-quoted strings become double-quoted (unescaping \\' , escaping "),
+    bareword keys/identifiers get quoted, and trailing commas before } or ] drop.
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == '"' or c == "'":
+            quote = c
+            buf = []
+            i += 1
+            while i < n and src[i] != quote:
+                if src[i] == "\\" and i + 1 < n:
+                    nxt = src[i + 1]
+                    # \' is only meaningful in JS single-quoted strings — in JSON
+                    # it's invalid, so unescape it; keep every other escape as-is.
+                    buf.append(nxt if nxt == "'" else src[i] + nxt)
+                    i += 2
+                    continue
+                buf.append('\\"' if src[i] == '"' else src[i])
+                i += 1
+            i += 1  # closing quote
+            out.append('"' + "".join(buf) + '"')
+        elif c.isalpha() or c == "_" or c == "$":
+            # A bareword: an unquoted key, or a literal (true/false/null). Quote it
+            # unless it's a JSON keyword, leaving numbers/structure untouched.
+            j = i
+            while j < n and (src[j].isalnum() or src[j] in "_$"):
+                j += 1
+            word = src[i:j]
+            out.append(word if word in ("true", "false", "null") else '"' + word + '"')
+            i = j
+        elif c in ",":
+            # Drop a trailing comma (next non-space is a closer).
+            k = i + 1
+            while k < n and src[k].isspace():
+                k += 1
+            if k < n and src[k] in "}]":
+                i += 1  # skip the comma
+            else:
+                out.append(c)
+                i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def _parse_thinning(soup: BeautifulSoup, report: ImportReport) -> Optional[dict]:
     script = soup.find("script", string=re.compile(r"window\.GUIDE_THINNING"))
     if script is None:
@@ -601,10 +657,18 @@ def _parse_thinning(soup: BeautifulSoup, report: ImportReport) -> Optional[dict]
     m = re.search(r"window\.GUIDE_THINNING\s*=\s*(\{.*?\});", script.string or "", re.S)
     if not m:
         return None
+    raw = m.group(1)
     try:
-        data = json.loads(m.group(1))
+        data = json.loads(raw)
     except json.JSONDecodeError:
-        report.notes.append("GUIDE_THINNING is a JS literal (not JSON) — not imported")
+        # Real corpus form is a JS object literal (unquoted keys, single quotes) —
+        # normalize and retry before giving up (#271).
+        try:
+            data = json.loads(_js_object_to_json(raw))
+        except (json.JSONDecodeError, ValueError):
+            report.notes.append("GUIDE_THINNING couldn't be parsed as JSON or a JS literal — not imported")
+            return None
+    if not isinstance(data, dict):
         return None
     return {
         "airbrush_rows": data.get("airbrushRows") or [],

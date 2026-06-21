@@ -8,6 +8,7 @@ Two complementary proofs (spec §9.6/§9.7):
   produces an import report — `unresolved_paints` is the inventory-gap list and
   `unmapped_nodes` the schema-coverage gap list.
 """
+import json
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,8 @@ from bs4 import BeautifulSoup
 from types import SimpleNamespace
 
 from app.painting.services.importing import (
-    ImportReport, _parse_swatch, import_guide_html, make_db_resolver, with_overrides,
+    ImportReport, _js_object_to_json, _parse_swatch, _parse_thinning,
+    import_guide_html, make_db_resolver, with_overrides,
 )
 from app.painting.services.rendering import PaintInfo, _render_mix
 from tests.test_painting_guides import mk_paint
@@ -656,6 +658,66 @@ class TestRealCorpus:
         assert len(report.unresolved_paints) > 0
         # unmapped_nodes is the schema-coverage to-do list (may be non-empty)
         assert isinstance(report.unmapped_nodes, list)
+
+
+class TestGuideThinningImport:
+    """#271: the importer parses the real-corpus GUIDE_THINNING JS object literal
+    (unquoted keys, single quotes, trailing commas), not just strict JSON."""
+
+    def _thinning(self, literal: str):
+        html = f"<html><body><script>window.GUIDE_THINNING = {literal};</script></body></html>"
+        soup = BeautifulSoup(html, "html.parser")
+        report = ImportReport()
+        return _parse_thinning(soup, report), report
+
+    def test_strict_json_still_parses(self):
+        out, report = self._thinning(
+            '{"airbrushRows": [{"technique": "Base", "ratio": "2:1"}],'
+            ' "brushRows": [], "thinningCards": []}'
+        )
+        assert out["airbrush_rows"] == [{"technique": "Base", "ratio": "2:1"}]
+        assert report.notes == []
+
+    def test_js_literal_unquoted_keys_and_single_quotes(self):
+        out, report = self._thinning(
+            "{ airbrushRows: [ { technique: 'Zenithal', nozzle: '0.4', ratio: '1:1' } ],"
+            " brushRows: [ { technique: 'Layer', ratio: '3:1' } ],"
+            " thinningCards: [ { title: 'Tip', body: 'Thin your paints' } ], }"
+        )
+        assert out["airbrush_rows"] == [{"technique": "Zenithal", "nozzle": "0.4", "ratio": "1:1"}]
+        assert out["brush_rows"] == [{"technique": "Layer", "ratio": "3:1"}]
+        assert out["thinning_cards"] == [{"title": "Tip", "body": "Thin your paints"}]
+        assert report.notes == []  # parsed, not noted as a failure
+
+    def test_apostrophe_inside_value_survives(self):
+        out, _ = self._thinning(
+            r"{ thinningCards: [ { title: 'Don\'t', body: 'it ain\'t thin' } ] }"
+        )
+        assert out["thinning_cards"] == [{"title": "Don't", "body": "it ain't thin"}]
+
+    def test_colon_in_value_not_treated_as_key(self):
+        out, _ = self._thinning("{ thinningCards: [ { body: 'ratio is 2:1 here' } ] }")
+        assert out["thinning_cards"] == [{"body": "ratio is 2:1 here"}]
+
+    def test_truly_malformed_is_noted_and_dropped(self):
+        out, report = self._thinning("{ airbrushRows: [ { technique: }")  # unbalanced
+        assert out is None
+        assert any("GUIDE_THINNING" in n for n in report.notes)
+
+
+class TestJsObjectToJson:
+    """Unit coverage for the JS-literal normalizer (#271)."""
+
+    def test_quotes_barewords_and_keeps_literals(self):
+        assert json.loads(_js_object_to_json("{a: true, b: false, c: null, d: 3}")) == {
+            "a": True, "b": False, "c": None, "d": 3,
+        }
+
+    def test_strips_trailing_commas(self):
+        assert json.loads(_js_object_to_json("{a: [1, 2,], b: 3,}")) == {"a": [1, 2], "b": 3}
+
+    def test_single_to_double_quotes(self):
+        assert json.loads(_js_object_to_json("{a: 'x', b: 'y'}")) == {"a": "x", "b": "y"}
 
 
 @pytest.mark.skipif(not CORPUS.exists(), reason="corpus fixture not present")
