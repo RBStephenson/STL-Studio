@@ -72,12 +72,20 @@ function SwatchRow({ swatch }: { swatch: GuideSwatch }) {
 // A multi-paint mix as one chip: blended dot, "A + B" name, ratio suffix when
 // parts differ (#339). Mirrors the static exporter's _render_mix.
 function MixRow({ components }: { components: GuideMixComponent[] }) {
-  const infos = components.filter((c) => c.paint);
-  if (infos.length === 0) return null;
-  let name = infos.map((c) => `${c.paint!.name} ${c.paint!.code}`.trim()).join(" + ");
-  const parts = infos.map((c) => c.parts);
+  // A component renders by its resolved paint, or by its stored name when it
+  // didn't resolve to a shelf paint (#425) — so a medium/back-reference shows.
+  const cells = components
+    .map((c) => ({
+      label: c.paint ? `${c.paint.name} ${c.paint.code}`.trim() : (c.name ?? ""),
+      parts: c.parts,
+      hex: c.paint?.hex ?? null,
+    }))
+    .filter((c) => c.label);
+  if (cells.length === 0) return null;
+  let name = cells.map((c) => c.label).join(" + ");
+  const parts = cells.map((c) => c.parts);
   if (new Set(parts).size > 1) name = `${name} (${parts.map(String).join(":")})`;
-  const hexes = infos.map((c) => c.paint!.hex).filter((h): h is string => !!h);
+  const hexes = cells.map((c) => c.hex).filter((h): h is string => !!h);
   const dot = blendHex(hexes);
   return (
     <div className="swatch">

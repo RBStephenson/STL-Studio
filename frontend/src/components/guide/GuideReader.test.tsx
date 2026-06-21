@@ -54,9 +54,9 @@ const GUIDE: Guide = {
               tip: "Thin to milk.", warning: null, ratio_box: "1:1 paint:thinner", sort_order: 0,
               swatches: [mkSwatch()],
               mix_components: [
-                { id: 1, paint_id: 10, parts: 3, sort_order: 0,
+                { id: 1, paint_id: 10, name: null, parts: 3, sort_order: 0,
                   paint: { name: "Burnt Sienna", code: "073", brand: "Pro Acryl", hex: "#a0522d" } },
-                { id: 2, paint_id: 11, parts: 1, sort_order: 1,
+                { id: 2, paint_id: 11, name: null, parts: 1, sort_order: 1,
                   paint: { name: "Titanium White", code: "001", brand: "Pro Acryl", hex: "#ffffff" } },
               ],
             },
@@ -138,6 +138,18 @@ describe("GuideReader", () => {
     const { container } = render(<GuideReader guide={GUIDE} />);
     const metals = panel(container, "metals");
     expect(within(metals).getByText("Burnt Sienna 073 + Titanium White 001 (3:1)")).toBeInTheDocument();
+  });
+
+  it("renders a name-only mix component (unresolved paint) by its name (#425)", () => {
+    const g = structuredClone(GUIDE);
+    g.tabs[0].phases[0].steps[0].mix_components.push(
+      { id: 99, paint_id: null, name: "Mid-tone", parts: 1, sort_order: 2, paint: null },
+    );
+    const { container } = render(<GuideReader guide={g} />);
+    const metals = panel(container, "metals");
+    expect(
+      within(metals).getByText("Burnt Sienna 073 + Titanium White 001 + Mid-tone (3:1:1)"),
+    ).toBeInTheDocument();
   });
 
   it("renders tab-level callouts: intro above content, tip below (#271)", () => {

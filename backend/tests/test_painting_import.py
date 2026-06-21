@@ -422,8 +422,9 @@ class TestSmartResolver:
 
 class TestMixComponents:
     """A mix swatch ('A + B (3:1)') parses into ordered mix components carrying
-    ratio parts (#339 Option B); non-paint components (mediums, back-refs #415)
-    drop + report. _parse_swatch returns (swatches, mix_components)."""
+    ratio parts (#339). Non-paint components (mediums, back-refs #415) are kept
+    by name (#425, Option B) so the mix round-trips, and still reported.
+    _parse_swatch returns (swatches, mix_components)."""
 
     def _swatch(self, name, value="~40% value — base", brand="Pro Acryl"):
         html = (f'<div class="swatch"><div class="swatch-name">{name}</div>'
@@ -448,13 +449,74 @@ class TestMixComponents:
             self._swatch("Burnt Sienna + Pyrrole Red (3:1)"), resolve, rep, "S")
         assert [m["parts"] for m in mix] == [3.0, 1.0]
 
-    def test_non_paint_component_dropped_and_reported(self):
+    def test_non_paint_component_kept_by_name_and_reported(self):
         resolve = lambda n, b: {"satin black s39": 5}.get(n.lower())
         rep = ImportReport()
         _swatches, mix = _parse_swatch(
-            self._swatch("Satin Black S39 + gloss medium"), resolve, rep, "S")
-        assert [m["paint_id"] for m in mix] == [5]
+            self._swatch("Satin Black S39 + gloss medium (2:1)"), resolve, rep, "S")
+        # Both components survive in order; the unresolved one keeps its name (#425).
+        assert [(m.get("paint_id"), m.get("name"), m["parts"], m["sort_order"]) for m in mix] == [
+            (5, None, 2.0, 0),
+            (None, "gloss medium", 1.0, 1),
+        ]
+        # Still reported as an inventory gap.
         assert any(u["name"] == "gloss medium" for u in rep.unresolved_paints)
+
+    def test_all_unresolved_mix_kept_by_name(self):
+        rep = ImportReport()
+        _swatches, mix = _parse_swatch(
+            self._swatch("Mid-tone + Titanium White (1:1)"), lambda n, b: None, rep, "S")
+        assert [(m.get("paint_id"), m["name"]) for m in mix] == [
+            (None, "Mid-tone"), (None, "Titanium White")
+        ]
+
+    def test_render_mix_rejoins_name_only_component(self):
+        """Exporter restores 'A + B (2:1)' using the resolved paint or the stored
+        name, so the importer's name-only component round-trips (#425)."""
+        from app.painting.services.rendering import _render_mix
+        comps = [
+            SimpleNamespace(paint_id=1, name=None, parts=2.0),
+            SimpleNamespace(paint_id=None, name="gloss medium", parts=1.0),
+        ]
+        paints = {1: PaintInfo(name="Satin Black", code="S39", brand="X", hex="#111111")}
+        html = _render_mix(comps, paints)
+        assert "Satin Black S39 + gloss medium (2:1)" in html
+
+    def _mix_guide_body(self, paint_id):
+        return {
+            "slug": "mix-rt", "title": "Mix RT",
+            "tabs": [{"name": "T", "sort_order": 0, "phases": [{"label": "P", "steps": [{
+                "title": "Blend",
+                "mix_components": [
+                    {"paint_id": paint_id, "parts": 2, "sort_order": 0},
+                    {"name": "Mid-tone", "parts": 1, "sort_order": 1},
+                ],
+            }]}]}],
+        }
+
+    def test_round_trip_preserves_name_only_component(self, client, paint):
+        g = client.post("/painting/guides", json=self._mix_guide_body(paint["id"]))
+        assert g.status_code == 201, g.text
+        gid = g.json()["id"]
+        # GET surfaces the name-only component (paint_id None, name kept).
+        comps = client.get(f"/painting/guides/{gid}").json()["tabs"][0]["phases"][0]["steps"][0]["mix_components"]
+        assert [(c["paint_id"], c["name"]) for c in comps] == [(paint["id"], None), (None, "Mid-tone")]
+        # Export rejoins both components into the mix swatch name.
+        html = client.get(f"/painting/guides/{gid}/export").text
+        assert f"{paint['name']} {paint['code']} + Mid-tone (2:1)" in html
+        # Re-import keeps the name-only component.
+        draft, _ = import_guide_html(html, slug="mix-rt2", resolve_paint=lambda n, b: None)
+        mix = draft["tabs"][0]["phases"][0]["steps"][0]["mix_components"]
+        assert any(m.get("name") == "Mid-tone" and m.get("paint_id") is None for m in mix)
+
+    def test_component_without_paint_or_name_rejected(self, client):
+        body = {
+            "slug": "bad", "title": "Bad",
+            "tabs": [{"name": "T", "sort_order": 0, "phases": [{"label": "P", "steps": [{
+                "title": "S", "mix_components": [{"parts": 1, "sort_order": 0}],
+            }]}]}],
+        }
+        assert client.post("/painting/guides", json=body).status_code == 422
 
     def test_leading_plus_continuation_is_single_swatch(self):
         # '+ Khaki 061 (2:1)' has one real component -> a single swatch, not a mix.

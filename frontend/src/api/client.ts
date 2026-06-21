@@ -333,7 +333,8 @@ export interface GuideSwatch {
 
 export interface GuideMixComponent {
   id: number;
-  paint_id: number;
+  paint_id: number | null; // null when the component is kept by name only (#425)
+  name: string | null;     // raw component text when unresolved
   parts: number;
   sort_order: number;
   paint: PaintSummary | null;

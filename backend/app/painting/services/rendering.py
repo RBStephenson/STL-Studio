@@ -137,7 +137,8 @@ def _paint_lookup(db: Session, guide: Guide) -> dict[int, PaintInfo]:
         for phase in tab.phases:
             for step in phase.steps:
                 ids.update(s.paint_id for s in step.swatches)
-                ids.update(m.paint_id for m in step.mix_components)
+                # A mix component can be name-only (paint_id None) under #425.
+                ids.update(m.paint_id for m in step.mix_components if m.paint_id is not None)
     if not ids:
         return {}
     rows = (
@@ -249,15 +250,23 @@ def _render_mix(components, paints: dict[int, PaintInfo]) -> str:
     """A multi-paint mix as one swatch chip: blended dot, 'A + B' name, and a
     ratio suffix when the parts aren't all equal (#339). Re-joining the names
     restores the legacy swatch-name for the import round-trip."""
-    infos = [(paints.get(c.paint_id), c.parts) for c in components]
-    infos = [(info, parts) for info, parts in infos if info is not None]
-    if not infos:
+    # Each component renders by its resolved paint, or by its stored name when it
+    # didn't resolve to a shelf paint (#425) — so the mix survives round-trip even
+    # with a medium or back-reference component.
+    cells = []
+    for c in components:
+        info = paints.get(c.paint_id) if c.paint_id is not None else None
+        if info is not None:
+            cells.append((f"{info.name} {info.code}".strip(), c.parts, info.hex))
+        elif c.name:
+            cells.append((c.name, c.parts, None))
+    if not cells:
         return ""
-    names = " + ".join(f"{info.name} {info.code}".strip() for info, _ in infos)
-    parts = [p for _, p in infos]
+    names = " + ".join(label for label, _, _ in cells)
+    parts = [p for _, p, _ in cells]
     if len(set(parts)) > 1:
         names = f"{names} ({':'.join(_fmt_parts(p) for p in parts)})"
-    dot = _blend_hex([info.hex for info, _ in infos])
+    dot = _blend_hex([hex_ for _, _, hex_ in cells])
     dot_style = f"background:{_attr(dot)}" if dot else ""
     return (
         '<div class="swatch">'
