@@ -77,7 +77,33 @@ class TestBrowseBootstrapRestriction:
 
 
 class TestBrowseRootRestriction:
-    """Once scan roots are configured, /scan/browse is limited to paths under them."""
+    """With scan roots configured, /scan/browse allows paths under them AND under
+    the bootstrap set (so the Add-Folder picker can still reach other drives to
+    add a new root); anything outside both stays rejected."""
+
+    def test_browse_bootstrap_path_allowed_with_roots_configured(self, client, tmp_path, monkeypatch):
+        # Regression: once any root existed the allowlist narrowed to just the
+        # roots, so the Settings "Add Folder" picker could not open any other
+        # drive/folder to add. Bootstrap locations must stay browsable.
+        from app.config import settings
+        from app.routers import scan
+        monkeypatch.setattr(settings, "stl_roots", "")
+        root = tmp_path / "Root"
+        root.mkdir()
+        elsewhere = tmp_path / "Elsewhere"
+        (elsewhere / "Sub").mkdir(parents=True)
+        monkeypatch.setattr(scan, "_bootstrap_roots", lambda: [elsewhere])
+        assert client.post("/scan/roots", json={"path": str(root)}).status_code == 200
+
+        # Outside the configured root but inside bootstrap -> now allowed.
+        resp = client.get("/scan/browse", params={"path": str(elsewhere)})
+        assert resp.status_code == 200, resp.text
+        assert [e["name"] for e in resp.json()["entries"]] == ["Sub"]
+
+        # Outside BOTH the roots and bootstrap -> still rejected (#41 boundary holds).
+        outside = tmp_path / "Outside"
+        outside.mkdir()
+        assert client.get("/scan/browse", params={"path": str(outside)}).status_code == 403
 
     def test_browse_allowed_under_every_configured_root(self, client, tmp_path, monkeypatch):
         # Only DB-configured roots — clear the STL_ROOTS env fallback so the
