@@ -81,9 +81,9 @@ def source_contents(source: str, db: Session = Depends(get_db)):
 
     `already_imported` flags a subfolder that already has inbox models ingested,
     so a re-listing ("Scan for New Files") distinguishes new packs from imported
-    ones. File counts are deferred (#456). The source is resolved and confined to
-    the allowed roots (configured scan roots + bootstrap allowlist) before any
-    disk access."""
+    ones. Each entry carries a recursive STL-family file count from disk (#456).
+    The source is resolved and confined to the allowed roots (configured scan
+    roots + bootstrap allowlist) before any disk access."""
     if not source.strip():
         raise HTTPException(status_code=400, detail="source is required")
 
@@ -110,6 +110,24 @@ def source_contents(source: str, db: Session = Depends(get_db)):
     # inbox scanner's flat-layout branch).
     is_flat = scanner._has_stls(p, recurse=False)
 
+    # Recursive STL-family counts (#456) in one walk rooted at the already-confined
+    # `p` (the raising barrier above dominates this sink, so no tainted path is
+    # walked): the running total feeds the flat single-card, and each top-level
+    # child accumulates its whole subtree for that pack's card.
+    total_stls = 0
+    child_stls: dict[str, int] = {}
+    for dirpath, _dirnames, filenames in os.walk(p):
+        n = sum(1 for f in filenames if os.path.splitext(f)[1].lower() in scanner.STL_EXTENSIONS)
+        if not n:
+            continue
+        total_stls += n
+        rel = os.path.relpath(dirpath, src)
+        if rel != ".":
+            top = rel.replace("\\", "/").split("/", 1)[0]
+            cp = os.path.normpath(os.path.join(src, top))
+            child_stls[cp] = child_stls.get(cp, 0) + n
+    root_file_count = total_stls if is_flat else 0
+
     # Inbox model folder_paths already under this source, for the imported flag.
     prefix = src + os.sep
     imported = {
@@ -127,9 +145,14 @@ def source_contents(source: str, db: Session = Depends(get_db)):
             dp = os.path.normpath(str(d))
             child_prefix = dp + os.sep
             already = any(m == dp or m.startswith(child_prefix) for m in imported)
-            entries.append(SourceContentsEntry(name=d.name, path=dp, already_imported=already))
+            entries.append(SourceContentsEntry(
+                name=d.name, path=dp, already_imported=already,
+                file_count=child_stls.get(dp, 0),
+            ))
 
-    return SourceContentsResponse(source=src, is_flat=is_flat, entries=entries)
+    return SourceContentsResponse(
+        source=src, is_flat=is_flat, entries=entries, file_count=root_file_count,
+    )
 
 
 @router.post("/scan-folder", response_model=dict)

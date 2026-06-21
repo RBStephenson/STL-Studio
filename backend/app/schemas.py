@@ -304,12 +304,14 @@ class SourceContentsEntry(BaseModel):
     name: str
     path: str
     already_imported: bool  # has inbox models already ingested under it
+    file_count: int  # recursive count of STL-family files on disk (#456)
 
 
 class SourceContentsResponse(BaseModel):
     source: str
     is_flat: bool  # source itself holds STLs directly (single-pack layout)
     entries: list[SourceContentsEntry]
+    file_count: int  # recursive STL count of the source root, for the flat card (#456)
 
 
 class ImportApplyRequest(BaseModel):

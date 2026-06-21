@@ -36,6 +36,7 @@ export default function ImportPreviewPage() {
 
   const [entries, setEntries] = useState<SourceContentsEntry[]>([]);
   const [isFlat, setIsFlat] = useState(false);
+  const [flatFileCount, setFlatFileCount] = useState(0); // root STL count for the flat card (#456)
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [libraryId, setLibraryId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,13 +65,15 @@ export default function ImportPreviewPage() {
       ]);
       setEntries(contents.entries);
       setIsFlat(contents.is_flat);
+      setFlatFileCount(contents.file_count);
       setLibraries(libs);
       setLibraryId(mapping?.library_id ?? null);
 
       const packByPath = new Map(preview.packs.map((p) => [p.source_path, p]));
       const cards: SourceContentsEntry[] = contents.is_flat
         ? [{ name: contents.source.split(/[\\/]/).filter(Boolean).pop() || contents.source,
-             path: contents.source, already_imported: preview.packs.length > 0 }]
+             path: contents.source, already_imported: preview.packs.length > 0,
+             file_count: contents.file_count }]
         : contents.entries;
       setFields((prev) => {
         const next = { ...prev };
@@ -140,7 +143,7 @@ export default function ImportPreviewPage() {
   };
 
   const cards: SourceContentsEntry[] = isFlat
-    ? [{ name: source.split(/[\\/]/).filter(Boolean).pop() || source, path: source, already_imported: false }]
+    ? [{ name: source.split(/[\\/]/).filter(Boolean).pop() || source, path: source, already_imported: false, file_count: flatFileCount }]
     : entries;
 
   const stagedCount = cards.filter((c) => c.already_imported || status[c.path] === "done").length;
@@ -245,6 +248,9 @@ export default function ImportPreviewPage() {
                   <div className="text-sm font-medium text-gray-100 truncate">{c.name}</div>
                   <div className="text-xs font-mono text-gray-600 truncate">{c.path}</div>
                 </div>
+                <span className="text-xs text-gray-500 shrink-0 tabular-nums" data-testid="pack-file-count">
+                  {c.file_count} {c.file_count === 1 ? "file" : "files"}
+                </span>
                 {c.already_imported && st === "idle" && (
                   <span className="text-xs text-gray-500 shrink-0">imported</span>
                 )}

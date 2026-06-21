@@ -136,12 +136,14 @@ export interface SourceContentsEntry {
   name: string;
   path: string;
   already_imported: boolean;
+  file_count: number; // recursive STL-family count on disk (#456)
 }
 
 export interface SourceContents {
   source: string;
   is_flat: boolean;
   entries: SourceContentsEntry[];
+  file_count: number; // root recursive STL count, for the flat single-card (#456)
 }
 
 export interface ImportPreviewPack {

@@ -57,6 +57,33 @@ class TestSourceContents:
         by_name = {e["name"]: e["already_imported"] for e in r.json()["entries"]}
         assert by_name == {"PackA": True, "PackB": False}
 
+    def test_entry_file_count_is_recursive(self, client, db, tmp_path):
+        _allow(db, tmp_path)
+        _stl(str(tmp_path / "PackA"), "a.stl")
+        _stl(str(tmp_path / "PackA" / "sub"), "b.3mf")  # nested, STL-family
+        _stl(str(tmp_path / "PackA" / "sub"), "c.obj")
+        (tmp_path / "PackA" / "readme.txt").write_text("x")  # non-STL ignored
+        r = client.get("/import/source-contents", params={"source": str(tmp_path)})
+        entry = next(e for e in r.json()["entries"] if e["name"] == "PackA")
+        assert entry["file_count"] == 3
+
+    def test_flat_source_file_count_on_response(self, client, db, tmp_path):
+        _allow(db, tmp_path)
+        _stl(str(tmp_path), "a.stl")
+        _stl(str(tmp_path), "b.stl")
+        body = client.get("/import/source-contents", params={"source": str(tmp_path)}).json()
+        assert body["is_flat"] is True
+        assert body["file_count"] == 2
+
+    def test_subfolder_layout_response_count_zero(self, client, db, tmp_path):
+        # Root count only feeds the flat card; subfolder layout reports 0 at the root.
+        _allow(db, tmp_path)
+        _stl(str(tmp_path / "PackA"))
+        body = client.get("/import/source-contents", params={"source": str(tmp_path)}).json()
+        assert body["is_flat"] is False
+        assert body["file_count"] == 0
+        assert body["entries"][0]["file_count"] == 1
+
     def test_missing_source_400(self, client, db):
         assert client.get("/import/source-contents", params={"source": ""}).status_code == 400
 

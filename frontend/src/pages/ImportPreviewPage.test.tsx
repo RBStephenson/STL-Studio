@@ -39,8 +39,8 @@ const PACK = {
 
 function setup(opts: { mapping?: { source_path: string; library_id: number } | null } = {}) {
   vi.mocked(api.import.sourceContents).mockResolvedValue({
-    source: "/src", is_flat: false,
-    entries: [{ name: "PackA", path: "/src/PackA", already_imported: false }],
+    source: "/src", is_flat: false, file_count: 0,
+    entries: [{ name: "PackA", path: "/src/PackA", already_imported: false, file_count: 212 }],
   });
   vi.mocked(api.scan.libraries).mockResolvedValue([
     { id: 1, path: "/lib", name: "minis", is_writable: true, write_enabled: false },
@@ -62,6 +62,12 @@ describe("ImportPreviewPage (#452 C2)", () => {
     setup();
     expect(await screen.findByText("PackA")).toBeInTheDocument();
     expect(screen.getByText("/src/PackA")).toBeInTheDocument();
+  });
+
+  it("shows the recursive STL file count on each pack card (#456)", async () => {
+    setup();
+    await screen.findByText("PackA");
+    expect(screen.getByTestId("pack-file-count")).toHaveTextContent("212 files");
   });
 
   it("lists writable libraries in the destination dropdown", async () => {
@@ -91,8 +97,8 @@ describe("ImportPreviewPage (#452 C2)", () => {
 
   it("shows the batch bar for imported packs and applies via /import/apply", async () => {
     vi.mocked(api.import.sourceContents).mockResolvedValue({
-      source: "/src", is_flat: false,
-      entries: [{ name: "PackA", path: "/src/PackA", already_imported: true }],
+      source: "/src", is_flat: false, file_count: 0,
+      entries: [{ name: "PackA", path: "/src/PackA", already_imported: true, file_count: 5 }],
     });
     vi.mocked(api.scan.libraries).mockResolvedValue([
       { id: 1, path: "/lib", name: "minis", is_writable: true, write_enabled: true },
