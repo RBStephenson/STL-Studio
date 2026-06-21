@@ -10,7 +10,7 @@ color paints), so the API computes it and clients can never set it.
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Finish = Literal[
     "matte", "satin", "gloss", "metallic", "ink", "wash",
@@ -374,11 +374,20 @@ class SwatchRead(SwatchIn):
 
 
 class MixComponentIn(BaseModel):
-    paint_id: int
+    # paint_id is optional (#425): a component that doesn't resolve to a shelf
+    # paint is kept by `name` so the mix still round-trips. One of the two required.
+    paint_id: Optional[int] = None
+    name: Optional[str] = None
     parts: float = Field(gt=0)
     sort_order: int = 0
 
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _require_paint_or_name(self):
+        if self.paint_id is None and not (self.name and self.name.strip()):
+            raise ValueError("a mix component needs a paint_id or a name")
+        return self
 
 
 class MixComponentRead(MixComponentIn):

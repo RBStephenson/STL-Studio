@@ -245,12 +245,19 @@ class GuideSwatch(Base):
 
 
 class GuideMixComponent(Base):
-    """One paint in a multi-paint mix; the ratio string is derived from parts."""
+    """One paint in a multi-paint mix; the ratio string is derived from parts.
+
+    `paint_id` is nullable (#425, Option B): a component that doesn't resolve to a
+    shelf paint — a medium, or a back-reference to a prior step's result — is kept
+    as a `name`-only row so the mix relationship and ratio still round-trip rather
+    than the component being dropped. Each row carries a paint_id or a name.
+    """
     __tablename__ = "guide_mix_components"
 
     id = Column(Integer, primary_key=True)
     step_id = Column(Integer, ForeignKey("guide_steps.id"), nullable=False, index=True)
-    paint_id = Column(Integer, ForeignKey("paints.id"), nullable=False)
+    paint_id = Column(Integer, ForeignKey("paints.id"), nullable=True)
+    name = Column(String, nullable=True)             # raw component text when unresolved
     parts = Column(Float, nullable=False)
     sort_order = Column(Integer, default=0)
 

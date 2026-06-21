@@ -314,17 +314,22 @@ def _parse_swatch(node: Tag, resolve: PaintResolver, report: ImportReport,
         mix: list[dict] = []
         for i, part in enumerate(parts):
             paint_id = resolve(part, brand)
+            comp: dict = {
+                "parts": ratio[i] if ratio and i < len(ratio) else 1.0,
+                "sort_order": i,
+            }
             if paint_id is None:
+                # Keep the component by name (#425) instead of dropping it, so the
+                # mix relationship + ratio still round-trip. Still reported as an
+                # inventory gap.
                 report.unresolved_paints.append(
                     {"name": part, "brand": brand, "step": step_title, "hex": swatch_hex}
                 )
-                continue
-            report.resolved_paints += 1
-            mix.append({
-                "paint_id": paint_id,
-                "parts": ratio[i] if ratio and i < len(ratio) else 1.0,
-                "sort_order": len(mix),
-            })
+                comp["name"] = part
+            else:
+                report.resolved_paints += 1
+                comp["paint_id"] = paint_id
+            mix.append(comp)
         return [], mix
 
     # Single paint — resolve the cleaned part so a leading-plus continuation

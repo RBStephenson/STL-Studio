@@ -60,6 +60,10 @@ def _migrate_schema():
         ("guide_tabs", "raw_blocks", "JSON DEFAULT '[]'"),
         ("guide_phases", "subtab_key", "TEXT"),
         ("guide_steps", "technique_label", "TEXT"),
+        # #425: a mix component can be a name-only row when it doesn't resolve to a
+        # shelf paint. The paint_id NOT-NULL relax is an Alembic-batch rebuild
+        # (0011); only the additive name column is handled here.
+        ("guide_mix_components", "name", "TEXT"),
         ("models", "print_status", "VARCHAR NOT NULL DEFAULT 'none'"),
         ("models", "print_count", "INTEGER NOT NULL DEFAULT 0"),
         ("models", "user_rating", "INTEGER"),

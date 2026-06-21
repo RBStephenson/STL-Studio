@@ -23,7 +23,8 @@ def collect_paint_ids(tabs: list[TabIn]) -> set[int]:
         for phase in tab.phases:
             for step in phase.steps:
                 ids.update(s.paint_id for s in step.swatches)
-                ids.update(m.paint_id for m in step.mix_components)
+                # A mix component may be name-only (paint_id None) under #425.
+                ids.update(m.paint_id for m in step.mix_components if m.paint_id is not None)
     return ids
 
 
@@ -86,7 +87,7 @@ def build_tab(tab_in: TabIn) -> GuideTab:
             ]
             step.mix_components = [
                 GuideMixComponent(
-                    paint_id=m.paint_id, parts=m.parts, sort_order=m.sort_order
+                    paint_id=m.paint_id, name=m.name, parts=m.parts, sort_order=m.sort_order
                 )
                 for m in step_in.mix_components
             ]
