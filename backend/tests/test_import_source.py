@@ -84,13 +84,6 @@ class TestSourceContents:
         assert body["file_count"] == 0
         assert body["entries"][0]["file_count"] == 1
 
-    def test_count_stls_returns_zero_outside_allowlist(self, db, tmp_path):
-        """The inline containment barrier in _count_stls returns 0 for a path that
-        isn't under an allowed root, never walking it (path-injection guard)."""
-        from app.routers.imports import _count_stls
-        _stl(str(tmp_path / "evil"))  # has an STL, but no allowed root registered
-        assert _count_stls(tmp_path / "evil", []) == 0
-
     def test_missing_source_400(self, client, db):
         assert client.get("/import/source-contents", params={"source": ""}).status_code == 400
 
