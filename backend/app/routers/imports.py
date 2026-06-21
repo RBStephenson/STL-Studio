@@ -75,12 +75,27 @@ def _collapse(values: list) -> object | None:
     return next(iter(distinct)) if len(distinct) == 1 else None
 
 
-def _count_stls(folder: Path) -> int:
+def _count_stls(folder: Path, allowed_bases: list[str]) -> int:
     """Recursive count of STL-family files under a folder (#456), so a pack card
     shows its size before import. Reuses the scanner's extension set so it matches
-    what an inbox scan would actually ingest. A pure filesystem walk — no DB."""
+    what an inbox scan would actually ingest. A pure filesystem walk — no DB.
+
+    The folder is already confined by the caller, but the containment barrier is
+    re-applied inline here (realpath + commonpath) so CodeQL sees the guard at the
+    walk sink — a tainted path that escaped the allowlist returns 0, never walks."""
+    real = os.path.realpath(str(folder))
+    contained = False
+    for base in allowed_bases:
+        try:
+            if os.path.commonpath([real, base]) == base:
+                contained = True
+                break
+        except ValueError:
+            continue  # different drives (Windows)
+    if not contained:
+        return 0
     return sum(
-        1 for f in folder.rglob("*")
+        1 for f in Path(real).rglob("*")
         if f.is_file() and f.suffix.lower() in scanner.STL_EXTENSIONS
     )
 
@@ -100,8 +115,9 @@ def source_contents(source: str, db: Session = Depends(get_db)):
     # Path-injection barrier (inline so CodeQL sees the guard at the sink):
     # realpath + commonpath containment against the allowed roots.
     real = os.path.realpath(source.strip())
+    bases = _allowed_bases(db)
     contained = False
-    for base in _allowed_bases(db):
+    for base in bases:
         try:
             if os.path.commonpath([real, base]) == base:
                 contained = True
@@ -121,7 +137,7 @@ def source_contents(source: str, db: Session = Depends(get_db)):
     is_flat = scanner._has_stls(p, recurse=False)
     # Root count only feeds the flat single-card; for the subfolder layout each
     # entry carries its own recursive count, so the root walk would be wasted.
-    root_file_count = _count_stls(p) if is_flat else 0
+    root_file_count = _count_stls(p, bases) if is_flat else 0
 
     # Inbox model folder_paths already under this source, for the imported flag.
     prefix = src + os.sep
@@ -142,7 +158,7 @@ def source_contents(source: str, db: Session = Depends(get_db)):
             already = any(m == dp or m.startswith(child_prefix) for m in imported)
             entries.append(SourceContentsEntry(
                 name=d.name, path=dp, already_imported=already,
-                file_count=_count_stls(d),
+                file_count=_count_stls(d, bases),
             ))
 
     return SourceContentsResponse(
