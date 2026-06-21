@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
-import { api, Guide, TabInput } from "../api/client";
+import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { api, Guide, GuideTab, TabInput } from "../api/client";
 import GuideSpineEditor from "../components/guide/GuideSpineEditor";
+import GuideReader from "../components/guide/GuideReader";
 import { useToast } from "../context/ToastContext";
 
 export default function GuideContentEditorPage() {
@@ -15,6 +16,9 @@ export default function GuideContentEditorPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Live preview projection of the in-progress draft (#488), fed by the editor.
+  const [previewTabs, setPreviewTabs] = useState<GuideTab[] | null>(null);
+  const [showPreview, setShowPreview] = useState(true);
 
   useEffect(() => {
     let alive = true;
@@ -43,24 +47,50 @@ export default function GuideContentEditorPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8">
       <Link to={`/painting/guides/${id}`} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 mb-4">
         <ArrowLeft size={14} /> Back to guide
       </Link>
-      <h1 className="text-2xl font-bold text-white mb-1">Edit content</h1>
-      {guide && <p className="text-sm text-gray-500 mb-6">{guide.title}</p>}
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-white mb-1">Edit content</h1>
+          {guide && <p className="text-sm text-gray-500">{guide.title}</p>}
+        </div>
+        {!loading && !loadError && guide && (
+          <button
+            type="button"
+            onClick={() => setShowPreview((v) => !v)}
+            aria-pressed={showPreview}
+            className="hidden lg:inline-flex items-center gap-1.5 shrink-0 text-sm text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2.5 py-1.5"
+          >
+            {showPreview ? <EyeOff size={15} /> : <Eye size={15} />}
+            {showPreview ? "Hide preview" : "Show preview"}
+          </button>
+        )}
+      </div>
 
       {loading && <p className="text-sm text-gray-500">Loading…</p>}
       {loadError && <p role="alert" className="text-sm text-rose-400">{loadError}</p>}
 
       {!loading && !loadError && guide && (
-        <GuideSpineEditor
-          initialTabs={guide.tabs}
-          busy={busy}
-          error={saveError}
-          onSave={save}
-          onCancel={() => navigate(`/painting/guides/${id}`)}
-        />
+        <div className={showPreview ? "lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start" : ""}>
+          <GuideSpineEditor
+            initialTabs={guide.tabs}
+            busy={busy}
+            error={saveError}
+            onSave={save}
+            onCancel={() => navigate(`/painting/guides/${id}`)}
+            onPreviewChange={setPreviewTabs}
+          />
+          {showPreview && (
+            <div className="hidden lg:block lg:sticky lg:top-6 mt-6 lg:mt-0">
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">Live preview</div>
+              <div className="border border-gray-800 rounded-lg overflow-auto max-h-[calc(100vh-7rem)]">
+                <GuideReader guide={{ ...guide, tabs: previewTabs ?? guide.tabs }} />
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
