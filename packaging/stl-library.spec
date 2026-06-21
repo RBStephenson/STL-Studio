@@ -18,10 +18,28 @@ FRONTEND_DIST = ROOT / "frontend" / "dist"
 
 block_cipher = None
 
+# Desktop shell (#463): bundle pywebview + its platform backend when installed
+# (Windows). On Linux pywebview isn't installed, so this collects nothing and the
+# binary keeps the browser fallback — standalone.py imports `webview` lazily.
+webview_datas, webview_binaries, webview_hiddenimports = [], [], []
+try:
+    from PyInstaller.utils.hooks import collect_all
+
+    for _pkg in ("webview", "clr_loader", "pythonnet"):
+        try:
+            _d, _b, _h = collect_all(_pkg)
+            webview_datas += _d
+            webview_binaries += _b
+            webview_hiddenimports += _h
+        except Exception:
+            pass  # not installed on this platform — skip
+except Exception:
+    pass
+
 a = Analysis(
     [str(ROOT / "packaging" / "standalone.py")],
     pathex=[str(BACKEND)],
-    binaries=[],
+    binaries=webview_binaries,
     datas=[
         # Bundle the built React frontend
         (str(FRONTEND_DIST), "dist"),
@@ -30,7 +48,7 @@ a = Analysis(
         # Alembic migrations (ini + env + versions)
         (str(BACKEND / "alembic.ini"), "."),
         (str(BACKEND / "alembic"), "alembic"),
-    ],
+    ] + webview_datas,
     hiddenimports=[
         # uvicorn internals that PyInstaller misses
         "uvicorn.logging",
@@ -71,7 +89,7 @@ a = Analysis(
         "watchdog",
         "watchdog.observers",
         "watchdog.observers.polling",
-    ],
+    ] + webview_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

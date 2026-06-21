@@ -66,6 +66,14 @@ jobs:
         working-directory: backend
         run: pip install -r requirements.txt pyinstaller
 
+      # Desktop shell (#463): native window via pywebview. Windows only — the
+      # Linux single-file binary can't portably bundle GTK/WebKit, so it keeps
+      # the browser fallback (standalone.py imports `webview` lazily).
+      - name: Install desktop shell (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: backend
+        run: pip install -r requirements-desktop.txt
+
       - name: Build executable
         run: pyinstaller packaging/stl-library.spec --distpath dist-standalone
 

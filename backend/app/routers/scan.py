@@ -88,7 +88,14 @@ def browse_dirs(path: str = "", mode: str = "", db: Session = Depends(get_db)):
     # Inbox mode: browse outside configured scan roots so the user can pick an
     # arbitrary import folder. Uses the same bootstrap allowlist as the first-run
     # picker, which is already considered a safe exposure boundary.
-    allowlist = _bootstrap_roots() if mode == "inbox" else (roots or _bootstrap_roots())
+    #
+    # Default (Settings "Add Folder") mode unions the configured roots with the
+    # bootstrap set. The picker's job is to add a NEW root anywhere, so it must
+    # always be able to reach the bootstrap drives — narrowing to just the
+    # configured roots once any existed blocked navigating to any other drive or
+    # folder to add. The exposure boundary stays the bootstrap set (drives on
+    # Windows, home + mounts on Unix), same as the first-run picker.
+    allowlist = _bootstrap_roots() if mode == "inbox" else (roots + _bootstrap_roots())
 
     # Top level — drive list on Windows, home dir elsewhere.
     if not path:

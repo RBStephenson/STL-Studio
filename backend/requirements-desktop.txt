@@ -1,0 +1,11 @@
+# Desktop-shell extra for the standalone build (#463).
+#
+# pywebview wraps the localhost server in a native OS window (WebView2 on
+# Windows). NOT installed for the Docker/server deployment — standalone.py
+# imports `webview` lazily and falls back to the default browser when it's
+# absent, so a Linux build without a bundled GTK/WebKit backend still works.
+#
+# On Windows pywebview uses the EdgeChromium backend, which pulls pythonnet /
+# clr-loader; the WebView2 runtime ships with Windows 11 (and is a documented
+# runtime dependency for older Windows).
+pywebview==5.4
