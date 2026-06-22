@@ -32,6 +32,15 @@ def test_system_prompt_includes_rules_and_owned_paints(client, db):
     assert "{shelf}" not in prompt
 
 
+def test_system_prompt_includes_enriched_rule_blocks(client, db):
+    # Folded-in domain specifics (#525 enrichment): skin method selection, eye
+    # order, thinning rule.
+    prompt = assemble_system_prompt(db).lower()
+    assert "pick one method" in prompt
+    assert "sclera" in prompt
+    assert "vallejo metal color" in prompt  # thinning exception
+
+
 def test_shelf_constraint_excludes_unowned(client, db):
     line = _line(client)
     mk_paint(client, line["id"], code="002", name="Coal Black")

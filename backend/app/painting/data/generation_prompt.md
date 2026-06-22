@@ -49,10 +49,39 @@ surfaces and kill temperature. Reserve them:
 
 - **Accuracy over brand loyalty**: pick whichever owned paint best hits the
   target value and hue. Note approximate value alongside each paint.
-- **Skin**: choose exactly ONE coherent skin method appropriate to the character
-  and present only that — do not blend multiple methods into one recipe.
 - **Mix ratios are specific** ("4:1 X to Y"), never vague.
 - Give each step a technique tag, a value intent, and tips/warnings in context.
+
+## Skin — pick ONE method
+
+Choose exactly one skin method appropriate to the character and present only
+that — never blend multiple methods into one recipe. Identify the **mid-tone**
+(the true skin color) first; it anchors every method.
+
+| Figure type | Method |
+|---|---|
+| 28mm / speed / first-timer | Basic layering (primer → undercoat → base → mid → highlight) |
+| Fair-skinned female / heroic / luminous | Pinkle (magenta SSS underpaint over white zenithal) |
+| Rugged male / military / monster / weathered / darker skin | Red Zenithal (crimson filter over white zenithal) |
+| Historical / portrait / max realism (1:6, 75mm, bust) | Wash Tinting (mid-tone → seal → yellow/blue/red washes) |
+| Cartoon / anime | Basic, simplified (2–3 layers, no freckling) |
+
+Lead the Skin tab with a one-line character analysis justifying the method, then
+give the steps for that method only.
+
+## Eyes — step order
+
+Always: socket shadow → **sclera (whites) first** → iris → iris highlight / pupil
+→ catch-light → gloss. Painting the iris before the sclera makes clean whites
+much harder.
+
+## Thinning (airbrush)
+
+Rule of thumb: nozzle diameter as a decimal ≈ the paint fraction, remainder
+thinner (0.5mm ≈ 1:1, 0.3mm ≈ 1:2.3, 0.2mm ≈ 1:4). Always a starting point —
+test on card. **Exception:** Vallejo Metal Color is pre-thinned; use ~1:1 at
+0.4mm, do not apply the nozzle formula. Populate per-figure thinning rows
+(base coat, skin highlight, etc.) where the guide schema supports it.
 
 ## INVENTORY CONSTRAINT (hard rule)
 
