@@ -5,7 +5,7 @@ import {
   Database, Download, Upload, ShieldAlert, Paintbrush, SlidersHorizontal, RefreshCw,
   FolderTree,
 } from "lucide-react";
-import { api, GuideTheme, ScanRoot } from "../api/client";
+import { api, AiSettings, GuideTheme, ScanRoot } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import FolderPicker from "../components/FolderPicker";
 import HelpLink from "../components/HelpLink";
@@ -82,6 +82,12 @@ export default function Settings() {
   const [newKeyword, setNewKeyword] = useState("");
   const [newTag, setNewTag] = useState("");
   const [newPartsName, setNewPartsName] = useState("");
+
+  // AI settings (#517) — key is write-only; we only ever know if one is set.
+  const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
+  const [aiKeyDraft, setAiKeyDraft] = useState("");
+  const [editingKey, setEditingKey] = useState(false);
+  const [aiModelDraft, setAiModelDraft] = useState(appSettings.ai_model);
 
   const load = () => {
     api.scan.roots()
@@ -279,6 +285,50 @@ export default function Settings() {
       await updateAppSettings({ guide_theme_defaults: theme });
     } catch (e: any) {
       flash(e?.message || "Could not save theme defaults", "err");
+    }
+  };
+
+  // Load AI key status when the painting module is on (key is never returned).
+  useEffect(() => {
+    if (!appSettings.painting_guides_enabled) return;
+    let alive = true;
+    api.settings.ai.get()
+      .then((s) => { if (alive) setAiSettings(s); })
+      .catch(() => { /* non-fatal — section just shows "no key" */ });
+    return () => { alive = false; };
+  }, [appSettings.painting_guides_enabled]);
+
+  useEffect(() => { setAiModelDraft(appSettings.ai_model); }, [appSettings.ai_model]);
+
+  const saveAiKey = async () => {
+    const key = aiKeyDraft.trim();
+    if (!key) return;
+    try {
+      setAiSettings(await api.settings.ai.setKey(key));
+      setAiKeyDraft("");
+      setEditingKey(false);
+      flash("API key saved", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not save the API key", "err");
+    }
+  };
+
+  const clearAiKey = async () => {
+    try {
+      setAiSettings(await api.settings.ai.clearKey());
+      flash("API key cleared", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not clear the API key", "err");
+    }
+  };
+
+  const saveAiModel = async () => {
+    const model = aiModelDraft.trim();
+    if (model === appSettings.ai_model) return;
+    try {
+      await updateAppSettings({ ai_model: model });
+    } catch (e: any) {
+      flash(e?.message || "Could not save the model", "err");
     }
   };
 
@@ -852,6 +902,80 @@ export default function Settings() {
             <ThemeEditor
               value={appSettings.guide_theme_defaults}
               onChange={saveThemeDefaults}
+            />
+          </div>
+        )}
+
+        {appSettings.painting_guides_enabled && (
+          <div className="mt-6">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+              AI generation
+            </h3>
+            <p className="text-xs text-gray-600 mb-3">
+              Bring your own Anthropic API key to generate guide drafts. The key is
+              stored encrypted and never shown again — only that one is set.
+            </p>
+
+            <label className="block text-xs text-gray-400 mb-1">Anthropic API key</label>
+            {aiSettings?.key_set && !editingKey ? (
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
+                  Key set <span className="text-gray-500">••••{aiSettings.key_hint?.replace(/^…/, "")}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setEditingKey(true); setAiKeyDraft(""); }}
+                  className="text-sm text-gray-300 hover:text-white border border-gray-700 rounded px-3 py-2"
+                >
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAiKey}
+                  className="text-sm text-rose-300 hover:text-rose-200 border border-gray-700 hover:border-rose-800 rounded px-3 py-2"
+                >
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mb-3">
+                <input
+                  type="password"
+                  aria-label="Anthropic API key"
+                  value={aiKeyDraft}
+                  onChange={(e) => setAiKeyDraft(e.target.value)}
+                  placeholder="sk-ant-…"
+                  className="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={saveAiKey}
+                  disabled={!aiKeyDraft.trim()}
+                  className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-2 disabled:opacity-50"
+                >
+                  Save
+                </button>
+                {aiSettings?.key_set && (
+                  <button
+                    type="button"
+                    onClick={() => { setEditingKey(false); setAiKeyDraft(""); }}
+                    className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+
+            <label className="block text-xs text-gray-400 mb-1" htmlFor="ai-model">Model</label>
+            <input
+              id="ai-model"
+              type="text"
+              value={aiModelDraft}
+              onChange={(e) => setAiModelDraft(e.target.value)}
+              onBlur={saveAiModel}
+              placeholder="claude-opus-4-8"
+              className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
             />
           </div>
         )}

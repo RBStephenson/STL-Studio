@@ -15,6 +15,7 @@ const DEFAULTS: AppSettings = {
   scan_tag_rules: [],
   scan_parts_names: [],
   guide_theme_defaults: {},
+  ai_model: "",
 };
 
 interface AppSettingsContextValue {
