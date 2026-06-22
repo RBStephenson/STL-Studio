@@ -12,7 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Model
+from app.models import AppSetting, Model
 from app.painting.models import (
     Guide, GuideCategory, GuideReferenceImage, GuideSeries,
 )
@@ -54,6 +54,23 @@ def _get_or_404(db: Session, model, id_: int, label: str):
     if row is None:
         raise HTTPException(status_code=404, detail=f"{label} {id_} not found")
     return row
+
+
+_GUIDE_THEME_DEFAULTS_KEY = "guide_theme_defaults"
+
+
+def _default_guide_theme(db: Session) -> dict | None:
+    """The app-level default guide theme (#514), or None when none is configured.
+
+    New guides that don't carry their own theme inherit this. An all-None stored
+    theme counts as "not configured" so behaviour matches the corpus default.
+    """
+    row = db.get(AppSetting, _GUIDE_THEME_DEFAULTS_KEY)
+    if row is None or not isinstance(row.value, dict):
+        return None
+    if not any(v is not None for v in row.value.values()):
+        return None
+    return row.value
 
 
 def _validate_refs(db: Session, *, category_id, series_id, model_id, reference_image_id):
@@ -312,7 +329,7 @@ def create_guide(body: GuideCreate, db: Session = Depends(get_db)):
         paint_lines_used=[p.model_dump() for p in body.paint_lines_used],
         technique_tags=body.technique_tags,
         character_brief=body.character_brief.model_dump() if body.character_brief else None,
-        theme=body.theme.model_dump() if body.theme else None,
+        theme=body.theme.model_dump() if body.theme else _default_guide_theme(db),
         head_style=body.head_style,
         series_badge=[c.model_dump() for c in body.series_badge] if body.series_badge else None,
         thinning_config=body.thinning_config.model_dump() if body.thinning_config else None,

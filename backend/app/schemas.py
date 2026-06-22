@@ -2,6 +2,10 @@ from datetime import datetime
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
+# Reused as the shape of the app-level default guide theme (#514). The painting
+# schemas don't import app.schemas, so this import is one-directional (no cycle).
+from app.painting.schemas import GuideTheme
+
 
 class CreatorBase(BaseModel):
     name: str
@@ -395,6 +399,9 @@ class AppSettingsRead(BaseModel):
     # Exact folder names treated as parts/structural (never a product or a
     # variant-grouping character), merged with built-in detection (#31).
     scan_parts_names: list[str] = []
+    # App-level default guide theme (#514): new guides inherit these colors when
+    # they don't carry their own theme. All-None means "use the corpus default".
+    guide_theme_defaults: GuideTheme = GuideTheme()
 
 
 class AppSettingsUpdate(BaseModel):
@@ -415,6 +422,7 @@ class AppSettingsUpdate(BaseModel):
 
     scan_tag_rules: Optional[list[ScanTagRule]] = Field(None, max_length=500)
     scan_parts_names: Optional[list[str]] = Field(None, max_length=500)
+    guide_theme_defaults: Optional[GuideTheme] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
