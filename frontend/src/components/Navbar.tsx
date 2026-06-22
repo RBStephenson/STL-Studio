@@ -26,10 +26,12 @@ export default function Navbar() {
     { to: "/queue",       label: "Queue",       icon: Printer,       badge: queueCount },
     { to: "/triage",      label: "Triage",      icon: AlertTriangle, badge: reviewCount },
     { to: "/import",      label: "Import",      icon: Inbox,         badge: null },
+    // Paint Shelf is standalone paint inventory — always available (#516).
+    // Only Guides (and future AI) gate on the painting-guides flag.
     ...(appSettings.painting_guides_enabled ? [
-      { to: "/painting/guides", label: "Guides",      icon: Paintbrush, badge: null },
-      { to: "/painting/shelf",  label: "Paint Shelf", icon: Palette,    badge: null },
+      { to: "/painting/guides", label: "Guides", icon: Paintbrush, badge: null },
     ] : []),
+    { to: "/painting/shelf", label: "Paint Shelf", icon: Palette, badge: null },
     { to: "/tags",       label: "Tags",        icon: Tag,           badge: null },
     { to: "/settings",   label: "Settings",    icon: Settings,      badge: null },
     { to: "/help",        label: "Help",        icon: HelpCircle,    badge: null },
