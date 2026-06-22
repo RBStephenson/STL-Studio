@@ -255,6 +255,8 @@ export interface AppSettings {
   scan_ignore_patterns: string[];
   scan_tag_rules: ScanTagRule[];
   scan_parts_names: string[];
+  // App-level default guide theme (#514): new guides inherit these colors.
+  guide_theme_defaults: GuideTheme;
 }
 
 export interface ScanTagRule {
@@ -566,6 +568,7 @@ export interface GuideCreateInput {
   philosophy_note?: string | null;
   paint_lines_used?: PaintPill[];
   technique_tags?: string[];
+  theme?: GuideTheme | null;
 }
 
 // Content-spine input shapes (#329 PR 2). Mirror backend SwatchIn/StepIn/

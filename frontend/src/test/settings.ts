@@ -11,5 +11,6 @@ export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
   scan_ignore_patterns: [],
   scan_tag_rules: [],
   scan_parts_names: [],
+  guide_theme_defaults: {},
   ...over,
 });

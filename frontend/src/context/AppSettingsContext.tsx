@@ -14,6 +14,7 @@ const DEFAULTS: AppSettings = {
   scan_ignore_patterns: [],
   scan_tag_rules: [],
   scan_parts_names: [],
+  guide_theme_defaults: {},
 };
 
 interface AppSettingsContextValue {

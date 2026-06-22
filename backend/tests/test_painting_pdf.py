@@ -92,6 +92,39 @@ class TestInlinedHtml:
         assert "color: #e8e8e8 !important" in print_block
 
 
+class TestThemeVars:
+    def test_emits_default_root_vars(self, client, db, paint):
+        # A guide with no structured theme still gets a complete :root palette in
+        # the PDF source (#515), matching the in-app reader defaults.
+        guide = _make_guide(client, db, paint["id"])
+        guide.theme = None
+        db.add(guide); db.commit()
+        html = render_guide_pdf_html(db, guide)
+        assert "--accent: #c0a060;" in html
+        assert "--bg: #1a1a1a;" in html
+        assert ".hero { background: var(--hero-gradient); }" in html
+
+    def test_structured_theme_overrides_defaults(self, client, db, paint):
+        guide = _make_guide(client, db, paint["id"])
+        guide.theme = {"accent": "#ff0000", "hero_gradient": "linear-gradient(90deg, #111, #222)"}
+        db.add(guide); db.commit()
+        html = render_guide_pdf_html(db, guide)
+        assert "--accent: #ff0000;" in html
+        assert "--hero-gradient: linear-gradient(90deg, #111, #222);" in html
+        # Unset fields fall back to defaults.
+        assert "--bg: #1a1a1a;" in html
+
+    def test_head_style_wins_over_theme_block(self, client, db, paint):
+        # The theme block is injected right after <head>; a guide's verbatim
+        # head_style comes later in the head, so it still wins (escape hatch).
+        guide = _make_guide(client, db, paint["id"])
+        guide.theme = {"accent": "#ff0000"}
+        guide.head_style = ":root{--accent:#00ff00}"
+        db.add(guide); db.commit()
+        html = render_guide_pdf_html(db, guide)
+        assert html.index("--accent: #ff0000;") < html.index("--accent:#00ff00")
+
+
 class TestStamping:
     def test_footer_on_by_default(self, client, db, paint):
         guide = _make_guide(client, db, paint["id"])
