@@ -491,6 +491,12 @@ const SECTIONS: Section[] = [
           polluting the shelf.
         </p>
         <p className="font-medium text-gray-200">PaintRack CSV import &amp; export</p>
+        <p>
+          The import/export uses the CSV format from{" "}
+          <a href="https://www.courageousoctopus.com/" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 underline">PaintRack</a>{" "}
+          by Courageous Octopus — a great paint-inventory app. STL Library isn't
+          affiliated with it; we just interoperate with its export.
+        </p>
         <p>If you track paints in <strong>PaintRack</strong>, import its CSV export directly:</p>
         <ul>
           <li>

@@ -337,8 +337,20 @@ export default function PaintShelfPage() {
           </button>
         </div>
       </div>
-      <p className="text-sm text-gray-500 mb-6">
+      <p className="text-sm text-gray-500 mb-1">
         {total.toLocaleString()} paints — guides will only ever reference paints from your shelf.
+      </p>
+      <p className="text-xs text-gray-600 mb-6">
+        Import / export uses the CSV format from{" "}
+        <a
+          href="https://www.courageousoctopus.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-indigo-400 hover:text-indigo-300 underline"
+        >
+          PaintRack
+        </a>{" "}
+        by Courageous Octopus — a great paint-inventory app. STL Library isn't affiliated with it.
       </p>
 
       <div ref={formRef} className="scroll-mt-4">

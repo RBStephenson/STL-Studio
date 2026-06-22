@@ -396,6 +396,11 @@ clear message instead of polluting the shelf.
 
 ### PaintRack CSV import & export
 
+The Paint Shelf's import/export uses the CSV format from
+[**PaintRack**](https://www.courageousoctopus.com/) by Courageous Octopus — a
+great paint-inventory app. STL Library isn't affiliated with it; we just
+interoperate with its export so you can reuse a shelf you've already built.
+
 If you track paints in **PaintRack**, import its CSV export directly:
 
 - **Import CSV** shows a **diff preview** first — what would be added, changed,
