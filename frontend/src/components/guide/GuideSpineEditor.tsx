@@ -227,10 +227,11 @@ function SwatchRow({ value, onChange, ...ctl }: { value: DraftSwatch; onChange: 
   );
 }
 
-function StepEditor({ value, onChange, ...ctl }: { value: DraftStep; onChange: (v: DraftStep) => void } & RowControls) {
+function StepEditor({ value, onChange, anchorId, ...ctl }: { value: DraftStep; onChange: (v: DraftStep) => void; anchorId: string } & RowControls) {
   const set = (patch: Partial<DraftStep>) => onChange({ ...value, ...patch });
   return (
-    <div className="border border-gray-800 rounded p-3 bg-gray-950/40 space-y-2">
+    // `id` is the jump-to-node target for validation flags (#489).
+    <div id={anchorId} className="border border-gray-800 rounded p-3 bg-gray-950/40 space-y-2 scroll-mt-6">
       <div className="flex items-start gap-2">
         <input aria-label="Step title" placeholder="Step title *" className={field} value={value.title} onChange={(e) => set({ title: e.target.value })} />
         <RowButtons {...ctl} />
@@ -279,7 +280,7 @@ function StepEditor({ value, onChange, ...ctl }: { value: DraftStep; onChange: (
   );
 }
 
-function PhaseEditor({ value, onChange, ...ctl }: { value: DraftPhase; onChange: (v: DraftPhase) => void } & RowControls) {
+function PhaseEditor({ value, onChange, tabIndex, phaseIndex, ...ctl }: { value: DraftPhase; onChange: (v: DraftPhase) => void; tabIndex: number; phaseIndex: number } & RowControls) {
   const set = (patch: Partial<DraftPhase>) => onChange({ ...value, ...patch });
   return (
     <div className="border border-gray-800 rounded p-3 bg-gray-900/40 space-y-2">
@@ -291,6 +292,7 @@ function PhaseEditor({ value, onChange, ...ctl }: { value: DraftPhase; onChange:
         {value.steps.map((s, i) => (
           <StepEditor
             key={s._key} value={s}
+            anchorId={`guide-step-${tabIndex}-${phaseIndex}-${i}`}
             onChange={(v) => set({ steps: replaceAt(value.steps, i, v) })}
             onUp={() => set({ steps: move(value.steps, i, -1) })}
             onDown={() => set({ steps: move(value.steps, i, 1) })}
@@ -307,7 +309,7 @@ function PhaseEditor({ value, onChange, ...ctl }: { value: DraftPhase; onChange:
   );
 }
 
-function TabEditor({ value, onChange, ...ctl }: { value: DraftTab; onChange: (v: DraftTab) => void } & RowControls) {
+function TabEditor({ value, onChange, tabIndex, ...ctl }: { value: DraftTab; onChange: (v: DraftTab) => void; tabIndex: number } & RowControls) {
   const set = (patch: Partial<DraftTab>) => onChange({ ...value, ...patch });
   return (
     <div className="border border-gray-700 rounded-lg p-3 bg-gray-900 space-y-3">
@@ -323,6 +325,7 @@ function TabEditor({ value, onChange, ...ctl }: { value: DraftTab; onChange: (v:
         {value.phases.map((p, i) => (
           <PhaseEditor
             key={p._key} value={p}
+            tabIndex={tabIndex} phaseIndex={i}
             onChange={(v) => set({ phases: replaceAt(value.phases, i, v) })}
             onUp={() => set({ phases: move(value.phases, i, -1) })}
             onDown={() => set({ phases: move(value.phases, i, 1) })}
@@ -381,7 +384,7 @@ export default function GuideSpineEditor({ initialTabs, busy, error, onSave, onC
 
       {tabs.map((t, i) => (
         <TabEditor
-          key={t._key} value={t}
+          key={t._key} value={t} tabIndex={i}
           onChange={(v) => setTabs((cur) => replaceAt(cur, i, v))}
           onUp={() => setTabs((cur) => move(cur, i, -1))}
           onDown={() => setTabs((cur) => move(cur, i, 1))}

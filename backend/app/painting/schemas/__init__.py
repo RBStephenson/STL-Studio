@@ -704,3 +704,27 @@ class SeriesRead(BaseModel):
     display_name: str
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Guide validation (#489, spec §8.4)
+# ---------------------------------------------------------------------------
+
+class ValidationFlag(BaseModel):
+    """One validator finding. `block` flags prevent publish; `warn` is advisory.
+
+    The index locator (tab/phase/step/swatch) lets the editor jump to the node;
+    `path` is a human breadcrumb for display."""
+    severity: Literal["block", "warn"]
+    code: str
+    message: str
+    tab_index: Optional[int] = None
+    phase_index: Optional[int] = None
+    step_index: Optional[int] = None
+    swatch_index: Optional[int] = None
+    path: Optional[str] = None
+
+
+class GuideValidationResult(BaseModel):
+    ok: bool                       # True when no block-severity flags remain
+    flags: list[ValidationFlag]

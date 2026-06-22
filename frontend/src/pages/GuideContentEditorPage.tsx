@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
-import { api, Guide, GuideTab, TabInput } from "../api/client";
+import { api, Guide, GuideTab, GuideValidationResult, TabInput } from "../api/client";
 import GuideSpineEditor from "../components/guide/GuideSpineEditor";
 import GuideReader from "../components/guide/GuideReader";
+import GuideValidationPanel from "../components/guide/GuideValidationPanel";
 import { useToast } from "../context/ToastContext";
 
 export default function GuideContentEditorPage() {
@@ -19,6 +20,20 @@ export default function GuideContentEditorPage() {
   // Live preview projection of the in-progress draft (#488), fed by the editor.
   const [previewTabs, setPreviewTabs] = useState<GuideTab[] | null>(null);
   const [showPreview, setShowPreview] = useState(true);
+  // Validator findings for the SAVED guide (#489); refreshed after each save.
+  const [validation, setValidation] = useState<GuideValidationResult | null>(null);
+  const [validating, setValidating] = useState(false);
+
+  const refreshValidation = async (guideId: number) => {
+    setValidating(true);
+    try {
+      setValidation(await api.painting.guides.validate(guideId));
+    } catch {
+      // A failed validation fetch shouldn't block editing — leave the panel as is.
+    } finally {
+      setValidating(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -26,10 +41,12 @@ export default function GuideContentEditorPage() {
     setLoadError(null);
     api.painting.guides
       .get(Number(id))
-      .then((g) => { if (alive) setGuide(g); })
+      .then((g) => { if (alive) { setGuide(g); refreshValidation(g.id); } })
       .catch((e) => { if (alive) setLoadError(e?.message || "Could not load this guide."); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
+    // refreshValidation is stable for the lifetime of this page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const save = async (tabs: TabInput[]) => {
@@ -39,9 +56,11 @@ export default function GuideContentEditorPage() {
       // Sending `tabs` replaces the whole content subtree (#258 semantics).
       await api.painting.guides.update(Number(id), { tabs });
       toast("Guide content saved.", "success");
-      navigate(`/painting/guides/${id}`);
+      // Stay on the editor and re-run validation so the panel reflects the save.
+      await refreshValidation(Number(id));
     } catch (e) {
       setSaveError((e as Error)?.message || "Could not save the guide content.");
+    } finally {
       setBusy(false);
     }
   };
@@ -71,6 +90,12 @@ export default function GuideContentEditorPage() {
 
       {loading && <p className="text-sm text-gray-500">Loading…</p>}
       {loadError && <p role="alert" className="text-sm text-rose-400">{loadError}</p>}
+
+      {!loading && !loadError && guide && (
+        <div className="mb-4">
+          <GuideValidationPanel result={validation} loading={validating} />
+        </div>
+      )}
 
       {!loading && !loadError && guide && (
         <div className={showPreview ? "lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start" : ""}>

@@ -425,6 +425,22 @@ export interface GuideTab {
   phases: GuidePhase[];
 }
 
+export interface ValidationFlag {
+  severity: "block" | "warn";
+  code: string;
+  message: string;
+  tab_index: number | null;
+  phase_index: number | null;
+  step_index: number | null;
+  swatch_index: number | null;
+  path: string | null;
+}
+
+export interface GuideValidationResult {
+  ok: boolean;
+  flags: ValidationFlag[];
+}
+
 export interface GuideTheme {
   bg?: string | null;
   surface?: string | null;
@@ -1194,6 +1210,9 @@ export const api = {
         }),
       delete: (id: number) =>
         request<{ ok: boolean }>(`/painting/guides/${id}`, { method: "DELETE" }),
+      // Validator findings for the editor panel + publish gate (#489).
+      validate: (id: number) =>
+        request<GuideValidationResult>(`/painting/guides/${id}/validation`),
       // Render the guide to a print-ready PDF and trigger a download (#320).
       // A blob endpoint, so it can't go through request(); surfaces the 503
       // "Chromium not installed" detail like the other download helpers.

@@ -19,12 +19,13 @@ from app.painting.models import (
 from app.painting.schemas import (
     CategoryCreate, CategoryRead,
     GuideCreate, GuideImportRequest, GuideImportResult, GuideList, GuideListItem,
-    GuideRead, GuideUpdate, SeriesCreate, SeriesRead,
+    GuideRead, GuideUpdate, GuideValidationResult, SeriesCreate, SeriesRead,
 )
 from app.painting.services.guides import build_tabs, collect_paint_ids, missing_paint_ids
 from app.painting.services.importing import import_guide_html, make_db_resolver, with_overrides
 from app.painting.services.pdf import ChromiumNotInstalledError, render_guide_pdf
 from app.painting.services.rendering import attach_resolved_paints, render_guide_html
+from app.painting.services.validation import validate_guide
 from app.utils import utcnow
 
 router = APIRouter()
@@ -185,6 +186,15 @@ def get_guide(guide_id: int, db: Session = Depends(get_db)):
     return attach_resolved_paints(db, _get_or_404(db, Guide, guide_id, "Guide"))
 
 
+@router.get("/guides/{guide_id}/validation", response_model=GuideValidationResult)
+def get_guide_validation(guide_id: int, db: Session = Depends(get_db)):
+    """Validator findings for the editor panel (#489, spec §8.4). `ok` is False
+    when any block-severity flag remains — the same gate publish enforces."""
+    guide = _get_or_404(db, Guide, guide_id, "Guide")
+    flags = validate_guide(db, guide)
+    return GuideValidationResult(ok=not any(f.severity == "block" for f in flags), flags=flags)
+
+
 @router.get("/guides/{guide_id}/export", response_class=Response)
 def export_guide_html(guide_id: int, db: Session = Depends(get_db)):
     """Serialize a guide to the legacy self-contained HTML file (spec §9.5).
@@ -328,6 +338,18 @@ def update_guide(guide_id: int, body: GuideUpdate, db: Session = Depends(get_db)
 
     if tabs_in is not None:
         guide.tabs = build_tabs(tabs_in)   # delete-orphan clears the old subtree
+
+    # Publish gate (#489, spec §8.4): a guide can't go published while any
+    # block-severity validation flag remains. Validates the post-update content.
+    if becoming_published:
+        blocking = [f for f in validate_guide(db, guide) if f.severity == "block"]
+        if blocking:
+            db.rollback()
+            raise HTTPException(status_code=422, detail={
+                "message": "Resolve blocking validation issues before publishing.",
+                "flags": [f.model_dump() for f in blocking],
+            })
+
     if becoming_published and guide.published_at is None:
         guide.published_at = utcnow()
 
