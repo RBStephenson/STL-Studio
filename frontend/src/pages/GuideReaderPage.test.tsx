@@ -69,13 +69,16 @@ describe("GuideReaderPage", () => {
     printSpy.mockRestore();
   });
 
-  it("exports a PDF via the Export PDF button (#320)", async () => {
+  it("exports a PDF via the Export PDF menu (#320/#511)", async () => {
     const { api } = await import("../api/client");
     renderAt("1");
     await screen.findByRole("heading", { level: 1, name: /RoboCop/ });
 
     await userEvent.click(screen.getByRole("button", { name: /export pdf/i }));
-    expect(api.painting.guides.exportPdf).toHaveBeenCalledWith(1, "robocop");
+    await userEvent.click(screen.getByRole("menuitem", { name: /export this guide/i }));
+    expect(api.painting.guides.exportPdf).toHaveBeenCalledWith(
+      1, "robocop", expect.objectContaining({ footer: true, watermark: false }),
+    );
   });
 
   it("surfaces a PDF export failure as a toast (#320)", async () => {
@@ -87,6 +90,7 @@ describe("GuideReaderPage", () => {
     await screen.findByRole("heading", { level: 1, name: /RoboCop/ });
 
     await userEvent.click(screen.getByRole("button", { name: /export pdf/i }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /export this guide/i }));
     expect(await screen.findByText(/needs Chromium/i)).toBeInTheDocument();
   });
 

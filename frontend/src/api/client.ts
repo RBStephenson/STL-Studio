@@ -25,6 +25,50 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+// Per-export reward-stamping options for PDF endpoints (#490/#511). Omitted
+// fields fall back to the server defaults (footer on, watermark off).
+export interface StampOptions {
+  footer?: boolean;
+  tier?: string;
+  watermark?: boolean;
+}
+
+export interface SeriesExportOptions extends StampOptions {
+  cover?: boolean;
+}
+
+function stampQuery(opts: SeriesExportOptions): string {
+  const params = new URLSearchParams();
+  if (opts.cover !== undefined) params.set("cover", String(opts.cover));
+  if (opts.footer !== undefined) params.set("footer", String(opts.footer));
+  if (opts.tier) params.set("tier", opts.tier);
+  if (opts.watermark !== undefined) params.set("watermark", String(opts.watermark));
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
+// Fetch a PDF blob and trigger a browser download. Blob endpoints can't go
+// through request(); this surfaces the 503 "Chromium not installed" / 404 detail
+// like the other download helpers. The server's Content-Disposition filename
+// wins when present (e.g. the series-bundle slug), else `fallbackName`.
+async function downloadPdf(url: string, fallbackName: string): Promise<void> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+    throw new ApiError(res.status, detail);
+  }
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const name = match ? match[1] : fallbackName;
+  const objectUrl = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export type PrintStatus = "none" | "queued" | "printing" | "printed";
 export const PRINT_STATUS_CYCLE: PrintStatus[] = ["none", "queued", "printing", "printed"];
 export const PRINT_STATUS_LABELS: Record<PrintStatus, string> = {
@@ -1214,22 +1258,18 @@ export const api = {
       validate: (id: number) =>
         request<GuideValidationResult>(`/painting/guides/${id}/validation`),
       // Render the guide to a print-ready PDF and trigger a download (#320).
-      // A blob endpoint, so it can't go through request(); surfaces the 503
-      // "Chromium not installed" detail like the other download helpers.
-      exportPdf: async (id: number, slug: string) => {
-        const res = await fetch(`${BASE}/painting/guides/${id}/export/pdf`);
-        if (!res.ok) {
-          let detail = `${res.status} ${res.statusText}`;
-          try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
-          throw new ApiError(res.status, detail);
-        }
-        const url = URL.createObjectURL(await res.blob());
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${slug}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-      },
+      // Stamping options (#511): footer on by default, watermark off.
+      exportPdf: (id: number, slug: string, opts: StampOptions = {}) =>
+        downloadPdf(
+          `${BASE}/painting/guides/${id}/export/pdf${stampQuery(opts)}`,
+          `${slug}.pdf`,
+        ),
+      // Render every published guide in a series into one bundled PDF (#490/#511).
+      exportSeriesPdf: (seriesId: number, opts: SeriesExportOptions = {}) =>
+        downloadPdf(
+          `${BASE}/painting/series/${seriesId}/export/pdf${stampQuery(opts)}`,
+          `series-${seriesId}-bundle.pdf`,
+        ),
     },
   },
   database: {
