@@ -86,6 +86,30 @@ describe("GuideSpineEditor", () => {
     expect(step.swatches).toHaveLength(1); // the new paintless one is dropped
   });
 
+  it("emits a live preview projection on mount and on edit (#488)", async () => {
+    const onPreviewChange = vi.fn();
+    render(
+      <GuideSpineEditor
+        initialTabs={[oneTab()]} onSave={vi.fn()} onCancel={vi.fn()}
+        onPreviewChange={onPreviewChange}
+      />,
+    );
+
+    // Mount: the draft is projected to the read-shape GuideReader consumes,
+    // with the picked paint's display fields carried through.
+    expect(onPreviewChange).toHaveBeenCalled();
+    const last = () => onPreviewChange.mock.calls[onPreviewChange.mock.calls.length - 1][0];
+    let preview = last();
+    expect(preview[0]).toMatchObject({ name: "Skin", section: { heading: "Flesh tones" } });
+    const sw = preview[0].phases[0].steps[0].swatches[0];
+    expect(sw).toMatchObject({ paint_id: 7, paint: { name: "Cadmium", code: "MPA-001", hex: "#fff" } });
+
+    // Edit: the projection re-fires and reflects the change live.
+    await userEvent.type(screen.getByDisplayValue("Basecoat"), "X");
+    preview = last();
+    expect(preview[0].phases[0].steps[0].title).toBe("BasecoatX");
+  });
+
   it("adds a new tab", async () => {
     const onSave = vi.fn();
     render(<GuideSpineEditor initialTabs={[oneTab()]} onSave={onSave} onCancel={vi.fn()} />);

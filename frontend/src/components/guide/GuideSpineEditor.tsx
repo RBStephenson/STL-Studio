@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronUp, ChevronDown, Trash2, Plus } from "lucide-react";
 import {
   GuideTab,
+  GuidePhase,
+  GuideStep,
+  GuideSwatch,
   StepTechnique,
   TabInput,
 } from "../../api/client";
@@ -90,6 +93,62 @@ function serialize(tabs: DraftTab[]): TabInput[] {
             role_label: orNull(w.role_label),
             sort_order: wi,
           })),
+      })),
+    })),
+  }));
+}
+
+// Map the live draft to the read-shape GuideReader consumes, so the editor can
+// render a faithful preview without a server round-trip (#488). The draft already
+// carries each picked paint's name/code/hex (PickedPaint), so swatches resolve;
+// `brand` isn't held on the draft, so it's left blank in the preview. Synthetic
+// ids are render-local (stable React keys only). Mix components aren't authorable
+// yet (#504), so each step previews with single-paint swatches and no mixes.
+function draftToPreviewTabs(tabs: DraftTab[]): GuideTab[] {
+  let id = 0;
+  const nid = () => ++id;
+  return tabs.map((t, ti): GuideTab => ({
+    id: nid(),
+    name: t.name,
+    dom_id: orNull(t.dom_id),
+    sort_order: ti,
+    has_expert_subtab: false,
+    section: t.heading.trim() ? { heading: t.heading.trim(), intro: orNull(t.intro) } : null,
+    value_map: null,
+    subtabs: [],
+    callouts: [],
+    raw_blocks: [],
+    method_block: null,
+    phases: t.phases.map((p, pi): GuidePhase => ({
+      id: nid(),
+      label: p.label,
+      subtab_key: null,
+      sort_order: pi,
+      steps: p.steps.map((s, si): GuideStep => ({
+        id: nid(),
+        title: s.title,
+        technique_tag: s.technique_tag === "" ? null : s.technique_tag,
+        technique_label: orNull(s.technique_label),
+        body: orNull(s.body),
+        value_intent: orNull(s.value_intent),
+        tip: orNull(s.tip),
+        warning: orNull(s.warning),
+        ratio_box: orNull(s.ratio_box),
+        sort_order: si,
+        swatches: s.swatches
+          .filter((w) => w.paint || (w.name && w.name.trim()))
+          .map((w, wi): GuideSwatch => ({
+            id: nid(),
+            paint_id: w.paint ? w.paint.id : null,
+            name: w.paint ? null : w.name,
+            value_pct: w.value_pct.trim() === "" ? null : Number(w.value_pct),
+            role_label: orNull(w.role_label),
+            sort_order: wi,
+            paint: w.paint
+              ? { name: w.paint.name, code: w.paint.code, brand: "", hex: w.paint.hex }
+              : null,
+          })),
+        mix_components: [],
       })),
     })),
   }));
@@ -288,11 +347,22 @@ interface Props {
   error?: string | null;
   onSave: (tabs: TabInput[]) => void;
   onCancel: () => void;
+  // Live draft → read-shape, emitted on every edit so a parent can render a
+  // preview (#488). Pass a stable callback (e.g. a setState setter).
+  onPreviewChange?: (tabs: GuideTab[]) => void;
 }
 
-export default function GuideSpineEditor({ initialTabs, busy, error, onSave, onCancel }: Props) {
+export default function GuideSpineEditor({ initialTabs, busy, error, onSave, onCancel, onPreviewChange }: Props) {
   const [tabs, setTabs] = useState<DraftTab[]>(() => toDraft(initialTabs));
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Push the live preview projection whenever the draft changes (and on mount).
+  useEffect(() => {
+    onPreviewChange?.(draftToPreviewTabs(tabs));
+    // onPreviewChange is expected to be a stable setter; tracking `tabs` alone
+    // keeps this from re-firing on unrelated parent re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs]);
 
   const save = () => {
     const err = validate(tabs);
