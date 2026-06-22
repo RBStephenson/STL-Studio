@@ -5,8 +5,10 @@ import {
   GuideCreateInput,
   GuideScale,
   GuideStatus,
+  GuideTheme,
   PaintPill,
 } from "../../api/client";
+import ThemeEditor from "./ThemeEditor";
 
 const SCALES: GuideScale[] = ["1:6", "1:12", "75mm", "28mm", "bust", "other"];
 const STATUSES: GuideStatus[] = ["draft", "in_review", "published", "archived"];
@@ -28,6 +30,7 @@ export interface GuideMetaInitial {
   philosophy_note?: string | null;
   paint_lines_used?: PaintPill[];
   technique_tags?: string[];
+  theme?: GuideTheme | null;
 }
 
 interface Props {
@@ -45,6 +48,14 @@ interface Props {
 const trimOrNull = (s: string): string | null => {
   const t = s.trim();
   return t === "" ? null : t;
+};
+
+// An all-empty theme is sent as null so new guides inherit the app default
+// (#514) and edits don't persist a hollow object.
+const normalizeTheme = (theme: GuideTheme | null): GuideTheme | null => {
+  if (!theme) return null;
+  const hasValue = Object.values(theme).some((v) => v != null && v !== "");
+  return hasValue ? theme : null;
 };
 
 export default function GuideMetaForm({
@@ -78,6 +89,7 @@ export default function GuideMetaForm({
   const [tagDraft, setTagDraft] = useState("");
   const [lines, setLines] = useState<PaintPill[]>(initial?.paint_lines_used ?? []);
   const [lineDraft, setLineDraft] = useState("");
+  const [theme, setTheme] = useState<GuideTheme | null>(initial?.theme ?? null);
   const [missingTitle, setMissingTitle] = useState(false);
 
   const addTag = () => {
@@ -124,6 +136,7 @@ export default function GuideMetaForm({
       philosophy_note: trimOrNull(philosophy),
       paint_lines_used: lines,
       technique_tags: tags,
+      theme: normalizeTheme(theme),
     });
   };
 
@@ -275,6 +288,19 @@ export default function GuideMetaForm({
           placeholder="e.g. Pro Acryl — press Enter"
         />
       </div>
+
+      <details className="border border-gray-800 rounded">
+        <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-300">
+          Theme
+        </summary>
+        <div className="px-3 pb-3 pt-1">
+          <p className="text-xs text-gray-500 mb-3">
+            Customize this guide's colors. Leave fields blank to inherit the
+            default theme from Settings.
+          </p>
+          <ThemeEditor value={theme} onChange={setTheme} />
+        </div>
+      </details>
 
       <div className="flex items-center gap-2 pt-2">
         <button

@@ -171,9 +171,55 @@ def render_guide_pdf_html(
         if tag not in html:
             raise RuntimeError(f"expected asset tag not found in export HTML: {tag!r}")
         html = html.replace(tag, inline, 1)
+    # Emit the structured theme as :root vars (#515). Injected right after <head>
+    # so a guide's verbatim head_style (later in the head) still wins as the
+    # escape hatch. The static guide.css is var-driven but ships no :root
+    # defaults, so this is also what makes editor-themed guides (which carry a
+    # `theme` but no head_style) render in colour in the PDF.
+    html = html.replace("<head>", "<head>\n" + _theme_style_block(guide), 1)
     if stamp is not None:
         html = _stamp_into_html(html, stamp)
     return html
+
+
+# Defaults mirror the in-app reader (`guide-reader.css`) so the PDF matches the
+# on-screen guide when a theme is partial or absent.
+_THEME_DEFAULTS: dict[str, str] = {
+    "bg": "#1a1a1a",
+    "surface": "#222222",
+    "surface2": "#2a2a2a",
+    "surface3": "#333333",
+    "border": "#3a3a3a",
+    "text": "#e8e8e8",
+    "text_muted": "#aaaaaa",
+    "text_dim": "#777777",
+    "accent": "#c0a060",
+}
+_DEFAULT_HERO_GRADIENT = "linear-gradient(135deg, var(--surface2), var(--bg))"
+# CSS var name per GuideTheme field (text_muted -> --text-muted, etc).
+_THEME_VAR_NAMES = {k: "--" + k.replace("_", "-") for k in _THEME_DEFAULTS}
+
+
+def _theme_style_block(guide: Guide) -> str:
+    """A `<style>` defining :root theme vars from the guide's structured theme.
+
+    Defaults fill any field the theme doesn't set, so the output is always a
+    complete, working palette.
+    """
+    theme = guide.theme or {}
+    lines = []
+    for field, default in _THEME_DEFAULTS.items():
+        value = theme.get(field) or default
+        lines.append(f"    {_THEME_VAR_NAMES[field]}: {value};")
+    hero = theme.get("hero_gradient") or _DEFAULT_HERO_GRADIENT
+    lines.append(f"    --hero-gradient: {hero};")
+    vars_block = "\n".join(lines)
+    return (
+        "  <style>\n"
+        f"  :root {{\n{vars_block}\n  }}\n"
+        "  .hero { background: var(--hero-gradient); }\n"
+        "  </style>"
+    )
 
 
 _PDF_MARGIN = {"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"}

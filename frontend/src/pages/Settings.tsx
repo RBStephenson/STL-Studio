@@ -5,10 +5,11 @@ import {
   Database, Download, Upload, ShieldAlert, Paintbrush, SlidersHorizontal, RefreshCw,
   FolderTree,
 } from "lucide-react";
-import { api, ScanRoot } from "../api/client";
+import { api, GuideTheme, ScanRoot } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import FolderPicker from "../components/FolderPicker";
 import HelpLink from "../components/HelpLink";
+import ThemeEditor from "../components/guide/ThemeEditor";
 
 const ACK_PHRASE = "ACKNOWLEDGED";
 
@@ -270,6 +271,14 @@ export default function Settings() {
       flash(next ? "Painting Guides enabled" : "Painting Guides disabled", "ok");
     } catch (e: any) {
       flash(e?.message || "Could not update setting", "err");
+    }
+  };
+
+  const saveThemeDefaults = async (theme: GuideTheme) => {
+    try {
+      await updateAppSettings({ guide_theme_defaults: theme });
+    } catch (e: any) {
+      flash(e?.message || "Could not save theme defaults", "err");
     }
   };
 
@@ -818,9 +827,9 @@ export default function Settings() {
           <Paintbrush size={14} /> Painting Guides
         </h2>
         <p className="text-xs text-gray-600 mb-4">
-          Author step-by-step painting guides for your models and track your paint inventory.
-          Enabling this adds <strong className="text-gray-500">Guides</strong> and{" "}
-          <strong className="text-gray-500">Paint Shelf</strong> to the navigation.
+          Author step-by-step painting guides for your models. Enabling this adds{" "}
+          <strong className="text-gray-500">Guides</strong> to the navigation. The{" "}
+          <strong className="text-gray-500">Paint Shelf</strong> is always available.
         </p>
         <label className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 cursor-pointer select-none self-start">
           <input
@@ -831,6 +840,21 @@ export default function Settings() {
           />
           <span className="text-sm text-gray-200">Enable Painting Guides</span>
         </label>
+
+        {appSettings.painting_guides_enabled && (
+          <div className="mt-6">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+              Default guide theme
+            </h3>
+            <p className="text-xs text-gray-600 mb-3">
+              New guides inherit these colors. Each guide can override them in its editor.
+            </p>
+            <ThemeEditor
+              value={appSettings.guide_theme_defaults}
+              onChange={saveThemeDefaults}
+            />
+          </div>
+        )}
       </section>
 
       {/* Data management */}

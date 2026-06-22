@@ -14,6 +14,30 @@ describe("GuideMetaForm", () => {
     expect(screen.getByText(/title is required/i)).toBeInTheDocument();
   });
 
+  it("submits a null theme when no colors are set (inherit default)", async () => {
+    const onSubmit = vi.fn();
+    render(<GuideMetaForm submitLabel="Create guide" onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText("Title *"), "Geralt");
+    await userEvent.click(screen.getByRole("button", { name: "Create guide" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ theme: null }));
+  });
+
+  it("includes an edited theme color in the submit payload (#515)", async () => {
+    const onSubmit = vi.fn();
+    render(<GuideMetaForm submitLabel="Create guide" onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText("Title *"), "Geralt");
+    await userEvent.click(screen.getByText("Theme"));
+    await userEvent.clear(screen.getByLabelText("Accent hex"));
+    await userEvent.type(screen.getByLabelText("Accent hex"), "#ff0000");
+    await userEvent.click(screen.getByRole("button", { name: "Create guide" }));
+
+    const payload = onSubmit.mock.calls[onSubmit.mock.calls.length - 1][0];
+    expect(payload.theme).toMatchObject({ accent: "#ff0000" });
+  });
+
   it("derives a slug from the title when left blank", async () => {
     const onSubmit = vi.fn();
     render(<GuideMetaForm submitLabel="Create guide" onSubmit={onSubmit} onCancel={vi.fn()} />);
