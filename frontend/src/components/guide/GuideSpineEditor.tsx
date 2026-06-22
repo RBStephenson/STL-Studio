@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { ChevronUp, ChevronDown, Trash2, Plus } from "lucide-react";
+import { ChevronUp, ChevronDown, Trash2, Plus, GripVertical } from "lucide-react";
+import {
+  DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors,
+  closestCenter, DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext, useSortable, verticalListSortingStrategy,
+  sortableKeyboardCoordinates, arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import type { ReactNode } from "react";
 import {
   GuideTab,
   GuidePhase,
@@ -181,6 +191,7 @@ const replaceAt = <T,>(arr: T[], i: number, v: T) => arr.map((x, idx) => (idx ==
 
 const field = "w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none";
 const labelCls = "block text-[11px] font-medium text-gray-500 mb-0.5";
+const gripCls = "cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-400 touch-none flex-shrink-0 p-0.5";
 
 interface RowControls { onUp: () => void; onDown: () => void; onRemove: () => void; removeLabel: string; }
 
@@ -194,14 +205,45 @@ function RowButtons({ onUp, onDown, onRemove, removeLabel }: RowControls) {
   );
 }
 
+// Sortable wrapper — applies dnd-kit transform/transition to the container and
+// provides a grip-handle button to the child via render prop. Keep up/down
+// RowButtons as the keyboard a11y path (#503).
+function SortableItem({ id, children }: { id: string; children: (handle: ReactNode) => ReactNode }) {
+  const { setNodeRef, transform, transition, isDragging, listeners, attributes } = useSortable({ id });
+  const handle = (
+    <button
+      type="button"
+      {...listeners}
+      {...attributes}
+      aria-label="Drag to reorder"
+      className={gripCls}
+    >
+      <GripVertical size={14} />
+    </button>
+  );
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+      }}
+    >
+      {children(handle)}
+    </div>
+  );
+}
+
 // --- Swatch / Step / Phase / Tab editors (module scope, not nested) ---------
 
-function SwatchRow({ value, onChange, ...ctl }: { value: DraftSwatch; onChange: (v: DraftSwatch) => void } & RowControls) {
+function SwatchRow({ value, onChange, dragHandle, ...ctl }: { value: DraftSwatch; onChange: (v: DraftSwatch) => void; dragHandle?: ReactNode } & RowControls) {
   // A name-only swatch (unresolved import, #477) has no shelf paint to pick —
   // show its name read-only so editing preserves rather than drops it.
   const nameOnly = !value.paint && !!value.name;
   return (
     <div className="flex items-center gap-2 flex-wrap">
+      {dragHandle}
       {nameOnly ? (
         <span
           className="px-2 py-1 text-xs rounded bg-gray-800 border border-gray-700 text-gray-300"
@@ -227,12 +269,26 @@ function SwatchRow({ value, onChange, ...ctl }: { value: DraftSwatch; onChange: 
   );
 }
 
-function StepEditor({ value, onChange, anchorId, ...ctl }: { value: DraftStep; onChange: (v: DraftStep) => void; anchorId: string } & RowControls) {
+function StepEditor({ value, onChange, anchorId, dragHandle, ...ctl }: { value: DraftStep; onChange: (v: DraftStep) => void; anchorId: string; dragHandle?: ReactNode } & RowControls) {
   const set = (patch: Partial<DraftStep>) => onChange({ ...value, ...patch });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onSwatchDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = value.swatches.findIndex((w) => w._key === String(active.id));
+    const newIdx = value.swatches.findIndex((w) => w._key === String(over.id));
+    if (oldIdx !== -1 && newIdx !== -1) set({ swatches: arrayMove(value.swatches, oldIdx, newIdx) });
+  };
+
   return (
     // `id` is the jump-to-node target for validation flags (#489).
     <div id={anchorId} className="border border-gray-800 rounded p-3 bg-gray-950/40 space-y-2 scroll-mt-6">
       <div className="flex items-start gap-2">
+        {dragHandle}
         <input aria-label="Step title" placeholder="Step title *" className={field} value={value.title} onChange={(e) => set({ title: e.target.value })} />
         <RowButtons {...ctl} />
       </div>
@@ -261,16 +317,25 @@ function StepEditor({ value, onChange, anchorId, ...ctl }: { value: DraftStep; o
       </div>
       <div className="space-y-1.5">
         <label className={labelCls}>Swatches</label>
-        {value.swatches.map((w, i) => (
-          <SwatchRow
-            key={w._key} value={w}
-            onChange={(v) => set({ swatches: replaceAt(value.swatches, i, v) })}
-            onUp={() => set({ swatches: move(value.swatches, i, -1) })}
-            onDown={() => set({ swatches: move(value.swatches, i, 1) })}
-            onRemove={() => set({ swatches: removeAt(value.swatches, i) })}
-            removeLabel="Remove swatch"
-          />
-        ))}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onSwatchDragEnd}>
+          <SortableContext items={value.swatches.map((w) => w._key)} strategy={verticalListSortingStrategy}>
+            {value.swatches.map((w, i) => (
+              <SortableItem key={w._key} id={w._key}>
+                {(handle) => (
+                  <SwatchRow
+                    value={w}
+                    dragHandle={handle}
+                    onChange={(v) => set({ swatches: replaceAt(value.swatches, i, v) })}
+                    onUp={() => set({ swatches: move(value.swatches, i, -1) })}
+                    onDown={() => set({ swatches: move(value.swatches, i, 1) })}
+                    onRemove={() => set({ swatches: removeAt(value.swatches, i) })}
+                    removeLabel="Remove swatch"
+                  />
+                )}
+              </SortableItem>
+            ))}
+          </SortableContext>
+        </DndContext>
         <button type="button" onClick={() => set({ swatches: [...value.swatches, { _key: nextKey(), paint: null, name: null, value_pct: "", role_label: "" }] })}
           className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
           <Plus size={12} /> Add swatch
@@ -280,26 +345,49 @@ function StepEditor({ value, onChange, anchorId, ...ctl }: { value: DraftStep; o
   );
 }
 
-function PhaseEditor({ value, onChange, tabIndex, phaseIndex, ...ctl }: { value: DraftPhase; onChange: (v: DraftPhase) => void; tabIndex: number; phaseIndex: number } & RowControls) {
+function PhaseEditor({ value, onChange, tabIndex, phaseIndex, dragHandle, ...ctl }: { value: DraftPhase; onChange: (v: DraftPhase) => void; tabIndex: number; phaseIndex: number; dragHandle?: ReactNode } & RowControls) {
   const set = (patch: Partial<DraftPhase>) => onChange({ ...value, ...patch });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onStepDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = value.steps.findIndex((s) => s._key === String(active.id));
+    const newIdx = value.steps.findIndex((s) => s._key === String(over.id));
+    if (oldIdx !== -1 && newIdx !== -1) set({ steps: arrayMove(value.steps, oldIdx, newIdx) });
+  };
+
   return (
     <div className="border border-gray-800 rounded p-3 bg-gray-900/40 space-y-2">
       <div className="flex items-center gap-2">
+        {dragHandle}
         <input aria-label="Phase label" placeholder="Phase label (optional)" className={field} value={value.label} onChange={(e) => set({ label: e.target.value })} />
         <RowButtons {...ctl} />
       </div>
       <div className="space-y-2 pl-2 border-l border-gray-800">
-        {value.steps.map((s, i) => (
-          <StepEditor
-            key={s._key} value={s}
-            anchorId={`guide-step-${tabIndex}-${phaseIndex}-${i}`}
-            onChange={(v) => set({ steps: replaceAt(value.steps, i, v) })}
-            onUp={() => set({ steps: move(value.steps, i, -1) })}
-            onDown={() => set({ steps: move(value.steps, i, 1) })}
-            onRemove={() => set({ steps: removeAt(value.steps, i) })}
-            removeLabel="Remove step"
-          />
-        ))}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onStepDragEnd}>
+          <SortableContext items={value.steps.map((s) => s._key)} strategy={verticalListSortingStrategy}>
+            {value.steps.map((s, i) => (
+              <SortableItem key={s._key} id={s._key}>
+                {(handle) => (
+                  <StepEditor
+                    value={s}
+                    dragHandle={handle}
+                    anchorId={`guide-step-${tabIndex}-${phaseIndex}-${i}`}
+                    onChange={(v) => set({ steps: replaceAt(value.steps, i, v) })}
+                    onUp={() => set({ steps: move(value.steps, i, -1) })}
+                    onDown={() => set({ steps: move(value.steps, i, 1) })}
+                    onRemove={() => set({ steps: removeAt(value.steps, i) })}
+                    removeLabel="Remove step"
+                  />
+                )}
+              </SortableItem>
+            ))}
+          </SortableContext>
+        </DndContext>
         <button type="button" onClick={() => set({ steps: [...value.steps, { _key: nextKey(), title: "", technique_tag: "", technique_label: "", body: "", value_intent: "", tip: "", warning: "", ratio_box: "", swatches: [] }] })}
           className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
           <Plus size={12} /> Add step
@@ -309,11 +397,25 @@ function PhaseEditor({ value, onChange, tabIndex, phaseIndex, ...ctl }: { value:
   );
 }
 
-function TabEditor({ value, onChange, tabIndex, ...ctl }: { value: DraftTab; onChange: (v: DraftTab) => void; tabIndex: number } & RowControls) {
+function TabEditor({ value, onChange, tabIndex, dragHandle, ...ctl }: { value: DraftTab; onChange: (v: DraftTab) => void; tabIndex: number; dragHandle?: ReactNode } & RowControls) {
   const set = (patch: Partial<DraftTab>) => onChange({ ...value, ...patch });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onPhaseDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = value.phases.findIndex((p) => p._key === String(active.id));
+    const newIdx = value.phases.findIndex((p) => p._key === String(over.id));
+    if (oldIdx !== -1 && newIdx !== -1) set({ phases: arrayMove(value.phases, oldIdx, newIdx) });
+  };
+
   return (
     <div className="border border-gray-700 rounded-lg p-3 bg-gray-900 space-y-3">
       <div className="flex items-center gap-2">
+        {dragHandle}
         <input aria-label="Tab name" placeholder="Tab name *" className={`${field} font-medium`} value={value.name} onChange={(e) => set({ name: e.target.value })} />
         <RowButtons {...ctl} />
       </div>
@@ -322,17 +424,26 @@ function TabEditor({ value, onChange, tabIndex, ...ctl }: { value: DraftTab; onC
         <div><label className={labelCls}>Section intro</label><input className={field} value={value.intro} onChange={(e) => set({ intro: e.target.value })} /></div>
       </div>
       <div className="space-y-2 pl-2 border-l border-gray-700">
-        {value.phases.map((p, i) => (
-          <PhaseEditor
-            key={p._key} value={p}
-            tabIndex={tabIndex} phaseIndex={i}
-            onChange={(v) => set({ phases: replaceAt(value.phases, i, v) })}
-            onUp={() => set({ phases: move(value.phases, i, -1) })}
-            onDown={() => set({ phases: move(value.phases, i, 1) })}
-            onRemove={() => set({ phases: removeAt(value.phases, i) })}
-            removeLabel="Remove phase"
-          />
-        ))}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onPhaseDragEnd}>
+          <SortableContext items={value.phases.map((p) => p._key)} strategy={verticalListSortingStrategy}>
+            {value.phases.map((p, i) => (
+              <SortableItem key={p._key} id={p._key}>
+                {(handle) => (
+                  <PhaseEditor
+                    value={p}
+                    dragHandle={handle}
+                    tabIndex={tabIndex} phaseIndex={i}
+                    onChange={(v) => set({ phases: replaceAt(value.phases, i, v) })}
+                    onUp={() => set({ phases: move(value.phases, i, -1) })}
+                    onDown={() => set({ phases: move(value.phases, i, 1) })}
+                    onRemove={() => set({ phases: removeAt(value.phases, i) })}
+                    removeLabel="Remove phase"
+                  />
+                )}
+              </SortableItem>
+            ))}
+          </SortableContext>
+        </DndContext>
         <button type="button" onClick={() => set({ phases: [...value.phases, { _key: nextKey(), label: "", steps: [] }] })}
           className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
           <Plus size={12} /> Add phase
@@ -374,6 +485,21 @@ export default function GuideSpineEditor({ initialTabs, busy, error, onSave, onC
     onSave(serialize(tabs));
   };
 
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onTabDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setTabs((cur) => {
+      const oldIdx = cur.findIndex((t) => t._key === String(active.id));
+      const newIdx = cur.findIndex((t) => t._key === String(over.id));
+      if (oldIdx === -1 || newIdx === -1) return cur;
+      return arrayMove(cur, oldIdx, newIdx);
+    });
+  };
+
   const shown = localError || error;
 
   return (
@@ -382,16 +508,25 @@ export default function GuideSpineEditor({ initialTabs, busy, error, onSave, onC
         <p role="alert" className="text-sm text-rose-400 bg-rose-950/30 border border-rose-900/50 rounded px-3 py-2">{shown}</p>
       )}
 
-      {tabs.map((t, i) => (
-        <TabEditor
-          key={t._key} value={t} tabIndex={i}
-          onChange={(v) => setTabs((cur) => replaceAt(cur, i, v))}
-          onUp={() => setTabs((cur) => move(cur, i, -1))}
-          onDown={() => setTabs((cur) => move(cur, i, 1))}
-          onRemove={() => setTabs((cur) => removeAt(cur, i))}
-          removeLabel="Remove tab"
-        />
-      ))}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onTabDragEnd}>
+        <SortableContext items={tabs.map((t) => t._key)} strategy={verticalListSortingStrategy}>
+          {tabs.map((t, i) => (
+            <SortableItem key={t._key} id={t._key}>
+              {(handle) => (
+                <TabEditor
+                  value={t} tabIndex={i}
+                  dragHandle={handle}
+                  onChange={(v) => setTabs((cur) => replaceAt(cur, i, v))}
+                  onUp={() => setTabs((cur) => move(cur, i, -1))}
+                  onDown={() => setTabs((cur) => move(cur, i, 1))}
+                  onRemove={() => setTabs((cur) => removeAt(cur, i))}
+                  removeLabel="Remove tab"
+                />
+              )}
+            </SortableItem>
+          ))}
+        </SortableContext>
+      </DndContext>
 
       <button
         type="button"
