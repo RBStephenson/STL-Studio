@@ -23,7 +23,13 @@ from app.painting.schemas import (
 )
 from app.painting.services.guides import build_tabs, collect_paint_ids, missing_paint_ids
 from app.painting.services.importing import import_guide_html, make_db_resolver, with_overrides
-from app.painting.services.pdf import ChromiumNotInstalledError, render_guide_pdf
+from app.painting.services.pdf import (
+    ChromiumNotInstalledError,
+    EmptySeriesError,
+    StampConfig,
+    render_guide_pdf,
+    render_series_pdf,
+)
 from app.painting.services.rendering import attach_resolved_paints, render_guide_html
 from app.painting.services.validation import validate_guide
 from app.utils import utcnow
@@ -209,27 +215,70 @@ def export_guide_html(guide_id: int, db: Session = Depends(get_db)):
     )
 
 
+_CHROMIUM_MISSING_DETAIL = (
+    "PDF rendering needs Chromium, which isn't installed. "
+    "Run `playwright install chromium` and try again."
+)
+
+
+def _stamp_from_query(footer: bool, tier: str | None, watermark: bool) -> StampConfig:
+    """Build per-export reward stamping from query params (spec §4.6, Q5)."""
+    return StampConfig(footer=footer, tier_label=tier, watermark=watermark)
+
+
 @router.get("/guides/{guide_id}/export/pdf", response_class=Response)
-async def export_guide_pdf(guide_id: int, db: Session = Depends(get_db)):
+async def export_guide_pdf(
+    guide_id: int,
+    db: Session = Depends(get_db),
+    footer: bool = Query(True, description="Patreon-exclusive footer (on by default)"),
+    tier: str | None = Query(None, description="Optional tier label for the footer"),
+    watermark: bool = Query(False, description="Diagonal watermark (off by default)"),
+):
     """Render a guide to a print-ready PDF via headless Chromium (spec §9.4).
 
     Reuses the static-HTML export with assets inlined and print media emulated,
     so the PDF matches the in-browser print view. Single-guide only."""
     guide = _get_or_404(db, Guide, guide_id, "Guide")
     try:
-        pdf = await render_guide_pdf(db, guide)
+        pdf = await render_guide_pdf(db, guide, _stamp_from_query(footer, tier, watermark))
     except ChromiumNotInstalledError:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "PDF rendering needs Chromium, which isn't installed. "
-                "Run `playwright install chromium` and try again."
-            ),
-        )
+        raise HTTPException(status_code=503, detail=_CHROMIUM_MISSING_DETAIL)
     return Response(
         content=pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{guide.slug}.pdf"'},
+    )
+
+
+@router.get("/series/{series_id}/export/pdf", response_class=Response)
+async def export_series_pdf(
+    series_id: int,
+    db: Session = Depends(get_db),
+    cover: bool = Query(True, description="Prepend a cover page (spec Q4)"),
+    footer: bool = Query(True, description="Patreon-exclusive footer (on by default)"),
+    tier: str | None = Query(None, description="Optional tier label for the footer"),
+    watermark: bool = Query(False, description="Diagonal watermark (off by default)"),
+):
+    """Render a series of published guides into one bundled PDF (spec §9.4).
+
+    Optional cover page; per-export reward stamping. 404 when the series doesn't
+    exist or has no published guides to bundle."""
+    series = _get_or_404(db, GuideSeries, series_id, "Series")
+    try:
+        pdf = await render_series_pdf(
+            db,
+            series,
+            _stamp_from_query(footer, tier, watermark),
+            cover=cover,
+        )
+    except EmptySeriesError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ChromiumNotInstalledError:
+        raise HTTPException(status_code=503, detail=_CHROMIUM_MISSING_DETAIL)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{series.slug}-bundle.pdf"'},
     )
 
 
