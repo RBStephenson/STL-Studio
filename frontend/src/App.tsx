@@ -14,6 +14,7 @@ import TagsPage from "./pages/TagsPage";
 import GuidesPage from "./pages/GuidesPage";
 import GuideReaderPage from "./pages/GuideReaderPage";
 import GuideEditorPage from "./pages/GuideEditorPage";
+import GuideWizardPage from "./pages/GuideWizardPage";
 import GuideContentEditorPage from "./pages/GuideContentEditorPage";
 import PaintShelfPage from "./pages/PaintShelfPage";
 import ReorganizePage from "./pages/ReorganizePage";
@@ -41,7 +42,7 @@ export default function App() {
           <Route path="/import/preview" element={<ImportPreviewPage />} />
           <Route path="/tags" element={<TagsPage />} />
           <Route path="/painting/guides" element={<GuidesPage />} />
-          <Route path="/painting/guides/new" element={<GuideEditorPage />} />
+          <Route path="/painting/guides/new" element={<GuideWizardPage />} />
           <Route path="/painting/guides/:id" element={<GuideReaderPage />} />
           <Route path="/painting/guides/:id/edit" element={<GuideEditorPage />} />
           <Route path="/painting/guides/:id/content" element={<GuideContentEditorPage />} />
