@@ -539,6 +539,25 @@ class GuideCreate(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class GuideDraft(GuideCreate):
+    """A generated/imported guide before it's persisted (#523, M4 §8.3).
+
+    Same shape as `GuideCreate`, with two relaxations for the draft stage:
+    - `slug` is optional — a generator focuses on content; the slug is derived
+      from the title when the draft is saved.
+    - swatch / mix-component paints may be referenced by `name` only; the real
+      Paint Shelf `paint_id`s are filled in by
+      `services.draft.reconcile_draft_paints` (the `*In` schemas already allow a
+      name-only paint, so no field changes are needed for that).
+
+    A draft is always status="draft" — generation never auto-publishes.
+    """
+    slug: Optional[str] = None
+    status: GuideStatus = "draft"
+
+    model_config = {"extra": "forbid"}
+
+
 class GuideUpdate(BaseModel):
     """Partial update. Scalar/JSON fields use exclude_unset (omitted = unchanged).
     If `tabs` is provided, the entire tab subtree is REPLACED (the natural save
