@@ -402,6 +402,9 @@ class AppSettingsRead(BaseModel):
     # App-level default guide theme (#514): new guides inherit these colors when
     # they don't carry their own theme. All-None means "use the corpus default".
     guide_theme_defaults: GuideTheme = GuideTheme()
+    # AI model id for guide generation (#517). The API key is NOT here — it's
+    # encrypted at rest and handled by the dedicated /settings/ai endpoints.
+    ai_model: str = ""
 
 
 class AppSettingsUpdate(BaseModel):
@@ -423,6 +426,7 @@ class AppSettingsUpdate(BaseModel):
     scan_tag_rules: Optional[list[ScanTagRule]] = Field(None, max_length=500)
     scan_parts_names: Optional[list[str]] = Field(None, max_length=500)
     guide_theme_defaults: Optional[GuideTheme] = None
+    ai_model: Optional[str] = Field(None, max_length=200)
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
@@ -463,6 +467,20 @@ class AppSettingsUpdate(BaseModel):
         return out
 
     model_config = {"extra": "forbid"}
+
+
+# --- AI settings (#517) ---------------------------------------------------
+
+class AiSettingsRead(BaseModel):
+    """AI settings status. The API key is write-only — never returned in full,
+    only whether one is set and a masked hint (e.g. `…wxyz`)."""
+    key_set: bool
+    key_hint: Optional[str] = None
+    model: str = ""
+
+
+class AiKeyUpdate(BaseModel):
+    key: str = Field(min_length=1, max_length=400)
 
 
 # --- Library reorganize, Phase 1 preview (#323) ---------------------------

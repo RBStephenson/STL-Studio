@@ -15,6 +15,7 @@ DEFAULTS = {
     "scan_tag_rules": [],
     "scan_parts_names": [],
     "guide_theme_defaults": {k: None for k in _THEME_KEYS},
+    "ai_model": "",
 }
 
 

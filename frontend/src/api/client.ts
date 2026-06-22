@@ -257,6 +257,16 @@ export interface AppSettings {
   scan_parts_names: string[];
   // App-level default guide theme (#514): new guides inherit these colors.
   guide_theme_defaults: GuideTheme;
+  // AI model id for guide generation (#517). The API key is NOT here — it's
+  // write-only via the dedicated /settings/ai endpoints.
+  ai_model: string;
+}
+
+// AI settings status (#517) — key is write-only, never returned in full.
+export interface AiSettings {
+  key_set: boolean;
+  key_hint: string | null;
+  model: string;
 }
 
 export interface ScanTagRule {
@@ -1119,6 +1129,19 @@ export const api = {
     // Re-read the .env / environment config without a full restart (#140).
     reloadEnv: () =>
       request<EnvReloadResult>("/settings/reload", { method: "POST" }),
+    // AI settings (#517). The API key is write-only — get() returns only
+    // whether one is set plus a masked hint, never the plaintext.
+    ai: {
+      get: () => request<AiSettings>("/settings/ai"),
+      setKey: (key: string) =>
+        request<AiSettings>("/settings/ai/key", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }),
+        }),
+      clearKey: () =>
+        request<AiSettings>("/settings/ai/key", { method: "DELETE" }),
+    },
   },
   painting: {
     brands: {

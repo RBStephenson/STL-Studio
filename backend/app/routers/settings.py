@@ -11,7 +11,15 @@ from sqlalchemy.orm import Session
 from app.config import RESTART_REQUIRED_KEYS, settings
 from app.database import get_db
 from app.models import AppSetting
-from app.schemas import AppSettingsRead, AppSettingsUpdate, EnvReloadResult, FilterPreset
+from app.schemas import (
+    AiKeyUpdate,
+    AiSettingsRead,
+    AppSettingsRead,
+    AppSettingsUpdate,
+    EnvReloadResult,
+    FilterPreset,
+)
+from app.services import secrets
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -106,3 +114,32 @@ def delete_filter_preset(name: str, db: Session = Depends(get_db)):
     presets = [p for p in _stored_presets(db) if p.get("name") != name]
     _write_presets(db, presets)
     return _merged(db)
+
+
+# --- AI settings (#517) ---------------------------------------------------
+# The API key is encrypted at rest and write-only: these endpoints report only
+# whether a key is set (+ a masked hint), accept a new key, or clear it. The
+# plaintext is never returned to the client.
+
+def _ai_settings(db: Session) -> AiSettingsRead:
+    hint = secrets.ai_api_key_hint(db)
+    model_row = db.get(AppSetting, "ai_model")
+    model = model_row.value if model_row is not None else ""
+    return AiSettingsRead(key_set=hint is not None, key_hint=hint, model=model)
+
+
+@router.get("/ai", response_model=AiSettingsRead)
+def get_ai_settings(db: Session = Depends(get_db)):
+    return _ai_settings(db)
+
+
+@router.put("/ai/key", response_model=AiSettingsRead)
+def set_ai_key(body: AiKeyUpdate, db: Session = Depends(get_db)):
+    secrets.set_ai_api_key(db, body.key)
+    return _ai_settings(db)
+
+
+@router.delete("/ai/key", response_model=AiSettingsRead)
+def clear_ai_key(db: Session = Depends(get_db)):
+    secrets.clear_ai_api_key(db)
+    return _ai_settings(db)
