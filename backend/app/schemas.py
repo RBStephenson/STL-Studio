@@ -405,6 +405,8 @@ class AppSettingsRead(BaseModel):
     # AI model id for guide generation (#517). The API key is NOT here — it's
     # encrypted at rest and handled by the dedicated /settings/ai endpoints.
     ai_model: str = ""
+    # AI generation effort → extended-thinking budget (low = off). (#517)
+    ai_effort: str = "low"
 
 
 class AppSettingsUpdate(BaseModel):
@@ -427,6 +429,7 @@ class AppSettingsUpdate(BaseModel):
     scan_parts_names: Optional[list[str]] = Field(None, max_length=500)
     guide_theme_defaults: Optional[GuideTheme] = None
     ai_model: Optional[str] = Field(None, max_length=200)
+    ai_effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
@@ -477,6 +480,7 @@ class AiSettingsRead(BaseModel):
     key_set: bool
     key_hint: Optional[str] = None
     model: str = ""
+    effort: str = "low"
 
 
 class AiKeyUpdate(BaseModel):

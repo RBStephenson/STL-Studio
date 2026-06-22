@@ -16,7 +16,14 @@ DEFAULTS = {
     "scan_parts_names": [],
     "guide_theme_defaults": {k: None for k in _THEME_KEYS},
     "ai_model": "",
+    "ai_effort": "low",
 }
+
+
+def test_ai_effort_round_trips_and_rejects_bad_value(client):
+    assert client.patch("/settings", json={"ai_effort": "high"}).status_code == 200
+    assert client.get("/settings").json()["ai_effort"] == "high"
+    assert client.patch("/settings", json={"ai_effort": "turbo"}).status_code == 422
 
 
 def test_guide_theme_defaults_round_trip(client):

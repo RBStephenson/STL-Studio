@@ -26,6 +26,16 @@ from app.services import secrets
 DEFAULT_MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS = 8192
 
+# Generation effort → extended-thinking budget (tokens). "low" disables thinking
+# for speed/cost; medium/high spend reasoning budget for richer guides.
+_EFFORT_THINKING_BUDGET = {"low": 0, "medium": 4096, "high": 10000}
+
+
+def _effort(db: Session) -> str:
+    row = db.get(AppSetting, "ai_effort")
+    value = row.value if row is not None else None
+    return value if value in _EFFORT_THINKING_BUDGET else "low"
+
 
 class GenerationError(RuntimeError):
     """Generation failed — bad/missing key, API error, or unparseable output."""
@@ -82,13 +92,19 @@ def generate_guide_draft(db: Session, guide: Guide) -> GuideDraft:
         raise MissingApiKeyError("No AI API key is configured.")
 
     client = Anthropic(api_key=key)
+    kwargs = {
+        "model": _model(db),
+        "max_tokens": _MAX_TOKENS,
+        "system": assemble_system_prompt(db),
+        "messages": [{"role": "user", "content": build_user_prompt(guide)}],
+    }
+    budget = _EFFORT_THINKING_BUDGET[_effort(db)]
+    if budget:
+        kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        # max_tokens must exceed the thinking budget.
+        kwargs["max_tokens"] = _MAX_TOKENS + budget
     try:
-        resp = client.messages.create(
-            model=_model(db),
-            max_tokens=_MAX_TOKENS,
-            system=assemble_system_prompt(db),
-            messages=[{"role": "user", "content": build_user_prompt(guide)}],
-        )
+        resp = client.messages.create(**kwargs)
     except Exception as exc:  # anthropic.APIError and friends
         raise GenerationError(f"AI request failed: {exc}") from exc
 

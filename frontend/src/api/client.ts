@@ -257,16 +257,20 @@ export interface AppSettings {
   scan_parts_names: string[];
   // App-level default guide theme (#514): new guides inherit these colors.
   guide_theme_defaults: GuideTheme;
-  // AI model id for guide generation (#517). The API key is NOT here — it's
-  // write-only via the dedicated /settings/ai endpoints.
+  // AI model id + generation effort for guide generation (#517). The API key is
+  // NOT here — it's write-only via the dedicated /settings/ai endpoints.
   ai_model: string;
+  ai_effort: AiEffort;
 }
+
+export type AiEffort = "low" | "medium" | "high";
 
 // AI settings status (#517) — key is write-only, never returned in full.
 export interface AiSettings {
   key_set: boolean;
   key_hint: string | null;
   model: string;
+  effort: AiEffort;
 }
 
 export interface ScanTagRule {

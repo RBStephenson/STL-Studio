@@ -16,6 +16,7 @@ const DEFAULTS: AppSettings = {
   scan_parts_names: [],
   guide_theme_defaults: {},
   ai_model: "",
+  ai_effort: "low",
 };
 
 interface AppSettingsContextValue {

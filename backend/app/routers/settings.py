@@ -125,7 +125,11 @@ def _ai_settings(db: Session) -> AiSettingsRead:
     hint = secrets.ai_api_key_hint(db)
     model_row = db.get(AppSetting, "ai_model")
     model = model_row.value if model_row is not None else ""
-    return AiSettingsRead(key_set=hint is not None, key_hint=hint, model=model)
+    effort_row = db.get(AppSetting, "ai_effort")
+    effort = effort_row.value if effort_row is not None else "low"
+    return AiSettingsRead(
+        key_set=hint is not None, key_hint=hint, model=model, effort=effort
+    )
 
 
 @router.get("/ai", response_model=AiSettingsRead)

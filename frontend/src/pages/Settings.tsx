@@ -5,7 +5,7 @@ import {
   Database, Download, Upload, ShieldAlert, Paintbrush, SlidersHorizontal, RefreshCw,
   FolderTree,
 } from "lucide-react";
-import { api, AiSettings, GuideTheme, ScanRoot } from "../api/client";
+import { api, AiEffort, AiSettings, GuideTheme, ScanRoot } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import FolderPicker from "../components/FolderPicker";
 import HelpLink from "../components/HelpLink";
@@ -87,7 +87,6 @@ export default function Settings() {
   const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
   const [aiKeyDraft, setAiKeyDraft] = useState("");
   const [editingKey, setEditingKey] = useState(false);
-  const [aiModelDraft, setAiModelDraft] = useState(appSettings.ai_model);
 
   const load = () => {
     api.scan.roots()
@@ -298,8 +297,6 @@ export default function Settings() {
     return () => { alive = false; };
   }, [appSettings.painting_guides_enabled]);
 
-  useEffect(() => { setAiModelDraft(appSettings.ai_model); }, [appSettings.ai_model]);
-
   const saveAiKey = async () => {
     const key = aiKeyDraft.trim();
     if (!key) return;
@@ -322,13 +319,19 @@ export default function Settings() {
     }
   };
 
-  const saveAiModel = async () => {
-    const model = aiModelDraft.trim();
-    if (model === appSettings.ai_model) return;
+  const saveAiModel = async (model: string) => {
     try {
       await updateAppSettings({ ai_model: model });
     } catch (e: any) {
       flash(e?.message || "Could not save the model", "err");
+    }
+  };
+
+  const saveAiEffort = async (effort: AiEffort) => {
+    try {
+      await updateAppSettings({ ai_effort: effort });
+    } catch (e: any) {
+      flash(e?.message || "Could not save the effort", "err");
     }
   };
 
@@ -967,16 +970,34 @@ export default function Settings() {
               </div>
             )}
 
-            <label className="block text-xs text-gray-400 mb-1" htmlFor="ai-model">Model</label>
-            <input
-              id="ai-model"
-              type="text"
-              value={aiModelDraft}
-              onChange={(e) => setAiModelDraft(e.target.value)}
-              onBlur={saveAiModel}
-              placeholder="claude-opus-4-8"
-              className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-            />
+            <div className="flex flex-wrap gap-4">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1" htmlFor="ai-model">Model</label>
+                <select
+                  id="ai-model"
+                  value={appSettings.ai_model || "claude-sonnet-4-6"}
+                  onChange={(e) => saveAiModel(e.target.value)}
+                  className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+                >
+                  <option value="claude-opus-4-8">Opus 4.8 — most capable</option>
+                  <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced (default)</option>
+                  <option value="claude-haiku-4-5">Haiku 4.5 — fastest</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1" htmlFor="ai-effort">Effort</label>
+                <select
+                  id="ai-effort"
+                  value={appSettings.ai_effort}
+                  onChange={(e) => saveAiEffort(e.target.value as AiEffort)}
+                  className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+                >
+                  <option value="low">Low — fastest (default)</option>
+                  <option value="medium">Medium — more reasoning</option>
+                  <option value="high">High — deepest reasoning</option>
+                </select>
+              </div>
+            </div>
           </div>
         )}
       </section>

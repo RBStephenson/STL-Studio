@@ -23,7 +23,7 @@ def test_ai_settings_default_no_key(client):
     r = client.get("/settings/ai")
     assert r.status_code == 200
     body = r.json()
-    assert body == {"key_set": False, "key_hint": None, "model": ""}
+    assert body == {"key_set": False, "key_hint": None, "model": "", "effort": "low"}
 
 
 def test_set_key_reports_masked_hint(client):

@@ -123,3 +123,38 @@ def test_model_setting_overrides_default(client, db, monkeypatch):
 
     generation.generate_guide_draft(db, _guide(db))
     assert captured["model"] == "claude-opus-4-8"
+
+
+def _capture_kwargs_client(captured: dict):
+    class _Client:
+        def __init__(self, *a, **k):
+            self.messages = types.SimpleNamespace(create=self._create)
+
+        def _create(self, **kw):
+            captured.update(kw)
+            return types.SimpleNamespace(
+                content=[types.SimpleNamespace(type="text", text=_VALID_DRAFT)]
+            )
+    return _Client
+
+
+def test_low_effort_sends_no_thinking(client, db, monkeypatch):
+    secrets.set_ai_api_key(db, "sk-test")
+    captured: dict = {}
+    monkeypatch.setattr(generation, "Anthropic", _capture_kwargs_client(captured))
+
+    generation.generate_guide_draft(db, _guide(db))  # default effort = low
+    assert "thinking" not in captured
+
+
+def test_high_effort_enables_thinking_budget(client, db, monkeypatch):
+    secrets.set_ai_api_key(db, "sk-test")
+    client.patch("/settings", json={"ai_effort": "high"})
+    captured: dict = {}
+    monkeypatch.setattr(generation, "Anthropic", _capture_kwargs_client(captured))
+
+    generation.generate_guide_draft(db, _guide(db))
+    assert captured["thinking"]["type"] == "enabled"
+    assert captured["thinking"]["budget_tokens"] == 10000
+    # max_tokens must exceed the thinking budget.
+    assert captured["max_tokens"] > 10000
