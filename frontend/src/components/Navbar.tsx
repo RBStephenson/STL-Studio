@@ -12,12 +12,22 @@ export default function Navbar() {
   const [reviewCount, setReviewCount] = useState<number | null>(null);
   const [queueCount, setQueueCount] = useState<number | null>(null);
 
+  // Refetch the badge counts on every route change and when the tab regains
+  // focus, so they don't go stale after a mutation elsewhere (e.g. an enrich
+  // that drops an item from the queue) — they're not fetched only once (#543).
   useEffect(() => {
-    api.models.stats().then(s => {
-      setReviewCount(s.needs_review);
-      setQueueCount(s.queued);
-    }).catch(() => {});
-  }, []);
+    let alive = true;
+    const refresh = () => {
+      api.models.stats().then(s => {
+        if (!alive) return;
+        setReviewCount(s.needs_review);
+        setQueueCount(s.queued);
+      }).catch(() => {});
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => { alive = false; window.removeEventListener("focus", refresh); };
+  }, [pathname]);
 
   const links = [
     { to: "/",            label: "Library",     icon: LayoutGrid,    badge: null },
