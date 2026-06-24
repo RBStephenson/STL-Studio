@@ -10,6 +10,7 @@ tests can monkeypatch it at the boundary — no live API call in the suite.
 """
 from __future__ import annotations
 
+import base64
 import json
 
 from anthropic import Anthropic
@@ -19,8 +20,17 @@ from sqlalchemy.orm import Session
 from app.models import AppSetting
 from app.painting.models import Guide
 from app.painting.schemas import GuideDraft
+from app.painting.services import images
 from app.painting.services.generation_prompt import assemble_system_prompt, build_user_prompt
 from app.services import secrets
+
+# Appended to the user prompt when a reference image accompanies the request, so
+# the model grounds skin tone / value / texture in the supplied image.
+_REFERENCE_INSTRUCTION = (
+    "\nA reference image of the figure/subject is attached. Analyze it for skin "
+    "tone, overall value structure, and surface textures, and let it guide the "
+    "palette and recipes you choose from the owned paints."
+)
 
 # Sensible default; the user can override via the `ai_model` app setting (#517).
 DEFAULT_MODEL = "claude-sonnet-4-6"
@@ -84,6 +94,29 @@ def _parse_json_object(text: str) -> dict:
         raise GenerationError("model output contained no JSON object")
 
 
+def _build_message_content(db: Session, guide: Guide):
+    """The user-message content: the per-figure text prompt, plus a reference
+    image block when the guide has one (Anthropic multimodal). Text-only — a
+    plain string — when no reference image is set, matching the original path."""
+    text = build_user_prompt(guide)
+    reference = images.load_reference(db, guide)
+    if reference is None:
+        return text
+
+    raw, media_type = reference
+    return [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": base64.standard_b64encode(raw).decode("ascii"),
+            },
+        },
+        {"type": "text", "text": text + _REFERENCE_INSTRUCTION},
+    ]
+
+
 def generate_guide_draft(db: Session, guide: Guide) -> GuideDraft:
     """Call Claude to generate a GuideDraft for a guide. Free of persistence —
     the job runner reconciles paints and saves the result."""
@@ -96,7 +129,7 @@ def generate_guide_draft(db: Session, guide: Guide) -> GuideDraft:
         "model": _model(db),
         "max_tokens": _MAX_TOKENS,
         "system": assemble_system_prompt(db),
-        "messages": [{"role": "user", "content": build_user_prompt(guide)}],
+        "messages": [{"role": "user", "content": _build_message_content(db, guide)}],
     }
     budget = _EFFORT_THINKING_BUDGET[_effort(db)]
     if budget:

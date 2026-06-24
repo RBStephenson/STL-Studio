@@ -6,7 +6,7 @@ nested tree; PATCH updates header/JSON fields and, when `tabs` is supplied,
 replaces the entire content spine. The renderer (#259), exporter (#260),
 importer (#261), and model-link UI (#263) build on these.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -19,8 +19,10 @@ from app.painting.models import (
 from app.painting.schemas import (
     CategoryCreate, CategoryRead,
     GuideCreate, GuideImportRequest, GuideImportResult, GuideList, GuideListItem,
-    GuideRead, GuideUpdate, GuideValidationResult, SeriesCreate, SeriesRead,
+    GuideRead, GuideUpdate, GuideValidationResult, ReferenceImageRead,
+    SeriesCreate, SeriesRead,
 )
+from app.painting.services import images
 from app.painting.services.guides import build_tabs, collect_paint_ids, missing_paint_ids
 from app.painting.services.importing import import_guide_html, make_db_resolver, with_overrides
 from app.painting.services.pdf import (
@@ -329,6 +331,58 @@ def guide_draft_status(guide_id: int, db: Session = Depends(get_db)):
     """Poll the draft-generation job status for a guide (#524)."""
     _get_or_404(db, Guide, guide_id, "Guide")
     return draft_jobs.get_status(guide_id)
+
+
+# ---------------------------------------------------------------------------
+# Reference image (#535, spec §8.5): user upload + Claude-vision source. The
+# fallback chain (STL-folder / web search / AI-gen) is #494.
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/guides/{guide_id}/reference-image",
+    response_model=ReferenceImageRead,
+    status_code=201,
+)
+async def upload_reference_image(
+    guide_id: int,
+    file: UploadFile = File(...),
+    alt_text: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Attach a reference image to a guide (replaces any existing one).
+
+    Stored on the local data volume; the bytes feed Claude vision at draft time
+    and the GET endpoint serves them for preview. 422 on a bad/oversize file."""
+    guide = _get_or_404(db, Guide, guide_id, "Guide")
+    raw = await file.read()
+    try:
+        row = images.store_upload(db, guide, raw, alt_text=alt_text)
+    except images.ReferenceImageError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.get("/guides/{guide_id}/reference-image", response_class=Response)
+def get_reference_image(guide_id: int, db: Session = Depends(get_db)):
+    """Serve the guide's reference-image bytes for preview. 404 when none set."""
+    guide = _get_or_404(db, Guide, guide_id, "Guide")
+    loaded = images.load_reference(db, guide)
+    if loaded is None:
+        raise HTTPException(status_code=404, detail="Guide has no reference image")
+    raw, media_type = loaded
+    return Response(content=raw, media_type=media_type,
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.delete("/guides/{guide_id}/reference-image", status_code=200)
+def delete_reference_image(guide_id: int, db: Session = Depends(get_db)):
+    """Clear the guide's reference image (FK + row + file). Idempotent."""
+    guide = _get_or_404(db, Guide, guide_id, "Guide")
+    images.clear_reference(db, guide)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/guides", response_model=GuideRead, status_code=201)

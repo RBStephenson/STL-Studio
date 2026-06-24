@@ -747,3 +747,17 @@ class ValidationFlag(BaseModel):
 class GuideValidationResult(BaseModel):
     ok: bool                       # True when no block-severity flags remain
     flags: list[ValidationFlag]
+
+
+class ReferenceImageRead(BaseModel):
+    """A guide's reference image metadata (the bytes are served separately)."""
+    id: int
+    guide_id: Optional[int] = None
+    provenance: str
+    source_url: Optional[str] = None
+    alt_text: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

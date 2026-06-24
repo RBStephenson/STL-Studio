@@ -158,3 +158,47 @@ def test_high_effort_enables_thinking_budget(client, db, monkeypatch):
     assert captured["thinking"]["budget_tokens"] == 10000
     # max_tokens must exceed the thinking budget.
     assert captured["max_tokens"] > 10000
+
+
+def _png_bytes() -> bytes:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (12, 12), (90, 60, 30)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_no_reference_sends_text_only(client, db, monkeypatch):
+    secrets.set_ai_api_key(db, "sk-test")
+    captured: dict = {}
+    monkeypatch.setattr(generation, "Anthropic", _capture_kwargs_client(captured))
+
+    generation.generate_guide_draft(db, _guide(db))
+
+    content = captured["messages"][0]["content"]
+    assert isinstance(content, str)  # plain text, no image block
+
+
+def test_reference_image_adds_image_block(client, db, tmp_path, monkeypatch):
+    from app.painting.services import images
+
+    monkeypatch.setattr(images, "data_dir", lambda: tmp_path)
+    secrets.set_ai_api_key(db, "sk-test")
+    guide = _guide(db)
+    images.store_upload(db, guide, _png_bytes())
+    db.commit()
+
+    captured: dict = {}
+    monkeypatch.setattr(generation, "Anthropic", _capture_kwargs_client(captured))
+
+    generation.generate_guide_draft(db, guide)
+
+    content = captured["messages"][0]["content"]
+    assert isinstance(content, list)
+    kinds = [block["type"] for block in content]
+    assert "image" in kinds and "text" in kinds
+    image_block = next(b for b in content if b["type"] == "image")
+    assert image_block["source"]["media_type"] == "image/png"
+    assert image_block["source"]["type"] == "base64"
