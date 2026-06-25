@@ -501,6 +501,26 @@ export interface GuideValidationResult {
   flags: ValidationFlag[];
 }
 
+// AI draft-generation job status (#524/#492). When `status === "done"` the
+// candidate `draft` (proposed tabs), validator `flags`, and `unresolved` paints
+// are populated for the review UI to diff before the user accepts.
+export type DraftJobStatus = "idle" | "running" | "done" | "error";
+
+export interface DraftUnresolvedPaint {
+  name: string;
+  tab: string;
+  step: string;
+}
+
+export interface GuideDraftStatus {
+  status: DraftJobStatus;
+  message: string;
+  draft: { tabs: TabInput[] } | null;
+  flags: ValidationFlag[];
+  unresolved: DraftUnresolvedPaint[];
+  error: string | null;
+}
+
 export interface GuideTheme {
   bg?: string | null;
   surface?: string | null;
@@ -1304,6 +1324,13 @@ export const api = {
       // Validator findings for the editor panel + publish gate (#489).
       validate: (id: number) =>
         request<GuideValidationResult>(`/painting/guides/${id}/validation`),
+      // Kick off async AI draft generation (#524). 202 + initial status; 503
+      // when no API key, 409 when a draft is already generating for this guide.
+      startDraft: (id: number) =>
+        request<GuideDraftStatus>(`/painting/guides/${id}/draft`, { method: "POST" }),
+      // Poll the draft-generation job; carries the candidate draft + flags when done.
+      draftStatus: (id: number) =>
+        request<GuideDraftStatus>(`/painting/guides/${id}/draft/status`),
       // Render the guide to a print-ready PDF and trigger a download (#320).
       // Stamping options (#511): footer on by default, watermark off.
       exportPdf: (id: number, slug: string, opts: StampOptions = {}) =>

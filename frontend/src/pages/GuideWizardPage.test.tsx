@@ -80,7 +80,7 @@ describe("GuideWizardPage (#487)", () => {
     expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
   });
 
-  it("advances step 2→3 and shows summary + disabled AI checkboxes", async () => {
+  it("advances step 2→3: AI-draft checkbox enabled, reference-images still disabled", async () => {
     renderWizard();
     await userEvent.type(screen.getByLabelText(/title \*/i), "My Guide");
     await userEvent.click(screen.getByRole("button", { name: /next/i }));
@@ -89,7 +89,22 @@ describe("GuideWizardPage (#487)", () => {
     expect(screen.getByText("My Guide")).toBeInTheDocument();
     const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes).toHaveLength(2);
-    checkboxes.forEach((cb) => expect(cb).toBeDisabled());
+    expect(checkboxes[0]).toBeEnabled();   // Generate AI draft
+    expect(checkboxes[1]).toBeDisabled();  // Generate reference images (#536/#494)
+  });
+
+  it("routes to the draft review page when 'Generate AI draft' is checked", async () => {
+    const create = await getCreateMock();
+    create.mockResolvedValue({ id: 42 } as never);
+    renderWizard();
+
+    await userEvent.type(screen.getByLabelText(/title \*/i), "Draft Guide");
+    await userEvent.click(screen.getByRole("button", { name: /next/i }));
+    await userEvent.click(screen.getByRole("button", { name: /next/i }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /generate ai draft/i }));
+    await userEvent.click(screen.getByRole("button", { name: /create guide/i }));
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/painting/guides/42/draft"));
   });
 
   it("creates guide with correct payload and navigates to content editor", async () => {

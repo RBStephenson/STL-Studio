@@ -24,6 +24,9 @@ export default function GuideWizardPage() {
   // Step 2 — Model link
   const [linkedModel, setLinkedModel] = useState<Model | null>(null);
 
+  // Step 3 — Options
+  const [genDraft, setGenDraft] = useState(false);
+
   // Submit
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +58,13 @@ export default function GuideWizardPage() {
         model_id: linkedModel?.id ?? null,
         status: "draft",
       });
-      toast("Guide created. Add your content below.", "success");
-      navigate(`/painting/guides/${guide.id}/content`);
+      if (genDraft) {
+        toast("Guide created. Generating an AI draft…", "success");
+        navigate(`/painting/guides/${guide.id}/draft`);
+      } else {
+        toast("Guide created. Add your content below.", "success");
+        navigate(`/painting/guides/${guide.id}/content`);
+      }
     } catch (e) {
       const msg =
         e instanceof ApiError && e.status === 409
@@ -150,12 +158,18 @@ export default function GuideWizardPage() {
           <h2 className="text-sm font-semibold text-gray-300">Options</h2>
 
           <div className="border border-gray-800 rounded p-4 space-y-3">
-            <label className="flex items-start gap-3 cursor-not-allowed opacity-40">
-              <input type="checkbox" disabled className="mt-0.5 accent-indigo-500" />
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={genDraft}
+                onChange={(e) => setGenDraft(e.target.checked)}
+                className="mt-0.5 accent-indigo-500"
+              />
               <div>
                 <span className="text-sm text-gray-300 block">Generate AI draft</span>
                 <span className="text-xs text-gray-500">
-                  Use Claude to create a painting guide draft from your shelf
+                  Use Claude to create a painting guide draft from your shelf, then
+                  review it before it lands. Needs an API key in Settings.
                 </span>
               </div>
             </label>
@@ -168,7 +182,6 @@ export default function GuideWizardPage() {
                 </span>
               </div>
             </label>
-            <p className="text-xs text-gray-600 pt-1">AI features arrive in a future release.</p>
           </div>
 
           <div className="bg-gray-900 border border-gray-800 rounded p-3 text-xs text-gray-500 space-y-0.5">

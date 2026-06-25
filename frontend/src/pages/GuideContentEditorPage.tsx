@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Sparkles } from "lucide-react";
 import { api, Guide, GuideTab, GuideValidationResult, TabInput } from "../api/client";
 import GuideSpineEditor from "../components/guide/GuideSpineEditor";
 import GuideReader from "../components/guide/GuideReader";
@@ -76,15 +76,24 @@ export default function GuideContentEditorPage() {
           {guide && <p className="text-sm text-gray-500">{guide.title}</p>}
         </div>
         {!loading && !loadError && guide && (
-          <button
-            type="button"
-            onClick={() => setShowPreview((v) => !v)}
-            aria-pressed={showPreview}
-            className="hidden lg:inline-flex items-center gap-1.5 shrink-0 text-sm text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2.5 py-1.5"
-          >
-            {showPreview ? <EyeOff size={15} /> : <Eye size={15} />}
-            {showPreview ? "Hide preview" : "Show preview"}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => navigate(`/painting/guides/${id}/draft`)}
+              className="inline-flex items-center gap-1.5 text-sm text-indigo-300 hover:text-indigo-200 border border-indigo-800/60 rounded px-2.5 py-1.5"
+            >
+              <Sparkles size={15} /> Generate AI draft
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPreview((v) => !v)}
+              aria-pressed={showPreview}
+              className="hidden lg:inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2.5 py-1.5"
+            >
+              {showPreview ? <EyeOff size={15} /> : <Eye size={15} />}
+              {showPreview ? "Hide preview" : "Show preview"}
+            </button>
+          </div>
         )}
       </div>
 

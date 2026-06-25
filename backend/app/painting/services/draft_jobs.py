@@ -2,8 +2,11 @@
 
 Mirrors the library-scan pattern: a background daemon thread does the work while
 the request returns immediately, and the UI polls a status endpoint. Generation
-always produces a **draft** — it replaces the guide's content spine and forces
-status="draft", never publishing.
+produces a **candidate draft** that is held for review (#492) — the job does NOT
+touch the guide's content spine. The reconciled draft tabs, the validator flags
+computed on that candidate, and any unresolved paints all ride in the job status
+so the review UI can diff the proposal against the live guide before the user
+accepts it (a plain PATCH of the tabs). Nothing is committed until then.
 
 The actual model call is injected behind `Generator` so this plumbing can ship
 and be tested with a fake before the real Claude call lands (#526). The default
@@ -20,6 +23,7 @@ from app.painting.models import Guide
 from app.painting.schemas import GuideDraft
 from app.painting.services.draft import reconcile_draft_paints
 from app.painting.services.guides import build_tabs
+from app.painting.services.validation import validate_guide
 
 # A generator turns a guide (its metadata/context) into a GuideDraft. Swapped for
 # the real Claude-backed implementation in #526; tests inject a fake.
@@ -53,7 +57,10 @@ def reset_generator() -> None:
 
 
 def _idle() -> dict:
-    return {"status": "idle", "message": "", "unresolved": [], "error": None}
+    return {
+        "status": "idle", "message": "", "unresolved": [],
+        "draft": None, "flags": [], "error": None,
+    }
 
 
 def get_status(guide_id: int) -> dict:
@@ -78,7 +85,8 @@ def start_generation(guide_id: int) -> bool:
         if _jobs.get(guide_id, {}).get("status") == "running":
             return False
         _jobs[guide_id] = {
-            "status": "running", "message": "generating", "unresolved": [], "error": None,
+            "status": "running", "message": "generating", "unresolved": [],
+            "draft": None, "flags": [], "error": None,
         }
     threading.Thread(target=_run, args=(guide_id,), daemon=True).start()
     return True
@@ -99,15 +107,20 @@ def _run(guide_id: int) -> None:
         draft = _generator(db, guide)
         result = reconcile_draft_paints(db, draft)
 
-        # Persist as a draft: replace the content spine, never publish.
-        guide.tabs = build_tabs(result.draft.tabs)
-        guide.status = "draft"
-        db.commit()
+        # Hold the candidate for review (#492) — do NOT touch the guide spine.
+        # Validate the proposed tabs on a transient, unpersisted guide so the
+        # review UI gets flags up front; build_tabs yields in-memory ORM objects
+        # with their phase/step relationships populated, which is all the
+        # validator walks (it never reads guide.id).
+        candidate = Guide(tabs=build_tabs(result.draft.tabs))
+        flags = validate_guide(db, candidate)
 
         _set(
             guide_id,
             status="done",
-            message="draft ready",
+            message="draft ready for review",
+            draft={"tabs": result.draft.model_dump()["tabs"]},
+            flags=[f.model_dump() for f in flags],
             unresolved=[u.__dict__ for u in result.unresolved],
             error=None,
         )

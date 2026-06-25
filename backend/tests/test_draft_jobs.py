@@ -75,7 +75,7 @@ def test_draft_requires_api_key(client):
     assert "API key" in r.json()["detail"]
 
 
-def test_generates_and_persists_as_draft(client, db):
+def test_generation_holds_draft_without_committing_spine(client, db):
     secrets.set_ai_api_key(db, "sk-test-key")
     _shelf_paint(client, "Coal Black")
     guide = _make_guide(client)
@@ -105,10 +105,32 @@ def test_generates_and_persists_as_draft(client, db):
     assert status["status"] == "done"
     assert [u["name"] for u in status["unresolved"]] == ["Unknown Purple"]
 
-    # Persisted as a draft: spine replaced, never published.
+    # The candidate draft rides in the job status for the review UI to diff,
+    # with the unresolved Coal Black swatch resolved to a paint_id.
+    draft_tabs = status["draft"]["tabs"]
+    assert draft_tabs[0]["name"] == "Skin"
+    swatches = draft_tabs[0]["phases"][0]["steps"][0]["swatches"]
+    assert any(s["paint_id"] is not None for s in swatches)  # Coal Black resolved
+
+    # The live guide is untouched — nothing is committed until the user accepts.
     refreshed = client.get(f"/painting/guides/{guide['id']}").json()
-    assert refreshed["status"] == "draft"
-    assert refreshed["tabs"][0]["name"] == "Skin"
+    assert refreshed["tabs"] == []
+
+
+def test_done_status_carries_validator_flags(client, db):
+    secrets.set_ai_api_key(db, "sk-test-key")
+    # A known-but-not-owned paint: validating the candidate yields a block flag.
+    paint = _shelf_paint(client, "Coal Black")
+    client.patch(f"/painting/paints/{paint['id']}", json={"owned": False})
+    guide = _make_guide(client)
+
+    draft_jobs.set_generator(lambda _db, _g: _draft_with("Coal Black"))
+    client.post(f"/painting/guides/{guide['id']}/draft")
+
+    status = _wait(client, guide["id"])
+    assert status["status"] == "done"
+    codes = [f["code"] for f in status["flags"]]
+    assert "paint_not_owned" in codes
 
 
 def test_generator_failure_surfaces_as_error(client, db):
