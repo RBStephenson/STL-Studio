@@ -5,6 +5,7 @@ import { api, Guide, GuideTab, GuideValidationResult, TabInput } from "../api/cl
 import GuideSpineEditor from "../components/guide/GuideSpineEditor";
 import GuideReader from "../components/guide/GuideReader";
 import GuideValidationPanel from "../components/guide/GuideValidationPanel";
+import ReferenceImageUpload from "../components/guide/ReferenceImageUpload";
 import { useToast } from "../context/ToastContext";
 
 export default function GuideContentEditorPage() {
@@ -101,7 +102,20 @@ export default function GuideContentEditorPage() {
       {loadError && <p role="alert" className="text-sm text-rose-400">{loadError}</p>}
 
       {!loading && !loadError && guide && (
-        <div className="mb-4">
+        <div className="mb-4 space-y-4">
+          <details className="border border-gray-800 rounded-lg" data-testid="reference-image-section">
+            <summary className="cursor-pointer text-sm text-gray-300 px-4 py-2.5">
+              Reference image
+              {guide.reference_image_id !== null && <span className="text-xs text-emerald-400 ml-2">attached</span>}
+            </summary>
+            <div className="px-4 pb-4">
+              <ReferenceImageUpload
+                guideId={guide.id}
+                referenceImageId={guide.reference_image_id}
+                onChange={(rid) => setGuide((g) => (g ? { ...g, reference_image_id: rid } : g))}
+              />
+            </div>
+          </details>
           <GuideValidationPanel result={validation} loading={validating} />
         </div>
       )}

@@ -501,6 +501,19 @@ export interface GuideValidationResult {
   flags: ValidationFlag[];
 }
 
+// A guide's reference image metadata (#535/#536). The bytes are served by the
+// GET reference-image endpoint; this carries the provenance + dimensions.
+export interface ReferenceImage {
+  id: number;
+  guide_id: number | null;
+  provenance: string;
+  source_url: string | null;
+  alt_text: string | null;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+}
+
 // AI draft-generation job status (#524/#492). When `status === "done"` the
 // candidate `draft` (proposed tabs), validator `flags`, and `unresolved` paints
 // are populated for the review UI to diff before the user accepts.
@@ -561,6 +574,7 @@ export interface Guide {
   category_label: string | null;
   series_id: number | null;
   model_id: number | null;
+  reference_image_id: number | null;
   scale: string | null;
   status: string;
   franchise: string | null;
@@ -1331,6 +1345,26 @@ export const api = {
       // Poll the draft-generation job; carries the candidate draft + flags when done.
       draftStatus: (id: number) =>
         request<GuideDraftStatus>(`/painting/guides/${id}/draft/status`),
+      // Reference image (#535/#536): the bytes feed Claude vision at draft time.
+      // `<img src>` target for the stored image; `v` busts the cache after a replace.
+      referenceImageUrl: (id: number, v?: number | string) =>
+        `${BASE}/painting/guides/${id}/reference-image${v !== undefined ? `?v=${v}` : ""}`,
+      uploadReferenceImage: async (id: number, file: File, altText?: string) => {
+        const form = new FormData();
+        form.append("file", file);
+        if (altText) form.append("alt_text", altText);
+        const res = await fetch(`${BASE}/painting/guides/${id}/reference-image`, {
+          method: "POST", body: form,
+        });
+        if (!res.ok) {
+          let detail = `${res.status} ${res.statusText}`;
+          try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+          throw new ApiError(res.status, detail);
+        }
+        return res.json() as Promise<ReferenceImage>;
+      },
+      deleteReferenceImage: (id: number) =>
+        request<{ ok: boolean }>(`/painting/guides/${id}/reference-image`, { method: "DELETE" }),
       // Render the guide to a print-ready PDF and trigger a download (#320).
       // Stamping options (#511): footer on by default, watermark off.
       exportPdf: (id: number, slug: string, opts: StampOptions = {}) =>

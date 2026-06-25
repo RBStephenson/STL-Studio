@@ -14,7 +14,7 @@ vi.mock("react-router-dom", async (importOriginal) => {
 
 const GUIDE = vi.hoisted(() => ({
   id: 1, slug: "robocop", title: "RoboCop", title_lead: "RoboCop", subtitle: null,
-  category_id: null, category_label: null, series_id: null, model_id: null, scale: "1:6",
+  category_id: null, category_label: null, series_id: null, model_id: null, reference_image_id: null, scale: "1:6",
   status: "published", franchise: null, quote: null, creator_credit: null, light_source: null,
   philosophy_note: null, paint_lines_used: [], technique_tags: [], character_brief: null,
   theme: null, head_style: null, thinning_config: null,

@@ -15,7 +15,7 @@ function mkSwatch(over = {}) {
 const GUIDE: Guide = {
   id: 1, slug: "robocop-1987", title: "RoboCop 1987", title_lead: "RoboCop",
   subtitle: "1:6 · Action", category_id: null, category_label: "Film & TV",
-  series_id: null, model_id: null, scale: "1:6", status: "published",
+  series_id: null, model_id: null, reference_image_id: null, scale: "1:6", status: "published",
   franchise: "RoboCop", quote: "Dead or alive, you're coming with me.",
   creator_credit: { name: "Acme Studio", url: "https://example.com", link_text: "@acme" },
   light_source: null, philosophy_note: null,

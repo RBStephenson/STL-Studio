@@ -11,6 +11,7 @@ import {
 } from "../api/client";
 import GuideReader from "../components/guide/GuideReader";
 import GuideValidationPanel from "../components/guide/GuideValidationPanel";
+import ReferenceImageUpload from "../components/guide/ReferenceImageUpload";
 import { useToast } from "../context/ToastContext";
 
 const POLL_MS = 1200;
@@ -43,6 +44,7 @@ export default function GuideDraftReviewPage() {
   const { toast } = useToast();
 
   const [guide, setGuide] = useState<Guide | null>(null);
+  const [refImageId, setRefImageId] = useState<number | null>(null);
   const [job, setJob] = useState<GuideDraftStatus | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
@@ -60,21 +62,28 @@ export default function GuideDraftReviewPage() {
     }
   }, [guideId]);
 
-  // Load the guide (for the diff + preview chrome) and kick off generation.
+  // Load the guide (for the diff + the attached reference image). Generation is
+  // user-triggered (#536) so an attached image reaches vision on the first pass.
   useEffect(() => {
     let alive = true;
     setFatal(null);
     api.painting.guides.get(guideId).then(
-      (g) => { if (alive) setGuide(g); },
+      (g) => { if (alive) { setGuide(g); setRefImageId(g.reference_image_id); } },
       (e) => { if (alive) setFatal((e as Error)?.message || "Could not load the guide."); },
     );
+    return () => {
+      alive = false;
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, [guideId]);
 
+  const generate = () => {
+    setFatal(null);
     api.painting.guides.startDraft(guideId).then(
-      (status) => { if (alive) { setJob(status); if (status.status === "running") poll(); } },
+      (status) => { setJob(status); if (status.status === "running") poll(); },
       (e) => {
-        if (!alive) return;
         if (e instanceof ApiError && e.status === 409) {
-          // A job is already generating for this guide — just attach and poll.
+          // A job is already generating for this guide — attach and poll.
           poll();
         } else if (e instanceof ApiError && e.status === 503) {
           setFatal(
@@ -85,12 +94,7 @@ export default function GuideDraftReviewPage() {
         }
       },
     );
-
-    return () => {
-      alive = false;
-      if (pollRef.current) clearTimeout(pollRef.current);
-    };
-  }, [guideId, poll]);
+  };
 
   const accept = async () => {
     if (!job?.draft) return;
@@ -106,7 +110,9 @@ export default function GuideDraftReviewPage() {
   };
 
   const proposed: GuideTab[] | null = job?.draft ? withSyntheticIds(job.draft.tabs) : null;
-  const running = job?.status === "running" || (!job && !fatal);
+  const running = job?.status === "running";
+  // Pre-generation: no job yet, or the last attempt errored (offer a retry).
+  const preGen = !job || job.status === "error";
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -144,17 +150,40 @@ export default function GuideDraftReviewPage() {
 
       {fatal && <p role="alert" className="text-sm text-rose-400 mb-4">{fatal}</p>}
 
+      {job?.status === "error" && (
+        <p role="alert" className="text-sm text-rose-400 border border-rose-900/50 rounded-lg p-4 mb-4">
+          Generation failed: {job.error}
+        </p>
+      )}
+
+      {preGen && guide && (
+        <div className="max-w-xl space-y-5 border border-gray-800 rounded-lg p-5">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-300 mb-1">Reference image <span className="text-gray-600 font-normal">(optional)</span></h2>
+            <p className="text-xs text-gray-500 mb-3">
+              Attach a photo of the figure or subject — Claude analyzes it for skin tone, value, and texture while drafting.
+            </p>
+            <ReferenceImageUpload
+              guideId={guideId}
+              referenceImageId={refImageId}
+              onChange={setRefImageId}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={generate}
+            className="inline-flex items-center gap-2 text-sm text-white bg-indigo-600 hover:bg-indigo-500 rounded px-4 py-2"
+          >
+            <Sparkles size={16} /> {job?.status === "error" ? "Try again" : "Generate draft"}
+          </button>
+        </div>
+      )}
+
       {running && (
         <div className="flex items-center gap-3 text-sm text-gray-400 border border-gray-800 rounded-lg p-6">
           <Sparkles size={16} className="text-indigo-400 animate-pulse" />
           Generating a draft from your Paint Shelf… this can take a moment.
         </div>
-      )}
-
-      {job?.status === "error" && (
-        <p role="alert" className="text-sm text-rose-400 border border-rose-900/50 rounded-lg p-4">
-          Generation failed: {job.error}
-        </p>
       )}
 
       {job?.status === "done" && proposed && guide && (

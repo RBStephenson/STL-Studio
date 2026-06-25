@@ -42,6 +42,9 @@ vi.mock("../components/guide/GuideValidationPanel", () => ({
     <div data-testid="validation">flags:{result.flags.length}</div>
   ),
 }));
+vi.mock("../components/guide/ReferenceImageUpload", () => ({
+  default: () => <div data-testid="reference-upload" />,
+}));
 vi.mock("../context/ToastContext", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
 async function mocks() {
@@ -49,7 +52,7 @@ async function mocks() {
   return vi.mocked(api.painting.guides);
 }
 
-const GUIDE = { id: 7, title: "Presto", tabs: [] };
+const GUIDE = { id: 7, title: "Presto", tabs: [], reference_image_id: null };
 const DRAFT_TABS = [{ name: "Skin", phases: [{ label: "Base", steps: [{ title: "Basecoat", swatches: [], mix_components: [] }] }] }];
 
 function renderPage() {
@@ -63,7 +66,23 @@ function renderPage() {
 describe("GuideDraftReviewPage (#492)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("polls to done, then accepts the draft into the editor", async () => {
+  // Click the pre-gen "Generate draft" button once the guide has loaded.
+  async function clickGenerate() {
+    const btn = await screen.findByRole("button", { name: /generate draft/i });
+    await userEvent.click(btn);
+  }
+
+  it("shows the pre-gen panel with the reference-image control", async () => {
+    const g = await mocks();
+    g.get.mockResolvedValue(GUIDE as never);
+    renderPage();
+
+    expect(await screen.findByTestId("reference-upload")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /generate draft/i })).toBeInTheDocument();
+    expect(g.startDraft).not.toHaveBeenCalled(); // no auto-start
+  });
+
+  it("generates on click, polls to done, then accepts into the editor", async () => {
     const g = await mocks();
     g.get.mockResolvedValue(GUIDE as never);
     g.startDraft.mockResolvedValue({
@@ -76,6 +95,8 @@ describe("GuideDraftReviewPage (#492)", () => {
     g.update.mockResolvedValue(GUIDE as never);
 
     renderPage();
+    await clickGenerate();
+    expect(g.startDraft).toHaveBeenCalledWith(7);
 
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /accept into editor/i })).toBeInTheDocument(),
@@ -84,9 +105,7 @@ describe("GuideDraftReviewPage (#492)", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /accept into editor/i }));
 
-    await waitFor(() =>
-      expect(g.update).toHaveBeenCalledWith(7, { tabs: DRAFT_TABS }),
-    );
+    await waitFor(() => expect(g.update).toHaveBeenCalledWith(7, { tabs: DRAFT_TABS }));
     expect(mockNavigate).toHaveBeenCalledWith("/painting/guides/7/content");
   });
 
@@ -96,6 +115,7 @@ describe("GuideDraftReviewPage (#492)", () => {
     g.startDraft.mockRejectedValue(new ApiError(503, "no key"));
 
     renderPage();
+    await clickGenerate();
 
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(/no AI API key is configured/i),
@@ -114,6 +134,7 @@ describe("GuideDraftReviewPage (#492)", () => {
     } as never);
 
     renderPage();
+    await clickGenerate();
 
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(/model exploded/i),
