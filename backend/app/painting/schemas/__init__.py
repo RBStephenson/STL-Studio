@@ -761,3 +761,46 @@ class ReferenceImageRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Color-match studio (spec §8.6, #493)
+# ---------------------------------------------------------------------------
+
+Band = Literal["very_close", "close", "family", "loose"]
+
+
+class ColorMatchCandidate(BaseModel):
+    """One suggested paint for a sampled region."""
+    paint_id: int
+    code: str
+    name: str
+    brand: str
+    line: str
+    hex: Optional[str] = None
+    finish: str
+    delta_l: float
+    delta_e: Optional[float] = None
+    band: Band
+
+    model_config = {"from_attributes": True}
+
+
+class ColorMatchRegion(BaseModel):
+    """A k-means region of the reference image with its paint suggestions."""
+    hex: str
+    lab: tuple[float, float, float]
+    value_l: float
+    weight: float
+    value_candidates: list[ColorMatchCandidate]
+    hue_candidates: list[ColorMatchCandidate]
+    glaze_options: list[ColorMatchCandidate]
+
+    model_config = {"from_attributes": True}
+
+
+class ColorMatchResult(BaseModel):
+    regions: list[ColorMatchRegion]
+    caveat: str
+
+    model_config = {"from_attributes": True}
