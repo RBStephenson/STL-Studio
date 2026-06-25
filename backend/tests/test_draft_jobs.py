@@ -5,7 +5,6 @@ plumbing (kickoff → status polling → persist-as-draft → key gating) is exe
 end to end without a live API.
 """
 import threading
-import time
 
 import pytest
 from cryptography.fernet import Fernet
@@ -24,10 +23,12 @@ def _isolate(monkeypatch):
     monkeypatch.setenv("STL_SECRET_KEY", Fernet.generate_key().decode())
     secrets.reset_cache()
     draft_jobs._jobs.clear()
+    draft_jobs._done_events.clear()
     yield
     secrets.reset_cache()
     draft_jobs.reset_generator()
     draft_jobs._jobs.clear()
+    draft_jobs._done_events.clear()
 
 
 def _make_guide(client):
@@ -57,14 +58,11 @@ def _draft_with(swatch_name: str) -> GuideDraft:
     })
 
 
-def _wait(client, gid, timeout=5.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        st = client.get(f"/painting/guides/{gid}/draft/status").json()
-        if st["status"] in ("done", "error"):
-            return st
-        time.sleep(0.02)
-    raise AssertionError("draft job did not finish in time")
+def _wait(client, gid, timeout=10.0):
+    """Block on the worker's completion Event (deterministic — no poll race),
+    then return the terminal status."""
+    assert draft_jobs.wait(gid, timeout), "draft job did not finish in time"
+    return client.get(f"/painting/guides/{gid}/draft/status").json()
 
 
 def test_draft_requires_api_key(client):

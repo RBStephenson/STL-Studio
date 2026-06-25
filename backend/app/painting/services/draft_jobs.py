@@ -32,6 +32,9 @@ Generator = Callable[[Session, Guide], GuideDraft]
 _state_lock = threading.Lock()
 # guide_id -> {status: idle|running|done|error, message, unresolved, error}
 _jobs: dict[int, dict] = {}
+# guide_id -> Event set when that guide's worker finishes. Lets callers await
+# completion deterministically (tests) instead of polling on a wall clock.
+_done_events: dict[int, threading.Event] = {}
 
 
 def _default_generator(db: Session, guide: Guide) -> GuideDraft:
@@ -88,8 +91,22 @@ def start_generation(guide_id: int) -> bool:
             "status": "running", "message": "generating", "unresolved": [],
             "draft": None, "flags": [], "error": None,
         }
+        _done_events[guide_id] = threading.Event()
     threading.Thread(target=_run, args=(guide_id,), daemon=True).start()
     return True
+
+
+def wait(guide_id: int, timeout: float = 10.0) -> bool:
+    """Block until the guide's worker finishes, or `timeout` elapses.
+
+    Returns True if the worker completed (or none was running). Lets tests await
+    completion deterministically rather than polling the status endpoint on a
+    timer — production code uses the async status endpoint and never calls this."""
+    with _state_lock:
+        event = _done_events.get(guide_id)
+    if event is None:
+        return True
+    return event.wait(timeout)
 
 
 def _run(guide_id: int) -> None:
@@ -129,3 +146,8 @@ def _run(guide_id: int) -> None:
         _set(guide_id, status="error", error=str(exc))
     finally:
         db.close()
+        # Signal completion last, so a waiter that wakes sees terminal state.
+        with _state_lock:
+            event = _done_events.get(guide_id)
+        if event is not None:
+            event.set()
