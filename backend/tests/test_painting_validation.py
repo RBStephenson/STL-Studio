@@ -123,3 +123,110 @@ class TestPublishGate:
         r = client.patch(f"/painting/guides/{g['id']}", json={"status": "published"})
         assert r.status_code == 200
         assert r.json()["status"] == "published"
+
+
+class TestDomainRules:
+    """Figure-painting domain rules ported into the validator (#498, #506 fold)."""
+
+    def _step_swatches(self, owned_paint, swatches, **step_over):
+        tabs = guide_body(owned_paint["id"])["tabs"]
+        step = tabs[0]["phases"][0]["steps"][0]
+        step["swatches"] = swatches
+        step.update(step_over)
+        return tabs
+
+    def test_near_white_without_specular_role_warns(self, client, owned_paint):
+        tabs = self._step_swatches(owned_paint, [
+            {"paint_id": owned_paint["id"], "value_pct": 99, "role_label": "mid-tone"},
+        ])
+        g = _make_guide(client, owned_paint["id"], tabs=tabs)
+        assert "white_misuse" in _codes(_validate(client, g["id"]))
+
+    def test_near_white_with_specular_role_is_clean(self, client, owned_paint):
+        tabs = self._step_swatches(owned_paint, [
+            {"paint_id": owned_paint["id"], "value_pct": 99, "role_label": "final specular"},
+        ])
+        g = _make_guide(client, owned_paint["id"], tabs=tabs)
+        assert "white_misuse" not in _codes(_validate(client, g["id"]))
+
+    def test_near_black_without_shadow_role_warns(self, client, owned_paint):
+        tabs = self._step_swatches(owned_paint, [
+            {"paint_id": owned_paint["id"], "value_pct": 1, "role_label": "base coat"},
+        ])
+        g = _make_guide(client, owned_paint["id"], tabs=tabs)
+        assert "black_misuse" in _codes(_validate(client, g["id"]))
+
+    def test_near_black_with_occlusion_role_is_clean(self, client, owned_paint):
+        tabs = self._step_swatches(owned_paint, [
+            {"paint_id": owned_paint["id"], "value_pct": 1, "role_label": "deepest occlusion"},
+        ])
+        g = _make_guide(client, owned_paint["id"], tabs=tabs)
+        assert "black_misuse" not in _codes(_validate(client, g["id"]))
+
+    def test_missing_value_intent_warns(self, client, owned_paint):
+        tabs = self._step_swatches(
+            owned_paint,
+            [{"paint_id": owned_paint["id"], "value_pct": 40, "role_label": "mid"}],
+            value_intent="",
+        )
+        g = _make_guide(client, owned_paint["id"], tabs=tabs)
+        res = _validate(client, g["id"])
+        assert "value_intent_missing" in _codes(res)
+        assert res["ok"] is True  # advisory
+
+    def test_value_intent_present_is_clean(self, client, owned_paint):
+        g = _make_guide(client, owned_paint["id"])  # default step carries value_intent
+        assert "value_intent_missing" not in _codes(_validate(client, g["id"]))
+
+    def test_high_contrast_scale_flags_wider_spread(self, client, owned_paint):
+        # Spread of 20% passes at 1:6 (min 15) but fails at 28mm (min 25).
+        swatches = [
+            {"paint_id": owned_paint["id"], "value_pct": 40, "role_label": "mid"},
+            {"paint_id": owned_paint["id"], "value_pct": 60, "role_label": "hi"},
+        ]
+        ok = _make_guide(client, owned_paint["id"],
+                         tabs=self._step_swatches(owned_paint, swatches), scale="1:6")
+        assert "value_compression" not in _codes(_validate(client, ok["id"]))
+
+        tight = _make_guide(client, owned_paint["id"], slug="rc-28",
+                            tabs=self._step_swatches(owned_paint, swatches), scale="28mm")
+        assert "value_compression" in _codes(_validate(client, tight["id"]))
+
+
+class TestSkinAnchorBand:
+    """Skin-anchor band check (skill Step 2, folded from #506)."""
+
+    def _skin_guide(self, client, anchor_paint_id, *, band, slug="diana"):
+        body = guide_body(anchor_paint_id, slug=slug)
+        body["tabs"] = [{
+            "name": "Skin",
+            "sort_order": 0,
+            "skin_config": {"complexion_band": band} if band else None,
+            "phases": [{"label": "Base", "steps": [{
+                "title": "Anchor",
+                "value_intent": "reads ~30% value",
+                "swatches": [
+                    {"paint_id": anchor_paint_id, "role_label": "mid-tone anchor", "value_pct": 30},
+                ],
+            }]}],
+        }]
+        return client.post("/painting/guides", json=body).json()
+
+    def test_light_anchor_on_deep_skin_flags(self, client, owned_paint):
+        # Shadow Flesh anchors the very-fair band — wrong for deep-brown skin (Diana).
+        shadow_flesh = mk_paint(client, owned_paint["paint_line_id"],
+                                code="042", name="Shadow Flesh")
+        g = self._skin_guide(client, shadow_flesh["id"], band="deep")
+        assert "skin_anchor_too_light" in _codes(_validate(client, g["id"]))
+
+    def test_band_appropriate_anchor_is_clean(self, client, owned_paint):
+        dark_flesh = mk_paint(client, owned_paint["paint_line_id"],
+                              code="068", name="Dark Flesh")
+        g = self._skin_guide(client, dark_flesh["id"], band="deep")
+        assert "skin_anchor_too_light" not in _codes(_validate(client, g["id"]))
+
+    def test_no_stated_band_skips_the_check(self, client, owned_paint):
+        shadow_flesh = mk_paint(client, owned_paint["paint_line_id"],
+                                code="042", name="Shadow Flesh")
+        g = self._skin_guide(client, shadow_flesh["id"], band=None)
+        assert "skin_anchor_too_light" not in _codes(_validate(client, g["id"]))

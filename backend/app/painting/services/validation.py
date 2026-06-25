@@ -20,7 +20,58 @@ from app.painting.schemas import ValidationFlag
 
 # Minimum value% spread between the lightest and darkest valued swatch in a step
 # before the range reads as "compressed" (skill Color Accuracy Checker, Step 4).
+# Value priority by scale (generation_prompt.md §"Value priority by scale"): small
+# scales are painted with extreme/high contrast, so a wider spread is expected.
 VALUE_COMPRESSION_MIN = 15
+VALUE_COMPRESSION_MIN_HIGH_CONTRAST = 25
+_HIGH_CONTRAST_SCALES = {"28mm", "1:12"}
+
+# The white & black rule (generation_prompt.md §"The white & black rule"): pure
+# white/black flatten as general swatches — white is the final specular only,
+# black only the deepest occlusion. A swatch reading near-pure at these bounds
+# must carry a role that justifies it.
+NEAR_WHITE_VALUE = 98
+NEAR_BLACK_VALUE = 2
+_PURE_WHITE_HEXES = {"#ffffff", "#fff"}
+_PURE_BLACK_HEXES = {"#000000", "#000"}
+# Role keywords (matched case-insensitively in role_label) that legitimise a
+# near-white / near-black swatch.
+_WHITE_OK_ROLES = ("specular", "highlight", "catch", "edge", "hot")
+_BLACK_OK_ROLES = ("shadow", "occlusion", "recess", "lining", "pupil", "black", "darkest")
+
+# Skin-anchor band validation (skill §"Step 2 — Skin Tone Anchor Validation",
+# folded from #506). Complexion bands ordered light→dark; the anchor paint must
+# not belong to a lighter band than the character's stated complexion. Fires
+# only when a Skin tab carries a stated band (skin_config.complexion_band), so
+# guides without that metadata are not flagged.
+_COMPLEXION_BANDS = ["very_fair", "fair", "medium", "olive", "brown", "deep"]
+# Free-text band → canonical ordinal key. Substrings, matched case-insensitively.
+_BAND_KEYWORDS = {
+    "porcelain": "very_fair", "very fair": "very_fair",
+    "fair": "fair",
+    "medium": "medium", "tan": "medium",
+    "olive": "olive", "mediterranean": "olive",
+    "brown": "brown",
+    "deep": "deep", "dark brown": "deep",
+}
+# Anchor paint name (lowercased substring) → the complexion band it anchors,
+# from the skill's Step 2 table (Pro Acryl + Army Painter Fanatic triads).
+_ANCHOR_PAINT_BAND = {
+    "shadow flesh": "very_fair", "bright shadow flesh": "very_fair",
+    "pearl skin": "very_fair", "opal skin": "very_fair", "ruby skin": "very_fair",
+    "warm flesh": "fair", "peach flesh": "fair", "barbarian flesh": "fair",
+    "agate skin": "fair", "moonstone skin": "fair",
+    "advanced flesh tone": "medium", "tan flesh": "medium",
+    "leopard stone skin": "medium", "tourmaline skin": "medium", "jasper skin": "medium",
+    "olive flesh": "olive", "topaz skin": "olive",
+    "tiger's eye skin": "olive", "carnelian skin": "olive",
+    "dark warm flesh": "brown", "quartz skin": "brown",
+    "dorado skin": "brown", "amber skin": "brown",
+    "dark flesh": "deep", "mocca skin": "deep",
+    "onyx skin": "deep", "obsidian skin": "deep",
+}
+# role_label keywords that mark a swatch as the skin mid-tone anchor.
+_ANCHOR_ROLES = ("anchor", "mid-tone", "midtone", "mid tone", "base")
 
 
 def validate_pattern(pattern: str | None) -> str | None:
@@ -56,26 +107,78 @@ def validate_code(code: str, pattern: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 class _PaintInfo:
-    __slots__ = ("owned", "code", "name", "pattern")
+    __slots__ = ("owned", "code", "name", "pattern", "hex")
 
-    def __init__(self, owned: bool, code: str, name: str, pattern: str | None):
+    def __init__(self, owned: bool, code: str, name: str, pattern: str | None, hex_: str | None):
         self.owned = owned
         self.code = code
         self.name = name
         self.pattern = pattern
+        self.hex = hex_
 
 
 def _paint_info(db: Session, paint_ids: set[int]) -> dict[int, _PaintInfo]:
-    """One query: id -> (owned, code, name, line code_pattern) for the checks."""
+    """One query: id -> (owned, code, name, line code_pattern, hex) for the checks."""
     if not paint_ids:
         return {}
     rows = (
-        db.query(Paint.id, Paint.owned, Paint.code, Paint.name, PaintLine.code_pattern)
+        db.query(Paint.id, Paint.owned, Paint.code, Paint.name,
+                 PaintLine.code_pattern, Paint.hex)
         .join(PaintLine, Paint.paint_line_id == PaintLine.id)
         .filter(Paint.id.in_(paint_ids))
         .all()
     )
-    return {r[0]: _PaintInfo(r[1], r[2], r[3], r[4]) for r in rows}
+    return {r[0]: _PaintInfo(r[1], r[2], r[3], r[4], r[5]) for r in rows}
+
+
+def _role_matches(role_label: str | None, keywords) -> bool:
+    """True when the swatch's role_label contains any of the keywords."""
+    if not role_label:
+        return False
+    low = role_label.lower()
+    return any(k in low for k in keywords)
+
+
+def _is_near_white(hex_: str | None, value_pct: int | None) -> bool:
+    if hex_ and hex_.strip().lower() in _PURE_WHITE_HEXES:
+        return True
+    return value_pct is not None and value_pct >= NEAR_WHITE_VALUE
+
+
+def _is_near_black(hex_: str | None, value_pct: int | None) -> bool:
+    if hex_ and hex_.strip().lower() in _PURE_BLACK_HEXES:
+        return True
+    return value_pct is not None and value_pct <= NEAR_BLACK_VALUE
+
+
+def _stated_band(tab) -> str | None:
+    """The character's complexion band stated on a Skin tab, normalised to a
+    canonical ordinal key, or None when not stated. Reads `complexion_band` from
+    the tab's skin_config / method_block JSON (no schema change; #506 wires the
+    draft to emit it)."""
+    for block in (tab.skin_config, tab.method_block):
+        if isinstance(block, dict):
+            raw = block.get("complexion_band")
+            if isinstance(raw, str) and raw.strip():
+                low = raw.lower()
+                # Prefer an exact canonical key, else match a keyword substring.
+                if low in _COMPLEXION_BANDS:
+                    return low
+                for kw, band in _BAND_KEYWORDS.items():
+                    if kw in low:
+                        return band
+    return None
+
+
+def _anchor_band(paint_name: str | None) -> str | None:
+    """The complexion band an anchor paint belongs to, by name, or None."""
+    if not paint_name:
+        return None
+    low = paint_name.lower()
+    for needle, band in _ANCHOR_PAINT_BAND.items():
+        if needle in low:
+            return band
+    return None
 
 
 def validate_guide(db: Session, guide: Guide) -> list[ValidationFlag]:
@@ -84,8 +187,18 @@ def validate_guide(db: Session, guide: Guide) -> list[ValidationFlag]:
     `block` flags prevent publish; `warn` flags are advisory. Unknown paint ids
     are already rejected at save time (router `_validate_paints`), so here a
     resolved paint is assumed to exist — we check `owned` and code validity.
-    Colour-accuracy domain checks are deferred (#506)."""
+
+    Domain rules ported from the figure-painting skill (#498) ride alongside the
+    structural checks: the white/black rule, the every-step value-intent rule,
+    scale-aware value compression, and the skin-anchor band check (#506 fold).
+    Highlight-direction remains in #506."""
     flags: list[ValidationFlag] = []
+
+    compression_min = (
+        VALUE_COMPRESSION_MIN_HIGH_CONTRAST
+        if (guide.scale in _HIGH_CONTRAST_SCALES)
+        else VALUE_COMPRESSION_MIN
+    )
 
     ids: set[int] = set()
     for tab in guide.tabs:
@@ -137,6 +250,8 @@ def validate_guide(db: Session, guide: Guide) -> list[ValidationFlag]:
                 for wi, sw in enumerate(step.swatches):
                     loc = {**base, "swatch_index": wi}
                     paint_checks(sw.paint_id, loc, "swatch")
+                    pi = info.get(sw.paint_id) if sw.paint_id is not None else None
+                    hex_ = pi.hex if pi else None
                     if sw.value_pct is not None:
                         if sw.value_pct < 0 or sw.value_pct > 100:
                             flags.append(ValidationFlag(
@@ -145,10 +260,42 @@ def validate_guide(db: Session, guide: Guide) -> list[ValidationFlag]:
                             ))
                         else:
                             values.append(sw.value_pct)
+                    # The white & black rule: a near-pure swatch needs a role that
+                    # justifies it (specular for white, occlusion for black).
+                    label = pi.name if pi else (sw.name or "This swatch")
+                    if _is_near_white(hex_, sw.value_pct) and not _role_matches(sw.role_label, _WHITE_OK_ROLES):
+                        flags.append(ValidationFlag(
+                            severity="warn", code="white_misuse",
+                            message=(
+                                f"{label} reads as pure white but isn't roled as a specular "
+                                "highlight — pure white flattens a general swatch; reserve it "
+                                "for the final specular dot/edge."
+                            ),
+                            **loc,
+                        ))
+                    if _is_near_black(hex_, sw.value_pct) and not _role_matches(sw.role_label, _BLACK_OK_ROLES):
+                        flags.append(ValidationFlag(
+                            severity="warn", code="black_misuse",
+                            message=(
+                                f"{label} reads as pure black but isn't roled as a shadow/"
+                                "occlusion — pure black reads as a hole; use a cool dark anchor "
+                                "and reserve near-black for the deepest recesses."
+                            ),
+                            **loc,
+                        ))
                 for mc in step.mix_components:
                     paint_checks(mc.paint_id, base, "mix component")
 
-                if len(values) >= 2 and max(values) - min(values) < VALUE_COMPRESSION_MIN:
+                # Every step must state its value intent (generation_prompt.md
+                # §"Core philosophy"). Only nudge steps that actually apply paint.
+                if (step.swatches or step.mix_components) and not (step.value_intent or "").strip():
+                    flags.append(ValidationFlag(
+                        severity="warn", code="value_intent_missing",
+                        message="Step applies paint but states no value intent (target value).",
+                        **base,
+                    ))
+
+                if len(values) >= 2 and max(values) - min(values) < compression_min:
                     flags.append(ValidationFlag(
                         severity="warn", code="value_compression",
                         message=(
@@ -158,4 +305,45 @@ def validate_guide(db: Session, guide: Guide) -> list[ValidationFlag]:
                         **base,
                     ))
 
+        _check_skin_anchor(tab, ti, info, flags)
+
     return flags
+
+
+def _check_skin_anchor(tab, ti: int, info: dict, flags: list[ValidationFlag]) -> None:
+    """Skin-anchor band check (skill Step 2, folded from #506).
+
+    When a Skin tab states the character's complexion band, the mid-tone anchor
+    paint must not belong to a *lighter* band — the single most common skin
+    error. Skipped entirely when no band is stated, so guides without the
+    metadata are never flagged."""
+    if "skin" not in (tab.name or "").lower():
+        return
+    band = _stated_band(tab)
+    if band is None:
+        return
+    band_idx = _COMPLEXION_BANDS.index(band)
+
+    for pi_, phase in enumerate(tab.phases):
+        for si, step in enumerate(phase.steps):
+            for wi, sw in enumerate(step.swatches):
+                if not _role_matches(sw.role_label, _ANCHOR_ROLES):
+                    continue
+                pi = info.get(sw.paint_id) if sw.paint_id is not None else None
+                anchor = _anchor_band(pi.name if pi else sw.name)
+                if anchor is None:
+                    continue
+                if _COMPLEXION_BANDS.index(anchor) < band_idx:
+                    name = pi.name if pi else sw.name
+                    value = f" (~{sw.value_pct}% value)" if sw.value_pct is not None else ""
+                    path = f"{tab.name} › {phase.label or 'Steps'} › {step.title or f'Step {si + 1}'}"
+                    flags.append(ValidationFlag(
+                        severity="warn", code="skin_anchor_too_light",
+                        message=(
+                            f"⚠ COLOR ACCURACY FLAG: {name}{value} anchors the "
+                            f"'{anchor.replace('_', ' ')}' complexion band, lighter than the "
+                            f"character's stated '{band.replace('_', ' ')}' — the anchor reads "
+                            "too light. Use the band-appropriate anchor (skill Step 2)."
+                        ),
+                        tab_index=ti, phase_index=pi_, step_index=si, swatch_index=wi, path=path,
+                    ))

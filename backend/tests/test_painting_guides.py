@@ -51,6 +51,7 @@ def guide_body(paint_id, **over):
                                 "title": "Gloss black base",
                                 "technique_tag": "airbrush",
                                 "body": "Lay down a gloss black.",
+                                "value_intent": "reads ~10% value",
                                 "tip": "Thin to milk.",
                                 "swatches": [
                                     {"paint_id": paint_id, "role_label": "shadow base",
