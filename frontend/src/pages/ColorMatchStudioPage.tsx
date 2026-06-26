@@ -6,6 +6,7 @@ import {
 import { useToast } from "../context/ToastContext";
 import { ColorChip } from "./PaintShelfPage";
 import HelpLink from "../components/HelpLink";
+import { downscaleForUpload } from "../lib/imageUpload";
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 const MAX_BYTES = 10 * 1024 * 1024; // mirror the backend cap
@@ -165,33 +166,6 @@ function RegionCard({
  */
 // Preview cap (px) for the canvas the reference is drawn into.
 const PREVIEW_MAX_W = 560; // canvas bitmap resolution; CSS scales it to the column
-
-// Client-side downscale before upload. The backend only samples at ~200px, so a
-// large original is wasted bandwidth — a resized copy matches identically, keeps
-// uploads fast, and never trips the size cap. Re-encoded as WebP q0.9.
-const UPLOAD_MAX_DIM = 1600;
-const UPLOAD_QUALITY = 0.9;
-
-async function downscaleForUpload(file: File): Promise<File> {
-  if (typeof createImageBitmap !== "function") return file; // jsdom / old browsers
-  try {
-    const bmp = await createImageBitmap(file);
-    const longest = Math.max(bmp.width, bmp.height);
-    if (longest <= UPLOAD_MAX_DIM) { bmp.close?.(); return file; }
-    const scale = UPLOAD_MAX_DIM / longest;
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bmp.width * scale);
-    canvas.height = Math.round(bmp.height * scale);
-    canvas.getContext("2d")?.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    bmp.close?.();
-    const blob = await new Promise<Blob | null>((res) =>
-      canvas.toBlob(res, "image/webp", UPLOAD_QUALITY));
-    if (!blob) return file;
-    return new File([blob], "reference.webp", { type: "image/webp" });
-  } catch {
-    return file; // any failure → upload the original
-  }
-}
 
 export default function ColorMatchStudioPage() {
   const { toast } = useToast();
