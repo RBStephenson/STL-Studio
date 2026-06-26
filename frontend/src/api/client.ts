@@ -514,6 +514,37 @@ export interface ReferenceImage {
   created_at: string;
 }
 
+// Color-match studio (#493/#561). Mirrors backend ColorMatch* schemas.
+export type ColorBand = "very_close" | "close" | "family" | "loose";
+
+export interface ColorMatchCandidate {
+  paint_id: number;
+  code: string;
+  name: string;
+  brand: string;
+  line: string;
+  hex: string | null;
+  finish: string;
+  delta_l: number;
+  delta_e: number | null;
+  band: ColorBand;
+}
+
+export interface ColorMatchRegion {
+  hex: string;
+  lab: [number, number, number];
+  value_l: number;
+  weight: number;
+  value_candidates: ColorMatchCandidate[];
+  hue_candidates: ColorMatchCandidate[];
+  glaze_options: ColorMatchCandidate[];
+}
+
+export interface ColorMatchResult {
+  regions: ColorMatchRegion[];
+  caveat: string;
+}
+
 // AI draft-generation job status (#524/#492). When `status === "done"` the
 // candidate `draft` (proposed tabs), validator `flags`, and `unresolved` paints
 // are populated for the review UI to diff before the user accepts.
@@ -1378,6 +1409,25 @@ export const api = {
           `${BASE}/painting/series/${seriesId}/export/pdf${stampQuery(opts)}`,
           `series-${seriesId}-bundle.pdf`,
         ),
+    },
+    // Color-match studio (#493/#561): sample a reference image into a palette of
+    // owned-paint suggestions. Suggest-only — nothing is persisted server-side.
+    colorMatch: async (
+      file: File,
+      opts: { k?: number; candidatesPerRegion?: number } = {},
+    ): Promise<ColorMatchResult> => {
+      const form = new FormData();
+      form.append("file", file);
+      if (opts.k !== undefined) form.append("k", String(opts.k));
+      if (opts.candidatesPerRegion !== undefined)
+        form.append("candidates_per_region", String(opts.candidatesPerRegion));
+      const res = await fetch(`${BASE}/painting/colormatch`, { method: "POST", body: form });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+        throw new ApiError(res.status, detail);
+      }
+      return res.json() as Promise<ColorMatchResult>;
     },
   },
   database: {
