@@ -260,12 +260,16 @@ def _classes(node: Tag) -> list[str]:
 _VALUE_RE = re.compile(r"~\s*(\d+)\s*%\s*value(?:\s*[—-]\s*(.*))?", re.I)
 
 
+_BARE_RATIO_RE = re.compile(r"\s+\d+(?:\.\d+)?:\d+(?:\.\d+)?$")
+
+
 def _mix_parts(name: str) -> list[str]:
     """Split a mix swatch name ('Burnt Sienna + Titanium White', '+ Khaki 061
-    (2:1)') into component paint strings. Ratio parens are dropped; a single
-    paint returns one part."""
-    cleaned = re.sub(r"\([^)]*\)", "", name)  # drop ratio like (2:1)
-    return [p.strip() for p in cleaned.split("+") if p.strip()]
+    (2:1)') into component paint strings. Ratio parens and bare trailing ratios
+    ('Warm Flesh 073 3:1') are stripped; a single paint returns one part."""
+    cleaned = re.sub(r"\([^)]*\)", "", name)  # drop paren content like (2:1) or (S18 sub)
+    parts = [p.strip() for p in cleaned.split("+") if p.strip()]
+    return [_BARE_RATIO_RE.sub("", p).strip() for p in parts]
 
 
 _RATIO_RE = re.compile(r"\(\s*([\d.]+(?:\s*:\s*[\d.]+)+)\s*\)\s*$")

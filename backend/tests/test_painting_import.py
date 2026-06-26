@@ -526,6 +526,16 @@ class TestMixComponents:
         }
         assert client.post("/painting/guides", json=body).status_code == 422
 
+    def test_bare_ratio_suffix_stripped_from_mix_component(self):
+        # 'Bold TW 001 + Warm Flesh 073 3:1 (S18 sub)' — bare ratio after paren
+        # strip leaves 'Warm Flesh 073 3:1'; should resolve as 'Warm Flesh 073'.
+        resolve = lambda n, b: {"bold tw 001": 1, "warm flesh 073": 2}.get(n.lower())
+        rep = ImportReport()
+        _swatches, mix = _parse_swatch(
+            self._swatch("Bold TW 001 + Warm Flesh 073 3:1 (S18 sub)"), resolve, rep, "S")
+        assert [(m.get("paint_id"), m.get("name")) for m in mix] == [(1, None), (2, None)]
+        assert rep.unresolved_paints == []
+
     def test_leading_plus_continuation_is_single_swatch(self):
         # '+ Khaki 061 (2:1)' has one real component -> a single swatch, not a mix.
         resolve = lambda n, b: 7 if n.lower() == "khaki 061" else None
