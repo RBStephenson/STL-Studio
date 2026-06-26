@@ -530,12 +530,18 @@ export interface ColorMatchCandidate {
   band: ColorBand;
 }
 
+export interface ColorMatchLadder {
+  shadow: ColorMatchCandidate[];
+  mid: ColorMatchCandidate[];
+  highlight: ColorMatchCandidate[];
+}
+
 export interface ColorMatchRegion {
   hex: string;
   lab: [number, number, number];
   value_l: number;
   weight: number;
-  value_candidates: ColorMatchCandidate[];
+  ladder: ColorMatchLadder;
   hue_candidates: ColorMatchCandidate[];
   glaze_options: ColorMatchCandidate[];
 }

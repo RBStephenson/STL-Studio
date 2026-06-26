@@ -120,15 +120,18 @@ function RegionCard({
         </div>
       </header>
 
-      {/* Value-first ordering per spec §8.6. Value mode desaturates every swatch
-          (preview, region, and paint chips) so the whole view reads as values. */}
-      <CandidateList
-        title="Value match"
-        hint="ranked by L* — includes metallics"
-        items={region.value_candidates}
-        metric="delta_l"
-        grayscale={valueMode}
-      />
+      {/* Value-first per spec §8.6 / #569: a hue-cohesive shadow → mid → highlight
+          ramp, not a flat value list. Value mode desaturates every swatch so the
+          whole view reads as values. */}
+      <div className="space-y-2">
+        <div className="flex items-baseline gap-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Value ladder</h4>
+          <span className="text-[11px] text-gray-600">shadow → mid → highlight, same hue family</span>
+        </div>
+        <CandidateList title="Shadow" items={region.ladder.shadow} metric="delta_l" grayscale={valueMode} />
+        <CandidateList title="Mid (anchor)" items={region.ladder.mid} metric="delta_e" grayscale={valueMode} />
+        <CandidateList title="Highlight" items={region.ladder.highlight} metric="delta_l" grayscale={valueMode} />
+      </div>
       <CandidateList
         title="Hue match"
         hint="opaque paints, ΔE2000"

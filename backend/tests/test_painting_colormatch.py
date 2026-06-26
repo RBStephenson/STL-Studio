@@ -65,6 +65,12 @@ def line(client):
     return mk_line(client, mk_brand(client)["id"])["id"]
 
 
+def ladder_names(region):
+    """All paint names across the region's value ladder (shadow + mid + highlight)."""
+    lad = region["ladder"]
+    return {c["name"] for c in lad["shadow"] + lad["mid"] + lad["highlight"]}
+
+
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
@@ -84,20 +90,18 @@ class TestMatching:
         assert top["delta_e"] is not None
         assert top["band"] in {"very_close", "close", "family"}
 
-    def test_value_candidates_lead_and_include_metallic(self, client, line):
-        # A metallic is excluded from hue (its hex lies) but must appear in the
-        # value ranking — value is honest even for metals (spec §8.6).
+    def test_metallic_in_ladder_not_hue(self, client, line):
+        # A metallic is excluded from hue (its hex lies) but stays in the value
+        # ladder — value is honest even for metals (spec §8.6).
         mk_paint(client, line, "R01", "Bold Red", "#C81E1E")
         mk_paint(client, line, "M01", "Gunmetal", "#5A5A5A", finish="metallic")
 
         body = post_match(client, solid_png((90, 90, 90)), k=1).json()
         region = body["regions"][0]
 
-        value_names = {c["name"] for c in region["value_candidates"]}
         hue_names = {c["name"] for c in region["hue_candidates"]}
-        assert "Gunmetal" in value_names
+        assert "Gunmetal" in ladder_names(region)
         assert "Gunmetal" not in hue_names  # metallic never hue-ranked
-        assert region["value_candidates"][0]["delta_e"] is None
 
     def test_inks_surface_as_glaze_options_only(self, client, line):
         mk_paint(client, line, "R01", "Bold Red", "#C81E1E")
@@ -108,10 +112,9 @@ class TestMatching:
 
         glaze_names = {c["name"] for c in region["glaze_options"]}
         hue_names = {c["name"] for c in region["hue_candidates"]}
-        value_names = {c["name"] for c in region["value_candidates"]}
         assert "Red Shade" in glaze_names
         assert "Red Shade" not in hue_names
-        assert "Red Shade" not in value_names
+        assert "Red Shade" not in ladder_names(region)
 
     def test_k_controls_region_count(self, client, line):
         mk_paint(client, line, "R01", "Bold Red", "#C81E1E")
@@ -146,43 +149,56 @@ class TestMatching:
 
 
 # ---------------------------------------------------------------------------
-# Value-match hue family gate (#561 review)
+# Value-ladder hue family gate (#561 review / #569)
 # ---------------------------------------------------------------------------
 
 class TestValueHueFamily:
-    def test_offhue_chromatic_paint_excluded_from_value(self, client, line):
-        # A green region must not offer a red as a "value match", but a same-hue
-        # green at a different value should still appear.
+    def test_offhue_chromatic_paint_excluded_from_ladder(self, client, line):
+        # A green region must not offer a red in its ladder, but a same-hue green
+        # at a different value should appear.
         mk_paint(client, line, "R01", "Bold Red", "#C81E1E")       # off-hue
         mk_paint(client, line, "G01", "Deep Green", "#0F5A14")     # same family
 
-        body = post_match(client, solid_png((40, 170, 60)), k=1).json()
-        value_names = {c["name"] for c in body["regions"][0]["value_candidates"]}
-        assert "Deep Green" in value_names
-        assert "Bold Red" not in value_names
+        region = post_match(client, solid_png((40, 170, 60)), k=1).json()["regions"][0]
+        assert "Deep Green" in ladder_names(region)
+        assert "Bold Red" not in ladder_names(region)
 
     def test_metallic_kept_regardless_of_hue(self, client, line):
         # Metallics are value-only by design — hue gate must not drop them.
         mk_paint(client, line, "M01", "Warm Steel", "#9A6A50", finish="metallic")
 
-        body = post_match(client, solid_png((40, 170, 60)), k=1).json()
-        value_names = {c["name"] for c in body["regions"][0]["value_candidates"]}
-        assert "Warm Steel" in value_names
+        region = post_match(client, solid_png((40, 170, 60)), k=1).json()["regions"][0]
+        assert "Warm Steel" in ladder_names(region)
 
     def test_neutral_paint_kept_regardless_of_hue(self, client, line):
         mk_paint(client, line, "GY1", "Neutral Grey", "#808080")
 
-        body = post_match(client, solid_png((40, 170, 60)), k=1).json()
-        value_names = {c["name"] for c in body["regions"][0]["value_candidates"]}
-        assert "Neutral Grey" in value_names
+        region = post_match(client, solid_png((40, 170, 60)), k=1).json()["regions"][0]
+        assert "Neutral Grey" in ladder_names(region)
 
     def test_neutral_region_keeps_all_hues(self, client, line):
         # A grey region has no meaningful hue → full value ladder, any hue.
         mk_paint(client, line, "R01", "Bold Red", "#C81E1E")
 
-        body = post_match(client, solid_png((130, 130, 130)), k=1).json()
-        value_names = {c["name"] for c in body["regions"][0]["value_candidates"]}
-        assert "Bold Red" in value_names
+        region = post_match(client, solid_png((130, 130, 130)), k=1).json()["regions"][0]
+        assert "Bold Red" in ladder_names(region)
+
+
+class TestValueLadder:
+    """The ladder splits the family into shadow → mid → highlight (#569)."""
+
+    def test_shadow_mid_highlight_ordering(self, client, line):
+        # Three greens at distinct values; sampling the mid green should place the
+        # dark one in shadow, the bright one in highlight, the match in mid.
+        mk_paint(client, line, "G_S", "Dark Camo Green", "#14320F")
+        mk_paint(client, line, "G_M", "Green", "#2E8B2E")
+        mk_paint(client, line, "G_H", "Bright Yellow Green", "#9ACD32")
+
+        region = post_match(client, solid_png((0x2E, 0x8B, 0x2E)), k=1).json()["regions"][0]
+        lad = region["ladder"]
+        assert "Dark Camo Green" in {c["name"] for c in lad["shadow"]}
+        assert "Green" in {c["name"] for c in lad["mid"]}
+        assert "Bright Yellow Green" in {c["name"] for c in lad["highlight"]}
 
 
 # ---------------------------------------------------------------------------

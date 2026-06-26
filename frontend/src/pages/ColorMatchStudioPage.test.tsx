@@ -12,12 +12,22 @@ const matchResult = {
       lab: [40, 60, 50] as [number, number, number],
       value_l: 40,
       weight: 0.6,
-      value_candidates: [
-        { paint_id: 1, code: "R01", name: "Bold Red", brand: "Pro Acryl", line: "Std",
-          hex: "#C81E1E", finish: "matte", delta_l: 1.2, delta_e: 1.5, band: "very_close" as const },
-        { paint_id: 2, code: "M01", name: "Gunmetal", brand: "Pro Acryl", line: "Std",
-          hex: "#5A5A5A", finish: "metallic", delta_l: 3.0, delta_e: null, band: "close" as const },
-      ],
+      ladder: {
+        shadow: [
+          { paint_id: 4, code: "D01", name: "Dark Camo Green", brand: "Pro Acryl", line: "Std",
+            hex: "#14320F", finish: "matte", delta_l: 20.0, delta_e: 18.0, band: "loose" as const },
+        ],
+        mid: [
+          { paint_id: 1, code: "R01", name: "Bold Red", brand: "Pro Acryl", line: "Std",
+            hex: "#C81E1E", finish: "matte", delta_l: 1.2, delta_e: 1.5, band: "very_close" as const },
+          { paint_id: 2, code: "M01", name: "Gunmetal", brand: "Pro Acryl", line: "Std",
+            hex: "#5A5A5A", finish: "metallic", delta_l: 3.0, delta_e: null, band: "close" as const },
+        ],
+        highlight: [
+          { paint_id: 5, code: "H01", name: "Bright Yellow Green", brand: "Pro Acryl", line: "Std",
+            hex: "#9ACD32", finish: "matte", delta_l: 24.0, delta_e: 22.0, band: "loose" as const },
+        ],
+      },
       hue_candidates: [
         { paint_id: 1, code: "R01", name: "Bold Red", brand: "Pro Acryl", line: "Std",
           hex: "#C81E1E", finish: "matte", delta_l: 1.2, delta_e: 1.5, band: "very_close" as const },
@@ -76,13 +86,16 @@ describe("ColorMatchStudioPage", () => {
     expect(await screen.findByTestId("colormatch-region")).toBeInTheDocument();
     expect(colorMatch).toHaveBeenCalledOnce();
 
-    // Section headings + the value-first lead.
-    expect(screen.getByText("Value match")).toBeInTheDocument();
+    // Value ladder (shadow → mid → highlight) leads, then hue + glaze.
+    expect(screen.getAllByText("Value ladder").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Shadow").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Highlight").length).toBeGreaterThan(0);
     expect(screen.getByText("Hue match")).toBeInTheDocument();
     expect(screen.getByText("Glazes & washes")).toBeInTheDocument();
 
-    // Candidates by class: metallic only in value, ink only in glaze.
-    expect(screen.getAllByText("Bold Red").length).toBeGreaterThan(0);
+    // Ladder + glaze contents: ramp ends + metallic in mid, ink in glaze.
+    expect(screen.getByText("Dark Camo Green")).toBeInTheDocument();
+    expect(screen.getByText("Bright Yellow Green")).toBeInTheDocument();
     expect(screen.getByText("Gunmetal")).toBeInTheDocument();
     expect(screen.getByText("Red Shade")).toBeInTheDocument();
   });

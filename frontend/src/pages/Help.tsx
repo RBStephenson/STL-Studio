@@ -608,9 +608,10 @@ const SECTIONS: Section[] = [
         </p>
         <p>
           It leads with <strong>value</strong>, then hue. For each sampled color you
-          get a <strong>Value match</strong> (paints at the same lightness, gated to a
-          similar hue so a red never shows up for a green, and always including
-          metallics), a <strong>Hue match</strong> (opaque paints ranked by ΔE2000),
+          get a <strong>Value ladder</strong> — a <strong>shadow → mid → highlight</strong>{" "}
+          ramp in the same hue family, anchored on the sampled mid-tone (Dark Camo
+          Green → Green → Bright Yellow-Green), so the steps read as a cohesive
+          recipe. Then a <strong>Hue match</strong> (opaque paints ranked by ΔE2000),
           and a labelled <strong>Glaze / wash</strong> list for transparents. Every
           suggestion carries a confidence band (<em>very close</em>, <em>confirm</em>,
           <em> family</em>, <em>loose</em>) — these are starting points to{" "}

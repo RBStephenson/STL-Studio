@@ -435,10 +435,11 @@ The **Color match** button on the Paint Shelf opens a studio that suggests
 paints from your shelf to match a reference photo (a render, box art, or a
 painted mini).
 
-- **Value-first.** For each sampled color you get a **Value match** (paints at
-  the same lightness — gated to a similar hue so a red never shows up for a
-  green, and always including metallics), a **Hue match** (opaque paints ranked
-  by ΔE2000), and a labelled **Glaze / wash** list for transparents. Every
+- **Value-first.** For each sampled color you get a **Value ladder** — a
+  **shadow → mid → highlight** ramp in the same hue family, anchored on the
+  sampled mid-tone (Dark Camo Green → Green → Bright Yellow-Green) so the steps
+  read as a cohesive recipe — then a **Hue match** (opaque paints ranked by
+  ΔE2000), and a labelled **Glaze / wash** list for transparents. Every
   suggestion carries a confidence band (*very close*, *confirm*, *family*,
   *loose*) — suggestions to **confirm by eye**, never auto-applied.
 - **Eyedropper.** Click anywhere on the preview to match that exact spot —
