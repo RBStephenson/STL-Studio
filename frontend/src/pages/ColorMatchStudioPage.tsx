@@ -181,18 +181,24 @@ export default function ColorMatchStudioPage() {
           )}
 
           {result && (
-            <button
-              type="button"
-              onClick={() => setValueMode((v) => !v)}
-              aria-pressed={valueMode}
-              className={`inline-flex items-center gap-1.5 text-xs rounded px-2.5 py-1.5 border ${
-                valueMode
-                  ? "border-indigo-600 text-indigo-300 bg-indigo-950/30"
-                  : "border-gray-700 text-gray-300 hover:border-indigo-600"
-              }`}
-            >
-              <Eye size={13} /> Value mode {valueMode ? "on" : "off"}
-            </button>
+            <div className="space-y-1">
+              <button
+                type="button"
+                onClick={() => setValueMode((v) => !v)}
+                aria-pressed={valueMode}
+                title="Desaturate the reference image and region swatches so you can read their values. Paint chips stay in color."
+                className={`inline-flex items-center gap-1.5 text-xs rounded px-2.5 py-1.5 border ${
+                  valueMode
+                    ? "border-indigo-600 text-indigo-300 bg-indigo-950/30"
+                    : "border-gray-700 text-gray-300 hover:border-indigo-600"
+                }`}
+              >
+                <Eye size={13} /> Value mode {valueMode ? "on" : "off"}
+              </button>
+              <p className="text-[11px] text-gray-600 leading-snug">
+                Greys out the reference so you can read its values; paint chips stay in color.
+              </p>
+            </div>
           )}
         </div>
 
