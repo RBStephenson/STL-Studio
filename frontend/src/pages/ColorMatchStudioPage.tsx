@@ -35,15 +35,15 @@ function BandPill({ band }: { band: ColorBand }) {
 
 /** One suggested paint. `metric` picks which distance to show (ΔE for hue, ΔL* for value). */
 function CandidateRow({
-  c, metric, grayscale,
-}: { c: ColorMatchCandidate; metric: "delta_e" | "delta_l"; grayscale: boolean }) {
+  c, metric,
+}: { c: ColorMatchCandidate; metric: "delta_e" | "delta_l" }) {
   const value = metric === "delta_e" ? c.delta_e : c.delta_l;
   const label = metric === "delta_e" ? "ΔE" : "ΔL*";
   return (
     <li className="flex items-center gap-2 py-1">
-      <span style={grayscale ? { filter: "grayscale(1)" } : undefined}>
-        <ColorChip hex={c.hex} size={18} />
-      </span>
+      {/* Paint chips always show true color — you're picking real paint. Value
+          mode only desaturates the reference preview + region swatch. */}
+      <ColorChip hex={c.hex} size={18} />
       <span className="text-sm text-gray-200 truncate">{c.name}</span>
       <span className="text-xs text-gray-500">{c.code}</span>
       <span className="text-xs text-gray-600 truncate hidden sm:inline">
@@ -60,12 +60,11 @@ function CandidateRow({
 }
 
 function CandidateList({
-  title, items, metric, grayscale, hint,
+  title, items, metric, hint,
 }: {
   title: string;
   items: ColorMatchCandidate[];
   metric: "delta_e" | "delta_l";
-  grayscale: boolean;
   hint?: string;
 }) {
   return (
@@ -79,7 +78,7 @@ function CandidateList({
       ) : (
         <ul className="divide-y divide-gray-800/60">
           {items.map((c) => (
-            <CandidateRow key={c.paint_id} c={c} metric={metric} grayscale={grayscale} />
+            <CandidateRow key={c.paint_id} c={c} metric={metric} />
           ))}
         </ul>
       )}
@@ -233,20 +232,19 @@ export default function ColorMatchStudioPage() {
                     </div>
                   </header>
 
-                  {/* Value-first ordering per spec §8.6; toggle only changes swatch rendering. */}
+                  {/* Value-first ordering per spec §8.6. Paint chips stay in true
+                      color; value mode only desaturates the preview + region swatch. */}
                   <CandidateList
                     title="Value match"
                     hint="ranked by L* — includes metallics"
                     items={r.value_candidates}
                     metric="delta_l"
-                    grayscale={valueMode}
                   />
                   <CandidateList
                     title="Hue match"
                     hint="opaque paints, ΔE2000"
                     items={r.hue_candidates}
                     metric="delta_e"
-                    grayscale={valueMode}
                   />
                   {r.glaze_options.length > 0 && (
                     <div className="pt-1">
@@ -257,7 +255,6 @@ export default function ColorMatchStudioPage() {
                         title="Glazes & washes"
                         items={r.glaze_options}
                         metric="delta_e"
-                        grayscale={valueMode}
                       />
                     </div>
                   )}
