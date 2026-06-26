@@ -89,6 +89,14 @@ def _num_token(s: Optional[str]) -> Optional[str]:
     return m.group(1).lstrip("0") or "0"
 
 
+def _strip_decimal_zeros(s: str) -> str:
+    """'77.720' -> '77.72', '77.700' -> '77.7', '17' -> '17'.
+    Normalises trailing zeros PaintRack drops on CSV export."""
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
+
+
 def make_db_resolver(db: Session) -> PaintResolver:
     """Resolve a swatch display string ('Coal Black 002' / 'P-002 Black Primer')
     to a Paint id (#334). The name/code split is lossy (spec §9.6), and real
@@ -159,11 +167,18 @@ def make_db_resolver(db: Session) -> PaintResolver:
         codes are excluded — a bare number collides with the per-line numbering
         guides use ('Burnt Umber 018'); a distinctive code (dots/letters) is a
         strong, near-unique key, so this also bridges brand drift like Vallejo
-        Metal Color. Requires a unique hit."""
+        Metal Color. Requires a unique hit.
+
+        Trailing-zero normalisation: '77.720' in the swatch matches shelf code
+        '77.72' (PaintRack strips trailing zeros on import)."""
+        norm_tokens = {_strip_decimal_zeros(t) for t in ws_tokens}
         hits = {
             pid
             for pid, _n, code, _b, _l, _nt, _cn in rows_
-            if code and not code.isdigit() and code.lower() in ws_tokens
+            if code and not code.isdigit() and (
+                code.lower() in ws_tokens
+                or _strip_decimal_zeros(code.lower()) in norm_tokens
+            )
         }
         return next(iter(hits)) if len(hits) == 1 else None
 

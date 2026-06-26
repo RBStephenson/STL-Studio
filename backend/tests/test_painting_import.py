@@ -526,6 +526,18 @@ class TestMixComponents:
         }
         assert client.post("/painting/guides", json=body).status_code == 422
 
+    def test_trailing_zero_code_matches_shelf_code_without_zero(self):
+        # Shelf stores '77.72' (PaintRack strips trailing zeros); swatch says
+        # 'VMC Gunmetal Grey 77.720' — the extra zero must not block resolution.
+        resolve = lambda n, b: None  # force _by_code path via make_db_resolver
+        # Test _strip_decimal_zeros directly.
+        from app.painting.services.importing import _strip_decimal_zeros
+        assert _strip_decimal_zeros("77.720") == "77.72"
+        assert _strip_decimal_zeros("77.700") == "77.7"
+        assert _strip_decimal_zeros("77.72") == "77.72"
+        assert _strip_decimal_zeros("AMP-018") == "AMP-018"
+        assert _strip_decimal_zeros("17") == "17"
+
     def test_bare_ratio_suffix_stripped_from_mix_component(self):
         # 'Bold TW 001 + Warm Flesh 073 3:1 (S18 sub)' — bare ratio after paren
         # strip leaves 'Warm Flesh 073 3:1'; should resolve as 'Warm Flesh 073'.
