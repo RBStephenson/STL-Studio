@@ -16,6 +16,8 @@ from app.schemas import (
     AiSettingsRead,
     AppSettingsRead,
     AppSettingsUpdate,
+    CultsCredentialsUpdate,
+    CultsSettingsRead,
     EnvReloadResult,
     FilterPreset,
 )
@@ -147,3 +149,27 @@ def set_ai_key(body: AiKeyUpdate, db: Session = Depends(get_db)):
 def clear_ai_key(db: Session = Depends(get_db)):
     secrets.clear_ai_api_key(db)
     return _ai_settings(db)
+
+
+# --- Cults3D settings (#578) ----------------------------------------------
+
+def _cults_settings(db: Session) -> CultsSettingsRead:
+    hint = secrets.cults_credentials_hint(db)
+    return CultsSettingsRead(credentials_set=hint is not None, hint=hint)
+
+
+@router.get("/cults", response_model=CultsSettingsRead)
+def get_cults_settings(db: Session = Depends(get_db)):
+    return _cults_settings(db)
+
+
+@router.put("/cults/credentials", response_model=CultsSettingsRead)
+def set_cults_credentials(body: CultsCredentialsUpdate, db: Session = Depends(get_db)):
+    secrets.set_cults_credentials(db, body.username, body.api_key)
+    return _cults_settings(db)
+
+
+@router.delete("/cults/credentials", response_model=CultsSettingsRead)
+def clear_cults_credentials(db: Session = Depends(get_db)):
+    secrets.clear_cults_credentials(db)
+    return _cults_settings(db)

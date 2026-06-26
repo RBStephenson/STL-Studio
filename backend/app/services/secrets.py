@@ -121,3 +121,56 @@ def ai_api_key_hint(db: Session) -> str | None:
         return None
     tail = key[-4:] if len(key) >= 4 else key
     return f"…{tail}"
+
+
+# --- Cults3D credentials (#578) -------------------------------------------
+# Stored as a single encrypted blob: "username\x00apikey" (null-byte separator
+# so neither field can contain the delimiter accidentally).
+
+CULTS_CREDS_ENC = "cults_credentials_enc"
+
+
+def set_cults_credentials(db: Session, username: str, api_key: str) -> None:
+    """Encrypt and persist Cults3D username + API key. Blank clears both."""
+    username, api_key = username.strip(), api_key.strip()
+    if not username or not api_key:
+        clear_cults_credentials(db)
+        return
+    blob = f"{username}\x00{api_key}"
+    token = _get_fernet().encrypt(blob.encode()).decode()
+    row = db.get(AppSetting, CULTS_CREDS_ENC)
+    if row is None:
+        db.add(AppSetting(key=CULTS_CREDS_ENC, value=token))
+    else:
+        row.value = token
+    db.commit()
+
+
+def get_cults_credentials(db: Session) -> tuple[str, str] | None:
+    """Return (username, api_key) or None if unset/undecryptable."""
+    row = db.get(AppSetting, CULTS_CREDS_ENC)
+    if row is None or not isinstance(row.value, str):
+        return None
+    try:
+        blob = _get_fernet().decrypt(row.value.encode()).decode()
+        username, api_key = blob.split("\x00", 1)
+        return username, api_key
+    except (InvalidToken, ValueError):
+        return None
+
+
+def clear_cults_credentials(db: Session) -> None:
+    row = db.get(AppSetting, CULTS_CREDS_ENC)
+    if row is not None:
+        db.delete(row)
+        db.commit()
+
+
+def cults_credentials_hint(db: Session) -> str | None:
+    """Masked hint: `rbstephenson / …wxyz`."""
+    creds = get_cults_credentials(db)
+    if not creds:
+        return None
+    username, api_key = creds
+    tail = api_key[-4:] if len(api_key) >= 4 else api_key
+    return f"{username} / …{tail}"
