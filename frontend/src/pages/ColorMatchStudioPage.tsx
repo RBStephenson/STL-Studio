@@ -35,15 +35,15 @@ function BandPill({ band }: { band: ColorBand }) {
 
 /** One suggested paint. `metric` picks which distance to show (ΔE for hue, ΔL* for value). */
 function CandidateRow({
-  c, metric,
-}: { c: ColorMatchCandidate; metric: "delta_e" | "delta_l" }) {
+  c, metric, grayscale,
+}: { c: ColorMatchCandidate; metric: "delta_e" | "delta_l"; grayscale: boolean }) {
   const value = metric === "delta_e" ? c.delta_e : c.delta_l;
   const label = metric === "delta_e" ? "ΔE" : "ΔL*";
   return (
     <li className="flex items-center gap-2 py-1">
-      {/* Paint chips always show true color — you're picking real paint. Value
-          mode only desaturates the reference preview + region swatch. */}
-      <ColorChip hex={c.hex} size={18} />
+      <span style={grayscale ? { filter: "grayscale(1)" } : undefined}>
+        <ColorChip hex={c.hex} size={18} />
+      </span>
       <span className="text-sm text-gray-200 truncate">{c.name}</span>
       <span className="text-xs text-gray-500">{c.code}</span>
       <span className="text-xs text-gray-600 truncate hidden sm:inline">
@@ -60,11 +60,12 @@ function CandidateRow({
 }
 
 function CandidateList({
-  title, items, metric, hint,
+  title, items, metric, grayscale, hint,
 }: {
   title: string;
   items: ColorMatchCandidate[];
   metric: "delta_e" | "delta_l";
+  grayscale: boolean;
   hint?: string;
 }) {
   return (
@@ -78,7 +79,7 @@ function CandidateList({
       ) : (
         <ul className="divide-y divide-gray-800/60">
           {items.map((c) => (
-            <CandidateRow key={c.paint_id} c={c} metric={metric} />
+            <CandidateRow key={c.paint_id} c={c} metric={metric} grayscale={grayscale} />
           ))}
         </ul>
       )}
@@ -186,7 +187,7 @@ export default function ColorMatchStudioPage() {
                 type="button"
                 onClick={() => setValueMode((v) => !v)}
                 aria-pressed={valueMode}
-                title="Desaturate the reference image and region swatches so you can read their values. Paint chips stay in color."
+                title="Desaturate everything — the reference, region swatches, and paint chips — so the whole view reads as values. Turn off to compare hues in full color."
                 className={`inline-flex items-center gap-1.5 text-xs rounded px-2.5 py-1.5 border ${
                   valueMode
                     ? "border-indigo-600 text-indigo-300 bg-indigo-950/30"
@@ -196,7 +197,7 @@ export default function ColorMatchStudioPage() {
                 <Eye size={13} /> Value mode {valueMode ? "on" : "off"}
               </button>
               <p className="text-[11px] text-gray-600 leading-snug">
-                Greys out the reference so you can read its values; paint chips stay in color.
+                Greys everything out so you can read values; turn off to compare hues in color.
               </p>
             </div>
           )}
@@ -238,19 +239,22 @@ export default function ColorMatchStudioPage() {
                     </div>
                   </header>
 
-                  {/* Value-first ordering per spec §8.6. Paint chips stay in true
-                      color; value mode only desaturates the preview + region swatch. */}
+                  {/* Value-first ordering per spec §8.6. Value mode desaturates
+                      every swatch (preview, region, and paint chips) so the whole
+                      view reads as values. */}
                   <CandidateList
                     title="Value match"
                     hint="ranked by L* — includes metallics"
                     items={r.value_candidates}
                     metric="delta_l"
+                    grayscale={valueMode}
                   />
                   <CandidateList
                     title="Hue match"
                     hint="opaque paints, ΔE2000"
                     items={r.hue_candidates}
                     metric="delta_e"
+                    grayscale={valueMode}
                   />
                   {r.glaze_options.length > 0 && (
                     <div className="pt-1">
@@ -261,6 +265,7 @@ export default function ColorMatchStudioPage() {
                         title="Glazes & washes"
                         items={r.glaze_options}
                         metric="delta_e"
+                        grayscale={valueMode}
                       />
                     </div>
                   )}
