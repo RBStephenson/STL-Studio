@@ -802,13 +802,22 @@ class ColorMatchCandidate(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ColorMatchLadder(BaseModel):
+    """Shadow → mid → highlight value ramp within the sampled hue family (#569)."""
+    shadow: list[ColorMatchCandidate]
+    mid: list[ColorMatchCandidate]
+    highlight: list[ColorMatchCandidate]
+
+    model_config = {"from_attributes": True}
+
+
 class ColorMatchRegion(BaseModel):
     """A k-means region of the reference image with its paint suggestions."""
     hex: str
     lab: tuple[float, float, float]
     value_l: float
     weight: float
-    value_candidates: list[ColorMatchCandidate]
+    ladder: ColorMatchLadder
     hue_candidates: list[ColorMatchCandidate]
     glaze_options: list[ColorMatchCandidate]
 

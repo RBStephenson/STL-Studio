@@ -61,6 +61,13 @@ _KMEANS_SEED = 0  # fixed → deterministic palette for a given image
 _NEUTRAL_CHROMA = 12.0      # C* below this = treat as neutral (hue unreliable)
 _VALUE_HUE_TOL_DEG = 40.0   # max hue-angle gap for a chromatic value match
 
+# Value ladder (#569): the hue-family pool is split into a shadow → mid →
+# highlight ramp around the sampled anchor, so suggestions read as a cohesive
+# recipe (Dark Camo Green → Green → Bright Yellow-Green) rather than a flat list.
+_LADDER_MID_BAND = 8.0      # |ΔL*| within this of the anchor = the mid slot
+_LADDER_TARGET_STEP = 22.0  # preferred ΔL* for a shadow / highlight step
+_LADDER_STEP_W = 0.4        # weight of value-step fit vs hue cohesion in ranking
+
 # Background exclusion for the auto palette: the backdrop is the single largest
 # area in most product shots and would otherwise eat a region. Estimate it from
 # the image corners and drop pixels close to it before clustering.
@@ -94,6 +101,15 @@ class Candidate:
 
 
 @dataclass(frozen=True)
+class ValueLadder:
+    """A hue-cohesive value ramp around the sampled anchor (#569)."""
+
+    shadow: list[Candidate] = field(default_factory=list)
+    mid: list[Candidate] = field(default_factory=list)      # closest to the anchor
+    highlight: list[Candidate] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class RegionMatch:
     """One k-means region of the reference image with its paint suggestions."""
 
@@ -101,7 +117,7 @@ class RegionMatch:
     lab: tuple[float, float, float]
     value_l: float                 # L* of the region (0..100)
     weight: float                  # fraction of sampled pixels in this cluster
-    value_candidates: list[Candidate] = field(default_factory=list)
+    ladder: ValueLadder = field(default_factory=ValueLadder)
     hue_candidates: list[Candidate] = field(default_factory=list)
     glaze_options: list[Candidate] = field(default_factory=list)
 
@@ -300,21 +316,65 @@ def _candidate(paint: Paint, region_lab: np.ndarray, paint_lab, *, hue: bool) ->
     )
 
 
+def _hue_dist(a, b) -> float:
+    """Circular hue-angle gap (degrees) between two Lab colours."""
+    d = abs(_hue_deg(a) - _hue_deg(b))
+    return min(d, 360.0 - d)
+
+
+def _value_ladder(
+    anchor: np.ndarray,
+    paints_lab: list[tuple[Paint, tuple[float, float, float]]],
+    top_n: int,
+) -> ValueLadder:
+    """Build a shadow → mid → highlight ramp from the hue-family pool (#569).
+
+    The pool is the same hue-gated set as the flat value match (so metallics and
+    neutrals stay in), but split by L* around the anchor: paints darker than the
+    sample feed the shadow slot, lighter ones the highlight, and those near it
+    the mid. Shadow/highlight are ranked for hue cohesion first (a near-neutral
+    fits any family) then for a clean value step; the mid by closeness (ΔE).
+    """
+    anchor_neutral = _chroma(anchor) < _NEUTRAL_CHROMA
+
+    def cohesion(lab) -> float:
+        # Neutrals read as in-family at any hue, so don't penalise them.
+        if anchor_neutral or _chroma(lab) < _NEUTRAL_CHROMA:
+            return 0.0
+        return _hue_dist(anchor, lab)
+
+    a_l = float(anchor[0])
+    shadow: list[tuple[Candidate, float]] = []
+    mid: list[tuple[Candidate, float]] = []
+    high: list[tuple[Candidate, float]] = []
+    for p, lab in paints_lab:
+        if not _in_value_family(anchor, lab, p.finish):
+            continue
+        dl = float(lab[0]) - a_l
+        cand = _candidate(p, anchor, lab, hue=True)
+        step_fit = abs(abs(dl) - _LADDER_TARGET_STEP)
+        rank = cohesion(lab) + _LADDER_STEP_W * step_fit
+        if dl < -_LADDER_MID_BAND:
+            shadow.append((cand, rank))
+        elif dl > _LADDER_MID_BAND:
+            high.append((cand, rank))
+        else:
+            mid.append((cand, cand.delta_e if cand.delta_e is not None else 0.0))
+
+    shadow.sort(key=lambda x: x[1])
+    high.sort(key=lambda x: x[1])
+    mid.sort(key=lambda x: x[1])
+    take = lambda lst: [c for c, _ in lst[:top_n]]
+    return ValueLadder(shadow=take(shadow), mid=take(mid), highlight=take(high))
+
+
 def _rank_region(
     region_lab: np.ndarray,
     paints_lab: list[tuple[Paint, tuple[float, float, float]]],
     glazes_lab: list[tuple[Paint, tuple[float, float, float]]],
     top_n: int,
-) -> tuple[list[Candidate], list[Candidate], list[Candidate]]:
-    # Value: paints at this L*, ranked by |ΔL*|. Gated to the region's hue family
-    # so a same-value but off-hue paint isn't offered as a misleading match;
-    # metallics and neutrals stay in (hue-less by nature). See _in_value_family.
-    value = [
-        _candidate(p, region_lab, lab, hue=False)
-        for p, lab in paints_lab
-        if _in_value_family(region_lab, lab, p.finish)
-    ]
-    value.sort(key=lambda c: c.delta_l)
+) -> tuple[ValueLadder, list[Candidate], list[Candidate]]:
+    ladder = _value_ladder(region_lab, paints_lab, top_n)
 
     # Hue: owned AND matchable only, ranked by CIEDE2000.
     hue = [
@@ -329,7 +389,7 @@ def _rank_region(
     glaze = [_candidate(p, region_lab, lab, hue=True) for p, lab in glazes_lab]
     glaze.sort(key=lambda c: c.delta_e)
 
-    return value[:top_n], hue[:top_n], glaze[:top_n]
+    return ladder, hue[:top_n], glaze[:top_n]
 
 
 PaintPool = tuple[
@@ -366,14 +426,14 @@ def _region_from_lab(
     centroid: np.ndarray, weight: float, pools: PaintPool, top_n: int,
 ) -> RegionMatch:
     paints_lab, glazes_lab = pools
-    value, hue, glaze = _rank_region(centroid, paints_lab, glazes_lab, top_n)
+    ladder, hue, glaze = _rank_region(centroid, paints_lab, glazes_lab, top_n)
     return RegionMatch(
         hex=_lab_to_hex(centroid),
         lab=(round(float(centroid[0]), 2), round(float(centroid[1]), 2),
              round(float(centroid[2]), 2)),
         value_l=round(float(centroid[0]), 2),
         weight=round(weight, 4),
-        value_candidates=value,
+        ladder=ladder,
         hue_candidates=hue,
         glaze_options=glaze,
     )
