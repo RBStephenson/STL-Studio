@@ -30,7 +30,7 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          STL Library catalogues the 3D-model files already on your drives. It never
+          STL Studio catalogues the 3D-model files already on your drives. It never
           downloads or moves anything — it reads your folders, builds a searchable index,
           and lets you browse, tag, preview, and plan prints.
         </p>
@@ -494,7 +494,7 @@ const SECTIONS: Section[] = [
         <p>
           The import/export uses the CSV format from{" "}
           <a href="https://www.courageousoctopus.com/" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 underline">PaintRack</a>{" "}
-          by Courageous Octopus — a great paint-inventory app. STL Library isn't
+          by Courageous Octopus — a great paint-inventory app. STL Studio isn't
           affiliated with it; we just interoperate with its export.
         </p>
         <p>If you track paints in <strong>PaintRack</strong>, import its CSV export directly:</p>
@@ -856,14 +856,14 @@ const SECTIONS: Section[] = [
     icon: Heart,
     body: (
       <>
-        <p className="font-medium text-gray-200">Like STL Library?</p>
+        <p className="font-medium text-gray-200">Like STL Studio?</p>
         <p>
-          STL Library started because I had a problem: way too many STL files and no good
+          STL Studio started because I had a problem: way too many STL files and no good
           way to keep track of them all. What began as a personal tool turned into something
           I thought other makers, painters, gamers, and hobbyists might find useful too.
         </p>
         <p>
-          If STL Library has helped you organize your collection, rediscover forgotten
+          If STL Studio has helped you organize your collection, rediscover forgotten
           models, or simply spend less time hunting through folders, please consider
           supporting the project through{" "}
           <a href="https://www.patreon.com/BrentStephenson" target="_blank" rel="noreferrer">Patreon</a> or{" "}
@@ -875,7 +875,7 @@ const SECTIONS: Section[] = [
           development, creativity, and caregiving.
         </p>
         <p>
-          There's absolutely no obligation—STL Library is, and will remain, a passion
+          There's absolutely no obligation—STL Studio is, and will remain, a passion
           project. But every bit of support is deeply appreciated and helps me continue
           building tools and content for the community.
         </p>
@@ -949,7 +949,7 @@ export default function Help() {
         <header className="mb-10">
           <h1 className="text-3xl font-bold text-white mb-2">Help &amp; Guide</h1>
           <p className="text-gray-500">
-            How every part of STL Library works. Jump to a topic on the left, or scroll through.
+            How every part of STL Studio works. Jump to a topic on the left, or scroll through.
           </p>
         </header>
 

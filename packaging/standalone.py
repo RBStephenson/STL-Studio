@@ -1,5 +1,5 @@
 """
-Standalone entry point for STL Library.
+Standalone entry point for STL Studio.
 
 Serves the FastAPI backend + the pre-built Vite frontend in a single process.
 All API routes are mounted under /api to match the frontend's BASE = "/api".
@@ -133,7 +133,7 @@ def run() -> None:
     _configure_env(data_dir)
 
     url = f"http://localhost:{PORT}"
-    print(f"STL Library running at {url}")
+    print(f"STL Studio running at {url}")
     print(f"Data stored in: {data_dir}")
 
     webview = None
@@ -161,7 +161,7 @@ def run() -> None:
         threading.Event().wait()
         return
     try:
-        webview.create_window("STL Library", url, width=1400, height=900)
+        webview.create_window("STL Studio", url, width=1400, height=900)
         webview.start()
     except Exception as exc:  # no usable GUI backend — degrade to the browser
         print(f"Native window unavailable ({exc}); opening browser instead.")

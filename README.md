@@ -1,4 +1,4 @@
-# STL Library
+# STL Studio
 
 [![Release](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml)
 [![Build Check](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml)
@@ -14,7 +14,7 @@
 
 Local web app for cataloguing, browsing, and managing an STL file library.
 
-📖 **User documentation:** the **[STL Library Wiki](https://github.com/RBStephenson/STL-Inventory/wiki)** is the canonical user guide.
+📖 **User documentation:** the **[STL Studio Wiki](https://github.com/RBStephenson/STL-Inventory/wiki)** is the canonical user guide.
 🗺️ **What's coming next:** [ROADMAP.md](ROADMAP.md)
 
 
@@ -235,14 +235,14 @@ Every PR to `main` runs **Build Check**, which compiles all three platform binar
 
 ## About & Support
 
-### Like STL Library?
+### Like STL Studio?
 
-STL Library started because I had a problem: way too many STL files and no good
+STL Studio started because I had a problem: way too many STL files and no good
 way to keep track of them all. What began as a personal tool turned into
 something I thought other makers, painters, gamers, and hobbyists might find
 useful too.
 
-If STL Library has helped you organize your collection, rediscover forgotten
+If STL Studio has helped you organize your collection, rediscover forgotten
 models, or simply spend less time hunting through folders, please consider
 supporting the project through
 [Patreon](https://www.patreon.com/BrentStephenson) or
@@ -252,7 +252,7 @@ Your support helps fund continued development, but it also helps keep resin in
 the printer, paint on the hobby desk, and supports my family as I balance
 software development, creativity, and caregiving.
 
-There's absolutely no obligation—STL Library is, and will remain, a passion
+There's absolutely no obligation—STL Studio is, and will remain, a passion
 project. But every bit of support is deeply appreciated and helps me continue
 building tools and content for the community.
 

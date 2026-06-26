@@ -429,7 +429,7 @@ export default function Settings() {
         Settings
         <HelpLink section="settings" label="About scan locations & data management" />
       </h1>
-      <p className="text-sm text-gray-500 mb-8">Manage the drives and folders that STL Library scans for models.</p>
+      <p className="text-sm text-gray-500 mb-8">Manage the drives and folders that STL Studio scans for models.</p>
 
       {/* Feedback */}
       {success && (
@@ -580,7 +580,7 @@ export default function Settings() {
         {/* How layouts work — example shown above the folder-layout input */}
         <div className="bg-gray-900/60 border border-gray-800 rounded-lg px-4 py-3 mt-4">
           <p className="text-xs text-gray-400 mb-2">
-            A <strong className="text-gray-300">layout</strong> tells STL Library how the folders
+            A <strong className="text-gray-300">layout</strong> tells STL Studio how the folders
             above each model map to a <span className="text-indigo-300">creator</span> and{" "}
             <span className="text-emerald-300">tags</span>. Read each path left to right, one folder
             per <code className="text-gray-500">/</code>:

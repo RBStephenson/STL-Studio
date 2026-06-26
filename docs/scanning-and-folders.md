@@ -1,6 +1,6 @@
 # Scanning & Folder Structure
 
-This explains how STL Library reads your library — useful if your models are
+This explains how STL Studio reads your library — useful if your models are
 laid out unusually or aren't being detected the way you'd expect.
 
 - [The folder layout it expects](#the-folder-layout-it-expects)

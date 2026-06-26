@@ -398,7 +398,7 @@ clear message instead of polluting the shelf.
 
 The Paint Shelf's import/export uses the CSV format from
 [**PaintRack**](https://www.courageousoctopus.com/) by Courageous Octopus — a
-great paint-inventory app. STL Library isn't affiliated with it; we just
+great paint-inventory app. STL Studio isn't affiliated with it; we just
 interoperate with its export so you can reuse a shelf you've already built.
 
 If you track paints in **PaintRack**, import its CSV export directly:
@@ -586,7 +586,7 @@ never modified.**
   way to recover your tags, favorites, and queue if something goes wrong.
 - **Restore from Backup…** — pick a previously downloaded `.db` file to replace
   your current library with it. The file is validated first (it must be a real
-  STL Library backup), and an older backup's schema is brought up to date
+  STL Studio backup), and an older backup's schema is brought up to date
   automatically.
 - **Delete All Data** — wipes the entire index back to empty. You'd then run a
   full scan to rebuild it.

@@ -356,7 +356,7 @@ export default function PaintShelfPage() {
         >
           PaintRack
         </a>{" "}
-        by Courageous Octopus — a great paint-inventory app. STL Library isn't affiliated with it.
+        by Courageous Octopus — a great paint-inventory app. STL Studio isn't affiliated with it.
       </p>
 
       <div ref={formRef} className="scroll-mt-4">

@@ -1,8 +1,8 @@
-# STL Library — Documentation
+# STL Studio — Documentation
 
 <!-- wiki-only:strip -->
 > ✏️ **This folder is the single source of truth for the user docs.** The
-> [STL Library Wiki](https://github.com/RBStephenson/STL-Inventory/wiki) is
+> [STL Studio Wiki](https://github.com/RBStephenson/STL-Inventory/wiki) is
 > **generated** from these files by `scripts/wiki/build_wiki.py` on every merge
 > to `main` — so edit Markdown here (via a PR), never on the wiki directly.
 > These same files also back the in-app **Help** page.
@@ -23,7 +23,7 @@ model library — search, filter, tag, preview in 3D, and plan your prints.
 
 ## What it does, in one paragraph
 
-Point STL Library at the folder(s) where your STL files live (your external
+Point STL Studio at the folder(s) where your STL files live (your external
 drives, a NAS, wherever). It walks the folders, detects each model, pulls in
 preview images and any metadata it can find, and builds a searchable library.
 From there you can filter by creator, scale, type, or tag; mark favorites;

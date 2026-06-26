@@ -269,13 +269,13 @@ def health():
 
 
 def create_app(api_prefix: str = "") -> FastAPI:
-    """Build the STL Library API app.
+    """Build the STL Studio API app.
 
     Single source of truth for routers, middleware, and startup migrations —
     used by both the Docker deployment (no prefix; nginx adds /api) and the
     standalone binary (api_prefix="/api", frontend served from the same app).
     """
-    app = FastAPI(title="STL Library", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="STL Studio", version="0.1.0", lifespan=lifespan)
 
     app.middleware("http")(_block_cross_origin_writes)
 
