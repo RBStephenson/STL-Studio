@@ -429,6 +429,27 @@ column (like real PaintRack exports) import exactly as before, and an **empty
 color cell never clears** a swatch you've already set — only a different,
 non-empty color shows up as a change in the preview.
 
+### Color-match studio
+
+The **Color match** button on the Paint Shelf opens a studio that suggests
+paints from your shelf to match a reference photo (a render, box art, or a
+painted mini).
+
+- **Value-first.** For each sampled color you get a **Value match** (paints at
+  the same lightness — gated to a similar hue so a red never shows up for a
+  green, and always including metallics), a **Hue match** (opaque paints ranked
+  by ΔE2000), and a labelled **Glaze / wash** list for transparents. Every
+  suggestion carries a confidence band (*very close*, *confirm*, *family*,
+  *loose*) — suggestions to **confirm by eye**, never auto-applied.
+- **Eyedropper.** Click anywhere on the preview to match that exact spot —
+  sample the skin, then the hair, then the leather, each with its own
+  suggestions. The **Palette overview** below is an automatic read of the whole
+  image, with the background excluded so the subject leads.
+- **Value mode** (on by default) greys the swatches so you can read values; turn
+  it off to compare hues in color.
+- Large photos are downscaled in the browser before upload, so even a phone shot
+  uploads instantly.
+
 ### Painting guides
 
 The **Guides** page lists your painting guides; open one to read it in-app. A

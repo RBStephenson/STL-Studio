@@ -135,6 +135,8 @@ The **Paint Shelf** is always available in the nav. Enabling **Settings → Pain
 
 **Paint Shelf** — paint inventory: search/filter by brand, line, finish, and owned state, with color chips for swatches. Per-line **code patterns** (regex) validate paint codes on entry. **CSV import/export in [PaintRack](https://www.courageousoctopus.com/) format** (by Courageous Octopus — not affiliated) with a diff preview (never a blind overwrite); optional `Color` column (`#RRGGBB`, `"rgb(r,g,b)"`, or `"hsv(h,s,v)"`) pre-populates swatches on import.
 
+**Color-match studio** — match a reference photo against your shelf. **Value-first** suggestions (paints at the same lightness, hue-gated so a red isn't offered for a green; metallics always included), a **hue** ranking (ΔE2000), and a labelled **glaze/wash** list, each with a confidence band — suggestions to confirm by eye, never auto-applied. **Eyedropper**: click the preview to sample a specific spot (skin, hair, leather), plus an automatic **palette overview** with the background excluded. Large photos are downscaled in-browser before upload.
+
 **Painting Guides** — step-by-step guides tied to your Paint Shelf:
 - **Author from scratch** — a guide-start wizard (title/scale/category, optional model link), then a structured editor for tabs, phases, steps, and swatches with drag-to-reorder at every level and a live preview pane.
 - Import an HTML guide file (click or drag-and-drop). Unresolved paints trigger a **Paint resolution** step — map each to a shelf paint, force-add it, or skip. Import stays disabled until *every* unresolved paint has a decision, so nothing is silently dropped; same-named paints from different brands resolve independently.

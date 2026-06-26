@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Tag, FolderSync, Inbox, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, type LucideIcon,
 } from "lucide-react";
 
 /** A keyboard key, styled like the hints elsewhere in the app. */
@@ -590,6 +590,44 @@ const SECTIONS: Section[] = [
           guide belongs to a <strong>series</strong>, <strong>Export series bundle</strong>{" "}
           renders every published guide in that series into one PDF with an optional
           cover page.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: "color-match",
+    title: "Color-match studio",
+    icon: Pipette,
+    body: (
+      <>
+        <p>
+          The <strong>Color-match studio</strong> (the <strong>Color match</strong>{" "}
+          button on the Paint Shelf) suggests paints from your shelf that match a
+          reference photo — drop in a render or a painted mini and it samples the
+          colors for you.
+        </p>
+        <p>
+          It leads with <strong>value</strong>, then hue. For each sampled color you
+          get a <strong>Value match</strong> (paints at the same lightness, gated to a
+          similar hue so a red never shows up for a green, and always including
+          metallics), a <strong>Hue match</strong> (opaque paints ranked by ΔE2000),
+          and a labelled <strong>Glaze / wash</strong> list for transparents. Every
+          suggestion carries a confidence band (<em>very close</em>, <em>confirm</em>,
+          <em> family</em>, <em>loose</em>) — these are starting points to{" "}
+          <strong>confirm by eye</strong> under your bench light, never auto-applied.
+        </p>
+        <p>
+          <strong>Eyedropper</strong> — click anywhere on the preview to match that
+          exact spot. Sample the skin, then the hair, then the leather, and each gets
+          its own suggestions. The <strong>Palette overview</strong> below it is an
+          automatic read of the whole image (the background is excluded so the subject
+          leads, not the backdrop).
+        </p>
+        <p>
+          <strong>Value mode</strong> (on by default) greys every swatch so you can
+          read values; turn it off to compare hues in full color. Large photos are
+          automatically downscaled in your browser before upload, so even a phone shot
+          uploads instantly.
         </p>
       </>
     ),
