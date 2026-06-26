@@ -670,6 +670,13 @@ export interface SwatchInput {
   sort_order?: number;
 }
 
+export interface MixComponentInput {
+  paint_id?: number | null; // omit/null when kept by name only (#425)
+  name?: string | null;
+  parts: number;
+  sort_order?: number;
+}
+
 export interface StepInput {
   title: string;
   technique_tag?: StepTechnique | null;
@@ -681,6 +688,7 @@ export interface StepInput {
   ratio_box?: string | null;
   sort_order?: number;
   swatches?: SwatchInput[];
+  mix_components?: MixComponentInput[];
 }
 
 export interface PhaseInput {

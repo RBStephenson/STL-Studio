@@ -15,6 +15,7 @@ import {
   GuidePhase,
   GuideStep,
   GuideSwatch,
+  GuideMixComponent,
   StepTechnique,
   TabInput,
 } from "../../api/client";
@@ -30,10 +31,13 @@ const nextKey = () => `k${++_seq}`;
 // `name` preserves an unresolved (name-only) swatch from import (#477): no
 // PaintPicker, just passed through on save so editing the guide can't drop it.
 interface DraftSwatch { _key: string; paint: PickedPaint | null; name: string | null; value_pct: string; role_label: string; }
+// A mix component (#504): one paint (or a preserved name-only component, #425)
+// plus its `parts` share of the blend, e.g. Red + Orange (4:1).
+interface DraftMixComp { _key: string; paint: PickedPaint | null; name: string | null; parts: string; }
 interface DraftStep {
   _key: string; title: string; technique_tag: StepTechnique | ""; technique_label: string;
   body: string; value_intent: string; tip: string; warning: string; ratio_box: string;
-  swatches: DraftSwatch[];
+  swatches: DraftSwatch[]; mix: DraftMixComp[];
 }
 interface DraftPhase { _key: string; label: string; steps: DraftStep[]; }
 interface DraftTab { _key: string; name: string; dom_id: string; heading: string; intro: string; phases: DraftPhase[]; }
@@ -66,6 +70,14 @@ function toDraft(tabs: GuideTab[]): DraftTab[] {
           name: w.name ?? null,
           value_pct: w.value_pct == null ? "" : String(w.value_pct),
           role_label: w.role_label ?? "",
+        })),
+        mix: (s.mix_components ?? []).map((m) => ({
+          _key: nextKey(),
+          paint: m.paint && m.paint_id != null
+            ? { id: m.paint_id, name: m.paint.name, code: m.paint.code, hex: m.paint.hex }
+            : null,
+          name: m.name ?? null,
+          parts: String(m.parts),
         })),
       })),
     })),
@@ -102,6 +114,16 @@ function serialize(tabs: DraftTab[]): TabInput[] {
             value_pct: w.value_pct.trim() === "" ? null : Number(w.value_pct),
             role_label: orNull(w.role_label),
             sort_order: wi,
+          })),
+        // Mix components (#504): paint-backed or preserved name-only (#425),
+        // each carrying its `parts` share (defaults to 1 when left blank).
+        mix_components: s.mix
+          .filter((m) => m.paint || (m.name && m.name.trim()))
+          .map((m, mi) => ({
+            paint_id: m.paint ? m.paint.id : null,
+            name: m.paint ? null : m.name,
+            parts: m.parts.trim() === "" ? 1 : Number(m.parts),
+            sort_order: mi,
           })),
       })),
     })),
@@ -158,7 +180,18 @@ function draftToPreviewTabs(tabs: DraftTab[]): GuideTab[] {
               ? { name: w.paint.name, code: w.paint.code, brand: "", hex: w.paint.hex }
               : null,
           })),
-        mix_components: [],
+        mix_components: s.mix
+          .filter((m) => m.paint || (m.name && m.name.trim()))
+          .map((m, mi): GuideMixComponent => ({
+            id: nid(),
+            paint_id: m.paint ? m.paint.id : null,
+            name: m.paint ? null : m.name,
+            parts: m.parts.trim() === "" ? 1 : Number(m.parts),
+            sort_order: mi,
+            paint: m.paint
+              ? { name: m.paint.name, code: m.paint.code, brand: "", hex: m.paint.hex }
+              : null,
+          })),
       })),
     })),
   }));
@@ -269,6 +302,63 @@ function SwatchRow({ value, onChange, dragHandle, ...ctl }: { value: DraftSwatch
   );
 }
 
+// One component of a mix swatch (#504): a paint (or preserved name-only) plus
+// its `parts`. No drag/reorder — order is set by add order and the up/down arrows.
+function MixCompRow({ value, onChange, onRemove }: { value: DraftMixComp; onChange: (v: DraftMixComp) => void; onRemove: () => void }) {
+  const nameOnly = !value.paint && !!value.name;
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {nameOnly ? (
+        <span
+          className="px-2 py-1 text-xs rounded bg-gray-800 border border-gray-700 text-gray-300"
+          title="Unresolved paint — preserved by name"
+        >
+          {value.name} <span className="text-gray-500">(unresolved)</span>
+        </span>
+      ) : (
+        <PaintPicker value={value.paint} onChange={(p) => onChange({ ...value, paint: p })} />
+      )}
+      <input
+        aria-label="Parts" type="number" min={1} step="any" placeholder="parts"
+        className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:border-indigo-600 focus:outline-none"
+        value={value.parts} onChange={(e) => onChange({ ...value, parts: e.target.value })}
+      />
+      <button type="button" aria-label="Remove mix component" onClick={onRemove} className="text-gray-500 hover:text-rose-400"><Trash2 size={14} /></button>
+    </div>
+  );
+}
+
+// Optional mix section on a step (#504). Components blend in `parts` ratio,
+// e.g. Red(4) + Orange(1) → "4:1". The reader renders them as one blended chip.
+function MixEditor({ value, onChange }: { value: DraftMixComp[]; onChange: (v: DraftMixComp[]) => void }) {
+  const ratio = value
+    .filter((m) => m.paint || (m.name && m.name.trim()))
+    .map((m) => (m.parts.trim() === "" ? "1" : m.parts.trim()))
+    .join(":");
+  return (
+    <div className="space-y-1.5">
+      <label className={labelCls}>
+        Mix {value.length >= 2 && ratio && <span className="text-gray-600">(ratio {ratio})</span>}
+      </label>
+      {value.map((m, i) => (
+        <MixCompRow
+          key={m._key}
+          value={m}
+          onChange={(v) => onChange(replaceAt(value, i, v))}
+          onRemove={() => onChange(removeAt(value, i))}
+        />
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...value, { _key: nextKey(), paint: null, name: null, parts: "1" }])}
+        className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"
+      >
+        <Plus size={12} /> Add mix component
+      </button>
+    </div>
+  );
+}
+
 function StepEditor({ value, onChange, anchorId, dragHandle, ...ctl }: { value: DraftStep; onChange: (v: DraftStep) => void; anchorId: string; dragHandle?: ReactNode } & RowControls) {
   const set = (patch: Partial<DraftStep>) => onChange({ ...value, ...patch });
 
@@ -341,6 +431,7 @@ function StepEditor({ value, onChange, anchorId, dragHandle, ...ctl }: { value: 
           <Plus size={12} /> Add swatch
         </button>
       </div>
+      <MixEditor value={value.mix} onChange={(mix) => set({ mix })} />
     </div>
   );
 }
@@ -388,7 +479,7 @@ function PhaseEditor({ value, onChange, tabIndex, phaseIndex, dragHandle, ...ctl
             ))}
           </SortableContext>
         </DndContext>
-        <button type="button" onClick={() => set({ steps: [...value.steps, { _key: nextKey(), title: "", technique_tag: "", technique_label: "", body: "", value_intent: "", tip: "", warning: "", ratio_box: "", swatches: [] }] })}
+        <button type="button" onClick={() => set({ steps: [...value.steps, { _key: nextKey(), title: "", technique_tag: "", technique_label: "", body: "", value_intent: "", tip: "", warning: "", ratio_box: "", swatches: [], mix: [] }] })}
           className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
           <Plus size={12} /> Add step
         </button>
