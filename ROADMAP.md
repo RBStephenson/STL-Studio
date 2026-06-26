@@ -300,26 +300,32 @@ decouple the Paint Shelf from the guides feature so it's always available.
 
 ---
 
-## v0.16 — AI drafts & color match 🗓 Planned
+## v0.16 — AI drafts & color match ✅ Complete
 
 The painting module's headline workflow: an LLM produces a first-draft guide as
 structured data, you edit it, and a colour-match studio suggests owned paints
 from a reference image. Domain rules are captured in
 [`docs/painting/reference/figure-painting-skill.md`](docs/painting/reference/figure-painting-skill.md).
+This release also **renames the app to STL Studio** (the catalog keeps the name
+*Library*) to reflect its growth into a 3D-print + painting toolbox.
 
 | Issue | Item |
 |-------|------|
 | [#485](https://github.com/RBStephenson/STL-Inventory/issues/485) | **Epic — AI draft & color match** |
 | [#491](https://github.com/RBStephenson/STL-Inventory/issues/491) | Generation service — Claude → GuideDraft, async `/draft` (`generation.py`) |
-| [#492](https://github.com/RBStephenson/STL-Inventory/issues/492) | Draft → edit diff flow |
-| [#493](https://github.com/RBStephenson/STL-Inventory/issues/493) | Color-match studio — Lab / CIEDE2000 / k-means (`colormatch.py`) |
-| [#494](https://github.com/RBStephenson/STL-Inventory/issues/494) | Reference-image pipeline — fallback chain + provenance (`images.py`) |
-| [#498](https://github.com/RBStephenson/STL-Inventory/issues/498) | Port domain rules + reference tables into the prompt/validator |
+| [#492](https://github.com/RBStephenson/STL-Inventory/issues/492) | Draft → edit review flow |
+| [#493](https://github.com/RBStephenson/STL-Inventory/issues/493) / [#561](https://github.com/RBStephenson/STL-Inventory/issues/561) | Color-match studio — Lab / CIEDE2000 / k-means, eyedropper, background exclusion |
+| [#569](https://github.com/RBStephenson/STL-Inventory/issues/569) | Color match — hue-cohesive value ladder (shadow / mid / highlight) |
+| [#494](https://github.com/RBStephenson/STL-Inventory/issues/494) | Reference-image pipeline — STL-folder rung + provenance (`images.py`) |
+| [#535](https://github.com/RBStephenson/STL-Inventory/issues/535) / [#536](https://github.com/RBStephenson/STL-Inventory/issues/536) | Reference image — upload + Claude vision, in-browser downscale |
+| [#498](https://github.com/RBStephenson/STL-Inventory/issues/498) / [#506](https://github.com/RBStephenson/STL-Inventory/issues/506) | Validation — domain colour rules: skin-anchor band + highlight-direction |
 | [#517](https://github.com/RBStephenson/STL-Inventory/issues/517) | AI/Painting settings — capture + encrypt the API key (shown only when guides are enabled) |
 | [#504](https://github.com/RBStephenson/STL-Inventory/issues/504) | Guide editor — author/edit mix-component swatches (ratios) |
-| [#506](https://github.com/RBStephenson/STL-Inventory/issues/506) | Validation — skin-anchor band + highlight-direction colour checks |
 
 All AI capabilities are bring-your-own-API-key; no keys ship in the repo or build.
+
+> Deferred to v1.0: the reference-image network rungs (assisted web search /
+> AI-gen) — [#563](https://github.com/RBStephenson/STL-Inventory/issues/563).
 
 ---
 
