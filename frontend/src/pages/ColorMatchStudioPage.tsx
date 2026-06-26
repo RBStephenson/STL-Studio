@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Pipette, Loader2, ImagePlus, Eye, Droplet } from "lucide-react";
 import {
   api, ApiError, ColorBand, ColorMatchCandidate, ColorMatchResult,
@@ -93,13 +93,36 @@ function CandidateList({
  * first, hue second, inks/glazes labelled separately. Suggest-and-confirm-by-eye
  * only: nothing is ever auto-assigned to a guide.
  */
+// Preview cap (px) for the canvas the reference is drawn into.
+const PREVIEW_MAX_W = 240;
+
 export default function ColorMatchStudioPage() {
   const { toast } = useToast();
-  const [preview, setPreview] = useState<string | null>(null);
+  const [hasPreview, setHasPreview] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [result, setResult] = useState<ColorMatchResult | null>(null);
   const [valueMode, setValueMode] = useState(true);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Draw the reference into a canvas via createImageBitmap — the file bytes
+  // never reach a DOM src/HTML sink, so an uploaded SVG can't smuggle script
+  // (avoids the js/xss-through-dom surface of <img src={objectURL}>).
+  const drawPreview = async (file: File) => {
+    const canvas = canvasRef.current;
+    if (!canvas || typeof createImageBitmap !== "function") return;
+    try {
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, PREVIEW_MAX_W / bmp.width);
+      canvas.width = Math.round(bmp.width * scale);
+      canvas.height = Math.round(bmp.height * scale);
+      canvas.getContext("2d")?.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      bmp.close?.();
+      setHasPreview(true);
+    } catch {
+      setHasPreview(false); // preview is best-effort; the match still runs
+    }
+  };
 
   const run = async (file: File) => {
     if (!ALLOWED_TYPES.has(file.type)) {
@@ -111,7 +134,7 @@ export default function ColorMatchStudioPage() {
       return;
     }
     setBusy(true);
-    setPreview(URL.createObjectURL(file));
+    void drawPreview(file);
     try {
       const res = await api.painting.colorMatch(file);
       setResult(res);
@@ -172,14 +195,12 @@ export default function ColorMatchStudioPage() {
             />
           </label>
 
-          {preview && (
-            <img
-              src={preview}
-              alt="Reference"
-              style={valueMode ? { filter: "grayscale(1)" } : undefined}
-              className="w-full rounded-lg border border-gray-700 object-contain"
-            />
-          )}
+          <canvas
+            ref={canvasRef}
+            aria-label="Reference preview"
+            style={valueMode ? { filter: "grayscale(1)" } : undefined}
+            className={`w-full rounded-lg border border-gray-700 ${hasPreview ? "" : "hidden"}`}
+          />
 
           {result && (
             <div className="space-y-1">
