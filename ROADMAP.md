@@ -324,17 +324,28 @@ This release also **renames the app to STL Studio** (the catalog keeps the name
 
 All AI capabilities are bring-your-own-API-key; no keys ship in the repo or build.
 
-> Deferred to v1.0: the reference-image network rungs (assisted web search /
+> Deferred to v0.17.0: the reference-image network rungs (assisted web search /
 > AI-gen) — [#563](https://github.com/RBStephenson/STL-Inventory/issues/563).
 
 ---
 
-## v1.0 — Painting full-corpus & wargaming 🗓 Planned
+## v0.17.0 — Painting full-corpus & wargaming 🗓 Planned
 
 | Issue | Item |
 |-------|------|
 | [#486](https://github.com/RBStephenson/STL-Inventory/issues/486) | **Painting M5 — full-corpus import & polish** — bulk-import the reference guide corpus as reviewed drafts, calibrate the validator, print/PDF + accessibility pass |
 | [#409](https://github.com/RBStephenson/STL-Inventory/issues/409) | **Structured wargaming guide type** — `guide_type` discriminator + quality tiers / batch workflow / basing |
+| [#563](https://github.com/RBStephenson/STL-Inventory/issues/563) | Reference-image network rungs — assisted web search / AI-gen + hero credit |
+
+---
+
+## v1.0 — Desktop shell (final polish) 🗓 Planned
+
+The 1.0 release is the desktop-experience polish pass.
+
+| Issue | Item |
+|-------|------|
+| [#528](https://github.com/RBStephenson/STL-Inventory/issues/528) | **Desktop shell: pywebview → Electron** — kill the console window; ship a proper packaged desktop app |
 
 macOS notarization ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17))
 sits in the backlog — deferred until there's appetite for the Apple Developer
