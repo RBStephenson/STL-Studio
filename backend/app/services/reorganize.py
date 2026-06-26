@@ -29,6 +29,7 @@ from app.models import (
 from app.services.path_sanitize import (
     path_over_length,
     sanitize_segment,
+    slug_segment,
 )
 from app.services.reorganize_template import parse_template, render_segments
 
@@ -138,6 +139,7 @@ def build_manifest(
     root_id: int | None = None,
     overrides: dict[int, dict] | None = None,
     inbox_source: str | None = None,
+    slugify_title: bool = False,
 ) -> Manifest:
     """Build the reorganize preview manifest. Raises ReorganizeTemplateError on
     a malformed template (caller maps to 4xx).
@@ -222,7 +224,8 @@ def build_manifest(
     entries: list[Entry] = []
     for m in models:
         entries.append(_build_entry(m, segments, root_keys, pack_paths, group_paths,
-                                    overrides.get(m.id), _dest_for(m)))
+                                    overrides.get(m.id), _dest_for(m),
+                                    slugify_title=slugify_title))
 
     _detect_collisions(entries)
     _detect_overlaps(entries)
@@ -237,6 +240,7 @@ def _build_entry(
     group_paths: list[str],
     override: dict | None = None,
     dest_root: str | None = None,
+    slugify_title: bool = False,
 ) -> Entry:
     # User resolutions (Phase 2c) take precedence over model metadata and clear
     # the corresponding 'missing' flag.
@@ -246,20 +250,29 @@ def _build_entry(
     ov_title = (override.get("title") or "").strip()
     ov_suffix = (override.get("suffix") or "").strip()
 
+    # Fields actually referenced in the template — only flag missing for these.
+    used_fields = {
+        f for seg in segments
+        for f in ("creator", "character", "title")
+        if ("{" + f + "}") in seg.lower()
+    }
+
     # Resolve template field values, tracking which fell back to a sentinel.
     missing: list[str] = []
     creator_name = ov_creator or (m.creator.name if m.creator else "") or ""
     if not creator_name:
         creator_name = UNKNOWN_CREATOR
-        missing.append("creator")
+        if "creator" in used_fields:
+            missing.append("creator")
     character = ov_character or m.character or ""
     if not character:
         character = UNKNOWN_CHARACTER
-        missing.append("character")
+        if "character" in used_fields:
+            missing.append("character")
     title = ov_title or m.title or m.name or ""
     if not (ov_title or (m.title or "").strip()):
         # title fell back to folder name — only 'missing' if that's also empty
-        if not (m.name or "").strip():
+        if not (m.name or "").strip() and "title" in used_fields:
             missing.append("title")
     # Suffix dodges a collision / shortens an over-length or reserved name.
     if ov_suffix:
@@ -271,11 +284,16 @@ def _build_entry(
     reserved = False
     over_len = False
     safe_parts: list[str] = []
-    for part in rendered:
-        sani = sanitize_segment(part)
-        reserved = reserved or sani.reserved_name
-        over_len = over_len or sani.over_length
-        safe_parts.append(sani.value)
+    for raw_seg, part in zip(segments, rendered):
+        # When slugify_title is on, segments containing {title} get a slug instead of
+        # the standard sanitizer so import folder names are lowercase-with-dashes.
+        if slugify_title and "{title}" in raw_seg.lower():
+            safe_parts.append(slug_segment(part))
+        else:
+            sani = sanitize_segment(part)
+            reserved = reserved or sani.reserved_name
+            over_len = over_len or sani.over_length
+            safe_parts.append(sani.value)
 
     current_dir = _canon(m.folder_path or "")
     cur_key = _key(m.folder_path or "")

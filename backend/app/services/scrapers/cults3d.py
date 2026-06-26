@@ -1,43 +1,68 @@
-"""
-Cults3D scraper — no public API, parse product page HTML.
+"""Cults3D metadata via the official GraphQL API.
 
-Cults3D is more aggressive about blocking scrapers. We:
-  - Use a realistic User-Agent
-  - Add a short delay between requests
-  - Pull from Open Graph + JSON-LD + page HTML
+Auth: HTTP Basic with base64(username:api_key).
+Endpoint: https://cults3d.com/graphql
+Credentials are stored encrypted in the DB via app.services.secrets.
 """
 import re
-import json
+import base64
 import logging
-import asyncio
-import httpx
-from bs4 import BeautifulSoup
 from typing import Optional
+
+import httpx
 
 from app.services.scrapers.base import ScrapedModel, SearchResult
 
 logger = logging.getLogger(__name__)
 
 SITE = "cults3d"
-BASE = "https://cults3d.com"
+_GRAPHQL_URL = "https://cults3d.com/graphql"
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://cults3d.com/",
-}
-
-# https://cults3d.com/en/3d-model/various/my-model-slug
-# https://cults3d.com/en/3d-printing-file/my-model-slug
+# https://cults3d.com/en/3d-model/game/my-slug
+# The slug is the last path segment after the category.
 _URL_RE = re.compile(
-    r"cults3d\.com/\w+/3d-(?:model|printing-file|modelling)/(.+?)(?:/|$)",
+    r"cults3d\.com/[^/]+/3d-(?:model|printing-file|modelling)/[^/]+/([^/?#]+)",
     re.I,
 )
+
+_FETCH_QUERY = """
+query FetchCreation($slug: String!) {
+  creation(slug: $slug) {
+    name
+    description
+    shortUrl
+    illustrationImageUrl
+    tags(locale: EN)
+    likesCount
+    downloadsCount
+    creator {
+      nick
+    }
+    illustrations {
+      imageUrl
+    }
+    blueprints {
+      imageUrl
+    }
+  }
+}
+"""
+
+_SEARCH_QUERY = """
+query SearchCreations($query: String!, $limit: Int!) {
+  creationsSearchBatch(query: $query, limit: $limit) {
+    total
+    results {
+      name
+      shortUrl
+      illustrationImageUrl
+      creator {
+        nick
+      }
+    }
+  }
+}
+"""
 
 
 def extract_id(url: str) -> Optional[str]:
@@ -45,165 +70,158 @@ def extract_id(url: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-async def fetch(url: str) -> Optional[ScrapedModel]:
-    await asyncio.sleep(1)  # be polite
-    async with httpx.AsyncClient(
-        timeout=20,
-        headers=_HEADERS,
-        follow_redirects=True,
-    ) as client:
+def _auth_header(username: str, api_key: str) -> str:
+    token = base64.b64encode(f"{username}:{api_key}".encode()).decode()
+    return f"Basic {token}"
+
+
+def _get_credentials() -> Optional[tuple[str, str]]:
+    """Fetch Cults3D credentials from the DB. Returns (username, api_key) or None."""
+    try:
+        from app.database import SessionLocal
+        from app.services import secrets
+        db = SessionLocal()
         try:
-            r = await client.get(url)
-            r.raise_for_status()
-            html = r.text
-            final_url = str(r.url)
-        except Exception as e:
-            logger.error(f"Cults3D fetch({url}) failed: {e}")
-            return None
-
-    return _parse(html, final_url)
-
-
-def _parse(html: str, url: str) -> Optional[ScrapedModel]:
-    soup = BeautifulSoup(html, "html.parser")
-
-    def og(prop: str) -> Optional[str]:
-        tag = soup.find("meta", property=f"og:{prop}")
-        return tag["content"].strip() if tag and tag.get("content") else None
-
-    def meta_name(name: str) -> Optional[str]:
-        tag = soup.find("meta", attrs={"name": name})
-        return tag["content"].strip() if tag and tag.get("content") else None
-
-    title = og("title") or meta_name("title") or _text(soup, ["h1"])
-    description = og("description") or meta_name("description")
-    thumbnail_url = og("image")
-
-    images: list[str] = []
-    tags: list[str] = []
-    creator_name: Optional[str] = None
-    like_count: Optional[int] = None
-    download_count: Optional[int] = None
-
-    # JSON-LD
-    for script in soup.find_all("script", type="application/ld+json"):
-        try:
-            ld = json.loads(script.string or "")
-            if isinstance(ld, list):
-                ld = ld[0]
-            t = ld.get("@type", "")
-            if t in ("Product", "CreativeWork", "3DModel"):
-                title = title or ld.get("name")
-                description = description or ld.get("description")
-                author = ld.get("author") or ld.get("creator") or {}
-                creator_name = creator_name or (
-                    author.get("name") if isinstance(author, dict) else None
-                )
-                for img in ld.get("image", []):
-                    if isinstance(img, str) and img not in images:
-                        images.append(img)
-        except Exception:
-            pass
-
-    # Creator from page
-    if not creator_name:
-        creator_name = _text(soup, [
-            ".creator-pseudo",
-            ".user-name",
-            '[class*="creator"] a',
-            '[itemprop="author"] [itemprop="name"]',
-        ])
-
-    # Tags
-    for tag_el in soup.select('[class*="tag"], [rel="tag"]'):
-        t = tag_el.get_text(strip=True)
-        if t and t not in tags:
-            tags.append(t)
-
-    # Stats (likes, downloads shown on page)
-    for stat in soup.select('[class*="stat"], [class*="count"]'):
-        text = stat.get_text(strip=True).lower()
-        num_match = re.search(r"[\d,]+", text)
-        if not num_match:
-            continue
-        n = int(num_match.group().replace(",", ""))
-        if "like" in text or "love" in text:
-            like_count = n
-        elif "download" in text:
-            download_count = n
-
-    if thumbnail_url and thumbnail_url not in images:
-        images.insert(0, thumbnail_url)
-    # Also grab gallery images
-    for img in soup.select('.creation-cover img, .gallery img, [class*="picture"] img'):
-        src = img.get("src") or img.get("data-src")
-        if src and src not in images:
-            images.append(src)
-
-    images = [i for i in images if i and i.startswith("http")]
-
-    if not title:
+            return secrets.get_cults3d_credentials(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Could not load Cults3D credentials: {e}")
         return None
+
+
+async def fetch(url: str) -> Optional[ScrapedModel]:
+    slug = extract_id(url)
+    if not slug:
+        logger.warning(f"Could not extract slug from Cults3D URL: {url}")
+        return None
+
+    creds = _get_credentials()
+    if not creds:
+        logger.info("Cults3D API credentials not configured")
+        return None
+
+    username, api_key = creds
+    headers = {
+        "Authorization": _auth_header(username, api_key),
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(
+                _GRAPHQL_URL,
+                headers=headers,
+                json={"query": _FETCH_QUERY, "variables": {"slug": slug}},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        logger.error(f"Cults3D fetch({url}) failed: {e}")
+        return None
+
+    errors = data.get("errors")
+    if errors:
+        logger.error(f"Cults3D GraphQL errors for {slug}: {errors}")
+        return None
+
+    creation = (data.get("data") or {}).get("creation")
+    if not creation:
+        logger.warning(f"Cults3D: no creation found for slug {slug!r}")
+        return None
+
+    return _to_scraped_model(creation, url, slug)
+
+
+def _to_scraped_model(creation: dict, source_url: str, slug: str) -> ScrapedModel:
+    title = creation.get("name") or ""
+    description = creation.get("description")
+    thumbnail = creation.get("illustrationImageUrl")
+    tags = creation.get("tags") or []
+    likes = creation.get("likesCount")
+    downloads = creation.get("downloadsCount")
+    creator_nick = (creation.get("creator") or {}).get("nick")
+    short_url = creation.get("shortUrl") or source_url
+
+    # Collect all images: cover first, then gallery illustrations, then blueprint previews.
+    seen: set[str] = set()
+    images: list[str] = []
+
+    def _add(url: str | None) -> None:
+        if url and url.startswith("http") and url not in seen:
+            seen.add(url)
+            images.append(url)
+
+    _add(thumbnail)
+    for ill in creation.get("illustrations") or []:
+        _add((ill or {}).get("imageUrl"))
+    for bp in creation.get("blueprints") or []:
+        _add((bp or {}).get("imageUrl"))
 
     return ScrapedModel(
         title=title,
         description=description,
-        source_url=url,
+        source_url=short_url,
         source_site=SITE,
-        external_id=extract_id(url),
-        creator_name=creator_name,
-        thumbnail_url=images[0] if images else None,
+        external_id=slug,
+        creator_name=creator_nick,
+        thumbnail_url=thumbnail,
         image_urls=images,
         tags=tags,
-        like_count=like_count,
-        download_count=download_count,
+        like_count=likes,
+        download_count=downloads,
     )
 
 
 async def search(query: str, limit: int = 12) -> list[SearchResult]:
-    await asyncio.sleep(1)
-    async with httpx.AsyncClient(
-        timeout=20,
-        headers=_HEADERS,
-        follow_redirects=True,
-    ) as client:
-        try:
-            r = await client.get(
-                f"{BASE}/en/3d-models/search",
-                params={"q": query},
+    creds = _get_credentials()
+    if not creds:
+        logger.info("Cults3D API credentials not configured — search skipped")
+        return []
+
+    username, api_key = creds
+    headers = {
+        "Authorization": _auth_header(username, api_key),
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(
+                _GRAPHQL_URL,
+                headers=headers,
+                json={
+                    "query": _SEARCH_QUERY,
+                    "variables": {"query": query, "limit": limit},
+                },
             )
             r.raise_for_status()
-            html = r.text
-        except Exception as e:
-            logger.error(f"Cults3D search({query!r}) failed: {e}")
-            return []
+            data = r.json()
+    except Exception as e:
+        logger.error(f"Cults3D search({query!r}) failed: {e}")
+        return []
 
-    soup = BeautifulSoup(html, "html.parser")
-    results = []
-    for card in soup.select("article.creation, [class*='creation-card']")[:limit]:
-        link = card.select_one("a[href*='/3d-model/'], a[href*='/3d-printing-file/']")
-        if not link:
-            continue
-        href = link.get("href", "")
-        product_url = href if href.startswith("http") else f"{BASE}{href}"
-        title_el = card.select_one("h3, h2, .title, [class*='name']")
-        img_el = card.select_one("img[src], img[data-src]")
-        thumb = (img_el.get("src") or img_el.get("data-src")) if img_el else None
-        creator_el = card.select_one("[class*='creator'], [class*='user']")
-        results.append(SearchResult(
-            title=title_el.get_text(strip=True) if title_el else product_url,
+    errors = data.get("errors")
+    if errors:
+        logger.error(f"Cults3D GraphQL search errors: {errors}")
+        return []
+
+    batch = (data.get("data") or {}).get("creationsSearchBatch") or {}
+    results = batch.get("results") or []
+
+    out: list[SearchResult] = []
+    for item in results:
+        product_url = item.get("shortUrl") or ""
+        slug = extract_id(product_url) or product_url
+        thumb = item.get("illustrationImageUrl")
+        creator_nick = (item.get("creator") or {}).get("nick")
+        out.append(SearchResult(
+            title=item.get("name") or product_url,
             source_url=product_url,
             source_site=SITE,
-            external_id=extract_id(product_url),
-            creator_name=creator_el.get_text(strip=True) if creator_el else None,
+            external_id=slug,
+            creator_name=creator_nick,
             thumbnail_url=thumb,
         ))
-    return results
 
-
-def _text(soup: BeautifulSoup, selectors: list[str]) -> Optional[str]:
-    for sel in selectors:
-        el = soup.select_one(sel)
-        if el:
-            return el.get_text(strip=True) or None
-    return None
+    return out

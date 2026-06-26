@@ -6,9 +6,10 @@ interface Props {
   onSelect: (path: string) => void;
   onClose: () => void;
   mode?: string; // passed to /scan/browse — "inbox" uses bootstrap allowlist
+  initialPath?: string;
 }
 
-export default function FolderPicker({ onSelect, onClose, mode }: Props) {
+export default function FolderPicker({ onSelect, onClose, mode, initialPath }: Props) {
   const [listing, setListing] = useState<DirListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,8 +24,7 @@ export default function FolderPicker({ onSelect, onClose, mode }: Props) {
       .finally(() => setLoading(false));
   }, []);
 
-  // Start at the default location (home dir / drive list)
-  useEffect(() => { browse(); }, [browse]);
+  useEffect(() => { browse(initialPath); }, [browse, initialPath]);
 
   const atDriveList = listing?.is_drive_list ?? false;
   const currentPath = listing?.path ?? "";

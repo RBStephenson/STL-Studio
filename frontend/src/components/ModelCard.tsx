@@ -1,6 +1,6 @@
-import { memo, useState, useEffect, useRef } from "react";
+import { memo, useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal } from "lucide-react";
+import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
 import { Model, PrintStatus, PRINT_STATUS_CYCLE, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -219,6 +219,16 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     ? api.fileUrl(model.thumbnail_path, model.updated_at)
     : model.thumbnail_url ?? null;
 
+  // Static card image: user-selected primary, else first gallery image, else nothing
+  // (falls through to thumbnail below).
+  const cardImageUrl = (() => {
+    if (imageCleared) return null;
+    const gallery = model.image_paths ?? [];
+    if (model.primary_image_path) return api.fileUrl(model.primary_image_path);
+    if (gallery.length > 0) return api.fileUrl(gallery[0]);
+    return null;
+  })();
+
   const displayName = isGroup && localCharacter
     ? localCharacter
     : (localTitle || model.name);
@@ -252,7 +262,14 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
       }`}
     >
       <div className="aspect-square bg-gray-800 relative overflow-hidden">
-        {thumbnail ? (
+        {cardImageUrl ? (
+          <img
+            src={cardImageUrl}
+            alt={displayName}
+            className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${nsfw && !showNSFW ? "blur-xl" : ""}`}
+            loading="lazy"
+          />
+        ) : thumbnail ? (
           <img
             src={thumbnail}
             alt={displayName}
@@ -479,5 +496,130 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     </div>
   );
 }
+
+export interface GalleryRotatorHandle {
+  goTo: (idx: number) => void;
+}
+
+export const GalleryRotator = forwardRef<
+  GalleryRotatorHandle,
+  { paths: string[]; alt: string; blur: boolean; onIndexChange?: (idx: number) => void }
+>(function GalleryRotatorInner({ paths, alt, blur, onIndexChange }, ref) {
+  const [broken, setBroken] = useState<Set<number>>(new Set());
+  const [idx, setIdx] = useState(0);
+  const [fade, setFade] = useState(true);
+  const [showLabel, setShowLabel] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const labelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const urls = paths.map((p) => api.fileUrl(p));
+  const validCount = paths.length - broken.size;
+  const filename = paths[idx]?.replace(/\\/g, "/").split("/").pop() ?? "";
+
+  const nextValid = useCallback((from: number, step: 1 | -1, brokenSet: Set<number>) => {
+    for (let i = 1; i <= paths.length; i++) {
+      const n = ((from + step * i) % paths.length + paths.length) % paths.length;
+      if (!brokenSet.has(n)) return n;
+    }
+    return from;
+  }, [paths.length]);
+
+  const go = useCallback((next: number) => {
+    setFade(false);
+    setTimeout(() => { setIdx(next); setFade(true); }, 150);
+  }, []);
+
+  useImperativeHandle(ref, () => ({ goTo: go }), [go]);
+
+  // Notify parent of index changes so it can track the current image.
+  useEffect(() => { onIndexChange?.(idx); }, [idx, onIndexChange]);
+
+  // Timer just advances by 1 — the broken-skip effect handles jumping over bad images.
+  const resetTimer = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setIdx((i) => (i + 1) % paths.length);
+    }, 10000);
+  }, [paths.length]);
+
+  useEffect(() => {
+    if (validCount > 1) resetTimer();
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [validCount, resetTimer]);
+
+  // Auto-skip when the current image turns broken (onError fired or initial broken).
+  useEffect(() => {
+    if (broken.has(idx) && validCount > 0) {
+      const next = nextValid(idx, 1, broken);
+      if (next !== idx) go(next);
+    }
+  }, [broken, idx, nextValid, go, validCount]);
+
+  const prev = (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    go(nextValid(idx, -1, broken));
+    resetTimer();
+  };
+  const next = (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    go(nextValid(idx, 1, broken));
+    resetTimer();
+  };
+
+  const handleMouseEnter = () => {
+    labelTimerRef.current = setTimeout(() => setShowLabel(true), 4000);
+  };
+  const handleMouseLeave = () => {
+    if (labelTimerRef.current) clearTimeout(labelTimerRef.current);
+    setShowLabel(false);
+  };
+
+  return (
+    <div
+      className="relative w-full h-full group/rot"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <img
+        src={urls[idx]}
+        alt={alt}
+        onError={() => setBroken((prev) => new Set([...prev, idx]))}
+        className={`w-full h-full object-cover transition-opacity duration-150 ${fade ? "opacity-100" : "opacity-0"} ${blur ? "blur-xl" : ""}`}
+        loading="lazy"
+      />
+      {/* Filename label — appears after 4 s of hover, hides immediately on leave */}
+      {showLabel && filename && (
+        <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-black/70 text-white text-xs truncate pointer-events-none">
+          {filename}
+        </div>
+      )}
+      {validCount > 1 && (
+        <>
+          <button
+            onClick={prev}
+            className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/rot:opacity-100 transition-opacity bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white"
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <button
+            onClick={next}
+            className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/rot:opacity-100 transition-opacity bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white"
+          >
+            <ChevronRight size={14} />
+          </button>
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-1 opacity-0 group-hover/rot:opacity-100 transition-opacity">
+            {paths.map((_, i) => broken.has(i) ? null : (
+              <button
+                key={i}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); go(i); resetTimer(); }}
+                className={`w-1.5 h-1.5 rounded-full transition-colors ${i === idx ? "bg-white" : "bg-white/40"}`}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+});
 
 export default memo(ModelCard);

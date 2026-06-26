@@ -68,3 +68,19 @@ def sanitize_segment(name: str) -> SanitizedSegment:
 def path_over_length(full_path: str) -> bool:
     """True if the assembled destination path exceeds the Windows MAX_PATH cap."""
     return len(full_path) > MAX_PATH_LEN
+
+
+# Slug sanitizer for import folder naming — separate from sanitize_segment so the
+# reorganize engine's existing behaviour is unchanged for in-library moves.
+_SLUG_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def slug_segment(name: str) -> str:
+    """Convert a title to a filesystem-safe slug: lowercase, non-alnum runs → dash.
+
+    Strips Unicode accent marks so accented chars become their ASCII base letter.
+    Falls back to a single underscore if the result is empty.
+    """
+    s = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
+    s = _SLUG_NON_ALNUM.sub("-", s.lower()).strip("-")
+    return s or "_"

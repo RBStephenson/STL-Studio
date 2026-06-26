@@ -86,11 +86,8 @@ def _allowed_roots() -> list[Path]:
     if _roots_cache is not None and now - _roots_cache[0] < _ROOTS_TTL:
         return _roots_cache[1]
 
-    roots = [Path(r) for r in settings.stl_root_list]
+    roots: list[Path] = []
 
-    # Roots added through the Settings UI live in the scan_roots table, not the
-    # STL_ROOTS env var. Include them so file serving works in standalone mode
-    # (where STL_ROOTS is empty and drives are added entirely through the UI).
     try:
         from app.database import SessionLocal
         db = SessionLocal()
@@ -179,6 +176,34 @@ def serve_stl(path: str, v: str | None = None):
     cache_control = "public, max-age=31536000, immutable" if v else "no-cache"
     return FileResponse(served, media_type="application/octet-stream",
                         headers={"Cache-Control": cache_control})
+
+
+@router.get("/document")
+def serve_document(path: str):
+    """Serve a non-STL, non-image pack file (PDF, TXT, ZIP, etc.) as a download.
+
+    Restricted to configured scan roots — the same allowlist as /files/image.
+    Rejects STL and image extensions (those have dedicated endpoints). The
+    filename is taken from the path and set in the Content-Disposition header
+    so the browser downloads rather than navigating."""
+    p = Path(path)
+    ext = p.suffix.lower()
+    if ext in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Use /files/image for image files")
+    if ext in ALLOWED_STL_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Use /files/stl for STL files")
+    if not _is_safe_path(p):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        p,
+        filename=p.name,
+        headers={
+            "Content-Disposition": f'attachment; filename="{p.name}"',
+            "Cache-Control": "no-cache",
+        },
+    )
 
 
 def _unique_arcname(filename: str, used: set[str]) -> str:

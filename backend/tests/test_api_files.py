@@ -14,19 +14,15 @@ from tests.conftest import make_creator, make_model, make_stl_file
 
 class TestAllowedRoots:
     @pytest.fixture(autouse=True)
-    def _isolate_env_roots(self, monkeypatch):
-        """The conftest sets STL_ROOTS=/tmp, and pytest's tmp_path lives under
-        /tmp — which would mask the scan_roots logic under test. Clear the
-        env-based roots so only the DB scan_roots decide the allowlist."""
+    def _isolate_env_roots(self):
+        """Clear the file-serving roots cache so only DB scan_roots decide the allowlist."""
         import app.routers.files as files_module
-        monkeypatch.setattr(files_module.settings, "stl_roots", "")
         files_module._roots_cache = None
         yield
         files_module._roots_cache = None
 
     def test_scan_roots_from_db_are_allowed(self, db, tmp_path):
-        """Roots added via the Settings UI (scan_roots table) must be served,
-        even when the STL_ROOTS env var doesn't include them (standalone mode)."""
+        """Roots added via the Settings UI (scan_roots table) must be served."""
         import app.routers.files as files_module
         from app.models import ScanRoot
 

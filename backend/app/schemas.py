@@ -66,7 +66,14 @@ class ModelRead(ModelBase):
     print_count: int = 0
     thumbnail_path: Optional[str] = None
     thumbnail_url: Optional[str] = None
-    image_paths: list = []
+    image_paths: list = Field(default_factory=list)
+    other_files: list = Field(default_factory=list)
+    primary_image_path: Optional[str] = None
+
+    @field_validator("image_paths", "other_files", mode="before")
+    @classmethod
+    def _coerce_list(cls, v: object) -> list:
+        return v if isinstance(v, list) else []
     rating: Optional[float] = None
     download_count: Optional[int] = None
     creator_id: Optional[int] = None
@@ -139,6 +146,8 @@ class ModelUpdate(BaseModel):
     nsfw: Optional[bool] = None
     needs_review: Optional[bool] = None
     thumbnail_url: Optional[str] = None
+    primary_image_path: Optional[str] = None
+    image_paths: Optional[list] = None
     creator_name: Optional[str] = None
 
 
@@ -237,6 +246,17 @@ class BulkEnrichUpdate(BaseModel):
     title: Optional[str] = None
     notes: Optional[str] = None
     source_url: Optional[str] = None
+    gallery_images: Optional[list[str]] = None
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[int]
+    delete_files: bool = False
+
+
+class BulkDeleteResponse(BaseModel):
+    deleted: int
+    folders_removed: int
 
 
 class SetGroupBody(BaseModel):
@@ -332,6 +352,11 @@ class SourceContentsResponse(BaseModel):
 
 class ImportApplyRequest(BaseModel):
     source: str
+
+
+class DownloadImagesRequest(BaseModel):
+    pack_path: str
+    image_urls: list[str] = []
 
 
 class ImportApplyIneligible(BaseModel):
@@ -485,6 +510,19 @@ class AiSettingsRead(BaseModel):
 
 class AiKeyUpdate(BaseModel):
     key: str = Field(min_length=1, max_length=400)
+
+
+# --- Cults3D settings -------------------------------------------------------
+
+class Cults3DSettingsRead(BaseModel):
+    configured: bool
+    username: Optional[str] = None
+    key_hint: Optional[str] = None
+
+
+class Cults3DCredentialsUpdate(BaseModel):
+    username: str = Field(min_length=1, max_length=200)
+    api_key: str = Field(min_length=1, max_length=400)
 
 
 # --- Library reorganize, Phase 1 preview (#323) ---------------------------

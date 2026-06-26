@@ -5,7 +5,7 @@ import {
   Database, Download, Upload, ShieldAlert, Paintbrush, SlidersHorizontal, RefreshCw,
   FolderTree,
 } from "lucide-react";
-import { api, AiEffort, AiSettings, GuideTheme, ScanRoot } from "../api/client";
+import { api, AiEffort, AiSettings, Cults3DSettings, GuideTheme, ScanRoot } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import FolderPicker from "../components/FolderPicker";
 import HelpLink from "../components/HelpLink";
@@ -87,6 +87,12 @@ export default function Settings() {
   const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
   const [aiKeyDraft, setAiKeyDraft] = useState("");
   const [editingKey, setEditingKey] = useState(false);
+
+  // Cults3D API credentials
+  const [cults3dSettings, setCults3dSettings] = useState<Cults3DSettings | null>(null);
+  const [cults3dUsernameDraft, setCults3dUsernameDraft] = useState("");
+  const [cults3dKeyDraft, setCults3dKeyDraft] = useState("");
+  const [editingCults3d, setEditingCults3d] = useState(false);
 
   const load = () => {
     api.scan.roots()
@@ -297,6 +303,15 @@ export default function Settings() {
     return () => { alive = false; };
   }, [appSettings.painting_guides_enabled]);
 
+  // Load Cults3D credential status on mount.
+  useEffect(() => {
+    let alive = true;
+    api.settings.cults3d.get()
+      .then((s) => { if (alive) setCults3dSettings(s); })
+      .catch(() => { /* non-fatal */ });
+    return () => { alive = false; };
+  }, []);
+
   const saveAiKey = async () => {
     const key = aiKeyDraft.trim();
     if (!key) return;
@@ -332,6 +347,30 @@ export default function Settings() {
       await updateAppSettings({ ai_effort: effort });
     } catch (e: any) {
       flash(e?.message || "Could not save the effort", "err");
+    }
+  };
+
+  const saveCults3dCredentials = async () => {
+    const username = cults3dUsernameDraft.trim();
+    const api_key = cults3dKeyDraft.trim();
+    if (!username || !api_key) return;
+    try {
+      setCults3dSettings(await api.settings.cults3d.setCredentials(username, api_key));
+      setCults3dUsernameDraft("");
+      setCults3dKeyDraft("");
+      setEditingCults3d(false);
+      flash("Cults3D credentials saved", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not save Cults3D credentials", "err");
+    }
+  };
+
+  const clearCults3dCredentials = async () => {
+    try {
+      setCults3dSettings(await api.settings.cults3d.clearCredentials());
+      flash("Cults3D credentials cleared", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not clear Cults3D credentials", "err");
     }
   };
 
@@ -997,6 +1036,92 @@ export default function Settings() {
                   <option value="high">High — deepest reasoning</option>
                 </select>
               </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Cults3D API credentials */}
+      <section className="mt-12 pt-8 border-t border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+          Cults3D API
+        </h2>
+        <p className="text-xs text-gray-600 mb-4">
+          Enter your Cults3D username and an API key to fetch model metadata automatically.
+          Generate an API key at{" "}
+          <a
+            href="https://cults3d.com/en/api/keys"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-indigo-400 hover:text-indigo-300 underline"
+          >
+            cults3d.com/en/api/keys
+          </a>
+          . The key is stored encrypted and never shown again.
+        </p>
+
+        {cults3dSettings?.configured && !editingCults3d ? (
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
+              <span className="text-gray-400">User:</span>{" "}
+              <span className="font-mono">{cults3dSettings.username}</span>
+              <span className="text-gray-500 ml-3">••••{cults3dSettings.key_hint?.replace(/^…/, "")}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => { setEditingCults3d(true); setCults3dUsernameDraft(cults3dSettings.username ?? ""); setCults3dKeyDraft(""); }}
+              className="text-sm text-gray-300 hover:text-white border border-gray-700 rounded px-3 py-2"
+            >
+              Replace
+            </button>
+            <button
+              type="button"
+              onClick={clearCults3dCredentials}
+              className="text-sm text-rose-300 hover:text-rose-200 border border-gray-700 hover:border-rose-800 rounded px-3 py-2"
+            >
+              Clear
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 max-w-sm">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400">Username</label>
+              <input
+                type="text"
+                value={cults3dUsernameDraft}
+                onChange={(e) => setCults3dUsernameDraft(e.target.value)}
+                placeholder="your-cults3d-username"
+                className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none font-mono"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-gray-400">API key</label>
+              <input
+                type="password"
+                value={cults3dKeyDraft}
+                onChange={(e) => setCults3dKeyDraft(e.target.value)}
+                placeholder="••••••••"
+                className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                type="button"
+                onClick={saveCults3dCredentials}
+                disabled={!cults3dUsernameDraft.trim() || !cults3dKeyDraft.trim()}
+                className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-2 disabled:opacity-50"
+              >
+                Save
+              </button>
+              {cults3dSettings?.configured && (
+                <button
+                  type="button"
+                  onClick={() => { setEditingCults3d(false); setCults3dUsernameDraft(""); setCults3dKeyDraft(""); }}
+                  className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           </div>
         )}

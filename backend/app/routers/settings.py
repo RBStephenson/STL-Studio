@@ -16,6 +16,8 @@ from app.schemas import (
     AiSettingsRead,
     AppSettingsRead,
     AppSettingsUpdate,
+    Cults3DCredentialsUpdate,
+    Cults3DSettingsRead,
     EnvReloadResult,
     FilterPreset,
 )
@@ -58,10 +60,10 @@ def update_settings(body: AppSettingsUpdate, db: Session = Depends(get_db)):
 def reload_env_settings():
     """Re-read the .env / environment config without a full restart (#140).
 
-    Useful after editing scan roots or drive mappings in .env. Values read
-    dynamically (scan roots, drive translations) take effect immediately; keys
-    in RESTART_REQUIRED_KEYS (e.g. database_url, bound once at startup) are
-    reported back so the user knows a restart is still needed for those.
+    Useful after editing drive mappings in .env. Values read dynamically
+    (drive translations) take effect immediately; keys in RESTART_REQUIRED_KEYS
+    (e.g. database_url, bound once at startup) are reported back so the user
+    knows a restart is still needed for those.
     """
     try:
         settings.reload()
@@ -75,7 +77,6 @@ def reload_env_settings():
     import app.routers.files as files_module
     files_module._roots_cache = None
     return EnvReloadResult(
-        scan_roots=settings.stl_root_list,
         drive_mappings={"drive1": settings.stl_drive_1, "drive2": settings.stl_drive_2},
         restart_required=list(RESTART_REQUIRED_KEYS),
     )
@@ -147,3 +148,33 @@ def set_ai_key(body: AiKeyUpdate, db: Session = Depends(get_db)):
 def clear_ai_key(db: Session = Depends(get_db)):
     secrets.clear_ai_api_key(db)
     return _ai_settings(db)
+
+
+# --- Cults3D settings --------------------------------------------------------
+# Credentials are write-only: GET returns only whether they're configured plus
+# the username and a masked key hint. Plaintext API key is never returned.
+
+def _cults3d_settings(db: Session) -> Cults3DSettingsRead:
+    username, hint = secrets.cults3d_credentials_hint(db)
+    return Cults3DSettingsRead(
+        configured=username is not None and hint is not None,
+        username=username,
+        key_hint=hint,
+    )
+
+
+@router.get("/cults3d", response_model=Cults3DSettingsRead)
+def get_cults3d_settings(db: Session = Depends(get_db)):
+    return _cults3d_settings(db)
+
+
+@router.put("/cults3d/credentials", response_model=Cults3DSettingsRead)
+def set_cults3d_credentials(body: Cults3DCredentialsUpdate, db: Session = Depends(get_db)):
+    secrets.set_cults3d_credentials(db, body.username, body.api_key)
+    return _cults3d_settings(db)
+
+
+@router.delete("/cults3d/credentials", response_model=Cults3DSettingsRead)
+def clear_cults3d_credentials(db: Session = Depends(get_db)):
+    secrets.clear_cults3d_credentials(db)
+    return _cults3d_settings(db)

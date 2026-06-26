@@ -1,14 +1,13 @@
 """
 Shared fixtures for all tests.
 
-Sets DATABASE_URL and STL_ROOTS environment variables *before* any app module
-is imported, so Settings() and create_engine() both pick up the test values.
+Sets DATABASE_URL *before* any app module is imported so Settings() and
+create_engine() both pick up the test value.
 """
 import os
 
 # Must happen before any app import
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-os.environ["STL_ROOTS"] = "/tmp"
 
 import pytest
 from app.utils import utcnow

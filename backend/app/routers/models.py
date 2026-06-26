@@ -1,3 +1,6 @@
+import logging
+import os
+import shutil
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -6,14 +9,16 @@ from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride
+from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride, ScanRoot, STLFile
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
     ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl, FavoriteUpdate, RatingUpdate, QueueReorder, GroupReorder,
     PrintStatusUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate,
     BulkExcludeUpdate, BulkReviewUpdate, BulkEnrichUpdate, SetGroupBody, BatchSetGroupBody,
-    BatchSetSourceUrl, GroupRepUpdate,
+    BatchSetSourceUrl, GroupRepUpdate, BulkDeleteRequest, BulkDeleteResponse,
 )
+
+_log = logging.getLogger(__name__)
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail, fetch_image_bytes, store_thumbnail
 from app.services.variant_sync import propagate_source_url
 from app.services.scrapers.base import detect_site
@@ -246,7 +251,7 @@ def list_models(
     exclude_tag: str | None = None,
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
-    is_inbox: bool | None = None,
+    is_inbox: bool = False,  # library view never shows inbox models by default
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,
@@ -318,6 +323,7 @@ def list_models(
 def list_creators(db: Session = Depends(get_db)):
     rows = (
         db.query(Creator, func.count(Model.id).label("cnt"))
+        .filter(func.substr(Creator.name, 1, 1) != "_")
         .outerjoin(Model, (Model.creator_id == Creator.id) & (Model.excluded == False))
         .group_by(Creator.id)
         .order_by(Creator.name)
@@ -631,9 +637,78 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
             model.source_url = body.source_url.strip() or None
             if model.source_url:
                 propagate_source_url(db, model)
+        if body.gallery_images is not None:
+            # Store CDN URLs now; import_apply will replace them with local paths
+            # after the pack is moved to the library.
+            model.image_paths = body.gallery_images
         model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "updated": len(models_to_update)}
+
+
+@router.delete("/bulk", response_model=BulkDeleteResponse)
+def bulk_delete_models(body: BulkDeleteRequest, db: Session = Depends(get_db)):
+    """Permanently remove models from the database, optionally deleting their files.
+
+    Deletion order: CollectionModel links → STLFile records → Model records. If
+    delete_files=True, each unique folder_path is removed from disk after the DB
+    transaction commits, provided the path is contained within a known scan root
+    (path-injection guard). Empty parent directories are NOT removed — the caller
+    owns the cleanup policy."""
+    if not body.ids:
+        raise HTTPException(status_code=400, detail="No model IDs provided")
+
+    models_to_delete = db.query(Model).filter(Model.id.in_(body.ids)).all()
+    if not models_to_delete:
+        raise HTTPException(status_code=404, detail="No matching models found")
+
+    # Collect folders before touching the DB (needed for disk deletion).
+    folder_paths = list({m.folder_path for m in models_to_delete if m.folder_path})
+
+    # Path guard: build allowed roots once, used only when delete_files=True.
+    if body.delete_files and folder_paths:
+        roots = [os.path.realpath(r.path) for r in db.query(ScanRoot).all()]
+
+        def _within_roots(p: str) -> bool:
+            real = os.path.realpath(p)
+            for root in roots:
+                try:
+                    if os.path.commonpath([real, root]) == root:
+                        return True
+                except ValueError:
+                    pass
+            return False
+
+        unsafe = [p for p in folder_paths if not _within_roots(p)]
+        if unsafe:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Some folders are outside known scan roots and cannot be deleted: {unsafe}",
+            )
+
+    model_ids = [m.id for m in models_to_delete]
+
+    # Delete child records manually (no ON DELETE CASCADE on these FKs).
+    db.query(CollectionModel).filter(CollectionModel.model_id.in_(model_ids)).delete(
+        synchronize_session=False
+    )
+    db.query(STLFile).filter(STLFile.model_id.in_(model_ids)).delete(
+        synchronize_session=False
+    )
+    db.query(Model).filter(Model.id.in_(model_ids)).delete(synchronize_session=False)
+    db.commit()
+
+    folders_removed = 0
+    if body.delete_files:
+        for path in folder_paths:
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                    folders_removed += 1
+            except Exception as exc:
+                _log.warning("Could not delete folder %r: %s", path, exc)
+
+    return BulkDeleteResponse(deleted=len(model_ids), folders_removed=folders_removed)
 
 
 @router.patch("/{model_id}")
@@ -647,7 +722,7 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
     allowed = {
         "title", "description", "notes", "source_url", "source_site",
         "license", "category", "tags", "removed_auto_tags", "custom_attributes",
-        "nsfw", "needs_review", "thumbnail_url",
+        "nsfw", "needs_review", "thumbnail_url", "primary_image_path", "image_paths",
     }
     # The metadata editor resubmits the whole form, so only treat thumbnail_url
     # as "changed" when it differs from what's stored. A new remote URL is
@@ -666,6 +741,11 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
             if key in ("tags", "removed_auto_tags") and isinstance(value, list):
                 value = list(dict.fromkeys(t.strip().lower() for t in value if t.strip()))
             setattr(model, key, value)
+
+    # If image_paths was updated and primary_image_path is no longer in the list, clear it.
+    if "image_paths" in data and isinstance(data["image_paths"], list):
+        if model.primary_image_path and model.primary_image_path not in data["image_paths"]:
+            model.primary_image_path = None
 
     if data.get("creator_name"):
         model.creator_id = resolve_creator(data["creator_name"], db).id

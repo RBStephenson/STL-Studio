@@ -90,7 +90,6 @@ class TestInboxScanConflict:
         """Lock acquired synchronously in endpoint — 409 before thread starts."""
         from unittest.mock import MagicMock
         mock_settings = MagicMock()
-        mock_settings.stl_root_list = []
         with patch("app.services.scanner.prepare_inbox_scan", return_value=False), \
              patch("app.routers.scan._configured_roots", return_value=[]), \
              patch("app.routers.scan.settings", mock_settings):

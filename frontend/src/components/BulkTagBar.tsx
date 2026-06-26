@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Tag, Trash2, X, Check, Loader2, FolderOpen, EyeOff, AlertCircle, Pencil } from "lucide-react";
+import { Tag, Trash2, X, Check, Loader2, FolderOpen, EyeOff, AlertCircle, Pencil, OctagonAlert } from "lucide-react";
 import { api, Collection } from "../api/client";
 import { useConfirm } from "../context/ConfirmContext";
 import { useToast } from "../context/ToastContext";
@@ -138,6 +138,36 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
     } catch {
       setStatus("idle");
       toast("Couldn't flag the selected models — try again.", "error");
+    }
+  };
+
+  const deleteSelected = async () => {
+    const ok = await confirm({
+      title: `Delete ${n} model${plural}?`,
+      message: `This permanently removes ${n} model${plural} from the library. The database records will be deleted. You'll be asked about files next.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+
+    const withFiles = await confirm({
+      title: "Also delete files from disk?",
+      message: `Delete the actual STL files and folders for ${n} model${plural}? This cannot be undone.\n\nChoose "Keep Files" to remove only the database records and leave files on disk.`,
+      confirmLabel: "Delete Files",
+      cancelLabel: "Keep Files",
+      destructive: true,
+    });
+
+    setStatus("loading");
+    try {
+      const res = await api.models.bulkDelete(selectedIds, withFiles);
+      const fileNote = withFiles ? `, ${res.folders_removed} folder${res.folders_removed !== 1 ? "s" : ""} removed` : "";
+      toast(`Deleted ${res.deleted} model${res.deleted !== 1 ? "s" : ""}${fileNote}.`, "success");
+      onDone();
+      onClear();
+    } catch {
+      setStatus("idle");
+      toast("Couldn't delete the selected models — try again.", "error");
     }
   };
 
@@ -384,6 +414,14 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
             >
               <EyeOff size={13} />
               Hide
+            </button>
+            <button
+              onClick={deleteSelected}
+              title="Permanently delete the selected models (optionally including files on disk)"
+              className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-red-950/60 border border-red-700/70 text-red-400 hover:bg-red-900/60 hover:text-red-200 transition-colors"
+            >
+              <OctagonAlert size={13} />
+              Delete
             </button>
           </div>
         )}

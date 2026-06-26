@@ -88,7 +88,7 @@ class TestSourceContents:
         assert client.get("/import/source-contents", params={"source": ""}).status_code == 400
 
     def test_outside_allowlist_403(self, client, db):
-        # Not under any configured root (STL_ROOTS=/tmp in tests) or bootstrap.
+        # Not under any configured root or bootstrap.
         r = client.get("/import/source-contents", params={"source": "/srv/outside/pack"})
         assert r.status_code == 403
 

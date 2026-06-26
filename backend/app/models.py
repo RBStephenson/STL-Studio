@@ -156,7 +156,9 @@ class Model(Base):
     # Images
     thumbnail_path = Column(String, nullable=True)   # local path
     thumbnail_url = Column(String, nullable=True)    # remote URL
-    image_paths = Column(JSON, default=list)          # additional local images
+    image_paths = Column(JSON, default=list)          # additional local images (gallery)
+    other_files = Column(JSON, default=list)          # non-STL, non-image files (PDFs, TXTs, etc.)
+    primary_image_path = Column(String, nullable=True)  # user-selected card image from image_paths
 
     # Persisted Set-Thumbnail picker manifest (#304). Caches the walk of the
     # character boundary so reopening the picker — even across restarts — needs

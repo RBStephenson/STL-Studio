@@ -110,6 +110,8 @@ export interface Model {
   thumbnail_path: string | null;
   thumbnail_url: string | null;
   image_paths: string[];
+  other_files: string[];
+  primary_image_path: string | null;
   rating: number | null;
   download_count: number | null;
   creator_id: number | null;
@@ -271,6 +273,12 @@ export interface AiSettings {
   key_hint: string | null;
   model: string;
   effort: AiEffort;
+}
+
+export interface Cults3DSettings {
+  configured: boolean;
+  username: string | null;
+  key_hint: string | null;
 }
 
 export interface ScanTagRule {
@@ -1011,11 +1019,17 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids, needs_review }),
       }),
-    bulkEnrich: (ids: number[], fields: { creator_name?: string; character?: string; title?: string; notes?: string; source_url?: string }) =>
+    bulkEnrich: (ids: number[], fields: { creator_name?: string; character?: string; title?: string; notes?: string; source_url?: string; gallery_images?: string[] }) =>
       request<{ ok: boolean; updated: number }>("/models/bulk/enrich", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids, ...fields }),
+      }),
+    bulkDelete: (ids: number[], deleteFiles: boolean) =>
+      request<{ deleted: number; folders_removed: number }>("/models/bulk", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, delete_files: deleteFiles }),
       }),
     characters: (creatorId: number) =>
       request<string[]>(`/models/characters?creator_id=${creatorId}`),
@@ -1204,6 +1218,12 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source }),
       }),
+    downloadImages: (packPath: string, imageUrls: string[]) =>
+      request<{ downloaded: number }>("/import/download-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pack_path: packPath, image_urls: imageUrls }),
+      }),
   },
   settings: {
     get: () => request<AppSettings>("/settings"),
@@ -1241,6 +1261,19 @@ export const api = {
         }),
       clearKey: () =>
         request<AiSettings>("/settings/ai/key", { method: "DELETE" }),
+    },
+    // Cults3D API credentials — write-only; get() returns configured status,
+    // username, and a masked key hint. Plaintext key is never returned.
+    cults3d: {
+      get: () => request<Cults3DSettings>("/settings/cults3d"),
+      setCredentials: (username: string, api_key: string) =>
+        request<Cults3DSettings>("/settings/cults3d/credentials", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, api_key }),
+        }),
+      clearCredentials: () =>
+        request<Cults3DSettings>("/settings/cults3d/credentials", { method: "DELETE" }),
     },
   },
   painting: {
@@ -1538,6 +1571,8 @@ export const api = {
   fileUrl: (path: string, version?: string | null) =>
     `/api/files/image?path=${encodeURIComponent(path)}` +
     (version ? `&v=${encodeURIComponent(version)}` : ""),
+  documentUrl: (path: string) =>
+    `/api/files/document?path=${encodeURIComponent(path)}`,
   // version (the file size) lets the backend serve an immutable long-cache
   // response so reopening the viewer doesn't re-read the STL from the drive (#304).
   stlUrl: (path: string, version?: string | number | null) =>

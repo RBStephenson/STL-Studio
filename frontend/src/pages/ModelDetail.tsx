@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
+import { GalleryRotator, GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck } from "lucide-react";
 import { api, ApiError, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
@@ -228,6 +229,8 @@ export default function ModelDetail() {
   const [variantVersion, setVariantVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState<string | null>(null);
+  const [galleryIdx, setGalleryIdx] = useState(0);
+  const rotatorRef = useRef<GalleryRotatorHandle>(null);
   const [showFindOnWeb, setShowFindOnWeb] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -262,18 +265,25 @@ export default function ModelDetail() {
     if (!lightboxOpen) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { setLightboxOpen(false); return; }
-      if (!activeImage) return;
-      const allImgs = [
-        model?.thumbnail_path ? api.fileUrl(model.thumbnail_path, model.updated_at) : model?.thumbnail_url,
-        ...(model?.image_paths ?? []).map((p) => api.fileUrl(p)),
-      ].filter(Boolean) as string[];
-      const idx = allImgs.indexOf(activeImage);
-      if (e.key === "ArrowLeft" && idx > 0) setActiveImage(allImgs[idx - 1]);
-      if (e.key === "ArrowRight" && idx < allImgs.length - 1) setActiveImage(allImgs[idx + 1]);
+      const hasGallery = (model?.image_paths ?? []).length > 0;
+      if (hasGallery) {
+        const total = model!.image_paths.length;
+        if (e.key === "ArrowLeft" && galleryIdx > 0) rotatorRef.current?.goTo(galleryIdx - 1);
+        if (e.key === "ArrowRight" && galleryIdx < total - 1) rotatorRef.current?.goTo(galleryIdx + 1);
+      } else {
+        if (!activeImage) return;
+        const allImgs = [
+          model?.thumbnail_path ? api.fileUrl(model.thumbnail_path, model.updated_at) : model?.thumbnail_url,
+          ...(model?.image_paths ?? []).map((p) => api.fileUrl(p)),
+        ].filter(Boolean) as string[];
+        const idx = allImgs.indexOf(activeImage);
+        if (e.key === "ArrowLeft" && idx > 0) setActiveImage(allImgs[idx - 1]);
+        if (e.key === "ArrowRight" && idx < allImgs.length - 1) setActiveImage(allImgs[idx + 1]);
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [lightboxOpen, activeImage, model]);
+  }, [lightboxOpen, activeImage, galleryIdx, model]);
 
   // sync local state from loaded model
   useEffect(() => {
@@ -751,7 +761,15 @@ export default function ModelDetail() {
           {viewMode === "images" && (
             <>
               <div className="aspect-square bg-gray-900 rounded-xl overflow-hidden border border-gray-800 relative group">
-                {activeImage ? (
+                {model.image_paths.length > 0 ? (
+                  <GalleryRotator
+                    ref={rotatorRef}
+                    paths={model.image_paths}
+                    alt={model.title ?? model.name}
+                    blur={nsfw && !showNSFW}
+                    onIndexChange={setGalleryIdx}
+                  />
+                ) : activeImage ? (
                   <img
                     src={activeImage}
                     alt={model.title ?? model.name}
@@ -776,7 +794,8 @@ export default function ModelDetail() {
                   </div>
                 )}
 
-                {activeImage && (
+                {/* Zoom button */}
+                {(model.image_paths.length > 0 || activeImage) && (
                   <button
                     onClick={() => setLightboxOpen(true)}
                     className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-gray-300 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
@@ -785,40 +804,115 @@ export default function ModelDetail() {
                     <ZoomIn size={14} />
                   </button>
                 )}
+
+                {/* Hover action bar */}
                 <div className="absolute bottom-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {activeImage && (
-                    <button
-                      onClick={clearImage}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-rose-900/70 text-gray-300 hover:text-white text-xs"
-                    >
-                      <ImageOff size={13} /> Clear image
-                    </button>
+                  {model.image_paths.length > 0 ? (
+                    // Gallery mode: bookmark + delete
+                    (() => {
+                      const currentPath = model.image_paths[galleryIdx] ?? null;
+                      const isPrimary = currentPath !== null && currentPath === model.primary_image_path;
+                      return (
+                        <>
+                          <button
+                            onClick={async () => {
+                              const ok = await confirm({
+                                title: "Delete this image?",
+                                message: "The image will be removed from this pack. The file remains on disk.",
+                                confirmLabel: "Delete image",
+                              });
+                              if (!ok) return;
+                              const newPaths = model.image_paths.filter((_, i) => i !== galleryIdx);
+                              await api.models.update(model.id, { image_paths: newPaths });
+                              load();
+                            }}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-rose-900/70 text-gray-300 hover:text-white text-xs"
+                          >
+                            <ImageOff size={13} /> Delete image
+                          </button>
+                          {isPrimary ? (
+                            <button
+                              onClick={async () => {
+                                await api.models.update(model.id, { primary_image_path: null });
+                                load();
+                              }}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-700/80 text-indigo-200 text-xs"
+                              title="Remove as library card image"
+                            >
+                              <BookmarkCheck size={13} /> Library image
+                            </button>
+                          ) : (
+                            <button
+                              onClick={async () => {
+                                await api.models.update(model.id, { primary_image_path: currentPath });
+                                load();
+                              }}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-indigo-700/80 text-gray-300 hover:text-indigo-200 text-xs"
+                              title="Use as library card image"
+                            >
+                              <Bookmark size={13} /> Set as library image
+                            </button>
+                          )}
+                        </>
+                      );
+                    })()
+                  ) : (
+                    // Thumbnail mode: clear / change
+                    <>
+                      {activeImage && (
+                        <button
+                          onClick={clearImage}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-rose-900/70 text-gray-300 hover:text-white text-xs"
+                        >
+                          <ImageOff size={13} /> Clear image
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setShowImagePicker(true)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-gray-300 hover:text-white text-xs"
+                      >
+                        <ImagePlus size={13} /> Change image
+                      </button>
+                    </>
                   )}
-                  <button
-                    onClick={() => setShowImagePicker(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-gray-300 hover:text-white text-xs"
-                  >
-                    <ImagePlus size={13} /> Change image
-                  </button>
                 </div>
               </div>
-              {allImages.length > 1 && (
-                <div className="flex gap-2 flex-wrap">
-                  {allImages.map((img, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setActiveImage(img)}
-                      className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
-                        activeImage === img
-                          ? "border-indigo-500"
-                          : "border-gray-800 hover:border-gray-600"
-                      }`}
-                    >
-                      <img src={img} alt="" className="w-full h-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              )}
+
+              {/* Thumbnail strip — explicit thumbnail + gallery sections to avoid index mapping bugs */}
+              {(() => {
+                const thumbSrc = model.thumbnail_path
+                  ? api.fileUrl(model.thumbnail_path, model.updated_at)
+                  : model.thumbnail_url ?? null;
+                const totalItems = (thumbSrc ? 1 : 0) + model.image_paths.length;
+                if (totalItems <= 1) return null;
+                return (
+                  <div className="flex gap-2 flex-wrap">
+                    {thumbSrc && (
+                      <button
+                        onClick={() => setActiveImage(thumbSrc)}
+                        className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+                          model.image_paths.length === 0 && activeImage === thumbSrc
+                            ? "border-indigo-500"
+                            : "border-gray-800 hover:border-gray-600"
+                        }`}
+                      >
+                        <img src={thumbSrc} alt="" className="w-full h-full object-cover" />
+                      </button>
+                    )}
+                    {model.image_paths.map((path, i) => (
+                      <button
+                        key={i}
+                        onClick={() => rotatorRef.current?.goTo(i)}
+                        className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+                          i === galleryIdx ? "border-indigo-500" : "border-gray-800 hover:border-gray-600"
+                        }`}
+                      >
+                        <img src={api.fileUrl(path)} alt="" className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </>
           )}
 
@@ -1311,6 +1405,32 @@ export default function ModelDetail() {
             </div>
           </div>
 
+          {/* Other Files (PDFs, TXTs, ZIPs, etc.) */}
+          {(model.other_files ?? []).length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                <FileBox size={14} />
+                Other Files ({(model.other_files ?? []).length})
+              </h3>
+              <div className="space-y-1">
+                {(model.other_files ?? []).map((fp) => {
+                  const name = fp.split(/[\\/]/).pop() ?? fp;
+                  return (
+                    <a
+                      key={fp}
+                      href={api.documentUrl(fp)}
+                      download={name}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-600 hover:bg-gray-800 text-xs text-gray-300 hover:text-gray-100 transition-colors"
+                    >
+                      <FileBox size={12} className="shrink-0 text-gray-500" />
+                      <span className="truncate">{name}</span>
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* File location */}
           <div className="mt-auto">
             <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
@@ -1375,60 +1495,72 @@ export default function ModelDetail() {
         />
       )}
 
-      {lightboxOpen && activeImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
-          onClick={() => setLightboxOpen(false)}
-        >
-          {/* Close */}
-          <button
+      {lightboxOpen && (() => {
+        const hasGallery = model.image_paths.length > 0;
+        const lbImages = hasGallery
+          ? model.image_paths.map((p) => api.fileUrl(p))
+          : allImages;
+        const lbIdx = hasGallery ? galleryIdx : allImages.indexOf(activeImage ?? "");
+        const lbSrc = lbImages[lbIdx] ?? null;
+        if (!lbSrc) return null;
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
             onClick={() => setLightboxOpen(false)}
-            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-            aria-label="Close"
           >
-            <X size={20} />
-          </button>
-
-          {/* Prev */}
-          {allImages.length > 1 && allImages.indexOf(activeImage) > 0 && (
             <button
-              onClick={(e) => { e.stopPropagation(); setActiveImage(allImages[allImages.indexOf(activeImage) - 1]); }}
-              className="absolute left-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-              aria-label="Previous image"
+              onClick={() => setLightboxOpen(false)}
+              className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+              aria-label="Close"
             >
-              <ChevronLeft size={28} />
+              <X size={20} />
             </button>
-          )}
 
-          {/* Image */}
-          <img
-            src={activeImage}
-            alt={model.title ?? model.name}
-            onClick={(e) => e.stopPropagation()}
-            className={`max-w-[90vw] max-h-[90vh] object-contain rounded-lg ${
-              nsfw && !showNSFW ? "blur-2xl" : ""
-            }`}
-          />
+            {lbIdx > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (hasGallery) rotatorRef.current?.goTo(lbIdx - 1);
+                  else setActiveImage(lbImages[lbIdx - 1]);
+                }}
+                className="absolute left-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                aria-label="Previous image"
+              >
+                <ChevronLeft size={28} />
+              </button>
+            )}
 
-          {/* Next */}
-          {allImages.length > 1 && allImages.indexOf(activeImage) < allImages.length - 1 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); setActiveImage(allImages[allImages.indexOf(activeImage) + 1]); }}
-              className="absolute right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-              aria-label="Next image"
-            >
-              <ChevronRight size={28} />
-            </button>
-          )}
+            <img
+              src={lbSrc}
+              alt={model.title ?? model.name}
+              onClick={(e) => e.stopPropagation()}
+              className={`max-w-[90vw] max-h-[90vh] object-contain rounded-lg ${
+                nsfw && !showNSFW ? "blur-2xl" : ""
+              }`}
+            />
 
-          {/* Image counter */}
-          {allImages.length > 1 && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/60 bg-black/40 px-3 py-1 rounded-full">
-              {allImages.indexOf(activeImage) + 1} / {allImages.length}
-            </div>
-          )}
-        </div>
-      )}
+            {lbIdx < lbImages.length - 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (hasGallery) rotatorRef.current?.goTo(lbIdx + 1);
+                  else setActiveImage(lbImages[lbIdx + 1]);
+                }}
+                className="absolute right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                aria-label="Next image"
+              >
+                <ChevronRight size={28} />
+              </button>
+            )}
+
+            {lbImages.length > 1 && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/60 bg-black/40 px-3 py-1 rounded-full">
+                {lbIdx + 1} / {lbImages.length}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

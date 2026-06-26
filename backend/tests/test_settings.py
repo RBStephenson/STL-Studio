@@ -239,7 +239,7 @@ def restore_settings():
         setattr(live_settings, name, value)
 
 
-def test_reload_reports_scan_roots_and_restart_keys(client, restore_settings):
+def test_reload_reports_restart_keys(client, restore_settings):
     r = client.post("/settings/reload")
     assert r.status_code == 200
     body = r.json()
@@ -247,15 +247,6 @@ def test_reload_reports_scan_roots_and_restart_keys(client, restore_settings):
     # database_url is bound once at startup — flagged as needing a restart.
     assert "database_url" in body["restart_required"]
     assert set(body.keys()) == {"ok", "scan_roots", "drive_mappings", "restart_required"}
-
-
-def test_reload_picks_up_changed_env(client, monkeypatch, restore_settings):
-    monkeypatch.setenv("STL_ROOTS", "/srv/a,/srv/b")
-    r = client.post("/settings/reload")
-    assert r.status_code == 200
-    assert r.json()["scan_roots"] == ["/srv/a", "/srv/b"]
-    # The live singleton was updated in place, so other modules see it too.
-    assert live_settings.stl_root_list == ["/srv/a", "/srv/b"]
 
 
 def test_reload_never_exposes_secrets(client, monkeypatch, restore_settings):

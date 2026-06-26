@@ -62,9 +62,7 @@ class TestBrowseBootstrapRestriction:
     bootstrap allowlist — it must not expose the whole filesystem (#41)."""
 
     def test_arbitrary_path_rejected_when_no_roots(self, client, tmp_path, monkeypatch):
-        from app.config import settings
         from app.routers import scan
-        monkeypatch.setattr(settings, "stl_roots", "")
 
         allowed = tmp_path / "allowed"
         outside = tmp_path / "outside"
@@ -85,9 +83,7 @@ class TestBrowseRootRestriction:
         # Regression: once any root existed the allowlist narrowed to just the
         # roots, so the Settings "Add Folder" picker could not open any other
         # drive/folder to add. Bootstrap locations must stay browsable.
-        from app.config import settings
         from app.routers import scan
-        monkeypatch.setattr(settings, "stl_roots", "")
         root = tmp_path / "Root"
         root.mkdir()
         elsewhere = tmp_path / "Elsewhere"
@@ -106,10 +102,6 @@ class TestBrowseRootRestriction:
         assert client.get("/scan/browse", params={"path": str(outside)}).status_code == 403
 
     def test_browse_allowed_under_every_configured_root(self, client, tmp_path, monkeypatch):
-        # Only DB-configured roots — clear the STL_ROOTS env fallback so the
-        # allowlist is exactly the two roots added below.
-        from app.config import settings
-        monkeypatch.setattr(settings, "stl_roots", "")
 
         root_a = tmp_path / "RootA"
         root_b = tmp_path / "RootB"
@@ -126,8 +118,6 @@ class TestBrowseRootRestriction:
             assert [e["name"] for e in resp.json()["entries"]] == [child]
 
     def test_browse_outside_configured_roots_rejected(self, client, tmp_path, monkeypatch):
-        from app.config import settings
-        monkeypatch.setattr(settings, "stl_roots", "")
 
         root = tmp_path / "Root"
         outside = tmp_path / "Outside"

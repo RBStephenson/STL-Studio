@@ -24,6 +24,10 @@ from app.models import AppSetting
 # whitelist, so the plain settings GET never echoes it).
 AI_API_KEY_ENC = "ai_api_key_enc"
 
+# Cults3D credentials: username is stored as plaintext (it's public), API key encrypted.
+CULTS3D_USERNAME_KEY = "cults3d_username"
+CULTS3D_API_KEY_ENC = "cults3d_api_key_enc"
+
 _SECRET_KEY_ENV = "STL_SECRET_KEY"
 _SECRET_KEY_FILENAME = ".secret_key"
 
@@ -121,3 +125,69 @@ def ai_api_key_hint(db: Session) -> str | None:
         return None
     tail = key[-4:] if len(key) >= 4 else key
     return f"…{tail}"
+
+
+# --- Cults3D credentials ---------------------------------------------------
+
+def set_cults3d_credentials(db: Session, username: str, api_key: str) -> None:
+    """Store Cults3D username (plaintext) and encrypted API key. Blank clears."""
+    username = username.strip()
+    api_key = api_key.strip()
+    if not username and not api_key:
+        clear_cults3d_credentials(db)
+        return
+    # username is public info — store plaintext
+    row = db.get(AppSetting, CULTS3D_USERNAME_KEY)
+    if row is None:
+        db.add(AppSetting(key=CULTS3D_USERNAME_KEY, value=username))
+    else:
+        row.value = username
+    # API key is sensitive — encrypt
+    if api_key:
+        token = _get_fernet().encrypt(api_key.encode()).decode()
+        row2 = db.get(AppSetting, CULTS3D_API_KEY_ENC)
+        if row2 is None:
+            db.add(AppSetting(key=CULTS3D_API_KEY_ENC, value=token))
+        else:
+            row2.value = token
+    db.commit()
+
+
+def get_cults3d_credentials(db: Session) -> tuple[str, str] | None:
+    """Return (username, api_key) or None if not configured."""
+    username_row = db.get(AppSetting, CULTS3D_USERNAME_KEY)
+    key_row = db.get(AppSetting, CULTS3D_API_KEY_ENC)
+    if username_row is None or key_row is None:
+        return None
+    username = username_row.value if isinstance(username_row.value, str) else None
+    if not username:
+        return None
+    try:
+        api_key = _get_fernet().decrypt(key_row.value.encode()).decode()
+    except InvalidToken:
+        return None
+    return (username, api_key)
+
+
+def clear_cults3d_credentials(db: Session) -> None:
+    for key in (CULTS3D_USERNAME_KEY, CULTS3D_API_KEY_ENC):
+        row = db.get(AppSetting, key)
+        if row is not None:
+            db.delete(row)
+    db.commit()
+
+
+def cults3d_credentials_hint(db: Session) -> tuple[str | None, str | None]:
+    """(username, masked_api_key_hint) — safe to show in the UI."""
+    username_row = db.get(AppSetting, CULTS3D_USERNAME_KEY)
+    key_row = db.get(AppSetting, CULTS3D_API_KEY_ENC)
+    username = username_row.value if username_row and isinstance(username_row.value, str) else None
+    hint: str | None = None
+    if key_row and isinstance(key_row.value, str):
+        try:
+            raw = _get_fernet().decrypt(key_row.value.encode()).decode()
+            tail = raw[-4:] if len(raw) >= 4 else raw
+            hint = f"…{tail}"
+        except InvalidToken:
+            pass
+    return (username or None, hint)

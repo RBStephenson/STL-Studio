@@ -91,9 +91,12 @@ def _build_and_persist(
     root_id: int | None,
     overrides: dict[int, dict] | None,
     inbox_source: str | None = None,
+    slugify_title: bool = False,
 ) -> ReorganizePreviewResponse:
     try:
-        manifest = reorganize.build_manifest(db, template, root_id, overrides, inbox_source)
+        manifest = reorganize.build_manifest(
+            db, template, root_id, overrides, inbox_source, slugify_title=slugify_title
+        )
     except ReorganizeTemplateError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

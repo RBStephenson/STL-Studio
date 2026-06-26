@@ -19,17 +19,9 @@ router = APIRouter(prefix="/scan", tags=["scan"])
 
 
 def _configured_roots(db: Session) -> list[Path]:
-    """Return all enabled scan roots from the DB plus the env config."""
+    """Return all enabled scan roots from the DB."""
     from app.models import ScanRoot as ScanRootModel
-    db_roots = [Path(r) for (r,) in db.query(ScanRootModel.path).filter(ScanRootModel.enabled == True)]
-    env_roots = [Path(r) for r in settings.stl_root_list]
-    seen: set[Path] = set()
-    result = []
-    for r in db_roots + env_roots:
-        if r not in seen:
-            seen.add(r)
-            result.append(r)
-    return result
+    return [Path(r) for (r,) in db.query(ScanRootModel.path).filter(ScanRootModel.enabled == True)]
 
 
 def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
@@ -53,7 +45,7 @@ def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
 # Safe top-level locations the first-run folder picker may browse before any
 # scan root is configured. Without this, an empty root list left /scan/browse
 # able to list the entire host/container filesystem (#41).
-_UNIX_BROWSE_DIRS = ("/mnt", "/media", "/Volumes", "/data")
+_UNIX_BROWSE_DIRS = ("/mnt", "/media", "/Volumes", "/data", "/import", "/library")
 
 
 def _bootstrap_roots() -> list[Path]:
@@ -220,7 +212,6 @@ def start_inbox_scan(body: InboxScanRequest, db: Session = Depends(get_db)):
     configured_norm: list[str] = [
         os.path.normpath(r.path) for r in db.query(ScanRoot).all() if r.path
     ]
-    configured_norm += [os.path.normpath(r) for r in settings.stl_root_list]
     for root in configured_norm:
         if (
             norm == root
@@ -355,10 +346,15 @@ def remove_root(root_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+_LIBRARY_ROOT = "/library"
+
+
 def _sync_roots_from_config(db: Session):
-    """Ensure each path in STL_ROOTS env var exists as a ScanRoot row."""
-    for path in settings.stl_root_list:
-        exists = db.query(ScanRoot).filter(ScanRoot.path == path).first()
-        if not exists:
-            db.add(ScanRoot(path=path, enabled=True))
+    """Seed /library as a ScanRoot on first boot if the mount is present."""
+    from pathlib import Path as _Path
+    if not _Path(_LIBRARY_ROOT).is_dir():
+        return
+    exists = db.query(ScanRoot).filter(ScanRoot.path == _LIBRARY_ROOT).first()
+    if not exists:
+        db.add(ScanRoot(path=_LIBRARY_ROOT, enabled=True))
     db.commit()
