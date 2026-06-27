@@ -10,8 +10,9 @@ class Settings(BaseSettings):
     stl_drive_1: str = ""
     stl_drive_2: str = ""
 
-    # Scraper API keys (reserved for future use)
-    # MMF switched to OAuth-only — scraping is used instead
+    # MyMiniFactory REST API key (simple ?key= query auth). When set, the MMF
+    # adapter uses the API for object detail + search and falls back to scraping
+    # on miss. Register an app at MMF Settings -> Developer to obtain a key.
     mmf_api_key: str = ""
 
     # Library reorganize apply (#324, Phase 2a) — the ONLY feature that moves

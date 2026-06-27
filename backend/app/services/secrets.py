@@ -127,67 +127,102 @@ def ai_api_key_hint(db: Session) -> str | None:
     return f"…{tail}"
 
 
-# --- Cults3D credentials ---------------------------------------------------
+# --- Cults3D credentials (#578) -------------------------------------------
+# Stored as a single encrypted blob: "username\x00apikey" (null-byte separator
+# so neither field can contain the delimiter accidentally).
 
-def set_cults3d_credentials(db: Session, username: str, api_key: str) -> None:
-    """Store Cults3D username (plaintext) and encrypted API key. Blank clears."""
-    username = username.strip()
-    api_key = api_key.strip()
-    if not username and not api_key:
-        clear_cults3d_credentials(db)
+CULTS_CREDS_ENC = "cults_credentials_enc"
+
+
+def set_cults_credentials(db: Session, username: str, api_key: str) -> None:
+    """Encrypt and persist Cults3D username + API key. Blank clears both."""
+    username, api_key = username.strip(), api_key.strip()
+    if not username or not api_key:
+        clear_cults_credentials(db)
         return
-    # username is public info — store plaintext
-    row = db.get(AppSetting, CULTS3D_USERNAME_KEY)
+    blob = f"{username}\x00{api_key}"
+    token = _get_fernet().encrypt(blob.encode()).decode()
+    row = db.get(AppSetting, CULTS_CREDS_ENC)
     if row is None:
-        db.add(AppSetting(key=CULTS3D_USERNAME_KEY, value=username))
+        db.add(AppSetting(key=CULTS_CREDS_ENC, value=token))
     else:
-        row.value = username
-    # API key is sensitive — encrypt
-    if api_key:
-        token = _get_fernet().encrypt(api_key.encode()).decode()
-        row2 = db.get(AppSetting, CULTS3D_API_KEY_ENC)
-        if row2 is None:
-            db.add(AppSetting(key=CULTS3D_API_KEY_ENC, value=token))
-        else:
-            row2.value = token
+        row.value = token
     db.commit()
 
 
-def get_cults3d_credentials(db: Session) -> tuple[str, str] | None:
-    """Return (username, api_key) or None if not configured."""
-    username_row = db.get(AppSetting, CULTS3D_USERNAME_KEY)
-    key_row = db.get(AppSetting, CULTS3D_API_KEY_ENC)
-    if username_row is None or key_row is None:
-        return None
-    username = username_row.value if isinstance(username_row.value, str) else None
-    if not username:
+def get_cults_credentials(db: Session) -> tuple[str, str] | None:
+    """Return (username, api_key) or None if unset/undecryptable."""
+    row = db.get(AppSetting, CULTS_CREDS_ENC)
+    if row is None or not isinstance(row.value, str):
         return None
     try:
-        api_key = _get_fernet().decrypt(key_row.value.encode()).decode()
-    except InvalidToken:
+        blob = _get_fernet().decrypt(row.value.encode()).decode()
+        username, api_key = blob.split("\x00", 1)
+        return username, api_key
+    except (InvalidToken, ValueError):
         return None
-    return (username, api_key)
 
 
-def clear_cults3d_credentials(db: Session) -> None:
-    for key in (CULTS3D_USERNAME_KEY, CULTS3D_API_KEY_ENC):
-        row = db.get(AppSetting, key)
-        if row is not None:
-            db.delete(row)
+def clear_cults_credentials(db: Session) -> None:
+    row = db.get(AppSetting, CULTS_CREDS_ENC)
+    if row is not None:
+        db.delete(row)
+        db.commit()
+
+
+def cults_credentials_hint(db: Session) -> str | None:
+    """Masked hint: `rbstephenson / …wxyz`."""
+    creds = get_cults_credentials(db)
+    if not creds:
+        return None
+    username, api_key = creds
+    tail = api_key[-4:] if len(api_key) >= 4 else api_key
+    return f"{username} / …{tail}"
+
+
+# --- MyMiniFactory API key ------------------------------------------------
+# Single encrypted key (simple ?key= query auth), mirroring the AI key.
+
+MMF_API_KEY_ENC = "mmf_api_key_enc"
+
+
+def set_mmf_api_key(db: Session, raw_key: str) -> None:
+    """Encrypt and store the MMF API key. Empty/blank input clears it instead."""
+    raw_key = raw_key.strip()
+    if not raw_key:
+        clear_mmf_api_key(db)
+        return
+    token = _get_fernet().encrypt(raw_key.encode()).decode()
+    row = db.get(AppSetting, MMF_API_KEY_ENC)
+    if row is None:
+        db.add(AppSetting(key=MMF_API_KEY_ENC, value=token))
+    else:
+        row.value = token
     db.commit()
 
 
-def cults3d_credentials_hint(db: Session) -> tuple[str | None, str | None]:
-    """(username, masked_api_key_hint) — safe to show in the UI."""
-    username_row = db.get(AppSetting, CULTS3D_USERNAME_KEY)
-    key_row = db.get(AppSetting, CULTS3D_API_KEY_ENC)
-    username = username_row.value if username_row and isinstance(username_row.value, str) else None
-    hint: str | None = None
-    if key_row and isinstance(key_row.value, str):
-        try:
-            raw = _get_fernet().decrypt(key_row.value.encode()).decode()
-            tail = raw[-4:] if len(raw) >= 4 else raw
-            hint = f"…{tail}"
-        except InvalidToken:
-            pass
-    return (username or None, hint)
+def get_mmf_api_key(db: Session) -> str | None:
+    """Decrypt and return the stored MMF API key, or None if unset/undecryptable."""
+    row = db.get(AppSetting, MMF_API_KEY_ENC)
+    if row is None or not isinstance(row.value, str):
+        return None
+    try:
+        return _get_fernet().decrypt(row.value.encode()).decode()
+    except InvalidToken:
+        return None
+
+
+def clear_mmf_api_key(db: Session) -> None:
+    row = db.get(AppSetting, MMF_API_KEY_ENC)
+    if row is not None:
+        db.delete(row)
+        db.commit()
+
+
+def mmf_api_key_hint(db: Session) -> str | None:
+    """A masked hint for display (e.g. `…wxyz`), never the full key."""
+    key = get_mmf_api_key(db)
+    if not key:
+        return None
+    tail = key[-4:] if len(key) >= 4 else key
+    return f"…{tail}"

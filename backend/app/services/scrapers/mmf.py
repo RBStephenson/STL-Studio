@@ -1,12 +1,18 @@
 """
-MyMiniFactory scraper.
+MyMiniFactory adapter.
 
-MMF now requires OAuth app registration for API access, so we scrape
-product pages directly. Their pages have reliable Open Graph tags,
-JSON-LD structured data, and a readable HTML structure.
+Two paths, API-first:
 
-If MMF ever offers a simple API key again, the api_key path can be
-restored — config.mmf_api_key is still wired up but unused for now.
+  * When an ``api_key`` is supplied we call the MMF REST API
+    (``/api/v2/objects/{id}`` and ``/api/v2/search``) with simple ``?key=``
+    query auth. This returns structured JSON — reliable fields, no selector
+    guessing. Confirmed working for *public* reads; private data (collections,
+    likes, ``is_saved``) would need the OAuth ``basic`` scope instead.
+  * Without a key — or if an API call fails — we fall back to scraping the
+    product page (Open Graph tags + JSON-LD + HTML), which needs no auth.
+
+Callers resolve the key (DB-stored secret, falling back to env) and pass it in;
+register an app at MMF Settings -> Developer to obtain one.
 """
 import re
 import json
@@ -21,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 SITE = "myminifactory"
 BASE = "https://www.myminifactory.com"
+API_BASE = "https://www.myminifactory.com/api/v2"
+
+# MMF serves each gallery image at several sizes; prefer the largest usable URL.
+_IMAGE_SIZE_PREFERENCE = ("large", "standard", "original", "thumbnail", "tiny")
 
 _HEADERS = {
     "User-Agent": (
@@ -46,7 +56,18 @@ def extract_id(url: str) -> Optional[str]:
     return id_m.group(1) if id_m else slug
 
 
-async def fetch(url: str) -> Optional[ScrapedModel]:
+async def fetch(url: str, api_key: Optional[str] = None) -> Optional[ScrapedModel]:
+    # API-first: structured JSON beats selector-scraping when a key is set and
+    # we can resolve the numeric object id from the URL.
+    object_id = extract_id(url)
+    if api_key and object_id and object_id.isdigit():
+        obj = await _api_get(f"/objects/{object_id}", api_key=api_key)
+        if obj:
+            model = _parse_api(obj, fallback_url=url)
+            if model:
+                return model
+        logger.info(f"MMF API fetch miss for object {object_id}; falling back to scrape")
+
     async with httpx.AsyncClient(
         timeout=20,
         headers=_HEADERS,
@@ -64,7 +85,29 @@ async def fetch(url: str) -> Optional[ScrapedModel]:
     return _parse(html, final_url)
 
 
-async def search(query: str, limit: int = 12) -> list[SearchResult]:
+async def search(query: str, limit: int = 12, api_key: Optional[str] = None) -> list[SearchResult]:
+    # API-first: the search endpoint returns full object records, which carry
+    # the fields SearchResult needs without scraping fragile result cards.
+    if api_key:
+        data = await _api_get("/search", params={"q": query, "per_page": limit}, api_key=api_key)
+        if data is not None:
+            results = []
+            for item in (data.get("items") or [])[:limit]:
+                model = _parse_api(item)
+                if not model:
+                    continue
+                results.append(SearchResult(
+                    title=model.title or model.source_url,
+                    source_url=model.source_url,
+                    source_site=SITE,
+                    external_id=model.external_id,
+                    creator_name=model.creator_name,
+                    thumbnail_url=model.thumbnail_url,
+                    like_count=model.like_count,
+                ))
+            return results
+        logger.info(f"MMF API search miss for {query!r}; falling back to scrape")
+
     async with httpx.AsyncClient(
         timeout=20,
         headers=_HEADERS,
@@ -111,6 +154,70 @@ async def search(query: str, limit: int = 12) -> list[SearchResult]:
             like_count=like_count,
         ))
     return results
+
+
+async def _api_get(path: str, api_key: str, params: Optional[dict] = None) -> Optional[dict]:
+    """GET an MMF API path with ?key= auth. Returns parsed JSON or None on error."""
+    query = {"key": api_key, **(params or {})}
+    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True) as client:
+        try:
+            r = await client.get(f"{API_BASE}{path}", params=query)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.error(f"MMF API GET {path} failed: {e}")
+            return None
+
+
+def _image_urls(obj: dict) -> list[str]:
+    """Best-resolution URL per gallery image, primary image first."""
+    images = obj.get("images") or []
+    # Primary first so the chosen thumbnail matches MMF's own cover choice.
+    images = sorted(images, key=lambda im: not im.get("is_primary"))
+    urls: list[str] = []
+    for im in images:
+        for size in _IMAGE_SIZE_PREFERENCE:
+            url = (im.get(size) or {}).get("url")
+            if url:
+                if url not in urls:
+                    urls.append(url)
+                break
+    return urls
+
+
+def _parse_api(obj: dict, fallback_url: Optional[str] = None) -> Optional[ScrapedModel]:
+    """Map an MMF API object record to ScrapedModel.
+
+    Shared by object-detail fetch and search (search items carry the same
+    object schema).
+    """
+    name = (obj.get("name") or "").strip()
+    if not name:
+        return None
+
+    designer = obj.get("designer") or {}
+    categories = (obj.get("categories") or {}).get("items") or []
+    images = _image_urls(obj)
+
+    obj_id = obj.get("id")
+    return ScrapedModel(
+        title=name,
+        description=(obj.get("description") or "").strip() or None,
+        source_url=obj.get("url") or fallback_url,
+        source_site=SITE,
+        external_id=str(obj_id) if obj_id is not None else None,
+        creator_name=(designer.get("name") or "").strip() or None,
+        creator_url=designer.get("profile_url") or None,
+        thumbnail_url=images[0] if images else None,
+        image_urls=images,
+        tags=[t for t in (obj.get("tags") or []) if t],
+        category=(categories[0].get("name") if categories else None),
+        license=(obj.get("license") or "").strip() or None,
+        like_count=obj.get("likes"),
+        # MMF exposes views, not downloads — don't conflate the two.
+        download_count=None,
+        make_count=len(obj.get("prints") or []) or None,
+    )
 
 
 def _parse(html: str, url: str) -> Optional[ScrapedModel]:

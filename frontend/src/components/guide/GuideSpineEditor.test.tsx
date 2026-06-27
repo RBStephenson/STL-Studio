@@ -64,6 +64,33 @@ describe("GuideSpineEditor", () => {
     );
   });
 
+  it("binds a name-only swatch to a picked shelf paint on save (#554)", async () => {
+    const { api } = await import("../../api/client");
+    vi.mocked(api.painting.paints.list).mockResolvedValue({
+      items: [{ id: 9, name: "Matte White Primer", code: "MWP", hex: "#eee" }],
+    } as never);
+
+    const onSave = vi.fn();
+    const tab = oneTab();
+    (tab as unknown as { phases: { steps: { swatches: unknown[] }[] }[] })
+      .phases[0].steps[0].swatches.push(
+        { id: 2, paint_id: null, name: "Matt White Primer", value_pct: 80, role_label: null, sort_order: 1, paint: null },
+      );
+    render(<GuideSpineEditor initialTabs={[tab]} onSave={onSave} onCancel={vi.fn()} />);
+
+    // The name-only swatch now exposes a picker; choose the real shelf paint.
+    await userEvent.click(screen.getAllByRole("button", { name: /choose paint/i })[0]);
+    await userEvent.type(screen.getByLabelText("Search paints"), "Matte");
+    await userEvent.click(await screen.findByText("Matte White Primer"));
+    await userEvent.click(screen.getByRole("button", { name: "Save content" }));
+
+    const swatches = onSave.mock.calls[0][0][0].phases[0].steps[0].swatches;
+    // Bound: paint_id set, name cleared.
+    expect(swatches).toContainEqual(
+      { paint_id: 9, name: null, value_pct: 80, role_label: null, sort_order: 1 },
+    );
+  });
+
   it("blocks save when a step has no title", async () => {
     const onSave = vi.fn();
     render(<GuideSpineEditor initialTabs={[oneTab()]} onSave={onSave} onCancel={vi.fn()} />);

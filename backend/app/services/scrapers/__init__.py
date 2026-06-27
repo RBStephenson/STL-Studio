@@ -15,11 +15,15 @@ SITE_PATTERNS = [
 __all__ = ["detect_site", "ScrapedModel", "SearchResult"]
 
 
-async def fetch_url(url: str) -> Optional[ScrapedModel]:
-    """Detect site from URL and fetch metadata."""
+async def fetch_url(url: str, mmf_api_key: Optional[str] = None) -> Optional[ScrapedModel]:
+    """Detect site from URL and fetch metadata.
+
+    ``mmf_api_key`` (DB secret or env fallback, resolved by the caller) enables
+    the MyMiniFactory API path; other sites ignore it.
+    """
     site = detect_site(url)
     if site == "myminifactory":
-        return await mmf.fetch(url)
+        return await mmf.fetch(url, api_key=mmf_api_key)
     if site == "gumroad":
         return await gumroad.fetch(url)
     if site == "cults3d":
@@ -29,10 +33,12 @@ async def fetch_url(url: str) -> Optional[ScrapedModel]:
     return None
 
 
-async def search_site(site: str, query: str, limit: int = 12) -> list[SearchResult]:
+async def search_site(
+    site: str, query: str, limit: int = 12, mmf_api_key: Optional[str] = None
+) -> list[SearchResult]:
     """Search a specific site by name."""
     if site == "myminifactory":
-        return await mmf.search(query, limit)
+        return await mmf.search(query, limit, api_key=mmf_api_key)
     if site == "gumroad":
         return await gumroad.search(query, limit)
     if site == "cults3d":

@@ -247,7 +247,7 @@ def _wrong_dark_highlight(name: str | None, hex_: str | None, light_cool: bool) 
     return None
 
 
-def validate_guide(db: Session, guide: Guide) -> list[ValidationFlag]:
+def validate_guide(db: Session, guide: Guide, *, strict: bool = True) -> list[ValidationFlag]:
     """Walk a guide's content tree and return validation flags (#489, spec §8.4).
 
     `block` flags prevent publish; `warn` flags are advisory. Unknown paint ids
@@ -352,24 +352,25 @@ def validate_guide(db: Session, guide: Guide) -> list[ValidationFlag]:
                 for mc in step.mix_components:
                     paint_checks(mc.paint_id, base, "mix component")
 
-                # Every step must state its value intent (generation_prompt.md
-                # §"Core philosophy"). Only nudge steps that actually apply paint.
-                if (step.swatches or step.mix_components) and not (step.value_intent or "").strip():
-                    flags.append(ValidationFlag(
-                        severity="warn", code="value_intent_missing",
-                        message="Step applies paint but states no value intent (target value).",
-                        **base,
-                    ))
+                if strict:
+                    # Every step must state its value intent (generation_prompt.md
+                    # §"Core philosophy"). Only nudge steps that actually apply paint.
+                    if (step.swatches or step.mix_components) and not (step.value_intent or "").strip():
+                        flags.append(ValidationFlag(
+                            severity="warn", code="value_intent_missing",
+                            message="Step applies paint but states no value intent (target value).",
+                            **base,
+                        ))
 
-                if len(values) >= 2 and max(values) - min(values) < compression_min:
-                    flags.append(ValidationFlag(
-                        severity="warn", code="value_compression",
-                        message=(
-                            f"Swatch values span only {max(values) - min(values)}% "
-                            f"({min(values)}–{max(values)}%); push the contrast wider."
-                        ),
-                        **base,
-                    ))
+                    if len(values) >= 2 and max(values) - min(values) < compression_min:
+                        flags.append(ValidationFlag(
+                            severity="warn", code="value_compression",
+                            message=(
+                                f"Swatch values span only {max(values) - min(values)}% "
+                                f"({min(values)}–{max(values)}%); push the contrast wider."
+                            ),
+                            **base,
+                        ))
 
         _check_skin_anchor(tab, ti, info, flags)
         _check_highlight_direction(tab, ti, guide, info, flags)

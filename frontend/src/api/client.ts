@@ -275,9 +275,15 @@ export interface AiSettings {
   effort: AiEffort;
 }
 
-export interface Cults3DSettings {
-  configured: boolean;
-  username: string | null;
+// Cults3D credential status (#578) — credentials are write-only.
+export interface CultsSettings {
+  credentials_set: boolean;
+  hint: string | null;
+}
+
+// MyMiniFactory API key status — key is write-only, never returned in full.
+export interface MmfSettings {
+  key_set: boolean;
   key_hint: string | null;
 }
 
@@ -1262,18 +1268,27 @@ export const api = {
       clearKey: () =>
         request<AiSettings>("/settings/ai/key", { method: "DELETE" }),
     },
-    // Cults3D API credentials — write-only; get() returns configured status,
-    // username, and a masked key hint. Plaintext key is never returned.
-    cults3d: {
-      get: () => request<Cults3DSettings>("/settings/cults3d"),
+    cults: {
+      get: () => request<CultsSettings>("/settings/cults"),
       setCredentials: (username: string, api_key: string) =>
-        request<Cults3DSettings>("/settings/cults3d/credentials", {
+        request<CultsSettings>("/settings/cults/credentials", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username, api_key }),
         }),
       clearCredentials: () =>
-        request<Cults3DSettings>("/settings/cults3d/credentials", { method: "DELETE" }),
+        request<CultsSettings>("/settings/cults/credentials", { method: "DELETE" }),
+    },
+    mmf: {
+      get: () => request<MmfSettings>("/settings/mmf"),
+      setKey: (key: string) =>
+        request<MmfSettings>("/settings/mmf/key", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }),
+        }),
+      clearKey: () =>
+        request<MmfSettings>("/settings/mmf/key", { method: "DELETE" }),
     },
   },
   painting: {

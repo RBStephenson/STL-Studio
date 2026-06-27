@@ -15,7 +15,7 @@ def _model(db, name):
 def _mock_scraper(monkeypatch, *, site, preview):
     import app.services.scrapers as scrapers
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, mmf_api_key=None):
         return preview
     monkeypatch.setattr(scrapers, "detect_site", lambda url: site)
     monkeypatch.setattr(scrapers, "fetch_url", fake_fetch)

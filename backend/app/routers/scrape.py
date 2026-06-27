@@ -5,9 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import Model, Creator
-from app.services import scrapers
+from app.services import scrapers, secrets
 from app.services.scanner import resolve_creator
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
 from app.services.variant_sync import propagate_source_url
@@ -83,10 +84,18 @@ def _host_label(url: str) -> Optional[str]:
     return host[4:] if host.startswith("www.") else host or None
 
 
+def _mmf_key(db: Session) -> Optional[str]:
+    """MMF API key: DB-stored secret first, then the .env fallback."""
+    return secrets.get_mmf_api_key(db) or (settings.mmf_api_key or None)
+
+
 # --- Endpoints ---
 
 @router.get("/fetch", response_model=ScrapePreview)
-async def fetch_url(url: str = Query(..., description="Full URL to the product page")):
+async def fetch_url(
+    url: str = Query(..., description="Full URL to the product page"),
+    db: Session = Depends(get_db),
+):
     """Fetch metadata from a product URL. Returns a preview for user confirmation."""
     site = scrapers.detect_site(url)
     if not site:
@@ -94,7 +103,7 @@ async def fetch_url(url: str = Query(..., description="Full URL to the product p
             status_code=400,
             detail=f"Unsupported site. Supported: {', '.join(SUPPORTED_SITES)}",
         )
-    result = await scrapers.fetch_url(url)
+    result = await scrapers.fetch_url(url, mmf_api_key=_mmf_key(db))
     if not result:
         raise HTTPException(status_code=422, detail="Could not extract metadata from that URL.")
     return ScrapePreview(**result.__dict__)
@@ -105,11 +114,12 @@ async def search_site(
     site: str = Query(..., description="myminifactory | gumroad | cults3d"),
     q: str = Query(..., description="Search query"),
     limit: int = Query(12, ge=1, le=24),
+    db: Session = Depends(get_db),
 ):
     """Search a site by name and return candidate results."""
     if site not in SUPPORTED_SITES:
         raise HTTPException(status_code=400, detail=f"Unsupported site: {site}")
-    results = await scrapers.search_site(site, q, limit)
+    results = await scrapers.search_site(site, q, limit, mmf_api_key=_mmf_key(db))
     return [SearchResultItem(**r.__dict__) for r in results]
 
 
@@ -202,7 +212,7 @@ async def apply_group(body: GroupScrapeApply, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="No matching models.")
 
     site = scrapers.detect_site(url)
-    preview = await scrapers.fetch_url(url) if site else None
+    preview = await scrapers.fetch_url(url, mmf_api_key=_mmf_key(db)) if site else None
 
     if preview is not None:
         fields = {

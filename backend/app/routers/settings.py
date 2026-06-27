@@ -16,10 +16,11 @@ from app.schemas import (
     AiSettingsRead,
     AppSettingsRead,
     AppSettingsUpdate,
-    Cults3DCredentialsUpdate,
-    Cults3DSettingsRead,
+    CultsCredentialsUpdate,
+    CultsSettingsRead,
     EnvReloadResult,
     FilterPreset,
+    MmfSettingsRead,
 )
 from app.services import secrets
 
@@ -150,31 +151,50 @@ def clear_ai_key(db: Session = Depends(get_db)):
     return _ai_settings(db)
 
 
-# --- Cults3D settings --------------------------------------------------------
-# Credentials are write-only: GET returns only whether they're configured plus
-# the username and a masked key hint. Plaintext API key is never returned.
+# --- Cults3D settings (#578) ----------------------------------------------
 
-def _cults3d_settings(db: Session) -> Cults3DSettingsRead:
-    username, hint = secrets.cults3d_credentials_hint(db)
-    return Cults3DSettingsRead(
-        configured=username is not None and hint is not None,
-        username=username,
-        key_hint=hint,
-    )
+def _cults_settings(db: Session) -> CultsSettingsRead:
+    hint = secrets.cults_credentials_hint(db)
+    return CultsSettingsRead(credentials_set=hint is not None, hint=hint)
 
 
-@router.get("/cults3d", response_model=Cults3DSettingsRead)
-def get_cults3d_settings(db: Session = Depends(get_db)):
-    return _cults3d_settings(db)
+@router.get("/cults", response_model=CultsSettingsRead)
+def get_cults_settings(db: Session = Depends(get_db)):
+    return _cults_settings(db)
 
 
-@router.put("/cults3d/credentials", response_model=Cults3DSettingsRead)
-def set_cults3d_credentials(body: Cults3DCredentialsUpdate, db: Session = Depends(get_db)):
-    secrets.set_cults3d_credentials(db, body.username, body.api_key)
-    return _cults3d_settings(db)
+@router.put("/cults/credentials", response_model=CultsSettingsRead)
+def set_cults_credentials(body: CultsCredentialsUpdate, db: Session = Depends(get_db)):
+    secrets.set_cults_credentials(db, body.username, body.api_key)
+    return _cults_settings(db)
 
 
-@router.delete("/cults3d/credentials", response_model=Cults3DSettingsRead)
-def clear_cults3d_credentials(db: Session = Depends(get_db)):
-    secrets.clear_cults3d_credentials(db)
-    return _cults3d_settings(db)
+@router.delete("/cults/credentials", response_model=CultsSettingsRead)
+def clear_cults_credentials(db: Session = Depends(get_db)):
+    secrets.clear_cults_credentials(db)
+    return _cults_settings(db)
+
+
+# --- MyMiniFactory settings -----------------------------------------------
+# Write-only API key, same pattern as the AI key.
+
+def _mmf_settings(db: Session) -> MmfSettingsRead:
+    hint = secrets.mmf_api_key_hint(db)
+    return MmfSettingsRead(key_set=hint is not None, key_hint=hint)
+
+
+@router.get("/mmf", response_model=MmfSettingsRead)
+def get_mmf_settings(db: Session = Depends(get_db)):
+    return _mmf_settings(db)
+
+
+@router.put("/mmf/key", response_model=MmfSettingsRead)
+def set_mmf_key(body: AiKeyUpdate, db: Session = Depends(get_db)):
+    secrets.set_mmf_api_key(db, body.key)
+    return _mmf_settings(db)
+
+
+@router.delete("/mmf/key", response_model=MmfSettingsRead)
+def clear_mmf_key(db: Session = Depends(get_db)):
+    secrets.clear_mmf_api_key(db)
+    return _mmf_settings(db)
