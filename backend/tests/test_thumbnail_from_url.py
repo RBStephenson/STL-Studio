@@ -453,7 +453,7 @@ class TestBatchFromUrlEndpoint:
 class TestImageCacheControl:
     def test_serve_image_sends_no_cache(self, client, tmp_path, monkeypatch):
         import app.routers.files as files_module
-        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: True)
+        monkeypatch.setattr(files_module, "_allowed_roots", lambda: [tmp_path])
 
         img = tmp_path / "thumb.png"
         img.write_bytes(PNG_BYTES)

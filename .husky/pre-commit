@@ -1,0 +1,40 @@
+#!/bin/sh
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# ── Vitest ────────────────────────────────────────────────────────────────────
+echo "▶ vitest"
+if [ ! -d "${REPO_ROOT}/frontend/node_modules" ]; then
+  echo "  Installing frontend deps…"
+  npm --prefix "${REPO_ROOT}/frontend" install --silent
+fi
+npm --prefix "${REPO_ROOT}/frontend" test
+echo "✔ vitest passed"
+
+# ── Pytest ────────────────────────────────────────────────────────────────────
+# Runs in a fresh container using the built backend image so no local Python
+# env is required.  Falls back gracefully when Docker isn't available.
+echo "▶ pytest"
+if ! docker info > /dev/null 2>&1; then
+  echo "⚠ Docker is not running — pytest skipped"
+  exit 0
+fi
+
+if ! docker image inspect stl-inventory-backend:latest > /dev/null 2>&1; then
+  echo "⚠ Backend image not found — pytest skipped"
+  echo "  Build it with: docker compose build backend"
+  exit 0
+fi
+
+# Mount the current source so tests always reflect what's about to be committed.
+# packaging/ is mounted at /packaging so test_standalone_launch.py can find it.
+# pytest and pytest-cov are not in the production image; they install in ~2s.
+docker run --rm \
+  --workdir /app \
+  -e DATABASE_URL="sqlite:///:memory:" \
+  -v "${REPO_ROOT}/backend:/app" \
+  -v "${REPO_ROOT}/packaging:/packaging" \
+  stl-inventory-backend:latest \
+  sh -c "pip install -q pytest==9.0.3 pytest-cov==7.1.0 && pytest tests/ -q --tb=short"
+echo "✔ pytest passed"
