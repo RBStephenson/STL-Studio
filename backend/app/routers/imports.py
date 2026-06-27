@@ -506,6 +506,13 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
     if not body.source.strip():
         raise HTTPException(status_code=400, detail="source is required")
 
+    allowed_roots = [os.path.realpath(root) for root in _configured_roots(db)]
+    if not any(
+        os.path.commonpath([src, root]) == root
+        for root in allowed_roots
+    ):
+        raise HTTPException(status_code=400, detail="source must be within a configured scan root")
+
     mapping = (
         db.query(ImportSourceMapping)
         .filter(ImportSourceMapping.source_path == src)
