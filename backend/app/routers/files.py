@@ -187,16 +187,31 @@ def serve_document(path: str):
     filename is taken from the path and set in the Content-Disposition header
     so the browser downloads rather than navigating."""
     p = Path(path)
+    if p.is_absolute() or ".." in p.parts:
+        raise HTTPException(status_code=403, detail="Path not allowed")
     ext = p.suffix.lower()
     if ext in ALLOWED_IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Use /files/image for image files")
     if ext in ALLOWED_STL_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Use /files/stl for STL files")
-    # Canonicalize first, then validate the exact path that will be served.
-    resolved = p.resolve(strict=False)
-    if not _is_safe_path(resolved):
+    try:
+        resolved = p.resolve(strict=True)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Explicitly enforce containment within an allowed root using canonical paths.
+    in_allowed_root = False
+    for root in _allowed_roots():
+        try:
+            resolved.relative_to(root.resolve(strict=False))
+            in_allowed_root = True
+            break
+        except ValueError:
+            continue
+    if not in_allowed_root or not _is_safe_path(resolved):
         raise HTTPException(status_code=403, detail="Path not allowed")
-    if not resolved.exists() or not resolved.is_file():
+
+    if not resolved.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     # Strip characters that would break the Content-Disposition header value.
     safe_name = resolved.name.replace('"', "").replace("\n", "").replace("\r", "")

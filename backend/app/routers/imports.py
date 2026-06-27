@@ -358,26 +358,25 @@ def download_images(body: DownloadImagesRequest, db: Session = Depends(get_db)):
     if "\x00" in raw_pack_path:
         raise HTTPException(status_code=400, detail="pack_path is invalid")
 
-    candidate_pack_path = Path(raw_pack_path)
-    if not candidate_pack_path.is_absolute():
+    pack_dir_str = os.path.realpath(os.path.expanduser(raw_pack_path))
+    if not os.path.isabs(pack_dir_str):
         raise HTTPException(status_code=400, detail="pack_path must be an absolute path")
-    if ".." in candidate_pack_path.parts:
-        raise HTTPException(status_code=400, detail="pack_path is invalid")
-
-    pack_dir = candidate_pack_path.expanduser().resolve(strict=False)
 
     # Path guard: must be within a configured or bootstrap-allowed root.
     contained = False
     for base in _allowed_bases(db):
+        base_dir_str = os.path.realpath(os.path.expanduser(base))
         try:
-            base_dir = Path(base).expanduser().resolve(strict=False)
-            pack_dir.relative_to(base_dir)
-            contained = True
-            break
+            if os.path.commonpath([pack_dir_str, base_dir_str]) == base_dir_str:
+                contained = True
+                break
         except ValueError:
             continue
+
     if not contained:
         raise HTTPException(status_code=403, detail="Path is outside the allowed folders")
+
+    pack_dir = Path(pack_dir_str)
     if not pack_dir.is_dir():
         raise HTTPException(status_code=404, detail="Pack folder not found")
 
@@ -599,13 +598,16 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
 
     # Clean up any stale empty directories left in the source root.
     try:
-        for dirpath, _, filenames in os.walk(src, topdown=False):
+        safe_src = os.path.realpath(src)
+        if not os.path.isdir(safe_src):
+            raise HTTPException(status_code=400, detail="source must be an existing directory")
+        for dirpath, _, filenames in os.walk(safe_src, topdown=False):
             if not filenames:
                 dirpath_resolved = os.path.realpath(dirpath)
-                if os.path.commonpath([dirpath_resolved, src]) != src:
+                if os.path.commonpath([dirpath_resolved, safe_src]) != safe_src:
                     logger.warning(
                         "Skipping cleanup outside source root: %r (source: %r)",
-                        dirpath_resolved, src,
+                        dirpath_resolved, safe_src,
                     )
                     continue
                 try:
