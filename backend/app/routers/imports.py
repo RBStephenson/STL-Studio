@@ -387,20 +387,21 @@ def download_images(body: DownloadImagesRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="pack_path must be an absolute path")
 
     # Path guard: must be within a configured or bootstrap-allowed root.
-    contained = False
+    matched_base_dir_str: str | None = None
     for base in _allowed_bases(db):
         base_dir_str = os.path.realpath(os.path.expanduser(base))
         try:
             if os.path.commonpath([pack_dir_str, base_dir_str]) == base_dir_str:
-                contained = True
+                matched_base_dir_str = base_dir_str
                 break
         except ValueError:
             continue
 
-    if not contained:
+    if matched_base_dir_str is None:
         raise HTTPException(status_code=403, detail="Path is outside the allowed folders")
 
-    pack_dir = Path(pack_dir_str)
+    canonical_pack_dir_str = _validated_path_within_root(matched_base_dir_str, pack_dir_str)
+    pack_dir = Path(canonical_pack_dir_str)
     if not pack_dir.is_dir():
         raise HTTPException(status_code=404, detail="Pack folder not found")
 
