@@ -8,7 +8,7 @@ aiofiles==24.1.0
 httpx==0.28.1
 beautifulsoup4==4.15.0
 python-multipart==0.0.32
-nh3==0.3.1  # HTML sanitization for imported guide content (#440)
+nh3==0.3.6  # HTML sanitization for imported guide content (#440)
 watchdog==6.0.0
 apscheduler==3.11.2
 cryptography==44.0.0  # Fernet encryption-at-rest for the AI API key (#517)
