@@ -637,10 +637,6 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
             model.source_url = body.source_url.strip() or None
             if model.source_url:
                 propagate_source_url(db, model)
-        if body.gallery_images is not None:
-            # Store CDN URLs now; import_apply will replace them with local paths
-            # after the pack is moved to the library.
-            model.image_paths = body.gallery_images
         model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "updated": len(models_to_update)}

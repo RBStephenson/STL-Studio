@@ -246,7 +246,6 @@ class BulkEnrichUpdate(BaseModel):
     title: Optional[str] = None
     notes: Optional[str] = None
     source_url: Optional[str] = None
-    gallery_images: Optional[list[str]] = None
 
 
 class BulkDeleteRequest(BaseModel):
