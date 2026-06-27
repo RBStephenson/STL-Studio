@@ -506,10 +506,11 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="source is required")
 
     allowed_roots = [os.path.realpath(root) for root in _configured_roots(db)]
-    if not any(
-        os.path.commonpath([src, root]) == root
-        for root in allowed_roots
-    ):
+    matched_root = next(
+        (root for root in allowed_roots if os.path.commonpath([src, root]) == root),
+        None,
+    )
+    if matched_root is None:
         raise HTTPException(status_code=400, detail="source must be within a configured scan root")
 
     mapping = (
@@ -598,7 +599,13 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
 
     # Clean up any stale empty directories left in the source root.
     try:
-        safe_src = os.path.realpath(src)
+        resolved_root = os.path.realpath(matched_root)
+        rel_src = os.path.relpath(src, resolved_root)
+        if rel_src == ".." or rel_src.startswith(".." + os.sep):
+            raise HTTPException(status_code=400, detail="source must be within a configured scan root")
+        safe_src = os.path.realpath(os.path.join(resolved_root, rel_src))
+        if os.path.commonpath([safe_src, resolved_root]) != resolved_root:
+            raise HTTPException(status_code=400, detail="source must be within a configured scan root")
         if not os.path.isdir(safe_src):
             raise HTTPException(status_code=400, detail="source must be an existing directory")
         for dirpath, _, filenames in os.walk(safe_src, topdown=False):
