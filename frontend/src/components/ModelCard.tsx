@@ -248,7 +248,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   const linkTo = modelLinkTo(model);
 
   return (
-    <div ref={cardRef} className="relative">
+    <div ref={cardRef} className="relative h-full">
     <Link
       to={linkTo}
       state={{ from: backTo ?? location.pathname + location.search }}
@@ -257,7 +257,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
       // Without this, mouse-selecting text in the inline rename input starts a
       // link-drag and drops the URL into the field instead of selecting text.
       draggable={false}
-      className={`group bg-gray-900 rounded-lg overflow-hidden border transition-colors flex flex-col ${
+      className={`group bg-gray-900 rounded-lg overflow-hidden border transition-colors flex flex-col h-full ${
         selected
           ? "border-indigo-500 ring-1 ring-indigo-500/50"
           : focused
