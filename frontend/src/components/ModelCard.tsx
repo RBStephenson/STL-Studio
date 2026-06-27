@@ -224,8 +224,12 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   const cardImageUrl = (() => {
     if (imageCleared) return null;
     const gallery = model.image_paths ?? [];
-    if (model.primary_image_path) return api.fileUrl(model.primary_image_path);
-    if (gallery.length > 0) return api.fileUrl(gallery[0]);
+    // Between bulk-enrich and import-apply, image_paths can hold remote CDN URLs
+    // (apply later swaps them for local paths). Serve those directly; only wrap
+    // local filesystem paths through the file endpoint.
+    const resolve = (p: string) => (/^https?:\/\//i.test(p) ? p : api.fileUrl(p));
+    if (model.primary_image_path) return resolve(model.primary_image_path);
+    if (gallery.length > 0) return resolve(gallery[0]);
     return null;
   })();
 
