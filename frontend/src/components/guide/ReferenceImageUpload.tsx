@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ImagePlus, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { api, ApiError } from "../../api/client";
 import { useToast } from "../../context/ToastContext";
+import { downscaleForUpload } from "../../lib/imageUpload";
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 const MAX_BYTES = 10 * 1024 * 1024; // mirror the backend cap (#535)
@@ -31,13 +32,17 @@ export default function ReferenceImageUpload({
       toast("Use a PNG, JPEG, WebP, or GIF image.", "error");
       return;
     }
-    if (file.size > MAX_BYTES) {
-      toast("Image is too large — the limit is 10 MB.", "error");
+    setBusy(true);
+    // Downscale a large original before upload; Claude vision resizes reference
+    // images to ~1568px anyway, so this keeps quality and clears the size cap.
+    const toUpload = await downscaleForUpload(file);
+    if (toUpload.size > MAX_BYTES) {
+      toast("Image is too large even after resizing — try a smaller file.", "error");
+      setBusy(false);
       return;
     }
-    setBusy(true);
     try {
-      const img = await api.painting.guides.uploadReferenceImage(guideId, file);
+      const img = await api.painting.guides.uploadReferenceImage(guideId, toUpload);
       onChange(img.id);
       toast("Reference image attached.", "success");
     } catch (e) {

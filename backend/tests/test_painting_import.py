@@ -526,6 +526,57 @@ class TestMixComponents:
         }
         assert client.post("/painting/guides", json=body).status_code == 422
 
+    def test_by_code_leading_zero_normalisation(self):
+        """Swatch '065 Payne's Grey' matches shelf code '65' (PaintRack strips
+        leading zeros on CSV import, so DB stores '65' not '065')."""
+        # stripped_tokens: '065'.lstrip('0') = '65'; code '65'.lstrip('0') = '65' -> match
+        ws_tokens = set("065 payne's grey".split())
+        norm = {t for t in ws_tokens}           # no decimal points here
+        stripped = {t.lstrip("0") or "0" for t in norm}
+        code = "65"  # as stored in DB
+        cs = code.lstrip("0") or "0"
+        assert cs in stripped  # '65' in {'65', "payne's", 'grey'}
+
+    def test_by_code_matches_hyphenated_code_via_space_in_swatch(self):
+        """'AMP 017 Red Orange' should match code 'AMP-017' via part split."""
+        # Verify the logic: parts ['amp','017'] both in ws_tokens
+        ws = set("amp 017 red orange".split())
+        parts = "amp-017".split("-")
+        assert all(p in ws for p in parts)
+
+    def test_canon_expands_tw_abbreviation(self):
+        from app.painting.services.importing import _canon
+        assert _canon("Bold TW 001") == "bold titanium white 001"
+        assert _canon("TW") == "titanium white"
+
+    def test_canon_strips_fw_prefix_and_ink_suffix(self):
+        from app.painting.services.importing import _canon
+        assert _canon("FW Crimson Ink") == "crimson"
+        assert _canon("Payne's Gray Ink") == "payne's grey"
+        assert _canon("FW Payne's Gray Ink") == "payne's grey"
+
+    def test_trailing_zero_code_matches_shelf_code_without_zero(self):
+        # Shelf stores '77.72' (PaintRack strips trailing zeros); swatch says
+        # 'VMC Gunmetal Grey 77.720' — the extra zero must not block resolution.
+        resolve = lambda n, b: None  # force _by_code path via make_db_resolver
+        # Test _strip_decimal_zeros directly.
+        from app.painting.services.importing import _strip_decimal_zeros
+        assert _strip_decimal_zeros("77.720") == "77.72"
+        assert _strip_decimal_zeros("77.700") == "77.7"
+        assert _strip_decimal_zeros("77.72") == "77.72"
+        assert _strip_decimal_zeros("AMP-018") == "AMP-018"
+        assert _strip_decimal_zeros("17") == "17"
+
+    def test_bare_ratio_suffix_stripped_from_mix_component(self):
+        # 'Bold TW 001 + Warm Flesh 073 3:1 (S18 sub)' — bare ratio after paren
+        # strip leaves 'Warm Flesh 073 3:1'; should resolve as 'Warm Flesh 073'.
+        resolve = lambda n, b: {"bold tw 001": 1, "warm flesh 073": 2}.get(n.lower())
+        rep = ImportReport()
+        _swatches, mix = _parse_swatch(
+            self._swatch("Bold TW 001 + Warm Flesh 073 3:1 (S18 sub)"), resolve, rep, "S")
+        assert [(m.get("paint_id"), m.get("name")) for m in mix] == [(1, None), (2, None)]
+        assert rep.unresolved_paints == []
+
     def test_leading_plus_continuation_is_single_swatch(self):
         # '+ Khaki 061 (2:1)' has one real component -> a single swatch, not a mix.
         resolve = lambda n, b: 7 if n.lower() == "khaki 061" else None

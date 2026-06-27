@@ -487,6 +487,49 @@ class AiKeyUpdate(BaseModel):
     key: str = Field(min_length=1, max_length=400)
 
 
+# --- Cults3D settings (#578) ----------------------------------------------
+
+class CultsSettingsRead(BaseModel):
+    """Cults3D credential status. Credentials are write-only."""
+    credentials_set: bool
+    hint: Optional[str] = None
+
+
+class CultsCredentialsUpdate(BaseModel):
+    username: str = Field(min_length=1, max_length=200)
+    api_key: str = Field(min_length=1, max_length=400)
+
+
+# --- Cults3D search/creation responses -----------------------------------
+
+class CultsCreatorRead(BaseModel):
+    nick: str
+    short_url: str
+    bio: Optional[str] = None
+    image_url: Optional[str] = None
+
+
+class CultsCreationRead(BaseModel):
+    name: str
+    short_url: str
+    illustration_image_url: Optional[str] = None
+    license_name: Optional[str] = None
+    license_code: Optional[str] = None
+    category: Optional[str] = None
+    published_at: Optional[str] = None
+    views_count: Optional[int] = None
+    likes_count: Optional[int] = None
+    downloads_count: Optional[int] = None
+    tags: list[str] = []
+    price_amount: Optional[str] = None
+    price_currency: Optional[str] = None
+    creator: Optional[CultsCreatorRead] = None
+
+
+class CultsSearchResponse(BaseModel):
+    results: list[CultsCreationRead]
+
+
 # --- Library reorganize, Phase 1 preview (#323) ---------------------------
 
 FingerprintMethod = Literal["stat", "content_hash"]

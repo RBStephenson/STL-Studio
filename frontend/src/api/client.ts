@@ -514,6 +514,43 @@ export interface ReferenceImage {
   created_at: string;
 }
 
+// Color-match studio (#493/#561). Mirrors backend ColorMatch* schemas.
+export type ColorBand = "very_close" | "close" | "family" | "loose";
+
+export interface ColorMatchCandidate {
+  paint_id: number;
+  code: string;
+  name: string;
+  brand: string;
+  line: string;
+  hex: string | null;
+  finish: string;
+  delta_l: number;
+  delta_e: number | null;
+  band: ColorBand;
+}
+
+export interface ColorMatchLadder {
+  shadow: ColorMatchCandidate[];
+  mid: ColorMatchCandidate[];
+  highlight: ColorMatchCandidate[];
+}
+
+export interface ColorMatchRegion {
+  hex: string;
+  lab: [number, number, number];
+  value_l: number;
+  weight: number;
+  ladder: ColorMatchLadder;
+  hue_candidates: ColorMatchCandidate[];
+  glaze_options: ColorMatchCandidate[];
+}
+
+export interface ColorMatchResult {
+  regions: ColorMatchRegion[];
+  caveat: string;
+}
+
 // AI draft-generation job status (#524/#492). When `status === "done"` the
 // candidate `draft` (proposed tabs), validator `flags`, and `unresolved` paints
 // are populated for the review UI to diff before the user accepts.
@@ -633,6 +670,13 @@ export interface SwatchInput {
   sort_order?: number;
 }
 
+export interface MixComponentInput {
+  paint_id?: number | null; // omit/null when kept by name only (#425)
+  name?: string | null;
+  parts: number;
+  sort_order?: number;
+}
+
 export interface StepInput {
   title: string;
   technique_tag?: StepTechnique | null;
@@ -644,6 +688,7 @@ export interface StepInput {
   ratio_box?: string | null;
   sort_order?: number;
   swatches?: SwatchInput[];
+  mix_components?: MixComponentInput[];
 }
 
 export interface PhaseInput {
@@ -1378,6 +1423,45 @@ export const api = {
           `${BASE}/painting/series/${seriesId}/export/pdf${stampQuery(opts)}`,
           `series-${seriesId}-bundle.pdf`,
         ),
+    },
+    // Color-match studio (#493/#561): sample a reference image into a palette of
+    // owned-paint suggestions. Suggest-only — nothing is persisted server-side.
+    colorMatch: async (
+      file: File,
+      opts: { k?: number; candidatesPerRegion?: number } = {},
+    ): Promise<ColorMatchResult> => {
+      const form = new FormData();
+      form.append("file", file);
+      if (opts.k !== undefined) form.append("k", String(opts.k));
+      if (opts.candidatesPerRegion !== undefined)
+        form.append("candidates_per_region", String(opts.candidatesPerRegion));
+      const res = await fetch(`${BASE}/painting/colormatch`, { method: "POST", body: form });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+        throw new ApiError(res.status, detail);
+      }
+      return res.json() as Promise<ColorMatchResult>;
+    },
+    // Eyedropper (#561): match a single point. x/y are normalized [0,1] from the
+    // image's top-left. Returns a single-region result.
+    colorMatchPoint: async (
+      file: File, x: number, y: number,
+      opts: { candidatesPerRegion?: number } = {},
+    ): Promise<ColorMatchResult> => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("x", String(x));
+      form.append("y", String(y));
+      if (opts.candidatesPerRegion !== undefined)
+        form.append("candidates_per_region", String(opts.candidatesPerRegion));
+      const res = await fetch(`${BASE}/painting/colormatch/point`, { method: "POST", body: form });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+        throw new ApiError(res.status, detail);
+      }
+      return res.json() as Promise<ColorMatchResult>;
     },
   },
   database: {

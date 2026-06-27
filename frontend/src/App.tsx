@@ -18,6 +18,7 @@ import GuideWizardPage from "./pages/GuideWizardPage";
 import GuideContentEditorPage from "./pages/GuideContentEditorPage";
 import GuideDraftReviewPage from "./pages/GuideDraftReviewPage";
 import PaintShelfPage from "./pages/PaintShelfPage";
+import ColorMatchStudioPage from "./pages/ColorMatchStudioPage";
 import ReorganizePage from "./pages/ReorganizePage";
 import ImportPage from "./pages/ImportPage";
 import ImportPreviewPage from "./pages/ImportPreviewPage";
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/painting/guides/:id/content" element={<GuideContentEditorPage />} />
           <Route path="/painting/guides/:id/draft" element={<GuideDraftReviewPage />} />
           <Route path="/painting/shelf" element={<PaintShelfPage />} />
+          <Route path="/painting/color-match" element={<ColorMatchStudioPage />} />
           <Route path="/help" element={<Help />} />
         </Routes>
       </main>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Palette, Plus, Search, Pencil, Trash2, X, Upload, Download } from "lucide-react";
+import { useSearchParams, Link } from "react-router-dom";
+import { Palette, Plus, Search, Pencil, Trash2, X, Upload, Download, Pipette } from "lucide-react";
 import {
   api, ImportDiff, Paint, PaintBrand, PaintCreate, PaintFinish, PAINT_FINISHES,
 } from "../api/client";
@@ -303,6 +303,12 @@ export default function PaintShelfPage() {
           <HelpLink section="paint-shelf" label="How the Paint Shelf works" />
         </h1>
         <div className="flex items-center gap-2">
+          <Link
+            to="/painting/color-match"
+            className="inline-flex items-center gap-1.5 text-sm text-indigo-300 border border-indigo-800/70 rounded px-3 py-1.5 hover:bg-indigo-950/40"
+          >
+            <Pipette size={15} /> Color match
+          </Link>
           <input
             ref={fileInputRef}
             type="file"
@@ -350,7 +356,7 @@ export default function PaintShelfPage() {
         >
           PaintRack
         </a>{" "}
-        by Courageous Octopus — a great paint-inventory app. STL Library isn't affiliated with it.
+        by Courageous Octopus — a great paint-inventory app. STL Studio isn't affiliated with it.
       </p>
 
       <div ref={formRef} className="scroll-mt-4">

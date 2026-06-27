@@ -398,7 +398,7 @@ clear message instead of polluting the shelf.
 
 The Paint Shelf's import/export uses the CSV format from
 [**PaintRack**](https://www.courageousoctopus.com/) by Courageous Octopus — a
-great paint-inventory app. STL Library isn't affiliated with it; we just
+great paint-inventory app. STL Studio isn't affiliated with it; we just
 interoperate with its export so you can reuse a shelf you've already built.
 
 If you track paints in **PaintRack**, import its CSV export directly:
@@ -428,6 +428,28 @@ contain commas, those cells must be **quoted** in the CSV. Files without the
 column (like real PaintRack exports) import exactly as before, and an **empty
 color cell never clears** a swatch you've already set — only a different,
 non-empty color shows up as a change in the preview.
+
+### Color-match studio
+
+The **Color match** button on the Paint Shelf opens a studio that suggests
+paints from your shelf to match a reference photo (a render, box art, or a
+painted mini).
+
+- **Value-first.** For each sampled color you get a **Value ladder** — a
+  **shadow → mid → highlight** ramp in the same hue family, anchored on the
+  sampled mid-tone (Dark Camo Green → Green → Bright Yellow-Green) so the steps
+  read as a cohesive recipe — then a **Hue match** (opaque paints ranked by
+  ΔE2000), and a labelled **Glaze / wash** list for transparents. Every
+  suggestion carries a confidence band (*very close*, *confirm*, *family*,
+  *loose*) — suggestions to **confirm by eye**, never auto-applied.
+- **Eyedropper.** Click anywhere on the preview to match that exact spot —
+  sample the skin, then the hair, then the leather, each with its own
+  suggestions. The **Palette overview** below is an automatic read of the whole
+  image, with the background excluded so the subject leads.
+- **Value mode** (on by default) greys the swatches so you can read values; turn
+  it off to compare hues in color.
+- Large photos are downscaled in the browser before upload, so even a phone shot
+  uploads instantly.
 
 ### Painting guides
 
@@ -564,7 +586,7 @@ never modified.**
   way to recover your tags, favorites, and queue if something goes wrong.
 - **Restore from Backup…** — pick a previously downloaded `.db` file to replace
   your current library with it. The file is validated first (it must be a real
-  STL Library backup), and an older backup's schema is brought up to date
+  STL Studio backup), and an older backup's schema is brought up to date
   automatically.
 - **Delete All Data** — wipes the entire index back to empty. You'd then run a
   full scan to rebuild it.

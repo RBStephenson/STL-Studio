@@ -143,6 +143,57 @@ describe("GuideSpineEditor", () => {
     expect(steps[1].title).toBe("Basecoat");
   });
 
+  // --- Mix-component authoring (#504) --------------------------------------
+
+  function mixTab(): GuideTab {
+    const tab = oneTab();
+    (tab as unknown as { phases: { steps: { mix_components: unknown[] }[] }[] })
+      .phases[0].steps[0].mix_components = [
+        { id: 1, paint_id: null, name: "Bold Red", parts: 4, sort_order: 0, paint: null },
+        { id: 2, paint_id: null, name: "Orange", parts: 1, sort_order: 1, paint: null },
+      ];
+    return tab;
+  }
+
+  it("round-trips a mix swatch's components and ratio on save (#504)", async () => {
+    const onSave = vi.fn();
+    render(<GuideSpineEditor initialTabs={[mixTab()]} onSave={onSave} onCancel={vi.fn()} />);
+
+    expect(screen.getByText(/Bold Red/)).toBeInTheDocument();
+    expect(screen.getByText(/ratio 4:1/)).toBeInTheDocument(); // ≥2 components → ratio shown
+
+    await userEvent.click(screen.getByRole("button", { name: "Save content" }));
+    const step = onSave.mock.calls[0][0][0].phases[0].steps[0];
+    expect(step.mix_components).toEqual([
+      { paint_id: null, name: "Bold Red", parts: 4, sort_order: 0 },
+      { paint_id: null, name: "Orange", parts: 1, sort_order: 1 },
+    ]);
+  });
+
+  it("edits a mix component's parts (#504)", async () => {
+    const onSave = vi.fn();
+    render(<GuideSpineEditor initialTabs={[mixTab()]} onSave={onSave} onCancel={vi.fn()} />);
+
+    const parts = screen.getAllByLabelText("Parts");
+    await userEvent.clear(parts[0]);
+    await userEvent.type(parts[0], "3");
+    await userEvent.click(screen.getByRole("button", { name: "Save content" }));
+
+    const mix = onSave.mock.calls[0][0][0].phases[0].steps[0].mix_components;
+    expect(mix[0].parts).toBe(3);
+  });
+
+  it("drops an empty mix component from the saved payload (#504)", async () => {
+    const onSave = vi.fn();
+    render(<GuideSpineEditor initialTabs={[oneTab()]} onSave={onSave} onCancel={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /add mix component/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Save content" }));
+
+    const step = onSave.mock.calls[0][0][0].phases[0].steps[0];
+    expect(step.mix_components).toEqual([]); // paintless + nameless → dropped
+  });
+
   it("adds a new tab", async () => {
     const onSave = vi.fn();
     render(<GuideSpineEditor initialTabs={[oneTab()]} onSave={onSave} onCancel={vi.fn()} />);

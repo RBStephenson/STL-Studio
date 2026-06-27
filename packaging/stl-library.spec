@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# PyInstaller spec for STL Library standalone build.
+# PyInstaller spec for STL Studio standalone build.
 #
 # Run from the PROJECT ROOT (not this directory):
 #   pyinstaller packaging/stl-library.spec

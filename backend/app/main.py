@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.database import Base, engine, SessionLocal
-from app.routers import models, scan, files, collections, scrape, enrich, database, settings, reorganize, imports
+from app.routers import models, scan, files, collections, scrape, enrich, database, settings, reorganize, imports, cults
 # Registers the paint_*/guide_* tables on Base before create_all below.
 from app.painting import models as painting_models  # noqa: F401
 from app.painting.routers import router as painting_router
@@ -269,13 +269,13 @@ def health():
 
 
 def create_app(api_prefix: str = "") -> FastAPI:
-    """Build the STL Library API app.
+    """Build the STL Studio API app.
 
     Single source of truth for routers, middleware, and startup migrations —
     used by both the Docker deployment (no prefix; nginx adds /api) and the
     standalone binary (api_prefix="/api", frontend served from the same app).
     """
-    app = FastAPI(title="STL Library", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="STL Studio", version="0.1.0", lifespan=lifespan)
 
     app.middleware("http")(_block_cross_origin_writes)
 
@@ -298,6 +298,7 @@ def create_app(api_prefix: str = "") -> FastAPI:
         reorganize.router,
         imports.router,
         painting_router,
+        cults.router,
         _health_router,
     ):
         app.include_router(router, prefix=api_prefix)

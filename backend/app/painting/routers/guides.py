@@ -19,7 +19,8 @@ from app.painting.models import (
 from app.painting.schemas import (
     CategoryCreate, CategoryRead,
     GuideCreate, GuideImportRequest, GuideImportResult, GuideList, GuideListItem,
-    GuideRead, GuideUpdate, GuideValidationResult, ReferenceImageRead,
+    GuideRead, GuideUpdate, GuideValidationResult,
+    ReferenceCandidateList, ReferenceFromModel, ReferenceImageRead,
     SeriesCreate, SeriesRead,
 )
 from app.painting.services import images
@@ -214,11 +215,19 @@ def get_guide(guide_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/guides/{guide_id}/validation", response_model=GuideValidationResult)
-def get_guide_validation(guide_id: int, db: Session = Depends(get_db)):
+def get_guide_validation(
+    guide_id: int,
+    strict: bool = True,
+    db: Session = Depends(get_db),
+):
     """Validator findings for the editor panel (#489, spec §8.4). `ok` is False
-    when any block-severity flag remains — the same gate publish enforces."""
+    when any block-severity flag remains — the same gate publish enforces.
+
+    Pass `?strict=false` to suppress authoring-quality checks
+    (`value_intent_missing`, `value_compression`) that are noise for imported
+    guides lacking those metadata fields."""
     guide = _get_or_404(db, Guide, guide_id, "Guide")
-    flags = validate_guide(db, guide)
+    flags = validate_guide(db, guide, strict=strict)
     return GuideValidationResult(ok=not any(f.severity == "block" for f in flags), flags=flags)
 
 
@@ -357,6 +366,40 @@ async def upload_reference_image(
     raw = await file.read()
     try:
         row = images.store_upload(db, guide, raw, alt_text=alt_text)
+    except images.ReferenceImageError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.get(
+    "/guides/{guide_id}/reference-image/candidates",
+    response_model=ReferenceCandidateList,
+)
+def list_reference_candidates(guide_id: int, db: Session = Depends(get_db)):
+    """Reference-image candidates from the guide's linked STL model (#494 rung 0).
+
+    Paths are served for preview via the existing /files/image endpoint.
+    Empty list when there's no linked model or no indexed folder images."""
+    guide = _get_or_404(db, Guide, guide_id, "Guide")
+    return ReferenceCandidateList(candidates=images.list_model_candidates(db, guide))
+
+
+@router.post(
+    "/guides/{guide_id}/reference-image/from-model",
+    response_model=ReferenceImageRead,
+    status_code=201,
+)
+def reference_from_model(
+    guide_id: int, body: ReferenceFromModel, db: Session = Depends(get_db)
+):
+    """Adopt one of the linked model's folder images as the reference (#494 rung 0).
+
+    `index` refers to the candidates list from the GET endpoint."""
+    guide = _get_or_404(db, Guide, guide_id, "Guide")
+    try:
+        row = images.store_from_model(db, guide, body.index, alt_text=body.alt_text)
     except images.ReferenceImageError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     db.commit()

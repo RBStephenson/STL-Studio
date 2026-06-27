@@ -1,6 +1,6 @@
 # Docker — Drive Mounts & Configuration
 
-Running STL Library in Docker works a little differently from the standalone
+Running STL Studio in Docker works a little differently from the standalone
 app when it comes to telling it where your models live. A container can only see
 the folders you **mount into it** — so unlike standalone, you can't just type any
 host path into the Settings page and have it work. This page explains how drive

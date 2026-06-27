@@ -1,9 +1,17 @@
-"""Reference-image acquisition: upload, AI generation, assisted web search,
-and STL-model-folder sourcing, with provenance tracking (spec §8.5).
+"""Reference-image acquisition: upload + STL-model-folder sourcing, with
+provenance tracking (spec §4.4 / §8.5).
 
-#535 implements the first rung: user upload — store the bytes on the local data
-volume, record a GuideReferenceImage row, and wire the guide FK. The heavyweight
-fallback chain (STL-folder / web search / AI-gen) stays stubbed for #494.
+The dependable, fully-local spine of the spec's fallback chain (#535 + #494):
+
+* **user_upload** — `store_upload` (the original #535 rung).
+* **stl_model_folder** — `list_model_candidates` / `store_from_model`: the
+  linked model's already-indexed folder images, zero-cost (rung 0). The caller
+  picks a candidate by index, so no request value ever reaches the filesystem.
+
+The rungs that fetch from the network — user-supplied URL (rung 4), assisted
+web search (rung 2), AI generation (rung 3) — are deferred to #563, where the
+SSRF surface gets a dedicated IP-pinned guard rather than riding the shared
+thumbnail downloader.
 """
 from __future__ import annotations
 
@@ -14,7 +22,9 @@ from pathlib import Path
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
+from app.models import Model
 from app.painting.models import Guide, GuideReferenceImage
+from app.routers.files import _is_safe_path
 from app.services.write_lock import data_dir
 
 # Subdirectory under the local data dir (next to the SQLite DB) where uploaded
@@ -95,17 +105,19 @@ def clear_reference(db: Session, guide: Guide) -> None:
             pass  # row is the source of truth; an orphaned file is harmless
 
 
-def store_upload(
+def _persist(
     db: Session,
     guide: Guide,
     raw: bytes,
     *,
+    provenance: str,
+    source_url: str | None = None,
     alt_text: str | None = None,
 ) -> GuideReferenceImage:
-    """Store an uploaded reference image for a guide and wire the guide FK.
+    """Validate bytes, replace any existing reference, and store + wire the FK.
 
-    Replaces any existing reference image. Raises ReferenceImageError when the
-    bytes are missing, oversize, or not a supported image. Caller commits.
+    Shared by every acquisition rung; only `provenance`/`source_url` differ.
+    Raises ReferenceImageError on bad/oversize/unsupported bytes. Caller commits.
     """
     image, extension, _ = _decode(raw)
     width, height = image.size
@@ -119,7 +131,8 @@ def store_upload(
     row = GuideReferenceImage(
         guide_id=guide.id,
         storage_key=storage_key,
-        provenance="user_upload",
+        provenance=provenance,
+        source_url=source_url,
         alt_text=alt_text,
         width=width,
         height=height,
@@ -128,6 +141,74 @@ def store_upload(
     db.flush()  # assign row.id
     guide.reference_image_id = row.id
     return row
+
+
+def store_upload(
+    db: Session,
+    guide: Guide,
+    raw: bytes,
+    *,
+    alt_text: str | None = None,
+) -> GuideReferenceImage:
+    """Store an uploaded reference image for a guide and wire the guide FK.
+
+    Replaces any existing reference image. Raises ReferenceImageError when the
+    bytes are missing, oversize, or not a supported image. Caller commits.
+    """
+    return _persist(db, guide, raw, provenance="user_upload", alt_text=alt_text)
+
+
+def list_model_candidates(db: Session, guide: Guide) -> list[str]:
+    """Reference-image candidates from the guide's linked STL model (rung 0).
+
+    Returns the linked model's indexed folder images (thumbnail first, then
+    `image_paths`), deduped, restricted to existing files inside a scan root.
+    Empty when the guide has no linked model or no indexed images.
+    """
+    if guide.model_id is None:
+        return []
+    model = db.get(Model, guide.model_id)
+    if model is None:
+        return []
+
+    raw_paths: list[str] = []
+    if model.thumbnail_path:
+        raw_paths.append(model.thumbnail_path)
+    raw_paths.extend(model.image_paths or [])
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for p in raw_paths:
+        if p in seen:
+            continue
+        seen.add(p)
+        path = Path(p)
+        if _is_safe_path(path) and path.exists():
+            candidates.append(p)
+    return candidates
+
+
+def store_from_model(
+    db: Session,
+    guide: Guide,
+    index: int,
+    *,
+    alt_text: str | None = None,
+) -> GuideReferenceImage:
+    """Copy a linked-model folder image into the guide's reference store (rung 0).
+
+    `index` selects from `list_model_candidates(db, guide)`. Because the read
+    target is taken from that server-built, scan-root-validated list — never
+    from a request-supplied path — there is no path-injection surface. Raises
+    ReferenceImageError on an out-of-range index or unreadable bytes.
+    """
+    candidates = list_model_candidates(db, guide)
+    if not 0 <= index < len(candidates):
+        raise ReferenceImageError(
+            "That isn't one of the linked model's folder images."
+        )
+    raw = Path(candidates[index]).read_bytes()
+    return _persist(db, guide, raw, provenance="stl_model_folder", alt_text=alt_text)
 
 
 def load_reference(db: Session, guide: Guide) -> tuple[bytes, str] | None:

@@ -192,6 +192,39 @@ class TestDomainRules:
                             tabs=self._step_swatches(owned_paint, swatches), scale="28mm")
         assert "value_compression" in _codes(_validate(client, tight["id"]))
 
+    def test_strict_false_suppresses_value_intent_missing(self, client, owned_paint):
+        tabs = self._step_swatches(
+            owned_paint,
+            [{"paint_id": owned_paint["id"], "value_pct": 40, "role_label": "mid"}],
+            value_intent="",
+        )
+        g = _make_guide(client, owned_paint["id"], tabs=tabs, slug="import-test-1")
+        strict = client.get(f"/painting/guides/{g['id']}/validation?strict=true").json()
+        lax = client.get(f"/painting/guides/{g['id']}/validation?strict=false").json()
+        assert "value_intent_missing" in _codes(strict)
+        assert "value_intent_missing" not in _codes(lax)
+
+    def test_strict_false_suppresses_value_compression(self, client, owned_paint):
+        swatches = [
+            {"paint_id": owned_paint["id"], "value_pct": 40, "role_label": "mid"},
+            {"paint_id": owned_paint["id"], "value_pct": 45, "role_label": "hi"},
+        ]
+        g = _make_guide(client, owned_paint["id"], slug="import-test-2",
+                        tabs=self._step_swatches(owned_paint, swatches))
+        strict = client.get(f"/painting/guides/{g['id']}/validation?strict=true").json()
+        lax = client.get(f"/painting/guides/{g['id']}/validation?strict=false").json()
+        assert "value_compression" in _codes(strict)
+        assert "value_compression" not in _codes(lax)
+
+    def test_strict_false_still_reports_block_flags(self, client, owned_paint, db):
+        g = _make_guide(client, owned_paint["id"], slug="import-test-3")
+        # Corrupt paint ownership after creation
+        db.query(Paint).filter(Paint.id == owned_paint["id"]).update({"owned": False})
+        db.commit()
+        res = client.get(f"/painting/guides/{g['id']}/validation?strict=false").json()
+        assert "paint_not_owned" in _codes(res)
+        assert res["ok"] is False
+
 
 class TestSkinAnchorBand:
     """Skin-anchor band check (skill Step 2, folded from #506)."""
@@ -230,3 +263,64 @@ class TestSkinAnchorBand:
                                 code="042", name="Shadow Flesh")
         g = self._skin_guide(client, shadow_flesh["id"], band=None)
         assert "skin_anchor_too_light" not in _codes(_validate(client, g["id"]))
+
+
+def _hex_paint(client, line_id, code, name, hex_):
+    return client.post(
+        "/painting/paints",
+        json={"paint_line_id": line_id, "code": code, "name": name,
+              "hex": hex_, "finish": "matte"},
+    ).json()
+
+
+class TestHighlightDirection:
+    """Highlight-direction check (skill Step 3, #506)."""
+
+    def _skin_guide(self, client, paint_id, *, band, role="bright highlight",
+                    light=None, slug="hl"):
+        body = guide_body(paint_id, slug=slug)
+        if light:
+            body["light_source"] = light
+        body["tabs"] = [{
+            "name": "Skin",
+            "sort_order": 0,
+            "skin_config": {"complexion_band": band} if band else None,
+            "phases": [{"label": "Light", "steps": [{
+                "title": "Highlight",
+                "value_intent": "reads ~70% value",
+                "swatches": [{"paint_id": paint_id, "role_label": role, "value_pct": 70}],
+            }]}],
+        }]
+        return client.post("/painting/guides", json=body).json()
+
+    def test_pink_highlight_on_deep_skin_flags(self, client, owned_paint):
+        # Rose-triad paint named as the wrong highlight on deep skin.
+        pearl = _hex_paint(client, owned_paint["paint_line_id"], "S01", "Pearl Skin", "#E8C9C0")
+        g = self._skin_guide(client, pearl["id"], band="deep")
+        assert "highlight_direction" in _codes(_validate(client, g["id"]))
+
+    def test_warm_golden_highlight_on_deep_skin_is_clean(self, client, owned_paint):
+        amber = _hex_paint(client, owned_paint["paint_line_id"], "S17", "Advanced Flesh Tone", "#C8923C")
+        g = self._skin_guide(client, amber["id"], band="deep")
+        assert "highlight_direction" not in _codes(_validate(client, g["id"]))
+
+    def test_cool_highlight_flags_by_hue(self, client, owned_paint):
+        # Neutral name, but a cool (blue) tinted highlight → flagged on deep skin.
+        cool = _hex_paint(client, owned_paint["paint_line_id"], "X01", "Sky Tint", "#8AA0C8")
+        g = self._skin_guide(client, cool["id"], band="deep")
+        assert "highlight_direction" in _codes(_validate(client, g["id"]))
+
+    def test_cool_highlight_allowed_under_cool_light(self, client, owned_paint):
+        cool = _hex_paint(client, owned_paint["paint_line_id"], "X01", "Sky Tint", "#8AA0C8")
+        g = self._skin_guide(client, cool["id"], band="deep", light="cool moonlight")
+        assert "highlight_direction" not in _codes(_validate(client, g["id"]))
+
+    def test_lighter_band_is_not_gated(self, client, owned_paint):
+        pearl = _hex_paint(client, owned_paint["paint_line_id"], "S01", "Pearl Skin", "#E8C9C0")
+        g = self._skin_guide(client, pearl["id"], band="fair")
+        assert "highlight_direction" not in _codes(_validate(client, g["id"]))
+
+    def test_non_highlight_role_is_ignored(self, client, owned_paint):
+        pearl = _hex_paint(client, owned_paint["paint_line_id"], "S01", "Pearl Skin", "#E8C9C0")
+        g = self._skin_guide(client, pearl["id"], band="deep", role="mid-tone anchor")
+        assert "highlight_direction" not in _codes(_validate(client, g["id"]))

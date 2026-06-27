@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Tag, FolderSync, Inbox, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, type LucideIcon,
 } from "lucide-react";
 
 /** A keyboard key, styled like the hints elsewhere in the app. */
@@ -30,7 +30,7 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          STL Library catalogues the 3D-model files already on your drives. It never
+          STL Studio catalogues the 3D-model files already on your drives. It never
           downloads or moves anything — it reads your folders, builds a searchable index,
           and lets you browse, tag, preview, and plan prints.
         </p>
@@ -494,7 +494,7 @@ const SECTIONS: Section[] = [
         <p>
           The import/export uses the CSV format from{" "}
           <a href="https://www.courageousoctopus.com/" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 underline">PaintRack</a>{" "}
-          by Courageous Octopus — a great paint-inventory app. STL Library isn't
+          by Courageous Octopus — a great paint-inventory app. STL Studio isn't
           affiliated with it; we just interoperate with its export.
         </p>
         <p>If you track paints in <strong>PaintRack</strong>, import its CSV export directly:</p>
@@ -590,6 +590,45 @@ const SECTIONS: Section[] = [
           guide belongs to a <strong>series</strong>, <strong>Export series bundle</strong>{" "}
           renders every published guide in that series into one PDF with an optional
           cover page.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: "color-match",
+    title: "Color-match studio",
+    icon: Pipette,
+    body: (
+      <>
+        <p>
+          The <strong>Color-match studio</strong> (the <strong>Color match</strong>{" "}
+          button on the Paint Shelf) suggests paints from your shelf that match a
+          reference photo — drop in a render or a painted mini and it samples the
+          colors for you.
+        </p>
+        <p>
+          It leads with <strong>value</strong>, then hue. For each sampled color you
+          get a <strong>Value ladder</strong> — a <strong>shadow → mid → highlight</strong>{" "}
+          ramp in the same hue family, anchored on the sampled mid-tone (Dark Camo
+          Green → Green → Bright Yellow-Green), so the steps read as a cohesive
+          recipe. Then a <strong>Hue match</strong> (opaque paints ranked by ΔE2000),
+          and a labelled <strong>Glaze / wash</strong> list for transparents. Every
+          suggestion carries a confidence band (<em>very close</em>, <em>confirm</em>,
+          <em> family</em>, <em>loose</em>) — these are starting points to{" "}
+          <strong>confirm by eye</strong> under your bench light, never auto-applied.
+        </p>
+        <p>
+          <strong>Eyedropper</strong> — click anywhere on the preview to match that
+          exact spot. Sample the skin, then the hair, then the leather, and each gets
+          its own suggestions. The <strong>Palette overview</strong> below it is an
+          automatic read of the whole image (the background is excluded so the subject
+          leads, not the backdrop).
+        </p>
+        <p>
+          <strong>Value mode</strong> (on by default) greys every swatch so you can
+          read values; turn it off to compare hues in full color. Large photos are
+          automatically downscaled in your browser before upload, so even a phone shot
+          uploads instantly.
         </p>
       </>
     ),
@@ -817,14 +856,14 @@ const SECTIONS: Section[] = [
     icon: Heart,
     body: (
       <>
-        <p className="font-medium text-gray-200">Like STL Library?</p>
+        <p className="font-medium text-gray-200">Like STL Studio?</p>
         <p>
-          STL Library started because I had a problem: way too many STL files and no good
+          STL Studio started because I had a problem: way too many STL files and no good
           way to keep track of them all. What began as a personal tool turned into something
           I thought other makers, painters, gamers, and hobbyists might find useful too.
         </p>
         <p>
-          If STL Library has helped you organize your collection, rediscover forgotten
+          If STL Studio has helped you organize your collection, rediscover forgotten
           models, or simply spend less time hunting through folders, please consider
           supporting the project through{" "}
           <a href="https://www.patreon.com/BrentStephenson" target="_blank" rel="noreferrer">Patreon</a> or{" "}
@@ -836,7 +875,7 @@ const SECTIONS: Section[] = [
           development, creativity, and caregiving.
         </p>
         <p>
-          There's absolutely no obligation—STL Library is, and will remain, a passion
+          There's absolutely no obligation—STL Studio is, and will remain, a passion
           project. But every bit of support is deeply appreciated and helps me continue
           building tools and content for the community.
         </p>
@@ -910,7 +949,7 @@ export default function Help() {
         <header className="mb-10">
           <h1 className="text-3xl font-bold text-white mb-2">Help &amp; Guide</h1>
           <p className="text-gray-500">
-            How every part of STL Library works. Jump to a topic on the left, or scroll through.
+            How every part of STL Studio works. Jump to a topic on the left, or scroll through.
           </p>
         </header>
 

@@ -761,3 +761,71 @@ class ReferenceImageRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ReferenceCandidateList(BaseModel):
+    """Linked-model folder images offered as reference candidates (#494 rung 0)."""
+    candidates: list[str]
+
+
+class ReferenceFromModel(BaseModel):
+    """Pick one of the linked model's folder images by index (#494 rung 0).
+
+    An index into `ReferenceCandidateList.candidates` — never a raw path — so the
+    request can't steer the server to an arbitrary file."""
+    index: int = Field(ge=0)
+    alt_text: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+# ---------------------------------------------------------------------------
+# Color-match studio (spec §8.6, #493)
+# ---------------------------------------------------------------------------
+
+Band = Literal["very_close", "close", "family", "loose"]
+
+
+class ColorMatchCandidate(BaseModel):
+    """One suggested paint for a sampled region."""
+    paint_id: int
+    code: str
+    name: str
+    brand: str
+    line: str
+    hex: Optional[str] = None
+    finish: str
+    delta_l: float
+    delta_e: Optional[float] = None
+    band: Band
+
+    model_config = {"from_attributes": True}
+
+
+class ColorMatchLadder(BaseModel):
+    """Shadow → mid → highlight value ramp within the sampled hue family (#569)."""
+    shadow: list[ColorMatchCandidate]
+    mid: list[ColorMatchCandidate]
+    highlight: list[ColorMatchCandidate]
+
+    model_config = {"from_attributes": True}
+
+
+class ColorMatchRegion(BaseModel):
+    """A k-means region of the reference image with its paint suggestions."""
+    hex: str
+    lab: tuple[float, float, float]
+    value_l: float
+    weight: float
+    ladder: ColorMatchLadder
+    hue_candidates: list[ColorMatchCandidate]
+    glaze_options: list[ColorMatchCandidate]
+
+    model_config = {"from_attributes": True}
+
+
+class ColorMatchResult(BaseModel):
+    regions: list[ColorMatchRegion]
+    caveat: str
+
+    model_config = {"from_attributes": True}
