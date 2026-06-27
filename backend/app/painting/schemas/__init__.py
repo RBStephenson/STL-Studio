@@ -539,6 +539,25 @@ class GuideCreate(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class GuideDraft(GuideCreate):
+    """A generated/imported guide before it's persisted (#523, M4 §8.3).
+
+    Same shape as `GuideCreate`, with two relaxations for the draft stage:
+    - `slug` is optional — a generator focuses on content; the slug is derived
+      from the title when the draft is saved.
+    - swatch / mix-component paints may be referenced by `name` only; the real
+      Paint Shelf `paint_id`s are filled in by
+      `services.draft.reconcile_draft_paints` (the `*In` schemas already allow a
+      name-only paint, so no field changes are needed for that).
+
+    A draft is always status="draft" — generation never auto-publishes.
+    """
+    slug: Optional[str] = None
+    status: GuideStatus = "draft"
+
+    model_config = {"extra": "forbid"}
+
+
 class GuideUpdate(BaseModel):
     """Partial update. Scalar/JSON fields use exclude_unset (omitted = unchanged).
     If `tabs` is provided, the entire tab subtree is REPLACED (the natural save
@@ -702,5 +721,111 @@ class SeriesRead(BaseModel):
     id: int
     slug: str
     display_name: str
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Guide validation (#489, spec §8.4)
+# ---------------------------------------------------------------------------
+
+class ValidationFlag(BaseModel):
+    """One validator finding. `block` flags prevent publish; `warn` is advisory.
+
+    The index locator (tab/phase/step/swatch) lets the editor jump to the node;
+    `path` is a human breadcrumb for display."""
+    severity: Literal["block", "warn"]
+    code: str
+    message: str
+    tab_index: Optional[int] = None
+    phase_index: Optional[int] = None
+    step_index: Optional[int] = None
+    swatch_index: Optional[int] = None
+    path: Optional[str] = None
+
+
+class GuideValidationResult(BaseModel):
+    ok: bool                       # True when no block-severity flags remain
+    flags: list[ValidationFlag]
+
+
+class ReferenceImageRead(BaseModel):
+    """A guide's reference image metadata (the bytes are served separately)."""
+    id: int
+    guide_id: Optional[int] = None
+    provenance: str
+    source_url: Optional[str] = None
+    alt_text: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ReferenceCandidateList(BaseModel):
+    """Linked-model folder images offered as reference candidates (#494 rung 0)."""
+    candidates: list[str]
+
+
+class ReferenceFromModel(BaseModel):
+    """Pick one of the linked model's folder images by index (#494 rung 0).
+
+    An index into `ReferenceCandidateList.candidates` — never a raw path — so the
+    request can't steer the server to an arbitrary file."""
+    index: int = Field(ge=0)
+    alt_text: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+# ---------------------------------------------------------------------------
+# Color-match studio (spec §8.6, #493)
+# ---------------------------------------------------------------------------
+
+Band = Literal["very_close", "close", "family", "loose"]
+
+
+class ColorMatchCandidate(BaseModel):
+    """One suggested paint for a sampled region."""
+    paint_id: int
+    code: str
+    name: str
+    brand: str
+    line: str
+    hex: Optional[str] = None
+    finish: str
+    delta_l: float
+    delta_e: Optional[float] = None
+    band: Band
+
+    model_config = {"from_attributes": True}
+
+
+class ColorMatchLadder(BaseModel):
+    """Shadow → mid → highlight value ramp within the sampled hue family (#569)."""
+    shadow: list[ColorMatchCandidate]
+    mid: list[ColorMatchCandidate]
+    highlight: list[ColorMatchCandidate]
+
+    model_config = {"from_attributes": True}
+
+
+class ColorMatchRegion(BaseModel):
+    """A k-means region of the reference image with its paint suggestions."""
+    hex: str
+    lab: tuple[float, float, float]
+    value_l: float
+    weight: float
+    ladder: ColorMatchLadder
+    hue_candidates: list[ColorMatchCandidate]
+    glaze_options: list[ColorMatchCandidate]
+
+    model_config = {"from_attributes": True}
+
+
+class ColorMatchResult(BaseModel):
+    regions: list[ColorMatchRegion]
+    caveat: str
 
     model_config = {"from_attributes": True}

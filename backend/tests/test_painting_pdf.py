@@ -8,10 +8,19 @@ Two layers:
   isn't installed, so the slim local-CI image (no Chromium) stays green while
   hosted CI and Docker — which install it — exercise the real path.
 """
+import asyncio
+
 import pytest
 
-from app.painting.models import Guide
-from app.painting.services.pdf import render_guide_pdf_html
+from app.painting.models import Guide, GuideSeries
+from app.painting.services.pdf import (
+    EmptySeriesError,
+    StampConfig,
+    _cover_html,
+    _series_guides,
+    render_guide_pdf_html,
+    render_series_pdf,
+)
 from app.painting.services.rendering import (
     GUIDE_CSS_HREF, GUIDE_JS_SRC, PRINT_CSS_HREF, SKILLS_JS_SRC,
 )
@@ -83,9 +92,128 @@ class TestInlinedHtml:
         assert "color: #e8e8e8 !important" in print_block
 
 
+class TestThemeVars:
+    def test_emits_default_root_vars(self, client, db, paint):
+        # A guide with no structured theme still gets a complete :root palette in
+        # the PDF source (#515), matching the in-app reader defaults.
+        guide = _make_guide(client, db, paint["id"])
+        guide.theme = None
+        db.add(guide); db.commit()
+        html = render_guide_pdf_html(db, guide)
+        assert "--accent: #c0a060;" in html
+        assert "--bg: #1a1a1a;" in html
+        assert ".hero { background: var(--hero-gradient); }" in html
+
+    def test_structured_theme_overrides_defaults(self, client, db, paint):
+        guide = _make_guide(client, db, paint["id"])
+        guide.theme = {"accent": "#ff0000", "hero_gradient": "linear-gradient(90deg, #111, #222)"}
+        db.add(guide); db.commit()
+        html = render_guide_pdf_html(db, guide)
+        assert "--accent: #ff0000;" in html
+        assert "--hero-gradient: linear-gradient(90deg, #111, #222);" in html
+        # Unset fields fall back to defaults.
+        assert "--bg: #1a1a1a;" in html
+
+    def test_head_style_wins_over_theme_block(self, client, db, paint):
+        # The theme block is injected right after <head>; a guide's verbatim
+        # head_style comes later in the head, so it still wins (escape hatch).
+        guide = _make_guide(client, db, paint["id"])
+        guide.theme = {"accent": "#ff0000"}
+        guide.head_style = ":root{--accent:#00ff00}"
+        db.add(guide); db.commit()
+        html = render_guide_pdf_html(db, guide)
+        assert html.index("--accent: #ff0000;") < html.index("--accent:#00ff00")
+
+
+class TestStamping:
+    def test_footer_on_by_default(self, client, db, paint):
+        guide = _make_guide(client, db, paint["id"])
+        html = render_guide_pdf_html(db, guide, StampConfig())
+        assert "pdf-stamp-footer" in html
+        assert "Patreon-exclusive" in html
+        # Watermark is opt-in.
+        assert "pdf-stamp-watermark" not in html
+
+    def test_no_stamp_when_omitted(self, client, db, paint):
+        guide = _make_guide(client, db, paint["id"])
+        html = render_guide_pdf_html(db, guide)
+        assert "pdf-stamp-footer" not in html
+        assert "pdf-stamp-watermark" not in html
+
+    def test_tier_label_appended_to_footer(self, client, db, paint):
+        guide = _make_guide(client, db, paint["id"])
+        html = render_guide_pdf_html(db, guide, StampConfig(tier_label="Hero Tier"))
+        assert "Hero Tier" in html
+
+    def test_watermark_opt_in(self, client, db, paint):
+        guide = _make_guide(client, db, paint["id"])
+        html = render_guide_pdf_html(
+            db, guide, StampConfig(footer=False, watermark=True)
+        )
+        assert "pdf-stamp-watermark" in html
+        assert "pdf-stamp-footer" not in html
+
+    def test_stamp_text_is_escaped(self, client, db, paint):
+        guide = _make_guide(client, db, paint["id"])
+        html = render_guide_pdf_html(
+            db, guide, StampConfig(tier_label="<script>x</script>")
+        )
+        assert "<script>x</script>" not in html
+        assert "&lt;script&gt;" in html
+
+
+def _publish_in_series(db, guide, series_id):
+    guide.series_id = series_id
+    guide.status = "published"
+    db.add(guide)
+    db.commit()
+
+
+class TestSeriesBundle:
+    def test_collects_only_published_in_id_order(self, client, db, paint):
+        series = GuideSeries(slug="dnd-toons", display_name="D&D Toons")
+        db.add(series)
+        db.commit()
+        g1 = _make_guide(client, db, paint["id"], slug="presto-1", title="Presto One")
+        g2 = _make_guide(client, db, paint["id"], slug="presto-2", title="Presto Two")
+        draft = _make_guide(client, db, paint["id"], slug="presto-3", title="Draft")
+        _publish_in_series(db, g1, series.id)
+        _publish_in_series(db, g2, series.id)
+        # draft stays draft + out of series
+        guides = _series_guides(db, series)
+        assert [g.id for g in guides] == [g1.id, g2.id]
+        assert draft.id not in {g.id for g in guides}
+
+    def test_cover_html_lists_guides(self, client, db, paint):
+        series = GuideSeries(slug="dnd-toons", display_name="D&D Toons")
+        db.add(series)
+        db.commit()
+        g1 = _make_guide(client, db, paint["id"], slug="presto-1", title="Presto One")
+        _publish_in_series(db, g1, series.id)
+        html = _cover_html(series, [g1])
+        assert "D&amp;D Toons" in html
+        assert "Presto One" in html
+
+    def test_empty_series_raises(self, client, db):
+        series = GuideSeries(slug="empty", display_name="Empty")
+        db.add(series)
+        db.commit()
+        with pytest.raises(EmptySeriesError):
+            asyncio.run(render_series_pdf(db, series))
+
+
 class TestEndpoint:
     def test_unknown_guide_404(self, client):
         assert client.get("/painting/guides/999/export/pdf").status_code == 404
+
+    def test_unknown_series_404(self, client):
+        assert client.get("/painting/series/999/export/pdf").status_code == 404
+
+    def test_empty_series_404(self, client, db):
+        series = GuideSeries(slug="empty-ep", display_name="Empty EP")
+        db.add(series)
+        db.commit()
+        assert client.get(f"/painting/series/{series.id}/export/pdf").status_code == 404
 
     @requires_chromium
     def test_renders_pdf(self, client, paint):
@@ -96,4 +224,19 @@ class TestEndpoint:
         assert r.status_code == 200, r.text
         assert r.headers["content-type"] == "application/pdf"
         assert 'filename="presto-magician.pdf"' in r.headers["content-disposition"]
+        assert r.content[:5] == b"%PDF-"
+
+    @requires_chromium
+    def test_renders_series_bundle(self, client, db, paint):
+        series = GuideSeries(slug="dnd-toons", display_name="D&D Toons")
+        db.add(series)
+        db.commit()
+        g1 = _make_guide(client, db, paint["id"], slug="presto-1", title="Presto One")
+        g2 = _make_guide(client, db, paint["id"], slug="presto-2", title="Presto Two")
+        _publish_in_series(db, g1, series.id)
+        _publish_in_series(db, g2, series.id)
+        r = client.get(f"/painting/series/{series.id}/export/pdf")
+        assert r.status_code == 200, r.text
+        assert r.headers["content-type"] == "application/pdf"
+        assert 'filename="dnd-toons-bundle.pdf"' in r.headers["content-disposition"]
         assert r.content[:5] == b"%PDF-"

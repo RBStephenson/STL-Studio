@@ -547,22 +547,19 @@ export default function VariantGroup() {
     }
   };
 
-  // Set one store-page URL on every selected member (#500). Selection-scoped +
-  // overwriting; the backend touches only these ids (no propagation to the
-  // rest of the group). Refetch on success so the grid reflects the change;
-  // selection is preserved.
+  // Set the store page on every selected member and, when the site is
+  // scrapeable, fetch its metadata once and apply it to all of them (#545).
+  // Variants share the same product page, so one scrape fans out to the whole
+  // selection. Refetch on success so the grid reflects the change; selection is
+  // preserved.
   const setStoreUrlForSelected = async (url: string) => {
     if (selectedIds.length === 0) return;
     try {
-      const res = await api.models.batchSetSourceUrl(selectedIds, url);
-      const n = res.updated.length;
-      const noun = n === 1 ? "model" : "models";
+      const res = await api.scrape.applyGroup(selectedIds, url);
       const skipped = res.missing.length;
       toast(
-        skipped > 0
-          ? `Store page set on ${n} ${noun}; ${skipped} skipped.`
-          : `Store page set on ${n} ${noun}.`,
-        "success",
+        skipped > 0 ? `${res.message} (${skipped} skipped.)` : res.message,
+        res.scraped ? "success" : "info",
       );
       const data = await api.models.variants(numCreatorId, decodedCharacter);
       setVariants(data.items);

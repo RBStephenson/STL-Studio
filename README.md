@@ -1,4 +1,4 @@
-# STL Library
+# STL Studio
 
 [![Release](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml)
 [![Build Check](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml)
@@ -14,7 +14,7 @@
 
 Local web app for cataloguing, browsing, and managing an STL file library.
 
-📖 **User documentation:** the **[STL Library Wiki](https://github.com/RBStephenson/STL-Inventory/wiki)** is the canonical user guide.
+📖 **User documentation:** the **[STL Studio Wiki](https://github.com/RBStephenson/STL-Inventory/wiki)** is the canonical user guide.
 🗺️ **What's coming next:** [ROADMAP.md](ROADMAP.md)
 
 
@@ -131,15 +131,19 @@ A folder is only indexed as a model if it contains 3D files.
 - Fuzzy-matches scraped listings against local models and bulk-applies metadata (source URL, thumbnail, external ID)
 
 ### Painting Guides module
-Enable under **Settings → Painting Guides** — adds **Guides** and **Paint Shelf** to the nav.
+The **Paint Shelf** is always available in the nav. Enabling **Settings → Painting Guides** additionally adds **Guides** (guide authoring/reading).
 
-**Paint Shelf** — opt-in paint inventory: search/filter by brand, line, finish, and owned state, with color chips for swatches. Per-line **code patterns** (regex) validate paint codes on entry. **PaintRack CSV import/export** with a diff preview (never a blind overwrite); optional `Color` column (`#RRGGBB`, `"rgb(r,g,b)"`, or `"hsv(h,s,v)"`) pre-populates swatches on import.
+**Paint Shelf** — paint inventory: search/filter by brand, line, finish, and owned state, with color chips for swatches. Per-line **code patterns** (regex) validate paint codes on entry. **CSV import/export in [PaintRack](https://www.courageousoctopus.com/) format** (by Courageous Octopus — not affiliated) with a diff preview (never a blind overwrite); optional `Color` column (`#RRGGBB`, `"rgb(r,g,b)"`, or `"hsv(h,s,v)"`) pre-populates swatches on import.
+
+**Color-match studio** — match a reference photo against your shelf. A **value ladder** (shadow → mid → highlight ramp in the same hue family, anchored on the sampled mid-tone) plus a **hue** ranking (ΔE2000) and a labelled **glaze/wash** list, each with a confidence band — suggestions to confirm by eye, never auto-applied. **Eyedropper**: click the preview to sample a specific spot (skin, hair, leather), plus an automatic **palette overview** with the background excluded. Large photos are downscaled in-browser before upload.
 
 **Painting Guides** — step-by-step guides tied to your Paint Shelf:
+- **Author from scratch** — a guide-start wizard (title/scale/category, optional model link), then a structured editor for tabs, phases, steps, and swatches with drag-to-reorder at every level and a live preview pane.
 - Import an HTML guide file (click or drag-and-drop). Unresolved paints trigger a **Paint resolution** step — map each to a shelf paint, force-add it, or skip. Import stays disabled until *every* unresolved paint has a decision, so nothing is silently dropped; same-named paints from different brands resolve independently.
 - **Mix swatches** (*Paint A + Paint B, 3:1*) import, render as blended chips, and round-trip cleanly.
-- In-app structured editor for tabs, phases, steps, and swatches.
-- **Print** or **Export PDF** the whole guide in one pass — the print stylesheet preserves dark backgrounds and paint chip colors so swatches render correctly on paper.
+- **Validation + publish gate** — a validation panel flags problems (unowned/invalid paints block; empty sections warn) and publishing is blocked until blocking issues are resolved.
+- **Theming** — customize each guide's look with a color-picker theme editor (live preview), or set an app-wide **default guide theme** under Settings that new guides inherit.
+- **Print** or **Export PDF** the whole guide in one pass — the print stylesheet preserves dark backgrounds and paint chip colors. The export menu adds per-export **reward stamping** (Patreon-exclusive footer, optional tier label and watermark), and guides in a **series** can be exported as one **bundle PDF** with an optional cover page.
 - **Model links** — guides appear as a badge on Library cards and a button on model detail pages.
 
 ### Import Folder (`/import`)
@@ -231,14 +235,14 @@ Every PR to `main` runs **Build Check**, which compiles all three platform binar
 
 ## About & Support
 
-### Like STL Library?
+### Like STL Studio?
 
-STL Library started because I had a problem: way too many STL files and no good
+STL Studio started because I had a problem: way too many STL files and no good
 way to keep track of them all. What began as a personal tool turned into
 something I thought other makers, painters, gamers, and hobbyists might find
 useful too.
 
-If STL Library has helped you organize your collection, rediscover forgotten
+If STL Studio has helped you organize your collection, rediscover forgotten
 models, or simply spend less time hunting through folders, please consider
 supporting the project through
 [Patreon](https://www.patreon.com/BrentStephenson) or
@@ -248,7 +252,7 @@ Your support helps fund continued development, but it also helps keep resin in
 the printer, paint on the hobby desk, and supports my family as I balance
 software development, creativity, and caregiving.
 
-There's absolutely no obligation—STL Library is, and will remain, a passion
+There's absolutely no obligation—STL Studio is, and will remain, a passion
 project. But every bit of support is deeply appreciated and helps me continue
 building tools and content for the community.
 

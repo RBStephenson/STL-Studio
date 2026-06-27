@@ -5,10 +5,11 @@ import {
   Database, Download, Upload, ShieldAlert, Paintbrush, SlidersHorizontal, RefreshCw,
   FolderTree,
 } from "lucide-react";
-import { api, ScanRoot } from "../api/client";
+import { api, AiEffort, AiSettings, GuideTheme, ScanRoot } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import FolderPicker from "../components/FolderPicker";
 import HelpLink from "../components/HelpLink";
+import ThemeEditor from "../components/guide/ThemeEditor";
 
 const ACK_PHRASE = "ACKNOWLEDGED";
 
@@ -81,6 +82,11 @@ export default function Settings() {
   const [newKeyword, setNewKeyword] = useState("");
   const [newTag, setNewTag] = useState("");
   const [newPartsName, setNewPartsName] = useState("");
+
+  // AI settings (#517) — key is write-only; we only ever know if one is set.
+  const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
+  const [aiKeyDraft, setAiKeyDraft] = useState("");
+  const [editingKey, setEditingKey] = useState(false);
 
   const load = () => {
     api.scan.roots()
@@ -273,6 +279,62 @@ export default function Settings() {
     }
   };
 
+  const saveThemeDefaults = async (theme: GuideTheme) => {
+    try {
+      await updateAppSettings({ guide_theme_defaults: theme });
+    } catch (e: any) {
+      flash(e?.message || "Could not save theme defaults", "err");
+    }
+  };
+
+  // Load AI key status when the painting module is on (key is never returned).
+  useEffect(() => {
+    if (!appSettings.painting_guides_enabled) return;
+    let alive = true;
+    api.settings.ai.get()
+      .then((s) => { if (alive) setAiSettings(s); })
+      .catch(() => { /* non-fatal — section just shows "no key" */ });
+    return () => { alive = false; };
+  }, [appSettings.painting_guides_enabled]);
+
+  const saveAiKey = async () => {
+    const key = aiKeyDraft.trim();
+    if (!key) return;
+    try {
+      setAiSettings(await api.settings.ai.setKey(key));
+      setAiKeyDraft("");
+      setEditingKey(false);
+      flash("API key saved", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not save the API key", "err");
+    }
+  };
+
+  const clearAiKey = async () => {
+    try {
+      setAiSettings(await api.settings.ai.clearKey());
+      flash("API key cleared", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not clear the API key", "err");
+    }
+  };
+
+  const saveAiModel = async (model: string) => {
+    try {
+      await updateAppSettings({ ai_model: model });
+    } catch (e: any) {
+      flash(e?.message || "Could not save the model", "err");
+    }
+  };
+
+  const saveAiEffort = async (effort: AiEffort) => {
+    try {
+      await updateAppSettings({ ai_effort: effort });
+    } catch (e: any) {
+      flash(e?.message || "Could not save the effort", "err");
+    }
+  };
+
   const addIgnorePattern = async () => {
     const pat = newPattern.trim();
     if (!pat) return;
@@ -367,7 +429,7 @@ export default function Settings() {
         Settings
         <HelpLink section="settings" label="About scan locations & data management" />
       </h1>
-      <p className="text-sm text-gray-500 mb-8">Manage the drives and folders that STL Library scans for models.</p>
+      <p className="text-sm text-gray-500 mb-8">Manage the drives and folders that STL Studio scans for models.</p>
 
       {/* Feedback */}
       {success && (
@@ -518,7 +580,7 @@ export default function Settings() {
         {/* How layouts work — example shown above the folder-layout input */}
         <div className="bg-gray-900/60 border border-gray-800 rounded-lg px-4 py-3 mt-4">
           <p className="text-xs text-gray-400 mb-2">
-            A <strong className="text-gray-300">layout</strong> tells STL Library how the folders
+            A <strong className="text-gray-300">layout</strong> tells STL Studio how the folders
             above each model map to a <span className="text-indigo-300">creator</span> and{" "}
             <span className="text-emerald-300">tags</span>. Read each path left to right, one folder
             per <code className="text-gray-500">/</code>:
@@ -818,9 +880,9 @@ export default function Settings() {
           <Paintbrush size={14} /> Painting Guides
         </h2>
         <p className="text-xs text-gray-600 mb-4">
-          Author step-by-step painting guides for your models and track your paint inventory.
-          Enabling this adds <strong className="text-gray-500">Guides</strong> and{" "}
-          <strong className="text-gray-500">Paint Shelf</strong> to the navigation.
+          Author step-by-step painting guides for your models. Enabling this adds{" "}
+          <strong className="text-gray-500">Guides</strong> to the navigation. The{" "}
+          <strong className="text-gray-500">Paint Shelf</strong> is always available.
         </p>
         <label className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 cursor-pointer select-none self-start">
           <input
@@ -831,6 +893,113 @@ export default function Settings() {
           />
           <span className="text-sm text-gray-200">Enable Painting Guides</span>
         </label>
+
+        {appSettings.painting_guides_enabled && (
+          <div className="mt-6">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+              Default guide theme
+            </h3>
+            <p className="text-xs text-gray-600 mb-3">
+              New guides inherit these colors. Each guide can override them in its editor.
+            </p>
+            <ThemeEditor
+              value={appSettings.guide_theme_defaults}
+              onChange={saveThemeDefaults}
+            />
+          </div>
+        )}
+
+        {appSettings.painting_guides_enabled && (
+          <div className="mt-6">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+              AI generation
+            </h3>
+            <p className="text-xs text-gray-600 mb-3">
+              Bring your own Anthropic API key to generate guide drafts. The key is
+              stored encrypted and never shown again — only that one is set.
+            </p>
+
+            <label className="block text-xs text-gray-400 mb-1">Anthropic API key</label>
+            {aiSettings?.key_set && !editingKey ? (
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
+                  Key set <span className="text-gray-500">••••{aiSettings.key_hint?.replace(/^…/, "")}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setEditingKey(true); setAiKeyDraft(""); }}
+                  className="text-sm text-gray-300 hover:text-white border border-gray-700 rounded px-3 py-2"
+                >
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAiKey}
+                  className="text-sm text-rose-300 hover:text-rose-200 border border-gray-700 hover:border-rose-800 rounded px-3 py-2"
+                >
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mb-3">
+                <input
+                  type="password"
+                  aria-label="Anthropic API key"
+                  value={aiKeyDraft}
+                  onChange={(e) => setAiKeyDraft(e.target.value)}
+                  placeholder="sk-ant-…"
+                  className="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={saveAiKey}
+                  disabled={!aiKeyDraft.trim()}
+                  className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-2 disabled:opacity-50"
+                >
+                  Save
+                </button>
+                {aiSettings?.key_set && (
+                  <button
+                    type="button"
+                    onClick={() => { setEditingKey(false); setAiKeyDraft(""); }}
+                    className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-4">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1" htmlFor="ai-model">Model</label>
+                <select
+                  id="ai-model"
+                  value={appSettings.ai_model || "claude-sonnet-4-6"}
+                  onChange={(e) => saveAiModel(e.target.value)}
+                  className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+                >
+                  <option value="claude-opus-4-8">Opus 4.8 — most capable</option>
+                  <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced (default)</option>
+                  <option value="claude-haiku-4-5">Haiku 4.5 — fastest</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1" htmlFor="ai-effort">Effort</label>
+                <select
+                  id="ai-effort"
+                  value={appSettings.ai_effort}
+                  onChange={(e) => saveAiEffort(e.target.value as AiEffort)}
+                  className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+                >
+                  <option value="low">Low — fastest (default)</option>
+                  <option value="medium">Medium — more reasoning</option>
+                  <option value="high">High — deepest reasoning</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Data management */}

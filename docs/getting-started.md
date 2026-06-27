@@ -1,6 +1,6 @@
 # Getting Started
 
-There are two ways to run STL Library:
+There are two ways to run STL Studio:
 
 - **[Standalone](#standalone-recommended)** — a single downloadable app. No Docker, no setup. Recommended for most people.
 - **[Docker](#docker-advanced)** — for people who already run Docker and want the containerized version.

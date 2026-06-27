@@ -1,4 +1,6 @@
 from typing import Optional
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -61,6 +63,26 @@ class ApplyRequest(BaseModel):
     download_count: Optional[int] = None
 
 
+class GroupScrapeApply(BaseModel):
+    """Set a store URL on selected variants and fetch+apply its metadata (#545)."""
+    model_ids: list[int]
+    url: str
+
+
+class GroupScrapeResult(BaseModel):
+    applied: int                       # models the URL/metadata was written to
+    scraped: bool                      # whether metadata was fetched (vs URL-only)
+    source_site: Optional[str] = None
+    missing: list[int] = []            # requested ids that don't exist
+    message: str = ""
+
+
+def _host_label(url: str) -> Optional[str]:
+    """Bare hostname (sans 'www.') for store URLs we don't scrape."""
+    host = (urlparse(url if "//" in url else f"https://{url}").hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host or None
+
+
 # --- Endpoints ---
 
 @router.get("/fetch", response_model=ScrapePreview)
@@ -91,17 +113,8 @@ async def search_site(
     return [SearchResultItem(**r.__dict__) for r in results]
 
 
-@router.post("/apply/{model_id}", response_model=dict)
-async def apply_metadata(
-    model_id: int,
-    body: ApplyRequest,
-    db: Session = Depends(get_db),
-):
-    """Apply scraped (and user-reviewed) metadata to a model record."""
-    model = db.query(Model).filter(Model.id == model_id).first()
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-
+async def _apply_request_to_model(db: Session, model: Model, body: ApplyRequest) -> None:
+    """Apply reviewed/scraped metadata onto one model (no commit)."""
     if body.title:
         model.title = body.title
     if body.description:
@@ -148,6 +161,75 @@ async def apply_metadata(
     model.source_last_fetched = utcnow()
     model.needs_review = False  # user reviewed it, clear the flag
     model.updated_at = utcnow()
+
+
+@router.post("/apply/{model_id}", response_model=dict)
+async def apply_metadata(
+    model_id: int,
+    body: ApplyRequest,
+    db: Session = Depends(get_db),
+):
+    """Apply scraped (and user-reviewed) metadata to a model record."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    await _apply_request_to_model(db, model, body)
+    db.commit()
+    return {"ok": True, "model_id": model_id}
+
+
+@router.post("/apply-group", response_model=GroupScrapeResult)
+async def apply_group(body: GroupScrapeApply, db: Session = Depends(get_db)):
+    """Set a store page on selected variants and, when the site is scrapeable,
+    fetch its metadata once and apply it to all of them (#545).
+
+    Variants in a group share the same product page, so this scrapes once and
+    fans the result out to every selected model — no per-model detail-page trip.
+    When the site can't be scraped, it still records the URL + host label so the
+    link isn't lost (matching the bulk set-store-page behaviour, #500)."""
+    ids = list(dict.fromkeys(body.model_ids))  # de-dupe, preserve order
+    if not ids:
+        raise HTTPException(status_code=400, detail="model_ids must not be empty.")
+    url = body.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url must not be empty.")
+
+    models = db.query(Model).filter(Model.id.in_(ids)).all()
+    found = {m.id for m in models}
+    missing = [i for i in ids if i not in found]
+    if not models:
+        raise HTTPException(status_code=404, detail="No matching models.")
+
+    site = scrapers.detect_site(url)
+    preview = await scrapers.fetch_url(url) if site else None
+
+    if preview is not None:
+        fields = {
+            k: v for k, v in preview.__dict__.items() if k in ApplyRequest.model_fields
+        }
+        fields["source_url"] = url
+        fields.setdefault("source_site", site)
+        data = ApplyRequest(**fields)
+        scraped = True
+        message = f"Fetched and applied to {len(models)} variant(s)."
+    else:
+        # Unsupported site or scrape failed — still record the URL so it's not lost.
+        data = ApplyRequest(source_url=url, source_site=site or _host_label(url))
+        scraped = False
+        message = (
+            f"Store page set on {len(models)} variant(s); "
+            "metadata couldn't be fetched for this site."
+        )
+
+    for model in models:
+        await _apply_request_to_model(db, model, data)
     db.commit()
 
-    return {"ok": True, "model_id": model_id}
+    return GroupScrapeResult(
+        applied=len(models),
+        scraped=scraped,
+        source_site=data.source_site,
+        missing=missing,
+        message=message,
+    )

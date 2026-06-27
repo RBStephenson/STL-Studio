@@ -11,10 +11,12 @@ services:
       # Windows example: "D:/3D STLs:/mnt/drive1:ro"
       # Mac example:    "/Volumes/MyDrive1:/mnt/drive1:ro"
       - "${STL_DRIVE_1:-/mnt/drive1}:/mnt/drive1:ro"
+      - "${STL_DRIVE_2:-/mnt/drive2}:/mnt/drive2:ro"
     environment:
       - DATABASE_URL=sqlite:////data/stl_inventory.db
-      - STL_ROOTS=/mnt/drive1
+      - STL_ROOTS=/mnt/drive1,/mnt/drive2
       - STL_DRIVE_1=${STL_DRIVE_1:-}
+      - STL_DRIVE_2=${STL_DRIVE_2:-}
     restart: unless-stopped
 
   frontend:

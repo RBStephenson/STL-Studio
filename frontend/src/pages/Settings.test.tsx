@@ -40,6 +40,11 @@ vi.mock("../api/client", () => ({
         drive_mappings: {},
         restart_required: ["database_url"],
       }),
+      ai: {
+        get: vi.fn().mockResolvedValue({ key_set: false, key_hint: null, model: "", effort: "low" }),
+        setKey: vi.fn().mockResolvedValue({ key_set: true, key_hint: "…wxyz", model: "", effort: "low" }),
+        clearKey: vi.fn().mockResolvedValue({ key_set: false, key_hint: null, model: "", effort: "low" }),
+      },
     },
   },
 }));
@@ -179,6 +184,65 @@ describe("Settings – Painting Guides toggle (#180)", () => {
 
     expect(await screen.findByText("DB locked")).toBeInTheDocument();
     expect(checkbox).not.toBeChecked();
+  });
+});
+
+describe("Settings – AI generation section (#517)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("is hidden when painting guides are disabled", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: false }));
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    await screen.findByRole("checkbox", { name: /enable painting guides/i });
+    expect(screen.queryByLabelText("Anthropic API key")).toBeNull();
+    expect(api.settings.ai.get).not.toHaveBeenCalled();
+  });
+
+  it("saves a typed key and then shows the masked, key-set state", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    const input = await screen.findByLabelText("Anthropic API key");
+    await userEvent.type(input, "sk-ant-secret-wxyz");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(api.settings.ai.setKey).toHaveBeenCalledWith("sk-ant-secret-wxyz");
+    expect(await screen.findByText(/key set/i)).toBeInTheDocument();
+    expect(screen.getByText(/wxyz/)).toBeInTheDocument();
+  });
+
+  it("shows the key-set state on load and clears the key", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
+    vi.mocked(api.settings.ai.get).mockResolvedValue({ key_set: true, key_hint: "…wxyz", model: "", effort: "low" });
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    expect(await screen.findByText(/key set/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+    expect(api.settings.ai.clearKey).toHaveBeenCalled();
+  });
+
+  it("saves model and effort from the dropdowns (#517)", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
+    // update must keep painting enabled so the AI section stays mounted.
+    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+
+    await screen.findByLabelText("Anthropic API key");
+    await userEvent.selectOptions(screen.getByLabelText("Model"), "claude-opus-4-8");
+    expect(api.settings.update).toHaveBeenCalledWith({ ai_model: "claude-opus-4-8" });
+
+    await userEvent.selectOptions(screen.getByLabelText("Effort"), "high");
+    expect(api.settings.update).toHaveBeenCalledWith({ ai_effort: "high" });
   });
 });
 

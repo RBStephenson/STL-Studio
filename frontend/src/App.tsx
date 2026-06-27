@@ -14,8 +14,11 @@ import TagsPage from "./pages/TagsPage";
 import GuidesPage from "./pages/GuidesPage";
 import GuideReaderPage from "./pages/GuideReaderPage";
 import GuideEditorPage from "./pages/GuideEditorPage";
+import GuideWizardPage from "./pages/GuideWizardPage";
 import GuideContentEditorPage from "./pages/GuideContentEditorPage";
+import GuideDraftReviewPage from "./pages/GuideDraftReviewPage";
 import PaintShelfPage from "./pages/PaintShelfPage";
+import ColorMatchStudioPage from "./pages/ColorMatchStudioPage";
 import ReorganizePage from "./pages/ReorganizePage";
 import ImportPage from "./pages/ImportPage";
 import ImportPreviewPage from "./pages/ImportPreviewPage";
@@ -41,11 +44,13 @@ export default function App() {
           <Route path="/import/preview" element={<ImportPreviewPage />} />
           <Route path="/tags" element={<TagsPage />} />
           <Route path="/painting/guides" element={<GuidesPage />} />
-          <Route path="/painting/guides/new" element={<GuideEditorPage />} />
+          <Route path="/painting/guides/new" element={<GuideWizardPage />} />
           <Route path="/painting/guides/:id" element={<GuideReaderPage />} />
           <Route path="/painting/guides/:id/edit" element={<GuideEditorPage />} />
           <Route path="/painting/guides/:id/content" element={<GuideContentEditorPage />} />
+          <Route path="/painting/guides/:id/draft" element={<GuideDraftReviewPage />} />
           <Route path="/painting/shelf" element={<PaintShelfPage />} />
+          <Route path="/painting/color-match" element={<ColorMatchStudioPage />} />
           <Route path="/help" element={<Help />} />
         </Routes>
       </main>

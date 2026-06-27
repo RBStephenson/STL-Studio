@@ -25,6 +25,50 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+// Per-export reward-stamping options for PDF endpoints (#490/#511). Omitted
+// fields fall back to the server defaults (footer on, watermark off).
+export interface StampOptions {
+  footer?: boolean;
+  tier?: string;
+  watermark?: boolean;
+}
+
+export interface SeriesExportOptions extends StampOptions {
+  cover?: boolean;
+}
+
+function stampQuery(opts: SeriesExportOptions): string {
+  const params = new URLSearchParams();
+  if (opts.cover !== undefined) params.set("cover", String(opts.cover));
+  if (opts.footer !== undefined) params.set("footer", String(opts.footer));
+  if (opts.tier) params.set("tier", opts.tier);
+  if (opts.watermark !== undefined) params.set("watermark", String(opts.watermark));
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
+// Fetch a PDF blob and trigger a browser download. Blob endpoints can't go
+// through request(); this surfaces the 503 "Chromium not installed" / 404 detail
+// like the other download helpers. The server's Content-Disposition filename
+// wins when present (e.g. the series-bundle slug), else `fallbackName`.
+async function downloadPdf(url: string, fallbackName: string): Promise<void> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+    throw new ApiError(res.status, detail);
+  }
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const name = match ? match[1] : fallbackName;
+  const objectUrl = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export type PrintStatus = "none" | "queued" | "printing" | "printed";
 export const PRINT_STATUS_CYCLE: PrintStatus[] = ["none", "queued", "printing", "printed"];
 export const PRINT_STATUS_LABELS: Record<PrintStatus, string> = {
@@ -211,6 +255,22 @@ export interface AppSettings {
   scan_ignore_patterns: string[];
   scan_tag_rules: ScanTagRule[];
   scan_parts_names: string[];
+  // App-level default guide theme (#514): new guides inherit these colors.
+  guide_theme_defaults: GuideTheme;
+  // AI model id + generation effort for guide generation (#517). The API key is
+  // NOT here — it's write-only via the dedicated /settings/ai endpoints.
+  ai_model: string;
+  ai_effort: AiEffort;
+}
+
+export type AiEffort = "low" | "medium" | "high";
+
+// AI settings status (#517) — key is write-only, never returned in full.
+export interface AiSettings {
+  key_set: boolean;
+  key_hint: string | null;
+  model: string;
+  effort: AiEffort;
 }
 
 export interface ScanTagRule {
@@ -425,6 +485,92 @@ export interface GuideTab {
   phases: GuidePhase[];
 }
 
+export interface ValidationFlag {
+  severity: "block" | "warn";
+  code: string;
+  message: string;
+  tab_index: number | null;
+  phase_index: number | null;
+  step_index: number | null;
+  swatch_index: number | null;
+  path: string | null;
+}
+
+export interface GuideValidationResult {
+  ok: boolean;
+  flags: ValidationFlag[];
+}
+
+// A guide's reference image metadata (#535/#536). The bytes are served by the
+// GET reference-image endpoint; this carries the provenance + dimensions.
+export interface ReferenceImage {
+  id: number;
+  guide_id: number | null;
+  provenance: string;
+  source_url: string | null;
+  alt_text: string | null;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+}
+
+// Color-match studio (#493/#561). Mirrors backend ColorMatch* schemas.
+export type ColorBand = "very_close" | "close" | "family" | "loose";
+
+export interface ColorMatchCandidate {
+  paint_id: number;
+  code: string;
+  name: string;
+  brand: string;
+  line: string;
+  hex: string | null;
+  finish: string;
+  delta_l: number;
+  delta_e: number | null;
+  band: ColorBand;
+}
+
+export interface ColorMatchLadder {
+  shadow: ColorMatchCandidate[];
+  mid: ColorMatchCandidate[];
+  highlight: ColorMatchCandidate[];
+}
+
+export interface ColorMatchRegion {
+  hex: string;
+  lab: [number, number, number];
+  value_l: number;
+  weight: number;
+  ladder: ColorMatchLadder;
+  hue_candidates: ColorMatchCandidate[];
+  glaze_options: ColorMatchCandidate[];
+}
+
+export interface ColorMatchResult {
+  regions: ColorMatchRegion[];
+  caveat: string;
+}
+
+// AI draft-generation job status (#524/#492). When `status === "done"` the
+// candidate `draft` (proposed tabs), validator `flags`, and `unresolved` paints
+// are populated for the review UI to diff before the user accepts.
+export type DraftJobStatus = "idle" | "running" | "done" | "error";
+
+export interface DraftUnresolvedPaint {
+  name: string;
+  tab: string;
+  step: string;
+}
+
+export interface GuideDraftStatus {
+  status: DraftJobStatus;
+  message: string;
+  draft: { tabs: TabInput[] } | null;
+  flags: ValidationFlag[];
+  unresolved: DraftUnresolvedPaint[];
+  error: string | null;
+}
+
 export interface GuideTheme {
   bg?: string | null;
   surface?: string | null;
@@ -465,6 +611,7 @@ export interface Guide {
   category_label: string | null;
   series_id: number | null;
   model_id: number | null;
+  reference_image_id: number | null;
   scale: string | null;
   status: string;
   franchise: string | null;
@@ -506,6 +653,7 @@ export interface GuideCreateInput {
   philosophy_note?: string | null;
   paint_lines_used?: PaintPill[];
   technique_tags?: string[];
+  theme?: GuideTheme | null;
 }
 
 // Content-spine input shapes (#329 PR 2). Mirror backend SwatchIn/StepIn/
@@ -522,6 +670,13 @@ export interface SwatchInput {
   sort_order?: number;
 }
 
+export interface MixComponentInput {
+  paint_id?: number | null; // omit/null when kept by name only (#425)
+  name?: string | null;
+  parts: number;
+  sort_order?: number;
+}
+
 export interface StepInput {
   title: string;
   technique_tag?: StepTechnique | null;
@@ -533,6 +688,7 @@ export interface StepInput {
   ratio_box?: string | null;
   sort_order?: number;
   swatches?: SwatchInput[];
+  mix_components?: MixComponentInput[];
 }
 
 export interface PhaseInput {
@@ -649,6 +805,15 @@ export interface ScrapePreview {
   license: string | null;
   like_count: number | null;
   download_count: number | null;
+}
+
+// Result of setting a store page + fetch/apply across selected variants (#545).
+export interface GroupScrapeResult {
+  applied: number;
+  scraped: boolean;
+  source_site: string | null;
+  missing: number[];
+  message: string;
 }
 
 // --- Library reorganize, Phase 1 preview (#323) ---
@@ -969,6 +1134,14 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
+    // Set a store page on selected variants and fetch+apply its metadata in one
+    // step (#545). Scrapes once and fans out to all ids.
+    applyGroup: (modelIds: number[], url: string) =>
+      request<GroupScrapeResult>(`/scrape/apply-group`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_ids: modelIds, url }),
+      }),
   },
   scan: {
     start: () => request<ScanStatus>("/scan/start", { method: "POST" }),
@@ -1056,6 +1229,19 @@ export const api = {
     // Re-read the .env / environment config without a full restart (#140).
     reloadEnv: () =>
       request<EnvReloadResult>("/settings/reload", { method: "POST" }),
+    // AI settings (#517). The API key is write-only — get() returns only
+    // whether one is set plus a masked hint, never the plaintext.
+    ai: {
+      get: () => request<AiSettings>("/settings/ai"),
+      setKey: (key: string) =>
+        request<AiSettings>("/settings/ai/key", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }),
+        }),
+      clearKey: () =>
+        request<AiSettings>("/settings/ai/key", { method: "DELETE" }),
+    },
   },
   painting: {
     brands: {
@@ -1194,23 +1380,88 @@ export const api = {
         }),
       delete: (id: number) =>
         request<{ ok: boolean }>(`/painting/guides/${id}`, { method: "DELETE" }),
-      // Render the guide to a print-ready PDF and trigger a download (#320).
-      // A blob endpoint, so it can't go through request(); surfaces the 503
-      // "Chromium not installed" detail like the other download helpers.
-      exportPdf: async (id: number, slug: string) => {
-        const res = await fetch(`${BASE}/painting/guides/${id}/export/pdf`);
+      // Validator findings for the editor panel + publish gate (#489).
+      validate: (id: number) =>
+        request<GuideValidationResult>(`/painting/guides/${id}/validation`),
+      // Kick off async AI draft generation (#524). 202 + initial status; 503
+      // when no API key, 409 when a draft is already generating for this guide.
+      startDraft: (id: number) =>
+        request<GuideDraftStatus>(`/painting/guides/${id}/draft`, { method: "POST" }),
+      // Poll the draft-generation job; carries the candidate draft + flags when done.
+      draftStatus: (id: number) =>
+        request<GuideDraftStatus>(`/painting/guides/${id}/draft/status`),
+      // Reference image (#535/#536): the bytes feed Claude vision at draft time.
+      // `<img src>` target for the stored image; `v` busts the cache after a replace.
+      referenceImageUrl: (id: number, v?: number | string) =>
+        `${BASE}/painting/guides/${id}/reference-image${v !== undefined ? `?v=${v}` : ""}`,
+      uploadReferenceImage: async (id: number, file: File, altText?: string) => {
+        const form = new FormData();
+        form.append("file", file);
+        if (altText) form.append("alt_text", altText);
+        const res = await fetch(`${BASE}/painting/guides/${id}/reference-image`, {
+          method: "POST", body: form,
+        });
         if (!res.ok) {
           let detail = `${res.status} ${res.statusText}`;
           try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
           throw new ApiError(res.status, detail);
         }
-        const url = URL.createObjectURL(await res.blob());
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${slug}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
+        return res.json() as Promise<ReferenceImage>;
       },
+      deleteReferenceImage: (id: number) =>
+        request<{ ok: boolean }>(`/painting/guides/${id}/reference-image`, { method: "DELETE" }),
+      // Render the guide to a print-ready PDF and trigger a download (#320).
+      // Stamping options (#511): footer on by default, watermark off.
+      exportPdf: (id: number, slug: string, opts: StampOptions = {}) =>
+        downloadPdf(
+          `${BASE}/painting/guides/${id}/export/pdf${stampQuery(opts)}`,
+          `${slug}.pdf`,
+        ),
+      // Render every published guide in a series into one bundled PDF (#490/#511).
+      exportSeriesPdf: (seriesId: number, opts: SeriesExportOptions = {}) =>
+        downloadPdf(
+          `${BASE}/painting/series/${seriesId}/export/pdf${stampQuery(opts)}`,
+          `series-${seriesId}-bundle.pdf`,
+        ),
+    },
+    // Color-match studio (#493/#561): sample a reference image into a palette of
+    // owned-paint suggestions. Suggest-only — nothing is persisted server-side.
+    colorMatch: async (
+      file: File,
+      opts: { k?: number; candidatesPerRegion?: number } = {},
+    ): Promise<ColorMatchResult> => {
+      const form = new FormData();
+      form.append("file", file);
+      if (opts.k !== undefined) form.append("k", String(opts.k));
+      if (opts.candidatesPerRegion !== undefined)
+        form.append("candidates_per_region", String(opts.candidatesPerRegion));
+      const res = await fetch(`${BASE}/painting/colormatch`, { method: "POST", body: form });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+        throw new ApiError(res.status, detail);
+      }
+      return res.json() as Promise<ColorMatchResult>;
+    },
+    // Eyedropper (#561): match a single point. x/y are normalized [0,1] from the
+    // image's top-left. Returns a single-region result.
+    colorMatchPoint: async (
+      file: File, x: number, y: number,
+      opts: { candidatesPerRegion?: number } = {},
+    ): Promise<ColorMatchResult> => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("x", String(x));
+      form.append("y", String(y));
+      if (opts.candidatesPerRegion !== undefined)
+        form.append("candidates_per_region", String(opts.candidatesPerRegion));
+      const res = await fetch(`${BASE}/painting/colormatch/point`, { method: "POST", body: form });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
+        throw new ApiError(res.status, detail);
+      }
+      return res.json() as Promise<ColorMatchResult>;
     },
   },
   database: {

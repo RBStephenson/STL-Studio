@@ -12,6 +12,7 @@ export interface PickedPaint {
 interface Props {
   value: PickedPaint | null;
   onChange: (paint: PickedPaint | null) => void;
+  defaultSearch?: string;
 }
 
 /**
@@ -19,12 +20,21 @@ interface Props {
  * itself only references paints, so the chosen paint's name/code/hex is held in
  * the swatch row for display. Mix components ("A + B") are out of scope (#339).
  */
-export default function PaintPicker({ value, onChange }: Props) {
+export default function PaintPicker({ value, onChange, defaultSearch }: Props) {
   const [open, setOpen] = useState(false);
+  const [seeded, setSeeded] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Paint[]>([]);
   const [loading, setLoading] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+
+  // Seed search with defaultSearch on first open (unresolved name-only swatches).
+  useEffect(() => {
+    if (open && !seeded && defaultSearch) {
+      setQ(defaultSearch);
+      setSeeded(true);
+    }
+  }, [open, seeded, defaultSearch]);
 
   // Debounced search; only runs while the dropdown is open.
   useEffect(() => {

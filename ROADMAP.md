@@ -268,48 +268,84 @@ Released as **v0.14.0**.
 
 ---
 
-## v0.15 — In-app guide authoring 🗓 Planned
+## v0.15 — In-app guide authoring ✅ Complete
 
-Extends the structured guide editor (shipped in v0.8) into a complete
-from-scratch authoring path, so a guide can be built and published entirely in
-the app without hand-writing HTML.
+Released as **v0.15.0**. Extended the structured guide editor (shipped in v0.8)
+into a complete from-scratch authoring path, so a guide can be built and
+published entirely in the app without hand-writing HTML.
 
 | Issue | Item |
 |-------|------|
 | [#484](https://github.com/RBStephenson/STL-Inventory/issues/484) | **Epic — in-app authoring & validation** |
 | [#487](https://github.com/RBStephenson/STL-Inventory/issues/487) | Guide-start wizard |
-| [#488](https://github.com/RBStephenson/STL-Inventory/issues/488) | Structured editor — inventory-backed swatch picker, value%/reorder |
+| [#488](https://github.com/RBStephenson/STL-Inventory/issues/488) | Structured editor — inventory-backed swatch picker, value%/reorder + live preview |
+| [#503](https://github.com/RBStephenson/STL-Inventory/issues/503) | Drag-reorder tabs/phases/steps/swatches in the editor |
 | [#489](https://github.com/RBStephenson/STL-Inventory/issues/489) | Validation panel — wire the validator; block publish on errors |
 | [#490](https://github.com/RBStephenson/STL-Inventory/issues/490) | Series-bundle PDF + reward stamping |
+| [#511](https://github.com/RBStephenson/STL-Inventory/issues/511) | Guide export UI — series-bundle download + stamping controls |
 
 ---
 
-## v0.16 — AI drafts & color match 🗓 Planned
+## v0.15.1 — Guide theming & Paint Shelf independence ✅ Complete
+
+Make guides customizable to each user's style before the AI work lands, and
+decouple the Paint Shelf from the guides feature so it's always available.
+
+| Issue | Item |
+|-------|------|
+| [#513](https://github.com/RBStephenson/STL-Inventory/issues/513) | **Epic — guide theming & Paint Shelf independence** |
+| [#514](https://github.com/RBStephenson/STL-Inventory/issues/514) | App-level default guide theme + new-guide inheritance |
+| [#515](https://github.com/RBStephenson/STL-Inventory/issues/515) | Guide theme editor UI (colour pickers + live preview) + PDF theme rendering |
+| [#516](https://github.com/RBStephenson/STL-Inventory/issues/516) | Paint Shelf made independent of the guides feature flag (always visible) |
+
+---
+
+## v0.16 — AI drafts & color match ✅ Complete
 
 The painting module's headline workflow: an LLM produces a first-draft guide as
 structured data, you edit it, and a colour-match studio suggests owned paints
 from a reference image. Domain rules are captured in
 [`docs/painting/reference/figure-painting-skill.md`](docs/painting/reference/figure-painting-skill.md).
+This release also **renames the app to STL Studio** (the catalog keeps the name
+*Library*) to reflect its growth into a 3D-print + painting toolbox.
 
 | Issue | Item |
 |-------|------|
 | [#485](https://github.com/RBStephenson/STL-Inventory/issues/485) | **Epic — AI draft & color match** |
 | [#491](https://github.com/RBStephenson/STL-Inventory/issues/491) | Generation service — Claude → GuideDraft, async `/draft` (`generation.py`) |
-| [#492](https://github.com/RBStephenson/STL-Inventory/issues/492) | Draft → edit diff flow |
-| [#493](https://github.com/RBStephenson/STL-Inventory/issues/493) | Color-match studio — Lab / CIEDE2000 / k-means (`colormatch.py`) |
-| [#494](https://github.com/RBStephenson/STL-Inventory/issues/494) | Reference-image pipeline — fallback chain + provenance (`images.py`) |
-| [#498](https://github.com/RBStephenson/STL-Inventory/issues/498) | Port domain rules + reference tables into the prompt/validator |
+| [#492](https://github.com/RBStephenson/STL-Inventory/issues/492) | Draft → edit review flow |
+| [#493](https://github.com/RBStephenson/STL-Inventory/issues/493) / [#561](https://github.com/RBStephenson/STL-Inventory/issues/561) | Color-match studio — Lab / CIEDE2000 / k-means, eyedropper, background exclusion |
+| [#569](https://github.com/RBStephenson/STL-Inventory/issues/569) | Color match — hue-cohesive value ladder (shadow / mid / highlight) |
+| [#494](https://github.com/RBStephenson/STL-Inventory/issues/494) | Reference-image pipeline — STL-folder rung + provenance (`images.py`) |
+| [#535](https://github.com/RBStephenson/STL-Inventory/issues/535) / [#536](https://github.com/RBStephenson/STL-Inventory/issues/536) | Reference image — upload + Claude vision, in-browser downscale |
+| [#498](https://github.com/RBStephenson/STL-Inventory/issues/498) / [#506](https://github.com/RBStephenson/STL-Inventory/issues/506) | Validation — domain colour rules: skin-anchor band + highlight-direction |
+| [#517](https://github.com/RBStephenson/STL-Inventory/issues/517) | AI/Painting settings — capture + encrypt the API key (shown only when guides are enabled) |
+| [#504](https://github.com/RBStephenson/STL-Inventory/issues/504) | Guide editor — author/edit mix-component swatches (ratios) |
 
 All AI capabilities are bring-your-own-API-key; no keys ship in the repo or build.
 
+> Deferred to v0.17.0: the reference-image network rungs (assisted web search /
+> AI-gen) — [#563](https://github.com/RBStephenson/STL-Inventory/issues/563).
+
 ---
 
-## v1.0 — Painting full-corpus & wargaming 🗓 Planned
+## v0.17.0 — Painting full-corpus & wargaming 🗓 Planned
 
 | Issue | Item |
 |-------|------|
 | [#486](https://github.com/RBStephenson/STL-Inventory/issues/486) | **Painting M5 — full-corpus import & polish** — bulk-import the reference guide corpus as reviewed drafts, calibrate the validator, print/PDF + accessibility pass |
 | [#409](https://github.com/RBStephenson/STL-Inventory/issues/409) | **Structured wargaming guide type** — `guide_type` discriminator + quality tiers / batch workflow / basing |
+| [#563](https://github.com/RBStephenson/STL-Inventory/issues/563) | Reference-image network rungs — assisted web search / AI-gen + hero credit |
+
+---
+
+## v1.0 — Desktop shell (final polish) 🗓 Planned
+
+The 1.0 release is the desktop-experience polish pass.
+
+| Issue | Item |
+|-------|------|
+| [#528](https://github.com/RBStephenson/STL-Inventory/issues/528) | **Desktop shell: pywebview → Electron** — kill the console window; ship a proper packaged desktop app |
 
 macOS notarization ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17))
 sits in the backlog — deferred until there's appetite for the Apple Developer

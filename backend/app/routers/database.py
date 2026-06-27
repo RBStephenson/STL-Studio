@@ -132,7 +132,7 @@ async def restore_database(file: UploadFile = File(...)):
     tmp.write_bytes(await file.read())
 
     # Validate before we touch the live file: must be a sound SQLite DB that
-    # actually looks like an STL Library database.
+    # actually looks like an STL Studio database.
     try:
         conn = sqlite3.connect(str(tmp))
         try:
@@ -146,7 +146,7 @@ async def restore_database(file: UploadFile = File(...)):
         finally:
             conn.close()
         if "models" not in tables:
-            raise ValueError("this file is not an STL Library database")
+            raise ValueError("this file is not an STL Studio database")
     except Exception as e:
         _safe_unlink(tmp)
         raise HTTPException(400, f"Invalid backup file: {e}")

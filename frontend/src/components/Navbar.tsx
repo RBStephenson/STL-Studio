@@ -12,12 +12,22 @@ export default function Navbar() {
   const [reviewCount, setReviewCount] = useState<number | null>(null);
   const [queueCount, setQueueCount] = useState<number | null>(null);
 
+  // Refetch the badge counts on every route change and when the tab regains
+  // focus, so they don't go stale after a mutation elsewhere (e.g. an enrich
+  // that drops an item from the queue) — they're not fetched only once (#543).
   useEffect(() => {
-    api.models.stats().then(s => {
-      setReviewCount(s.needs_review);
-      setQueueCount(s.queued);
-    }).catch(() => {});
-  }, []);
+    let alive = true;
+    const refresh = () => {
+      api.models.stats().then(s => {
+        if (!alive) return;
+        setReviewCount(s.needs_review);
+        setQueueCount(s.queued);
+      }).catch(() => {});
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => { alive = false; window.removeEventListener("focus", refresh); };
+  }, [pathname]);
 
   const links = [
     { to: "/",            label: "Library",     icon: LayoutGrid,    badge: null },
@@ -26,10 +36,12 @@ export default function Navbar() {
     { to: "/queue",       label: "Queue",       icon: Printer,       badge: queueCount },
     { to: "/triage",      label: "Triage",      icon: AlertTriangle, badge: reviewCount },
     { to: "/import",      label: "Import",      icon: Inbox,         badge: null },
+    // Paint Shelf is standalone paint inventory — always available (#516).
+    // Only Guides (and future AI) gate on the painting-guides flag.
     ...(appSettings.painting_guides_enabled ? [
-      { to: "/painting/guides", label: "Guides",      icon: Paintbrush, badge: null },
-      { to: "/painting/shelf",  label: "Paint Shelf", icon: Palette,    badge: null },
+      { to: "/painting/guides", label: "Guides", icon: Paintbrush, badge: null },
     ] : []),
+    { to: "/painting/shelf", label: "Paint Shelf", icon: Palette, badge: null },
     { to: "/tags",       label: "Tags",        icon: Tag,           badge: null },
     { to: "/settings",   label: "Settings",    icon: Settings,      badge: null },
     { to: "/help",        label: "Help",        icon: HelpCircle,    badge: null },
@@ -39,7 +51,7 @@ export default function Navbar() {
     <nav className="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-8 print:hidden">
       <Link to="/" className="flex items-center gap-2 text-indigo-400 font-bold text-lg shrink-0">
         <Box size={22} />
-        STL Library
+        STL Studio
       </Link>
 
       <div className="flex items-center gap-1 ml-4">

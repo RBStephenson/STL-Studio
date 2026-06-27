@@ -1,5 +1,9 @@
 """Tests for the app_settings key/value store (#180) and preferences (#32)."""
 
+_THEME_KEYS = [
+    "bg", "surface", "surface2", "surface3", "border",
+    "text", "text_muted", "text_dim", "accent", "hero_gradient",
+]
 DEFAULTS = {
     "painting_guides_enabled": False,
     "show_nsfw": False,
@@ -10,7 +14,35 @@ DEFAULTS = {
     "scan_ignore_patterns": [],
     "scan_tag_rules": [],
     "scan_parts_names": [],
+    "guide_theme_defaults": {k: None for k in _THEME_KEYS},
+    "ai_model": "",
+    "ai_effort": "low",
 }
+
+
+def test_ai_effort_round_trips_and_rejects_bad_value(client):
+    assert client.patch("/settings", json={"ai_effort": "high"}).status_code == 200
+    assert client.get("/settings").json()["ai_effort"] == "high"
+    assert client.patch("/settings", json={"ai_effort": "turbo"}).status_code == 422
+
+
+def test_guide_theme_defaults_round_trip(client):
+    # Partial theme: only the fields the user set come back populated (#514).
+    r = client.patch(
+        "/settings",
+        json={"guide_theme_defaults": {"accent": "#a8cc66", "bg": "#101010"}},
+    )
+    assert r.status_code == 200
+    stored = client.get("/settings").json()["guide_theme_defaults"]
+    assert stored["accent"] == "#a8cc66"
+    assert stored["bg"] == "#101010"
+    assert stored["surface"] is None
+
+
+def test_guide_theme_defaults_rejects_unknown_field(client):
+    # GuideTheme forbids extras, so a typo'd colour key is a 422, not silent loss.
+    r = client.patch("/settings", json={"guide_theme_defaults": {"accentt": "#fff"}})
+    assert r.status_code == 422
 
 
 def test_get_settings_returns_defaults(client):

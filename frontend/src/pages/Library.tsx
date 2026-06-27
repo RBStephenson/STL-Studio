@@ -676,7 +676,7 @@ export default function Library() {
               <FolderPlus size={22} />
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-semibold text-gray-100">Welcome to STL Library 👋</h2>
+              <h2 className="text-lg font-semibold text-gray-100">Welcome to STL Studio 👋</h2>
               <p className="text-sm text-gray-400 mt-1">
                 No folders are set up yet. Tell the app where your STL files live, then run a
                 scan to build your library.

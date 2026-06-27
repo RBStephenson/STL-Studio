@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Palette, Plus, Search, Pencil, Trash2, X, Upload, Download } from "lucide-react";
+import { useSearchParams, Link } from "react-router-dom";
+import { Palette, Plus, Search, Pencil, Trash2, X, Upload, Download, Pipette } from "lucide-react";
 import {
   api, ImportDiff, Paint, PaintBrand, PaintCreate, PaintFinish, PAINT_FINISHES,
 } from "../api/client";
@@ -303,6 +303,12 @@ export default function PaintShelfPage() {
           <HelpLink section="paint-shelf" label="How the Paint Shelf works" />
         </h1>
         <div className="flex items-center gap-2">
+          <Link
+            to="/painting/color-match"
+            className="inline-flex items-center gap-1.5 text-sm text-indigo-300 border border-indigo-800/70 rounded px-3 py-1.5 hover:bg-indigo-950/40"
+          >
+            <Pipette size={15} /> Color match
+          </Link>
           <input
             ref={fileInputRef}
             type="file"
@@ -337,8 +343,20 @@ export default function PaintShelfPage() {
           </button>
         </div>
       </div>
-      <p className="text-sm text-gray-500 mb-6">
+      <p className="text-sm text-gray-500 mb-1">
         {total.toLocaleString()} paints — guides will only ever reference paints from your shelf.
+      </p>
+      <p className="text-xs text-gray-600 mb-6">
+        Import / export uses the CSV format from{" "}
+        <a
+          href="https://www.courageousoctopus.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-indigo-400 hover:text-indigo-300 underline"
+        >
+          PaintRack
+        </a>{" "}
+        by Courageous Octopus — a great paint-inventory app. STL Studio isn't affiliated with it.
       </p>
 
       <div ref={formRef} className="scroll-mt-4">

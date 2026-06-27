@@ -380,9 +380,10 @@ can:
 
 ## Paint Shelf (Painting Guides)
 
-An opt-in module for tracking your paint inventory and reading step-by-step
-painting guides. Enable it under **Settings → Painting Guides**; the nav then
-gains **Guides** and **Paint Shelf** entries.
+The **Paint Shelf** is always available in the nav — it's standalone paint
+inventory and doesn't require the guides feature. Enabling **Settings →
+Painting Guides** additionally adds the **Guides** entry (authoring and reading
+step-by-step painting guides).
 
 The **Paint Shelf** is a table of every paint you own (or want): search by name
 or code, filter by brand, line, finish, or owned state, and see a **color
@@ -394,6 +395,11 @@ codes are then validated on entry, so typos like `MPA-12` get caught with a
 clear message instead of polluting the shelf.
 
 ### PaintRack CSV import & export
+
+The Paint Shelf's import/export uses the CSV format from
+[**PaintRack**](https://www.courageousoctopus.com/) by Courageous Octopus — a
+great paint-inventory app. STL Studio isn't affiliated with it; we just
+interoperate with its export so you can reuse a shelf you've already built.
 
 If you track paints in **PaintRack**, import its CSV export directly:
 
@@ -422,6 +428,28 @@ contain commas, those cells must be **quoted** in the CSV. Files without the
 column (like real PaintRack exports) import exactly as before, and an **empty
 color cell never clears** a swatch you've already set — only a different,
 non-empty color shows up as a change in the preview.
+
+### Color-match studio
+
+The **Color match** button on the Paint Shelf opens a studio that suggests
+paints from your shelf to match a reference photo (a render, box art, or a
+painted mini).
+
+- **Value-first.** For each sampled color you get a **Value ladder** — a
+  **shadow → mid → highlight** ramp in the same hue family, anchored on the
+  sampled mid-tone (Dark Camo Green → Green → Bright Yellow-Green) so the steps
+  read as a cohesive recipe — then a **Hue match** (opaque paints ranked by
+  ΔE2000), and a labelled **Glaze / wash** list for transparents. Every
+  suggestion carries a confidence band (*very close*, *confirm*, *family*,
+  *loose*) — suggestions to **confirm by eye**, never auto-applied.
+- **Eyedropper.** Click anywhere on the preview to match that exact spot —
+  sample the skin, then the hair, then the leather, each with its own
+  suggestions. The **Palette overview** below is an automatic read of the whole
+  image, with the background excluded so the subject leads.
+- **Value mode** (on by default) greys the swatches so you can read values; turn
+  it off to compare hues in color.
+- Large photos are downscaled in the browser before upload, so even a phone shot
+  uploads instantly.
 
 ### Painting guides
 
@@ -455,6 +483,19 @@ as the standalone HTML version.
     is dropped). Once every paint is resolved or skipped, the guide imports.
   - Add missing paints to your Paint Shelf before importing if you'd rather not
     use the resolution step, or just re-import after the shelf is updated.
+- **Validation panel + publish gate.** While editing, a validation panel lists
+  problems grouped by severity, each linking to the exact step. **Blocking**
+  issues (a swatch paint you don't own, or a code that fails its line's pattern)
+  must be fixed before you can publish — trying to publish with a blocking issue
+  is rejected. **Warnings** (an empty tab, a step with no swatches, value numbers
+  that barely differ) are advisory and don't block.
+- **Theming.** Each guide carries its own colour theme, editable in the guide
+  editor's **Theme** section: colour pickers for background, surfaces, borders,
+  text and accent, plus a hero-gradient field, with a live mini-preview. Leave a
+  field blank to inherit the **default guide theme** you set under
+  **Settings → Painting Guides → Default guide theme**, which every new guide
+  starts from. Themes apply in the in-app reader and the exported PDF; a guide's
+  raw `head_style` (from imported guides) still wins as an escape hatch.
 - **Publish / Unpublish** and **Delete** (buttons, top-right of a guide) control
   a guide's lifecycle: drafts stay flagged in the list until you publish, and
   delete removes the guide and all its tabs, steps and swatches after a
@@ -463,11 +504,14 @@ as the standalone HTML version.
   one continuous, print-styled document — the whole guide in one pass. The print
   stylesheet preserves dark backgrounds and paint chip colors (`print-color-adjust: exact`)
   so swatches render correctly on paper and in PDF.
-- **Export PDF** (button, top-right of a guide) renders that same print-styled
-  document to a downloadable PDF — handy for sharing a guide or printing it
-  later. In Docker the renderer is bundled and ready to use; the standalone
-  build needs a one-time `playwright install chromium` (see the install notes)
-  the first time you export.
+- **Export PDF** (the export menu, top-right of a guide) renders that same
+  print-styled document to a downloadable PDF. The menu carries per-export
+  **reward-stamping** options: a **Patreon-exclusive footer** (on by default),
+  an optional **tier label**, and a **watermark** (off by default). If the guide
+  belongs to a **series**, **Export series bundle** renders every published guide
+  in that series into one PDF, with an optional **cover page**. In Docker the
+  renderer is bundled and ready to use; the standalone build needs a one-time
+  `playwright install chromium` (see the install notes) the first time you export.
 - **Model links** tie guides to your library both ways: a model that has a guide
   shows a **Guide** badge on its Library card and a **Painting guide** button on
   its detail page, and the guide links back to its model.
@@ -542,7 +586,7 @@ never modified.**
   way to recover your tags, favorites, and queue if something goes wrong.
 - **Restore from Backup…** — pick a previously downloaded `.db` file to replace
   your current library with it. The file is validated first (it must be a real
-  STL Library backup), and an older backup's schema is brought up to date
+  STL Studio backup), and an older backup's schema is brought up to date
   automatically.
 - **Delete All Data** — wipes the entire index back to empty. You'd then run a
   full scan to rebuild it.

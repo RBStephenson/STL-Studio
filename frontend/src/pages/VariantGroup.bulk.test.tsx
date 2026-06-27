@@ -5,7 +5,7 @@ import VariantGroup from "./VariantGroup";
 
 const batchSetGroup = vi.fn();
 const batchThumbnailFromUrl = vi.fn();
-const batchSetSourceUrl = vi.fn();
+const applyGroup = vi.fn();
 const setGroupRep = vi.fn();
 const reorderGroup = vi.fn();
 const variantsMock = vi.fn();
@@ -19,9 +19,11 @@ vi.mock("../api/client", () => ({
       setGroupOverride: vi.fn().mockResolvedValue({}),
       batchSetGroup: (...a: unknown[]) => batchSetGroup(...a),
       batchThumbnailFromUrl: (...a: unknown[]) => batchThumbnailFromUrl(...a),
-      batchSetSourceUrl: (...a: unknown[]) => batchSetSourceUrl(...a),
       setGroupRep: (...a: unknown[]) => setGroupRep(...a),
       reorderGroup: (...a: unknown[]) => reorderGroup(...a),
+    },
+    scrape: {
+      applyGroup: (...a: unknown[]) => applyGroup(...a),
     },
   },
 }));
@@ -54,7 +56,7 @@ const flush = () => act(async () => { await Promise.resolve(); });
 beforeEach(() => {
   batchSetGroup.mockReset();
   batchThumbnailFromUrl.mockReset();
-  batchSetSourceUrl.mockReset();
+  applyGroup.mockReset();
   setGroupRep.mockReset();
   reorderGroup.mockReset();
   toast.mockReset();
@@ -139,8 +141,11 @@ describe("VariantGroup bulk management (#183)", () => {
     expect(toast).toHaveBeenCalledWith(expect.stringContaining("may not load"), "error");
   });
 
-  it("sets the store page on the selected members (#500) and refetches", async () => {
-    batchSetSourceUrl.mockResolvedValue({ ok: true, source_site: "myminifactory", updated: [10], missing: [] });
+  it("sets the store page on the selected members + fetches/applies (#545) and refetches", async () => {
+    applyGroup.mockResolvedValue({
+      applied: 1, scraped: true, source_site: "myminifactory", missing: [],
+      message: "Fetched and applied to 1 variant(s).",
+    });
     renderPage();
     await flush();
 
@@ -151,26 +156,29 @@ describe("VariantGroup bulk management (#183)", () => {
     });
     await act(async () => { fireEvent.click(screen.getByText("Apply")); });
 
-    expect(batchSetSourceUrl).toHaveBeenCalledWith([10], "https://www.myminifactory.com/object/x-1");
-    expect(toast).toHaveBeenCalledWith(expect.stringContaining("Store page set on 1 model"), "success");
+    expect(applyGroup).toHaveBeenCalledWith([10], "https://www.myminifactory.com/object/x-1");
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("Fetched and applied"), "success");
     // Refetched so the grid reflects the change.
     expect(variantsMock).toHaveBeenCalledTimes(2);
   });
 
-  it("reports skipped models when bulk-setting the store page (#500)", async () => {
-    batchSetSourceUrl.mockResolvedValue({ ok: true, source_site: "myminifactory", updated: [10], missing: [11] });
+  it("reports skipped models + info toast when the site can't be scraped (#545)", async () => {
+    applyGroup.mockResolvedValue({
+      applied: 2, scraped: false, source_site: "patreon.com", missing: [11],
+      message: "Store page set on 2 variant(s); metadata couldn't be fetched for this site.",
+    });
     renderPage();
     await flush();
 
     fireEvent.click(screen.getByText("Select all"));
     fireEvent.click(screen.getByLabelText("Set store page for selected"));
     fireEvent.change(screen.getByLabelText("Store page URL"), {
-      target: { value: "https://www.myminifactory.com/object/x-1" },
+      target: { value: "https://www.patreon.com/x" },
     });
     await act(async () => { fireEvent.click(screen.getByText("Apply")); });
 
-    expect(batchSetSourceUrl).toHaveBeenCalledWith([10, 11], "https://www.myminifactory.com/object/x-1");
-    expect(toast).toHaveBeenCalledWith(expect.stringContaining("1 skipped"), "success");
+    expect(applyGroup).toHaveBeenCalledWith([10, 11], "https://www.patreon.com/x");
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("1 skipped"), "info");
   });
 
   it("sets a member as the group display thumbnail (#193) and refetches", async () => {

@@ -16,3 +16,5 @@ AGENTS.md
 # Reorganize/import undo logs (written next to the DB; test artifacts)
 reorg_undo_*.log
 backend/reorg_undo_*.log
+bulk_import_report.csv
+corpus_validation_report.csv

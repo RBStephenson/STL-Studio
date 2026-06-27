@@ -62,11 +62,24 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 # US/EU spelling variants normalized so 'Warm Gray' matches shelf 'Warm Grey'.
 _SPELL = ((r"\bgray\b", "grey"), (r"\bcolour", "color"))
 
+# Common abbreviations used in guide swatch names that differ from shelf names.
+# Applied after lowercasing so keys are lowercase.
+_ABBREV = (
+    (r"\btw\b", "titanium white"),   # 'Bold TW 001' -> 'Bold Titanium White 001'
+    (r"\bfw\b", ""),                  # 'FW Crimson Ink' -> 'Crimson Ink' (brand prefix)
+)
+
+# Suffixes appended in guide names but absent from shelf paint names.
+_SUFFIX_RE = re.compile(r"\s+ink\s*$")
+
 
 def _canon(s: Optional[str]) -> str:
     s = (s or "").lower()
     for pat, repl in _SPELL:
         s = re.sub(pat, repl, s)
+    for pat, repl in _ABBREV:
+        s = re.sub(pat, repl, s)
+    s = _SUFFIX_RE.sub("", s).strip()
     return s
 
 
@@ -87,6 +100,14 @@ def _num_token(s: Optional[str]) -> Optional[str]:
     if not m:
         return None
     return m.group(1).lstrip("0") or "0"
+
+
+def _strip_decimal_zeros(s: str) -> str:
+    """'77.720' -> '77.72', '77.700' -> '77.7', '17' -> '17'.
+    Normalises trailing zeros PaintRack drops on CSV export."""
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
 
 
 def make_db_resolver(db: Session) -> PaintResolver:
@@ -159,12 +180,34 @@ def make_db_resolver(db: Session) -> PaintResolver:
         codes are excluded — a bare number collides with the per-line numbering
         guides use ('Burnt Umber 018'); a distinctive code (dots/letters) is a
         strong, near-unique key, so this also bridges brand drift like Vallejo
-        Metal Color. Requires a unique hit."""
-        hits = {
-            pid
-            for pid, _n, code, _b, _l, _nt, _cn in rows_
-            if code and not code.isdigit() and code.lower() in ws_tokens
-        }
+        Metal Color. Requires a unique hit.
+
+        Trailing-zero normalisation: '77.720' in the swatch matches shelf code
+        '77.72' (PaintRack strips trailing zeros on import)."""
+        norm_tokens = {_strip_decimal_zeros(t) for t in ws_tokens}
+        # Leading-zero normalised: swatch '065' -> '65' matches shelf code '65'
+        # (PaintRack strips leading zeros on CSV import).
+        stripped_tokens = {t.lstrip("0") or "0" for t in norm_tokens}
+        hits = set()
+        for pid, _n, code, _b, _l, _nt, _cn in rows_:
+            if not code:
+                continue
+            cl = code.lower()
+            cn = _strip_decimal_zeros(cl)
+            cs = cn.lstrip("0") or "0"
+            # Pure-digit codes (e.g. '065') must not match via any token path —
+            # a bare number collides with per-line numbering guides use.
+            # _exact and _smart still catch them when brand-scoped.
+            if code.isdigit():
+                continue
+            if cl in ws_tokens or cn in norm_tokens or cs in stripped_tokens:
+                hits.add(pid)
+            elif "-" in cl:
+                # 'AMP-017' -> parts ['amp','017']; match if all parts are tokens
+                parts = cl.split("-")
+                if all(_strip_decimal_zeros(p) in norm_tokens or p in ws_tokens
+                       for p in parts):
+                    hits.add(pid)
         return next(iter(hits)) if len(hits) == 1 else None
 
     def resolve(swatch_name: str, brand: Optional[str]) -> Optional[int]:
@@ -260,12 +303,16 @@ def _classes(node: Tag) -> list[str]:
 _VALUE_RE = re.compile(r"~\s*(\d+)\s*%\s*value(?:\s*[—-]\s*(.*))?", re.I)
 
 
+_BARE_RATIO_RE = re.compile(r"\s+\d+(?:\.\d+)?:\d+(?:\.\d+)?$")
+
+
 def _mix_parts(name: str) -> list[str]:
     """Split a mix swatch name ('Burnt Sienna + Titanium White', '+ Khaki 061
-    (2:1)') into component paint strings. Ratio parens are dropped; a single
-    paint returns one part."""
-    cleaned = re.sub(r"\([^)]*\)", "", name)  # drop ratio like (2:1)
-    return [p.strip() for p in cleaned.split("+") if p.strip()]
+    (2:1)') into component paint strings. Ratio parens and bare trailing ratios
+    ('Warm Flesh 073 3:1') are stripped; a single paint returns one part."""
+    cleaned = re.sub(r"\([^)]*\)", "", name)  # drop paren content like (2:1) or (S18 sub)
+    parts = [p.strip() for p in cleaned.split("+") if p.strip()]
+    return [_BARE_RATIO_RE.sub("", p).strip() for p in parts]
 
 
 _RATIO_RE = re.compile(r"\(\s*([\d.]+(?:\s*:\s*[\d.]+)+)\s*\)\s*$")

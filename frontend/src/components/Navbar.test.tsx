@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Navbar from "./Navbar";
 import { AppSettingsProvider } from "../context/AppSettingsContext";
@@ -36,16 +36,17 @@ function renderNavbar() {
 describe("Navbar – painting nav gating (#180/#181)", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it("hides Guides and Paint Shelf when painting guides are disabled", async () => {
+  it("hides Guides but keeps Paint Shelf when painting guides are disabled (#516)", async () => {
     const { api } = await import("../api/client");
     vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: false }));
 
     renderNavbar();
 
-    // Wait for the settings fetch to settle, then assert absence.
-    expect(await screen.findByText("Library")).toBeInTheDocument();
+    // Wait for the settings fetch to settle, then assert. Paint Shelf is
+    // standalone inventory — always shown; only Guides gates on the flag.
+    expect(await screen.findByText("Paint Shelf")).toBeInTheDocument();
     expect(screen.queryByText("Guides")).toBeNull();
-    expect(screen.queryByText("Paint Shelf")).toBeNull();
+    expect(screen.getByText("Paint Shelf").closest("a")).toHaveAttribute("href", "/painting/shelf");
   });
 
   it("shows Guides and Paint Shelf when painting guides are enabled", async () => {
@@ -58,6 +59,23 @@ describe("Navbar – painting nav gating (#180/#181)", () => {
     expect(screen.getByText("Paint Shelf")).toBeInTheDocument();
     expect(screen.getByText("Guides").closest("a")).toHaveAttribute("href", "/painting/guides");
     expect(screen.getByText("Paint Shelf").closest("a")).toHaveAttribute("href", "/painting/shelf");
+  });
+});
+
+describe("Navbar – badge counts stay fresh (#543)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("shows the queue count and refetches it on window focus", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 0, queued: 7 } as any);
+
+    renderNavbar();
+    expect(await screen.findByText("7")).toBeInTheDocument();
+
+    // An item leaves the queue elsewhere; on focus the badge refreshes.
+    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 0, queued: 6 } as any);
+    fireEvent(window, new Event("focus"));
+    expect(await screen.findByText("6")).toBeInTheDocument();
   });
 });
 
