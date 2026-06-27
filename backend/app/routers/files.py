@@ -192,11 +192,10 @@ def serve_document(path: str):
         raise HTTPException(status_code=400, detail="Use /files/image for image files")
     if ext in ALLOWED_STL_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Use /files/stl for STL files")
-    if not _is_safe_path(p):
+    # Canonicalize first, then validate the exact path that will be served.
+    resolved = p.resolve(strict=False)
+    if not _is_safe_path(resolved):
         raise HTTPException(status_code=403, detail="Path not allowed")
-    # Resolve after the allowlist check so the path handed to FileResponse is
-    # normalised and free of traversal sequences (satisfies CodeQL path-injection).
-    resolved = p.resolve()
     if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     # Strip characters that would break the Content-Disposition header value.

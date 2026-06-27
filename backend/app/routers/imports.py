@@ -601,8 +601,15 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
     try:
         for dirpath, _, filenames in os.walk(src, topdown=False):
             if not filenames:
+                dirpath_resolved = os.path.realpath(dirpath)
+                if os.path.commonpath([dirpath_resolved, src]) != src:
+                    logger.warning(
+                        "Skipping cleanup outside source root: %r (source: %r)",
+                        dirpath_resolved, src,
+                    )
+                    continue
                 try:
-                    os.rmdir(dirpath)
+                    os.rmdir(dirpath_resolved)
                 except OSError:
                     pass
     except Exception:
