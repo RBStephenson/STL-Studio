@@ -607,11 +607,12 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
             raise HTTPException(status_code=400, detail="source must be an existing directory")
         for dirpath, _, filenames in os.walk(safe_src, topdown=False):
             if not filenames:
-                dirpath_resolved = os.path.realpath(dirpath)
-                if os.path.commonpath([dirpath_resolved, safe_src]) != safe_src:
+                try:
+                    dirpath_resolved = _validated_path_within_root(safe_src, dirpath)
+                except HTTPException:
                     logger.warning(
                         "Skipping cleanup outside source root: %r (source: %r)",
-                        dirpath_resolved, safe_src,
+                        dirpath, safe_src,
                     )
                     continue
                 try:
