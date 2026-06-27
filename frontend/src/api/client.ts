@@ -273,6 +273,12 @@ export interface AiSettings {
   effort: AiEffort;
 }
 
+// Cults3D credential status (#578) — credentials are write-only.
+export interface CultsSettings {
+  credentials_set: boolean;
+  hint: string | null;
+}
+
 export interface ScanTagRule {
   keyword: string;
   tag: string;
@@ -1241,6 +1247,17 @@ export const api = {
         }),
       clearKey: () =>
         request<AiSettings>("/settings/ai/key", { method: "DELETE" }),
+    },
+    cults: {
+      get: () => request<CultsSettings>("/settings/cults"),
+      setCredentials: (username: string, api_key: string) =>
+        request<CultsSettings>("/settings/cults/credentials", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, api_key }),
+        }),
+      clearCredentials: () =>
+        request<CultsSettings>("/settings/cults/credentials", { method: "DELETE" }),
     },
   },
   painting: {
