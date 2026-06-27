@@ -42,8 +42,9 @@ def fetch_all_guides(base: str, prefix: str) -> list[dict]:
     return guides
 
 
-def fetch_validation(base: str, prefix: str, guide_id: int) -> list[dict]:
-    data = get_json(f"{base}{prefix}/painting/guides/{guide_id}/validation")
+def fetch_validation(base: str, prefix: str, guide_id: int, strict: bool = False) -> list[dict]:
+    qs = "?strict=true" if strict else "?strict=false"
+    data = get_json(f"{base}{prefix}/painting/guides/{guide_id}/validation{qs}")
     return data.get("flags", [])
 
 
@@ -52,6 +53,9 @@ def main() -> int:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--api-prefix", default=DEFAULT_API_PREFIX)
     parser.add_argument("--report-csv", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument("--strict", action="store_true", default=False,
+                        help="Include authoring-quality checks (value_intent_missing, "
+                             "value_compression). Default: off for import corpus runs.")
     args = parser.parse_args()
 
     print(f"Fetching guides from {args.base_url}{args.api_prefix}/painting/guides …")
@@ -66,7 +70,7 @@ def main() -> int:
         gid = g["id"]
         slug = g.get("slug", str(gid))
         try:
-            flags = fetch_validation(args.base_url, args.api_prefix, gid)
+            flags = fetch_validation(args.base_url, args.api_prefix, gid, strict=args.strict)
         except Exception as e:
             print(f"  ERR  {slug}: {e}")
             continue

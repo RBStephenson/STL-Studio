@@ -192,6 +192,39 @@ class TestDomainRules:
                             tabs=self._step_swatches(owned_paint, swatches), scale="28mm")
         assert "value_compression" in _codes(_validate(client, tight["id"]))
 
+    def test_strict_false_suppresses_value_intent_missing(self, client, owned_paint):
+        tabs = self._step_swatches(
+            owned_paint,
+            [{"paint_id": owned_paint["id"], "value_pct": 40, "role_label": "mid"}],
+            value_intent="",
+        )
+        g = _make_guide(client, owned_paint["id"], tabs=tabs, slug="import-test-1")
+        strict = client.get(f"/painting/guides/{g['id']}/validation?strict=true").json()
+        lax = client.get(f"/painting/guides/{g['id']}/validation?strict=false").json()
+        assert "value_intent_missing" in _codes(strict)
+        assert "value_intent_missing" not in _codes(lax)
+
+    def test_strict_false_suppresses_value_compression(self, client, owned_paint):
+        swatches = [
+            {"paint_id": owned_paint["id"], "value_pct": 40, "role_label": "mid"},
+            {"paint_id": owned_paint["id"], "value_pct": 45, "role_label": "hi"},
+        ]
+        g = _make_guide(client, owned_paint["id"], slug="import-test-2",
+                        tabs=self._step_swatches(owned_paint, swatches))
+        strict = client.get(f"/painting/guides/{g['id']}/validation?strict=true").json()
+        lax = client.get(f"/painting/guides/{g['id']}/validation?strict=false").json()
+        assert "value_compression" in _codes(strict)
+        assert "value_compression" not in _codes(lax)
+
+    def test_strict_false_still_reports_block_flags(self, client, owned_paint, db):
+        g = _make_guide(client, owned_paint["id"], slug="import-test-3")
+        # Corrupt paint ownership after creation
+        db.query(Paint).filter(Paint.id == owned_paint["id"]).update({"owned": False})
+        db.commit()
+        res = client.get(f"/painting/guides/{g['id']}/validation?strict=false").json()
+        assert "paint_not_owned" in _codes(res)
+        assert res["ok"] is False
+
 
 class TestSkinAnchorBand:
     """Skin-anchor band check (skill Step 2, folded from #506)."""

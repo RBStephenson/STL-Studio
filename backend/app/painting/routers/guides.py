@@ -215,11 +215,19 @@ def get_guide(guide_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/guides/{guide_id}/validation", response_model=GuideValidationResult)
-def get_guide_validation(guide_id: int, db: Session = Depends(get_db)):
+def get_guide_validation(
+    guide_id: int,
+    strict: bool = True,
+    db: Session = Depends(get_db),
+):
     """Validator findings for the editor panel (#489, spec §8.4). `ok` is False
-    when any block-severity flag remains — the same gate publish enforces."""
+    when any block-severity flag remains — the same gate publish enforces.
+
+    Pass `?strict=false` to suppress authoring-quality checks
+    (`value_intent_missing`, `value_compression`) that are noise for imported
+    guides lacking those metadata fields."""
     guide = _get_or_404(db, Guide, guide_id, "Guide")
-    flags = validate_guide(db, guide)
+    flags = validate_guide(db, guide, strict=strict)
     return GuideValidationResult(ok=not any(f.severity == "block" for f in flags), flags=flags)
 
 
