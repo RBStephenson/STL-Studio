@@ -43,10 +43,10 @@ class StorefrontProduct:
     tags: list[str] = field(default_factory=list)
 
 
-async def scrape_storefront(url: str) -> list[StorefrontProduct]:
+async def scrape_storefront(url: str, mmf_api_key: Optional[str] = None) -> list[StorefrontProduct]:
     site = detect_site(url)
     if site == "myminifactory":
-        return await _scrape_mmf(url)
+        return await _scrape_mmf(url, mmf_api_key)
     if site == "gumroad":
         return await _scrape_gumroad(url)
     if site == "cults3d":
@@ -59,18 +59,19 @@ async def scrape_storefront(url: str) -> list[StorefrontProduct]:
 # ---------------------------------------------------------------------------
 # MyMiniFactory
 # ---------------------------------------------------------------------------
-_MMF_ID_RE = re.compile(r"-(\d+)$")
-_MMF_SKU_RE = re.compile(r"3DO(\d+)")
-
-async def _scrape_mmf(url: str) -> list[StorefrontProduct]:
+async def _scrape_mmf(url: str, api_key: Optional[str] = None) -> list[StorefrontProduct]:
     """
-    Scrape a MMF user store page.
+    List a MMF user store's products.
 
-    MMF renders product listings client-side, but embeds a JSON blob in the page
-    that contains all object IDs grouped by store category.  We collect the unique
-    IDs, then fetch each object page concurrently and pull the JSON-LD <script>
-    (schema.org Product) for name / canonical URL / thumbnail — no auth required.
+    MMF renders listings client-side but embeds a JSON blob with all object IDs
+    grouped by store category. We collect the unique IDs, then resolve each via
+    the MMF adapter (``mmf.fetch``) — which uses the MMF REST API when a key is
+    set and falls back to scraping the object page otherwise. This replaces the
+    old per-object HTML JSON-LD regex with structured, more robust data.
     """
+    # Local import avoids a package-init import cycle (mmf imports storefront).
+    from app.services.scrapers import mmf
+
     async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True) as client:
         try:
             r = await client.get(url)
@@ -98,51 +99,25 @@ async def _scrape_mmf(url: str) -> list[StorefrontProduct]:
 
     semaphore = asyncio.Semaphore(10)
 
-    async def fetch_object(client: httpx.AsyncClient, oid: int) -> StorefrontProduct | None:
+    async def fetch_object(oid: int) -> StorefrontProduct | None:
         obj_url = f"https://www.myminifactory.com/object/3d-print-{oid}"
         async with semaphore:
-            try:
-                r = await client.get(obj_url)
-                r.raise_for_status()
-            except Exception:
-                return None
+            scraped = await mmf.fetch(obj_url, api_key=api_key)
+        if not scraped or not scraped.title:
+            return None
+        return StorefrontProduct(
+            title=scraped.title,
+            source_url=scraped.source_url or obj_url,
+            source_site="myminifactory",
+            external_id=scraped.external_id or str(oid),
+            thumbnail_url=scraped.thumbnail_url,
+            description=scraped.description,
+            tags=scraped.tags,
+        )
 
-        for script_m in re.finditer(
-            r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-            r.text, re.DOTALL | re.I
-        ):
-            try:
-                d = json.loads(script_m.group(1))
-            except Exception:
-                continue
-            if d.get("@type") != "Product":
-                continue
-
-            name = d.get("name", "").strip()
-            canonical = d.get("url") or obj_url
-            images = d.get("image") or []
-            thumb = images[0] if isinstance(images, list) and images else (images or None)
-            sku = d.get("sku", "")
-            sku_m = _MMF_SKU_RE.match(sku)
-            ext_id = sku_m.group(1) if sku_m else str(oid)
-
-            if not name:
-                return None
-            return StorefrontProduct(
-                title=name,
-                source_url=canonical,
-                source_site="myminifactory",
-                external_id=ext_id,
-                thumbnail_url=thumb,
-            )
-        return None
-
-    async with httpx.AsyncClient(timeout=15, headers=_HEADERS, follow_redirects=True) as client:
-        tasks = [fetch_object(client, oid) for oid in object_ids]
-        results = await asyncio.gather(*tasks)
-
+    results = await asyncio.gather(*(fetch_object(oid) for oid in object_ids))
     products = [p for p in results if p is not None]
-    logger.info(f"MMF: scraped {len(products)} products successfully")
+    logger.info(f"MMF: listed {len(products)} products successfully")
     return products
 
 

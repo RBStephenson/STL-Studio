@@ -65,9 +65,9 @@ class BulkApplyRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/storefront/preview", response_model=list[StorefrontProduct_Out])
-async def preview_storefront(url: str = Query(...)):
+async def preview_storefront(url: str = Query(...), db: Session = Depends(get_db)):
     """Scrape a creator storefront and return the product list."""
-    products = await scrape_storefront(url)
+    products = await scrape_storefront(url, mmf_api_key=secrets.resolve_mmf_api_key(db))
     if not products:
         raise HTTPException(
             status_code=422,
@@ -87,7 +87,7 @@ async def match_storefront(
     Scrape a storefront and fuzzy-match against local models for a creator.
     Returns ranked match candidates for user review.
     """
-    products = await scrape_storefront(url)
+    products = await scrape_storefront(url, mmf_api_key=secrets.resolve_mmf_api_key(db))
     if not products:
         raise HTTPException(status_code=422, detail="No products found at that URL.")
 
