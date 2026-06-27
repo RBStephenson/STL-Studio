@@ -251,7 +251,7 @@ def list_models(
     exclude_tag: str | None = None,
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
-    is_inbox: bool | None = None,  # None = show all; False = hide inbox; True = inbox only
+    is_inbox: bool = False,  # False = hide inbox (default); True = inbox only
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,

@@ -501,17 +501,9 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
     is_inbox cleared on move (#324). After the STL move, all remaining files
     (images, PDFs, etc.) are moved to the library folder and the old pack folder
     is removed."""
-    src = os.path.realpath(body.source.strip())
     if not body.source.strip():
         raise HTTPException(status_code=400, detail="source is required")
-
-    allowed_roots = [os.path.realpath(root) for root in _configured_roots(db)]
-    matched_root = next(
-        (root for root in allowed_roots if os.path.commonpath([src, root]) == root),
-        None,
-    )
-    if matched_root is None:
-        raise HTTPException(status_code=400, detail="source must be within a configured scan root")
+    src = os.path.realpath(body.source.strip())
 
     mapping = (
         db.query(ImportSourceMapping)
