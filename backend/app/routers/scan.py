@@ -45,7 +45,7 @@ def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
 # Safe top-level locations the first-run folder picker may browse before any
 # scan root is configured. Without this, an empty root list left /scan/browse
 # able to list the entire host/container filesystem (#41).
-_UNIX_BROWSE_DIRS = ("/mnt", "/media", "/Volumes", "/data", "/import", "/library")
+_UNIX_BROWSE_DIRS = ("/mnt", "/media", "/Volumes", "/data", "/import", "/library1", "/library2")
 
 
 def _bootstrap_roots() -> list[Path]:
@@ -347,15 +347,20 @@ def remove_root(root_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-_LIBRARY_ROOT = "/library"
-
-
 def _sync_roots_from_config(db: Session):
-    """Seed /library as a ScanRoot on first boot if the mount is present."""
+    """Seed scan roots from STL_ROOTS on first boot.
+
+    Each path in settings.stl_root_list is added as an enabled ScanRoot if
+    the directory exists in the container and isn't already registered.
+    """
     from pathlib import Path as _Path
-    if not _Path(_LIBRARY_ROOT).is_dir():
-        return
-    exists = db.query(ScanRoot).filter(ScanRoot.path == _LIBRARY_ROOT).first()
-    if not exists:
-        db.add(ScanRoot(path=_LIBRARY_ROOT, enabled=True))
-    db.commit()
+    added = False
+    for root_path in settings.stl_root_list:
+        if not _Path(root_path).is_dir():
+            continue
+        exists = db.query(ScanRoot).filter(ScanRoot.path == root_path).first()
+        if not exists:
+            db.add(ScanRoot(path=root_path, enabled=True))
+            added = True
+    if added:
+        db.commit()

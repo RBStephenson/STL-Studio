@@ -50,11 +50,15 @@ Your library database is stored in your user data folder and survives app update
 
 ### Docker (for advanced users)
 
-1. Copy `.env.example` to `.env` and set your drive path (forward slashes, even
+1. Copy `.env.example` to `.env` and set your drive paths (forward slashes, even
    on Windows):
    ```
    STL_DRIVE_1=D:/3D STLs
+   STL_DRIVE_2=E:/More STLs   # optional second drive
+   STL_ROOTS=/library1,/library2
    ```
+   `STL_DRIVE_1` mounts at `/library1`, `STL_DRIVE_2` at `/library2`. Both are
+   seeded as scan roots automatically on first boot.
 
 2. Start everything:
    ```
@@ -65,7 +69,7 @@ Your library database is stored in your user data folder and survives app update
 
 4. Click **Scan Library** to index your files.
 
-> Got models on more than one drive, or need to change mounts? See
+> Got models on more than two drives, or need to change mounts? See
 > [docs/docker.md](docs/docker.md) — Docker can't be configured purely from the
 > Settings page the way the standalone app can.
 

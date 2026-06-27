@@ -4,9 +4,16 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     database_url: str = "sqlite:////data/stl_inventory.db"
-    # Native (host) paths for the two drive mounts — used to translate
-    # Docker container paths back to Windows/Mac paths for display.
-    # Set these to match LIBRARY_DIR / IMPORT_DIR in your .env file.
+
+    # Comma-separated list of container paths to auto-seed as scan roots on
+    # first boot.  Set via STL_ROOTS in .env / docker-compose environment.
+    # Each entry must correspond to a volume mounted into the container.
+    stl_roots: str = "/library1,/library2"
+
+    # Native (host) paths for the drive mounts — used to translate Docker
+    # container paths back to Windows/Mac paths for display.
+    # Set STL_DRIVE_1 / STL_DRIVE_2 in your .env to match the host paths
+    # mounted at /library1 and /library2 respectively.
     stl_drive_1: str = ""
     stl_drive_2: str = ""
 
@@ -22,13 +29,17 @@ class Settings(BaseSettings):
     # this stays off unless a writable standalone deployment sets it.
     reorganize_write_enabled: bool = False
 
+    @property
+    def stl_root_list(self) -> list[str]:
+        return [r.strip() for r in self.stl_roots.split(",") if r.strip()]
+
     def to_native_path(self, docker_path: str) -> str:
         """Translate a Docker container path to the native host path, if mappings are configured."""
-        if self.stl_drive_1 and docker_path.startswith("/mnt/drive1"):
-            suffix = docker_path[len("/mnt/drive1"):].replace("/", os.sep)
+        if self.stl_drive_1 and docker_path.startswith("/library1"):
+            suffix = docker_path[len("/library1"):].replace("/", os.sep)
             return self.stl_drive_1.rstrip("/\\") + suffix
-        if self.stl_drive_2 and docker_path.startswith("/mnt/drive2"):
-            suffix = docker_path[len("/mnt/drive2"):].replace("/", os.sep)
+        if self.stl_drive_2 and docker_path.startswith("/library2"):
+            suffix = docker_path[len("/library2"):].replace("/", os.sep)
             return self.stl_drive_2.rstrip("/\\") + suffix
         return docker_path
 

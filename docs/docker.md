@@ -13,22 +13,24 @@ mounts are wired and how to add or change them.
 
 ---
 
-## How a drive mount is wired
+## How drive mounts are wired
 
-There are two things you need to set for Docker mode to see your library:
+There are three things you need to set for Docker mode to see your library:
 
 | Where | What it does |
 |-------|--------------|
-| `.env` → `LIBRARY_DIR` | The **host** path to your main library (e.g. `F:/3DModelLibrary`). |
-| `.env` → `IMPORT_DIR` | The **host** path where you drop zips/folders to import (optional). |
+| `.env` → `STL_DRIVE_1` | The **host** path to your first library drive (e.g. `F:/3DModelLibrary`). |
+| `.env` → `STL_DRIVE_2` | The **host** path to a second drive (optional). |
+| `.env` → `STL_ROOTS` | Comma-separated **container** paths to auto-register as scan roots on first boot. |
 
 The `docker-compose.yml` mounts these into the container at fixed paths:
 
-- `LIBRARY_DIR` → `/library` (your scanned model library)
-- `IMPORT_DIR` → `/import` (your import staging area)
+- `STL_DRIVE_1` → `/library1`
+- `STL_DRIVE_2` → `/library2`
+- `IMPORT_DIR` → `/import` (your import staging area — optional)
 
-On first boot the backend seeds `/library` as a scan root automatically — you
-don't need to add it in Settings.
+On first boot the backend seeds every path listed in `STL_ROOTS` as a scan root
+automatically — you don't need to add them in Settings.
 
 ---
 
@@ -37,13 +39,15 @@ don't need to add it in Settings.
 Copy `.env.example` to `.env` and fill in your paths:
 
 ```
-LIBRARY_DIR=F:/3DModelLibrary
+STL_DRIVE_1=F:/3DModelLibrary
+STL_DRIVE_2=G:/MoreModels
+STL_ROOTS=/library1,/library2
 IMPORT_DIR=F:/Downloads/STL-Imports
 ```
 
 > **Windows / macOS paths:** use **forward slashes** in `.env`
 > (`D:/3D STLs`, not `D:\3D STLs`). On macOS your drive lives under
-> `/Volumes`, e.g. `LIBRARY_DIR=/Volumes/MyDrive/STLs`.
+> `/Volumes`, e.g. `STL_DRIVE_1=/Volumes/MyDrive/STLs`.
 
 Then start the stack:
 
@@ -56,7 +60,7 @@ docker compose up -d
 ## Why a path typed into Settings must already be mounted
 
 In Docker mode the Settings page and folder browser operate **inside the
-container**, so they show container paths like `/library/...` — not host
+container**, so they show container paths like `/library1/...` — not host
 paths like `F:/...`. A scan root you add there must point at something that is
 already mounted into the container. Typing a raw host path such as
 `F:/3DModelLibrary` will not work, because the container has no `F:` drive.
@@ -66,38 +70,42 @@ at the container path.**
 
 ---
 
-## Adding a second library drive
+## Adding a third (or more) library drive
 
-If your models span multiple drives, add another volume mount to
-`docker-compose.yml` and point Settings at the new container path.
+The default `docker-compose.yml` supports two drives out of the box. To add more:
 
-1. **`.env`** — add the second host path:
+1. **`.env`** — add the new host path:
 
    ```
-   LIBRARY_DIR=F:/3DModelLibrary
-   LIBRARY_DIR_2=G:/MoreModels
+   STL_DRIVE_3=H:/EvenMoreModels
    ```
 
-2. **`docker-compose.yml`** — add a volume mount for it:
+2. **`docker-compose.yml`** — add a volume mount under `backend.volumes`:
 
    ```yaml
-   services:
-     backend:
-       volumes:
-         - ./data:/data
-         - "${LIBRARY_DIR}:/library"
-         - "${LIBRARY_DIR_2}:/library2"   # add this
-         - "${IMPORT_DIR}:/import"
+   - "${STL_DRIVE_3:-/dev/null}:/library3"
    ```
 
-3. **Recreate the container** so the new mount takes effect:
+   And add `STL_DRIVE_3` to the `environment` block:
+
+   ```yaml
+   environment:
+     - STL_DRIVE_3=${STL_DRIVE_3:-}
+   ```
+
+3. **`.env`** — add `/library3` to `STL_ROOTS`:
+
+   ```
+   STL_ROOTS=/library1,/library2,/library3
+   ```
+
+4. **Recreate the container** so the new mount takes effect:
 
    ```
    docker compose up -d
    ```
 
-4. **Add the new root in Settings** — go to Settings → Library Roots and add
-   `/library2`. The scanner will pick it up on the next scan.
+The new root is seeded automatically on next boot — no manual Settings step needed.
 
 > **Heads-up:** changing `docker-compose.yml` requires a `docker compose up -d`
 > to recreate the container — a running container does not pick up new mounts on

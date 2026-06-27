@@ -77,13 +77,14 @@ even on Windows):
 
 ```
 STL_DRIVE_1=D:/3D STLs
+STL_DRIVE_2=E:/More STLs      # optional second drive
+STL_ROOTS=/library1,/library2
 ```
 
-This mounts that folder into the container as the default library root. Got
-models on **more than one drive**, or need to change where things are mounted?
-See **[Docker — Drive Mounts & Configuration](docker.md)** for the full rundown
-(adding extra drives, why Settings paths must be mounted first, and host-path
-display).
+`STL_DRIVE_1` is mounted at `/library1` in the container, `STL_DRIVE_2` at
+`/library2`. Both are seeded as scan roots automatically on first boot.
+Got models on **more than two drives**, or need to change where things are mounted?
+See **[Docker — Drive Mounts & Configuration](docker.md)** for the full rundown.
 
 ### 2. Start everything
 
