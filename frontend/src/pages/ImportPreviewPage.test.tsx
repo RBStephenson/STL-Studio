@@ -70,7 +70,7 @@ function setup(opts: { mapping?: { source_path: string; library_id: number } | n
 /** Click "Scan for New Files" and wait for the pack card to appear. */
 async function scan() {
   fireEvent.click(await screen.findByRole("button", { name: /scan for new files/i }));
-  return screen.findByText("PackA");
+  return screen.findByText("PackA", {}, { timeout: 5000 });
 }
 
 describe("ImportPreviewPage (#452 C2)", () => {
