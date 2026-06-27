@@ -56,6 +56,8 @@ export default function ImportPreviewPage() {
   const [scanning, setScanning] = useState(false);
   // hasScanned: true once the user has clicked "Scan for New Files" at least once
   const [hasScanned, setHasScanned] = useState(false);
+  // batchCount: already-imported entries visible without a fresh scan (for batch bar)
+  const [batchCount, setBatchCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // Per-card state, keyed by the pack's source path.
@@ -85,6 +87,12 @@ export default function ImportPreviewPage() {
       setLibraries(libs);
       setLibraryId(mapping?.library_id ?? null);
       setCollections(cols);
+      // Quietly probe for already-scanned inbox packs so the batch-move bar
+      // appears on revisit without requiring a fresh scan.
+      try {
+        const contents = await api.import.sourceContents(source);
+        setBatchCount(contents.entries.filter((e) => e.already_imported).length);
+      } catch { /* source folder may not exist yet */ }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load source configuration.");
     } finally {
@@ -271,6 +279,20 @@ export default function ImportPreviewPage() {
     }
   };
 
+  const applyAll = async () => {
+    if (!libraryId) return;
+    try {
+      await api.import.apply(source);
+      const lib = libraries.find((l) => l.id === libraryId);
+      toast(`Moved to ${lib?.name ?? "library"}.`, "success");
+      setBatchCount(0);
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "Move failed — try again.", "error");
+    }
+  };
+
+  const batchLib = batchCount > 0 && libraryId ? libraries.find((l) => l.id === libraryId) : null;
+
   // Only show packs that still have STL files on disk (file_count > 0).
   // After a successful import the pack folder is removed, so its count drops to 0.
   const allCards: SourceContentsEntry[] = isFlat
@@ -319,6 +341,21 @@ export default function ImportPreviewPage() {
           </Link>
         )}
       </div>
+
+      {batchLib && (
+        <div className="flex items-center gap-3 bg-indigo-950/40 border border-indigo-800/60 rounded-lg px-4 py-3">
+          <Package size={16} className="text-indigo-400 shrink-0" />
+          <span className="flex-1 text-sm text-gray-300">
+            {batchCount} pack{batchCount !== 1 ? "s" : ""} already imported — ready to move
+          </span>
+          <button
+            onClick={applyAll}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors shrink-0"
+          >
+            Move to {batchLib.name}
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 text-sm text-red-400 bg-red-950/40 border border-red-900/60 rounded-lg px-4 py-3">
