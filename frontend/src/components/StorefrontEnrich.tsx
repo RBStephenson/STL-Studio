@@ -171,7 +171,8 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
       </div>
       <p className="text-xs text-gray-500">
         Paste {creatorName}'s profile URL from MyMiniFactory, Gumroad, or Cults3D.
-        We'll match their products to your local models and pull thumbnails + metadata in bulk.
+        We'll match their products to your local models and pull full metadata in bulk —
+        descriptions, tags, category, license, and thumbnails — including across variant groups.
       </p>
 
       <div className="flex gap-2">

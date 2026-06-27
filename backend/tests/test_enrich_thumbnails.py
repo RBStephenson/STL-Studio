@@ -6,11 +6,14 @@ block hot-linked <img> requests, so they often rendered nothing. It now
 downloads them server-side like /scrape/apply, falling back to the URL when
 a download fails.
 """
+from unittest.mock import AsyncMock
+
 import httpx
 import pytest
 
 from tests.conftest import make_creator, make_model
 
+import app.routers.enrich as enrich
 import app.services.thumbnails as thumbnails
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfakepngdata"
@@ -22,6 +25,14 @@ def thumb_dir(tmp_path, monkeypatch):
     d.mkdir()
     monkeypatch.setattr(thumbnails, "thumbnails_dir", lambda: d)
     return d
+
+
+@pytest.fixture(autouse=True)
+def _no_detail_fetch(monkeypatch):
+    """Force the shallow-fallback path so these tests stay focused on thumbnail
+    handling: the deep detail fetch returns nothing, so apply uses the item's
+    own fields (the deep path is covered in test_enrich_deep.py)."""
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=None))
 
 
 _REAL_ASYNC_CLIENT = httpx.AsyncClient
@@ -58,8 +69,7 @@ def test_bulk_apply_downloads_thumbnail(client, db, thumb_dir, monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["applied"] == 1
-    assert data["thumbnails_downloaded"] == 1
-    assert data["thumbnails_failed"] == 0
+    assert data["fallback_shallow"] == 1
 
     db.refresh(model)
     assert model.thumbnail_path == str(thumb_dir / f"{model.id}.png")
@@ -78,8 +88,6 @@ def test_bulk_apply_falls_back_to_url_on_download_failure(client, db, thumb_dir,
     assert resp.status_code == 200
     data = resp.json()
     assert data["applied"] == 1
-    assert data["thumbnails_downloaded"] == 0
-    assert data["thumbnails_failed"] == 1
 
     db.refresh(model)
     assert model.thumbnail_url == "https://cdn.example.com/thumb.png"
@@ -127,8 +135,6 @@ def test_bulk_apply_mixed_results(client, db, thumb_dir, monkeypatch):
     ]})
     data = resp.json()
     assert data["applied"] == 2
-    assert data["thumbnails_downloaded"] == 1
-    assert data["thumbnails_failed"] == 1
 
     db.refresh(ok_model)
     db.refresh(bad_model)

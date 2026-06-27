@@ -1,0 +1,139 @@
+"""
+Deep creator-enrichment: /enrich/storefront/apply fetches each selected
+product's full detail and writes the complete field set (description, tags,
+category, license) to every model that matched it — so the user doesn't have to
+go model-by-model through Find-on-Web.
+
+The detail fetch (scrapers.fetch_url) is mocked here; the real per-site adapters
+are tested elsewhere. Thumbnails are left out (url=None) to keep these focused on
+metadata — thumbnail handling is covered in test_enrich_thumbnails.py.
+"""
+from unittest.mock import AsyncMock
+
+import pytest
+from cryptography.fernet import Fernet
+
+import app.routers.enrich as enrich
+from app.services import secrets
+from app.services.scrapers.base import ScrapedModel
+from tests.conftest import make_creator, make_model
+
+
+@pytest.fixture(autouse=True)
+def _fixed_secret_key(monkeypatch):
+    """Encryption key for the secrets store (the MMF-key test sets a key)."""
+    monkeypatch.setenv("STL_SECRET_KEY", Fernet.generate_key().decode())
+    secrets.reset_cache()
+    yield
+    secrets.reset_cache()
+
+_URL = "https://www.myminifactory.com/object/dragon-123"
+
+
+def _deep(**overrides) -> ScrapedModel:
+    fields = dict(
+        title="Dragon Deluxe",
+        description="A fearsome dragon with full detail.",
+        source_url=_URL,
+        source_site="myminifactory",
+        external_id="123",
+        tags=["dragon", "fantasy"],
+        category="Creatures",
+        license="CC-BY",
+        thumbnail_url=None,
+    )
+    fields.update(overrides)
+    return ScrapedModel(**fields)
+
+
+def _item(model, **overrides) -> dict:
+    item = {
+        "model_id": model.id,
+        "source_url": _URL,
+        "source_site": "myminifactory",
+        "title": "shallow title",
+    }
+    item.update(overrides)
+    return item
+
+
+def test_apply_writes_deep_fields(client, db, monkeypatch):
+    creator = make_creator(db)
+    model = make_model(db, creator, name="dragon")
+    db.commit()
+
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+
+    resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data == {"ok": True, "applied": 1, "enriched_deep": 1, "fallback_shallow": 0}
+
+    db.refresh(model)
+    assert model.description == "A fearsome dragon with full detail."
+    assert set(model.tags) >= {"dragon", "fantasy"}
+    assert model.category == "Creatures"
+    assert model.license == "CC-BY"
+    assert model.source_url == _URL
+    assert model.external_id == "123"
+    assert model.needs_review is False
+
+
+def test_one_fetch_per_unique_url_fans_to_all_models(client, db, monkeypatch):
+    """Variants share a product URL — fetch the detail once, apply to every one."""
+    creator = make_creator(db)
+    a = make_model(db, creator, name="dragon a")
+    b = make_model(db, creator, name="dragon b")
+    db.commit()
+
+    fetch = AsyncMock(return_value=_deep())
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+
+    resp = client.post("/enrich/storefront/apply", json={
+        "items": [_item(a), _item(b)],
+    })
+    assert resp.status_code == 200
+    assert resp.json()["enriched_deep"] == 2
+    assert fetch.await_count == 1  # one fetch for the shared URL
+
+    db.refresh(a); db.refresh(b)
+    assert a.category == "Creatures"
+    assert b.category == "Creatures"
+
+
+def test_falls_back_to_shallow_when_fetch_returns_none(client, db, monkeypatch):
+    creator = make_creator(db)
+    model = make_model(db, creator, name="orphan")
+    db.commit()
+
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=None))
+
+    resp = client.post("/enrich/storefront/apply", json={
+        "items": [_item(model, title="Shallow Title")],
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["enriched_deep"] == 0
+    assert data["fallback_shallow"] == 1
+
+    db.refresh(model)
+    # Shallow fields from the item still land; deep-only fields stay empty.
+    assert model.source_url == _URL
+    assert model.title == "Shallow Title"
+    assert model.description is None
+    assert not model.tags
+
+
+def test_bulk_apply_passes_mmf_key_to_fetch(client, db, monkeypatch):
+    """The resolved MMF key is threaded into the detail fetch."""
+    creator = make_creator(db)
+    model = make_model(db, creator, name="dragon")
+    db.commit()
+
+    secrets.set_mmf_api_key(db, "test-mmf-key")
+    fetch = AsyncMock(return_value=_deep())
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+
+    resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
+    assert resp.status_code == 200
+    fetch.assert_awaited_once_with(_URL, mmf_api_key="test-mmf-key")

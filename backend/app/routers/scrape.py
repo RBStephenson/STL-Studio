@@ -5,14 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.database import get_db
-from app.models import Model, Creator
+from app.models import Model
 from app.services import scrapers, secrets
-from app.services.scanner import resolve_creator
-from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
-from app.services.variant_sync import propagate_source_url
-from app.utils import utcnow
+from app.services.metadata_apply import apply_scraped_to_model
+from app.services.scrapers.base import ScrapedModel
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
 
@@ -86,7 +83,7 @@ def _host_label(url: str) -> Optional[str]:
 
 def _mmf_key(db: Session) -> Optional[str]:
     """MMF API key: DB-stored secret first, then the .env fallback."""
-    return secrets.get_mmf_api_key(db) or (settings.mmf_api_key or None)
+    return secrets.resolve_mmf_api_key(db)
 
 
 # --- Endpoints ---
@@ -124,53 +121,28 @@ async def search_site(
 
 
 async def _apply_request_to_model(db: Session, model: Model, body: ApplyRequest) -> None:
-    """Apply reviewed/scraped metadata onto one model (no commit)."""
-    if body.title:
-        model.title = body.title
-    if body.description:
-        model.description = body.description
-    if body.source_url:
-        model.source_url = body.source_url
-    if body.source_site:
-        model.source_site = body.source_site
-    if body.external_id:
-        model.external_id = body.external_id
-    if body.thumbnail_url:
-        # Download the remote image to a local file — CDNs block hot-linking,
-        # and the UI gives thumbnail_path precedence over thumbnail_url.
-        try:
-            model.thumbnail_path = str(
-                await download_thumbnail(model.id, body.thumbnail_url)
-            )
-            model.thumbnail_url = None
-        except ThumbnailDownloadError:
-            # Fall back to the bare URL, clearing the local path so the new
-            # remote image actually takes display precedence.
-            model.thumbnail_url = body.thumbnail_url
-            model.thumbnail_path = None
-    if body.tags:
-        # Merge with existing tags, dedup
-        existing = set(model.tags or [])
-        model.tags = list(existing | set(body.tags))
-    if body.category:
-        model.category = body.category
-    if body.license:
-        model.license = body.license
-    if body.like_count is not None:
-        model.rating = body.like_count  # store likes as proxy for rating
-    if body.download_count is not None:
-        model.download_count = body.download_count
+    """Apply reviewed/scraped metadata onto one model (no commit).
 
-    # Resolve or create creator
-    if body.creator_name:
-        model.creator_id = resolve_creator(body.creator_name, db).id
-
-    if body.source_url:
-        propagate_source_url(db, model)
-
-    model.source_last_fetched = utcnow()
-    model.needs_review = False  # user reviewed it, clear the flag
-    model.updated_at = utcnow()
+    Thin adapter over the shared writer: a reviewed single-model apply overwrites
+    the title and always refreshes the thumbnail.
+    """
+    scraped = ScrapedModel(
+        title=body.title,
+        description=body.description,
+        source_url=body.source_url,
+        source_site=body.source_site,
+        external_id=body.external_id,
+        creator_name=body.creator_name,
+        thumbnail_url=body.thumbnail_url,
+        tags=body.tags or [],
+        category=body.category,
+        license=body.license,
+        like_count=body.like_count,
+        download_count=body.download_count,
+    )
+    await apply_scraped_to_model(
+        db, model, scraped, overwrite_title=True, thumbnail_fill_only=False
+    )
 
 
 @router.post("/apply/{model_id}", response_model=dict)

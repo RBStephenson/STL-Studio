@@ -376,7 +376,14 @@ can:
   Because you usually add models one creator at a time, this is much faster than
   a full library scan. The button is disabled while any scan is running.
 - **Enrich from web** — match a creator's online storefront listings against
-  your local models and bulk-apply metadata (source URLs, thumbnails, IDs).
+  your local models, then fetch each matched product's **full detail** and
+  bulk-apply the complete metadata set: title, description, tags, category,
+  license, thumbnail, source URL, and external ID. One run enriches every
+  matched model — including all variants in a group — so you no longer have to
+  open each model and run *Find on Web* by hand. MyMiniFactory and Cults3D use
+  their APIs when configured (see [Settings → AI & Integrations](#settings));
+  Gumroad is scraped. A product whose detail can't be fetched still receives the
+  shallow fields, so nothing is lost.
 
 ## Paint Shelf (Painting Guides)
 

@@ -10,20 +10,20 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
-from app.utils import utcnow
-from app.models import Model, Creator
-from app.services.scrapers.storefront import scrape_storefront, StorefrontProduct
-from app.services.matcher import match_products_to_models, MatchCandidate
-from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
-from app.services.variant_sync import propagate_source_url
+from app.models import Model
+from app.services import scrapers, secrets
+from app.services.scrapers.base import ScrapedModel
+from app.services.scrapers.storefront import scrape_storefront
+from app.services.matcher import match_products_to_models
+from app.services.metadata_apply import apply_scraped_to_model
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/enrich", tags=["enrich"])
 
-# A creator run can carry hundreds of thumbnails — bound the parallelism so we
-# neither hammer the CDN nor serialize the whole batch (#208).
-_THUMBNAIL_CONCURRENCY = 5
+# Each selected match triggers a detail fetch (MMF/Cults API or Gumroad scrape).
+# Bound the parallelism so we don't hammer a source or serialize the whole batch.
+_FETCH_CONCURRENCY = 5
 
 
 # ---------------------------------------------------------------------------
@@ -120,66 +120,70 @@ async def bulk_apply(
     body: BulkApplyRequest,
     db: Session = Depends(get_db),
 ):
-    """Apply confirmed matches to local model records."""
-    applied = 0
+    """Apply confirmed matches to local models, fetching full detail per product.
+
+    The match list only carries shallow fields (title, url, thumbnail). To save
+    the user the per-model Find-on-Web grind, we fetch each selected product's
+    detail once — via the MMF/Cults APIs or a Gumroad scrape — and write the full
+    field set (description, tags, category, license, images) to every model that
+    matched it. Variant siblings sharing a product URL all get the deep data, and
+    a product whose detail can't be fetched falls back to the shallow fields so
+    nothing regresses.
+    """
     item_map = {item.model_id: item for item in body.items}
     models = db.query(Model).filter(Model.id.in_(item_map.keys())).all()
 
-    # Download thumbnails server-side like /scrape/apply does — CDNs block
-    # hot-linked <img> requests, so a stored bare URL often renders nothing
-    # (#208). Only models without a local thumbnail get one (fill, never
-    # overwrite); a failed download falls back to storing the URL.
-    sem = asyncio.Semaphore(_THUMBNAIL_CONCURRENCY)
+    # Fetch each *unique* product URL once (variants share a listing), bounded so
+    # we don't hammer a source. MMF needs the key threaded; Cults self-resolves.
+    mmf_key = secrets.resolve_mmf_api_key(db)
+    sem = asyncio.Semaphore(_FETCH_CONCURRENCY)
 
-    async def _fetch(model_id: int, url: str):
+    async def _fetch_deep(url: str):
         async with sem:
             try:
-                return model_id, str(await download_thumbnail(model_id, url))
-            except ThumbnailDownloadError as e:
-                logger.warning(f"Bulk enrich: thumbnail download failed for model {model_id}: {e}")
-                return model_id, None
+                return url, await scrapers.fetch_url(url, mmf_api_key=mmf_key)
+            except Exception as e:
+                logger.warning(f"Bulk enrich: detail fetch failed for {url}: {e}")
+                return url, None
 
-    wanted = [
-        (m.id, item_map[m.id].thumbnail_url)
-        for m in models
-        if item_map[m.id].thumbnail_url and not m.thumbnail_path
-    ]
-    downloaded: dict[int, str | None] = dict(
-        await asyncio.gather(*(_fetch(mid, url) for mid, url in wanted))
+    unique_urls = {item.source_url for item in body.items if item.source_url}
+    fetched: dict[str, Optional[ScrapedModel]] = dict(
+        await asyncio.gather(*(_fetch_deep(u) for u in unique_urls))
     )
 
+    applied = deep = shallow = 0
     for model in models:
         item = item_map[model.id]
+        scraped = fetched.get(item.source_url)
 
-        if model.id in downloaded:
-            path = downloaded[model.id]
-            if path:
-                model.thumbnail_path = path
-                model.thumbnail_url = None
-            else:
-                model.thumbnail_url = item.thumbnail_url
-        if item.source_url:
-            model.source_url = item.source_url
-        if item.source_site:
-            model.source_site = item.source_site
-        if item.external_id:
-            model.external_id = item.external_id
-        if item.title and not model.title:
-            model.title = item.title
+        if scraped is not None:
+            # Keep the source identity from the match if the fetch didn't carry it.
+            scraped.source_url = scraped.source_url or item.source_url
+            scraped.source_site = scraped.source_site or item.source_site
+            scraped.external_id = scraped.external_id or item.external_id
+            deep += 1
+        else:
+            # Unsupported site / fetch failed — preserve the old shallow behaviour.
+            scraped = ScrapedModel(
+                title=item.title,
+                source_url=item.source_url,
+                source_site=item.source_site,
+                external_id=item.external_id,
+                thumbnail_url=item.thumbnail_url,
+            )
+            shallow += 1
 
-        if item.source_url:
-            propagate_source_url(db, model)
-
-        model.source_last_fetched = utcnow()
-        model.needs_review = False
-        model.updated_at = utcnow()
+        # Bulk policy: fill (don't overwrite) the title, and never replace an
+        # existing local thumbnail.
+        await apply_scraped_to_model(
+            db, model, scraped, overwrite_title=False, thumbnail_fill_only=True
+        )
         applied += 1
 
     db.commit()
-    downloaded_ok = sum(1 for p in downloaded.values() if p)
     return {
         "ok": True,
         "applied": applied,
-        "thumbnails_downloaded": downloaded_ok,
-        "thumbnails_failed": len(downloaded) - downloaded_ok,
+        "enriched_deep": deep,
+        "fallback_shallow": shallow,
     }

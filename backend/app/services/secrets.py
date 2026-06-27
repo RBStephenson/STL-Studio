@@ -226,3 +226,9 @@ def mmf_api_key_hint(db: Session) -> str | None:
         return None
     tail = key[-4:] if len(key) >= 4 else key
     return f"…{tail}"
+
+
+def resolve_mmf_api_key(db: Session) -> str | None:
+    """The MMF key to use for API calls: DB-stored secret first, then the
+    ``MMF_API_KEY`` env/.env fallback. None when neither is set."""
+    return get_mmf_api_key(db) or (settings.mmf_api_key or None)

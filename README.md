@@ -132,7 +132,8 @@ A folder is only indexed as a model if it contains 3D files.
 
 ### Storefront Enrichment
 - Paste a Gumroad, Cults3D, MyMiniFactory, or Loot Studios creator URL
-- Fuzzy-matches scraped listings against local models and bulk-applies metadata (source URL, thumbnail, external ID)
+- Fuzzy-matches scraped listings against local models, then fetches each matched product's **full detail** and bulk-applies the complete metadata set — title, description, tags, category, license, thumbnail, source URL, external ID — including across every model in a variant group
+- Uses the MyMiniFactory and Cults3D APIs when their keys/credentials are set (faster, richer); falls back to scraping. Gumroad is scrape-only. A product whose detail can't be fetched still gets the shallow fields, so nothing is lost
 
 ### Painting Guides module
 The **Paint Shelf** is always available in the nav. Enabling **Settings → Painting Guides** additionally adds **Guides** (guide authoring/reading).

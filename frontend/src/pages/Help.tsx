@@ -300,9 +300,17 @@ const SECTIONS: Section[] = [
         <p>
           The <strong>Source URL</strong> field has a <strong>Fetch</strong> button: paste
           a product page from <strong>Gumroad</strong>, <strong>Cults3D</strong>, or{" "}
-          <strong>MyMiniFactory</strong> and it scrapes the page to fill in the title,
-          description, creator, thumbnail, and tags. Bulk enrichment is available from the{" "}
-          <strong>Creators</strong> page.
+          <strong>MyMiniFactory</strong> and it fills in the title, description, creator,
+          thumbnail, tags, category, and license.
+        </p>
+        <p>
+          To do this in bulk, use <strong>Enrich from web</strong> on the{" "}
+          <strong>Creators</strong> page: paste a creator's storefront URL and it matches
+          their listings to your local models, then fetches each matched product's full
+          detail and applies the complete metadata in one pass — across every variant in a
+          group, so you don't have to <em>Fetch</em> each model by hand. MyMiniFactory and
+          Cults3D use their APIs when configured under <strong>Settings → AI &amp;
+          Integrations</strong>; Gumroad is scraped.
         </p>
       </>
     ),
