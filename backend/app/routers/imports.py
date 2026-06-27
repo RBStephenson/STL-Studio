@@ -46,6 +46,21 @@ def _validated_path_within_root(root: str, candidate: str) -> str:
     return resolved_candidate
 
 
+def _safe_path_from_root_and_relative(root: str, relative_candidate: str) -> str:
+    """Build a canonical path under root from a relative user-controlled segment."""
+    resolved_root = os.path.realpath(root)
+    if os.path.isabs(relative_candidate):
+        raise HTTPException(status_code=400, detail="source must be within a configured scan root")
+    normalized_relative = os.path.normpath(relative_candidate)
+    if normalized_relative == ".." or normalized_relative.startswith(f"..{os.sep}"):
+        raise HTTPException(status_code=400, detail="source must be within a configured scan root")
+    joined = os.path.join(resolved_root, normalized_relative)
+    resolved_candidate = os.path.realpath(joined)
+    if os.path.commonpath([resolved_candidate, resolved_root]) != resolved_root:
+        raise HTTPException(status_code=400, detail="source must be within a configured scan root")
+    return resolved_candidate
+
+
 # Entry flags (Phase 1) that make a pack ineligible to move, mapped to a reason.
 _INELIGIBLE_FLAGS = [
     ("unclassifiable", "missing creator/character"),
@@ -602,7 +617,8 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
     # Clean up any stale empty directories left in the source root.
     try:
         resolved_root = os.path.realpath(matched_root)
-        safe_src = _validated_path_within_root(resolved_root, src)
+        src_relative = os.path.relpath(src, resolved_root)
+        safe_src = _safe_path_from_root_and_relative(resolved_root, src_relative)
         if not os.path.isdir(safe_src):
             raise HTTPException(status_code=400, detail="source must be an existing directory")
         for dirpath, _, filenames in os.walk(safe_src, topdown=False):
