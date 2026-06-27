@@ -42,7 +42,6 @@ vi.mock("../api/client", () => ({
       }),
       reloadEnv: vi.fn().mockResolvedValue({
         ok: true,
-        scan_roots: ["/srv/a", "/srv/b"],
         drive_mappings: {},
         restart_required: ["database_url"],
       }),
@@ -271,7 +270,7 @@ describe("Settings – Reload .env (#140)", () => {
     await userEvent.click(await screen.findByRole("button", { name: /reload \.env settings/i }));
 
     expect(api.settings.reloadEnv).toHaveBeenCalled();
-    expect(await screen.findByText(/2 scan root\(s\) from \.env/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Settings reloaded from \.env/i)).toBeInTheDocument();
     expect(screen.getByText(/database_url still need a restart/i)).toBeInTheDocument();
   });
 

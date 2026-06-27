@@ -296,7 +296,6 @@ export type LibrarySort = "name" | "added" | "creator" | "rating";
 
 export interface EnvReloadResult {
   ok: boolean;
-  scan_roots: string[];
   drive_mappings: Record<string, string>;
   restart_required: string[];
 }

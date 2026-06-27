@@ -246,7 +246,7 @@ def test_reload_reports_restart_keys(client, restore_settings):
     assert body["ok"] is True
     # database_url is bound once at startup — flagged as needing a restart.
     assert "database_url" in body["restart_required"]
-    assert set(body.keys()) == {"ok", "scan_roots", "drive_mappings", "restart_required"}
+    assert set(body.keys()) == {"ok", "drive_mappings", "restart_required"}
 
 
 def test_reload_never_exposes_secrets(client, monkeypatch, restore_settings):

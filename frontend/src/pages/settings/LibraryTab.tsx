@@ -127,7 +127,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       const restart = res.restart_required.length
         ? ` (${res.restart_required.join(", ")} still need a restart)`
         : "";
-      flash(`Settings reloaded — ${res.scan_roots.length} scan root(s) from .env${restart}`, "ok");
+      flash(`Settings reloaded from .env${restart}`, "ok");
     } catch (e: any) {
       flash(e?.message || "Could not reload settings", "err");
     } finally {
