@@ -515,6 +515,7 @@ export const GalleryRotator = forwardRef<
   const [showLabel, setShowLabel] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const labelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const urls = paths.map((p) => api.fileUrl(p));
   const validCount = paths.length - broken.size;
@@ -530,8 +531,12 @@ export const GalleryRotator = forwardRef<
 
   const go = useCallback((next: number) => {
     setFade(false);
-    setTimeout(() => { setIdx(next); setFade(true); }, 150);
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    fadeTimerRef.current = setTimeout(() => { setIdx(next); setFade(true); }, 150);
   }, []);
+
+  // Clear any pending fade timer on unmount so it can't setState after teardown.
+  useEffect(() => () => { if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current); }, []);
 
   useImperativeHandle(ref, () => ({ goTo: go }), [go]);
 
