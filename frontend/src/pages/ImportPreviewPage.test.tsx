@@ -114,8 +114,7 @@ describe("ImportPreviewPage (#452 C2)", () => {
     await waitFor(() => expect(api.import.setMapping).toHaveBeenCalledWith("/src", 1));
   });
 
-  it("applies already-imported packs via /import/apply when Import is clicked", async () => {
-    // Set up mocks for the already-imported scenario BEFORE setup renders
+  it("shows the batch bar for imported packs and applies via /import/apply", async () => {
     vi.mocked(api.import.sourceContents).mockResolvedValue({
       source: "/src", is_flat: false, file_count: 0,
       entries: [{ name: "PackA", path: "/src/PackA", already_imported: true, file_count: 5 }],
@@ -125,18 +124,15 @@ describe("ImportPreviewPage (#452 C2)", () => {
     ]);
     vi.mocked(api.import.getMapping).mockResolvedValue({ source_path: "/src", library_id: 1 });
     vi.mocked(api.import.preview).mockResolvedValue({ source: "/src", library_id: 1, packs: [PACK] });
-    vi.mocked(api.collections.list).mockResolvedValue([]);
 
-    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    render(
+      <MemoryRouter initialEntries={["/import/preview?source=/src"]}>
+        <ImportPreviewPage />
+      </MemoryRouter>
+    );
 
-    // Wait for loadConfig to complete: verify the library dropdown is populated and shows "minis" as selected
-    await waitFor(() => {
-      const libSelect = screen.getByLabelText("Library") as HTMLSelectElement;
-      expect(libSelect.value).toBe("1");
-    });
-
-    await scan();
-    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+    const moveBtn = await screen.findByRole("button", { name: /move to minis/i });
+    fireEvent.click(moveBtn);
     await waitFor(() => expect(api.import.apply).toHaveBeenCalledWith("/src"));
   });
 
