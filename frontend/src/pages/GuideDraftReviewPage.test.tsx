@@ -45,6 +45,14 @@ vi.mock("../components/guide/GuideValidationPanel", () => ({
 vi.mock("../components/guide/ReferenceImageUpload", () => ({
   default: () => <div data-testid="reference-upload" />,
 }));
+// Stub PaintPicker: a button that resolves to a fixed shelf paint.
+vi.mock("../components/guide/PaintPicker", () => ({
+  default: ({ onChange }: { onChange: (p: { id: number; name: string; code: string; hex: null }) => void }) => (
+    <button onClick={() => onChange({ id: 9, name: "Matte White Primer", code: "MWP", hex: null })}>
+      pick-paint
+    </button>
+  ),
+}));
 vi.mock("../context/ToastContext", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
 async function mocks() {
@@ -107,6 +115,38 @@ describe("GuideDraftReviewPage (#492)", () => {
 
     await waitFor(() => expect(g.update).toHaveBeenCalledWith(7, { tabs: DRAFT_TABS }));
     expect(mockNavigate).toHaveBeenCalledWith("/painting/guides/7/content");
+  });
+
+  it("resolves an unresolved paint and binds it on accept (#554)", async () => {
+    const g = await mocks();
+    g.get.mockResolvedValue(GUIDE as never);
+    g.startDraft.mockResolvedValue({
+      status: "running", message: "generating", draft: null, flags: [], unresolved: [], error: null,
+    } as never);
+    // Draft has a name-only swatch the matcher couldn't resolve.
+    const draftTabs = [{ name: "Skin", phases: [{ label: "Base", steps: [{
+      title: "Basecoat",
+      swatches: [{ name: "Matt White Primer", value_pct: 80 }],
+      mix_components: [],
+    }] }] }];
+    g.draftStatus.mockResolvedValue({
+      status: "done", message: "ready", draft: { tabs: draftTabs }, flags: [],
+      unresolved: [{ name: "Matt White Primer", tab: "Skin", step: "Basecoat" }], error: null,
+    } as never);
+    g.update.mockResolvedValue(GUIDE as never);
+
+    renderPage();
+    await clickGenerate();
+    await screen.findByRole("button", { name: /accept into editor/i });
+
+    // Bind the unresolved paint via the (stubbed) picker, then accept.
+    await userEvent.click(screen.getByRole("button", { name: "pick-paint" }));
+    await userEvent.click(screen.getByRole("button", { name: /accept into editor/i }));
+
+    await waitFor(() => expect(g.update).toHaveBeenCalled());
+    const sentTabs = g.update.mock.calls[0][1].tabs ?? [];
+    const swatch = sentTabs[0]?.phases?.[0]?.steps?.[0]?.swatches?.[0];
+    expect(swatch).toMatchObject({ paint_id: 9, name: null, value_pct: 80 });
   });
 
   it("surfaces a configure-key message on a 503", async () => {
