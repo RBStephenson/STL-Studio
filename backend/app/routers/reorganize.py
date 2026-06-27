@@ -146,7 +146,8 @@ def apply(body: ReorganizeApplyRequest, db: Session = Depends(get_db)) -> Reorga
     writable; aborts on drift; serialized against scans by the app-wide write lock.
     """
     try:
-        result = reorganize_apply.apply_manifest(db, body.manifest_id, body.entry_ids)
+        manifest_id = reorganize_apply._validate_manifest_id(body.manifest_id)
+        result = reorganize_apply.apply_manifest(db, manifest_id, body.entry_ids)
     except write_lock.LibraryBusy as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ApplyError as e:
@@ -169,7 +170,8 @@ def undo(body: ReorganizeUndoRequest, db: Session = Depends(get_db)) -> Reorgani
     lock as apply.
     """
     try:
-        result = reorganize_apply.undo_manifest(db, body.manifest_id)
+        manifest_id = reorganize_apply._validate_manifest_id(body.manifest_id)
+        result = reorganize_apply.undo_manifest(db, manifest_id)
     except write_lock.LibraryBusy as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ApplyError as e:
