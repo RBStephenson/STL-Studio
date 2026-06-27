@@ -82,7 +82,7 @@ def _get_credentials() -> Optional[tuple[str, str]]:
         from app.services import secrets
         db = SessionLocal()
         try:
-            return secrets.get_cults3d_credentials(db)
+            return secrets.get_cults_credentials(db)
         finally:
             db.close()
     except Exception as e:

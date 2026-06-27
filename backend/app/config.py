@@ -8,12 +8,12 @@ class Settings(BaseSettings):
     # Comma-separated list of container paths to auto-seed as scan roots on
     # first boot.  Set via STL_ROOTS in .env / docker-compose environment.
     # Each entry must correspond to a volume mounted into the container.
-    stl_roots: str = "/library1,/library2"
+    stl_roots: str = "/mnt/drive1,/mnt/drive2"
 
     # Native (host) paths for the drive mounts — used to translate Docker
     # container paths back to Windows/Mac paths for display.
     # Set STL_DRIVE_1 / STL_DRIVE_2 in your .env to match the host paths
-    # mounted at /library1 and /library2 respectively.
+    # mounted at /mnt/drive1 and /mnt/drive2 respectively.
     stl_drive_1: str = ""
     stl_drive_2: str = ""
 
@@ -35,11 +35,11 @@ class Settings(BaseSettings):
 
     def to_native_path(self, docker_path: str) -> str:
         """Translate a Docker container path to the native host path, if mappings are configured."""
-        if self.stl_drive_1 and docker_path.startswith("/library1"):
-            suffix = docker_path[len("/library1"):].replace("/", os.sep)
+        if self.stl_drive_1 and docker_path.startswith("/mnt/drive1"):
+            suffix = docker_path[len("/mnt/drive1"):].replace("/", os.sep)
             return self.stl_drive_1.rstrip("/\\") + suffix
-        if self.stl_drive_2 and docker_path.startswith("/library2"):
-            suffix = docker_path[len("/library2"):].replace("/", os.sep)
+        if self.stl_drive_2 and docker_path.startswith("/mnt/drive2"):
+            suffix = docker_path[len("/mnt/drive2"):].replace("/", os.sep)
             return self.stl_drive_2.rstrip("/\\") + suffix
         return docker_path
 

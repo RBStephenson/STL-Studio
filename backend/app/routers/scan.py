@@ -45,7 +45,7 @@ def _is_under_configured_root(p: Path, roots: list[Path]) -> bool:
 # Safe top-level locations the first-run folder picker may browse before any
 # scan root is configured. Without this, an empty root list left /scan/browse
 # able to list the entire host/container filesystem (#41).
-_UNIX_BROWSE_DIRS = ("/mnt", "/media", "/Volumes", "/data", "/import", "/library1", "/library2")
+_UNIX_BROWSE_DIRS = ("/mnt", "/media", "/Volumes", "/data", "/import")
 
 
 def _bootstrap_roots() -> list[Path]:
