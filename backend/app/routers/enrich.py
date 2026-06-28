@@ -3,9 +3,11 @@ Bulk enrichment endpoints — storefront scrape + fuzzy match + batch apply.
 """
 import asyncio
 import logging
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -16,6 +18,7 @@ from app.services.scrapers.base import ScrapedModel
 from app.services.scrapers.storefront import scrape_storefront
 from app.services.matcher import match_products_to_models
 from app.services.metadata_apply import apply_scraped_to_model
+from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,29 @@ router = APIRouter(prefix="/enrich", tags=["enrich"])
 # Each selected match triggers a detail fetch (MMF/Cults API or Gumroad scrape).
 # Bound the parallelism so we don't hammer a source or serialize the whole batch.
 _FETCH_CONCURRENCY = 5
+
+
+async def _fetch_unique_deep(
+    urls: set[str], mmf_key: Optional[str]
+) -> dict[str, Optional[ScrapedModel]]:
+    """Fetch full detail for each unique product URL once, bounded-concurrently.
+
+    Variants share a product listing, so a URL is only fetched once and fanned
+    out to every model that references it. A URL whose fetch fails maps to None
+    so callers can decide how to degrade. Shared by the bulk-apply and refresh
+    paths so their fetch behaviour can't drift.
+    """
+    sem = asyncio.Semaphore(_FETCH_CONCURRENCY)
+
+    async def _one(url: str):
+        async with sem:
+            try:
+                return url, await scrapers.fetch_url(url, mmf_api_key=mmf_key)
+            except Exception as e:
+                logger.warning(f"Enrich: detail fetch failed for {url}: {e}")
+                return url, None
+
+    return dict(await asyncio.gather(*(_one(u) for u in urls)))
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +84,17 @@ class ApplyItem(BaseModel):
 
 class BulkApplyRequest(BaseModel):
     items: list[ApplyItem]
+
+
+class RefreshRequest(BaseModel):
+    """Scope for a re-enrich. All optional; an empty body refreshes library-wide.
+
+    ``stale_days`` keeps only models whose listing hasn't been fetched in N days
+    (or never), so a periodic refresh skips recently-enriched models.
+    """
+    creator_id: Optional[int] = None
+    model_ids: Optional[list[int]] = None
+    stale_days: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -136,20 +173,8 @@ async def bulk_apply(
     # Fetch each *unique* product URL once (variants share a listing), bounded so
     # we don't hammer a source. MMF needs the key threaded; Cults self-resolves.
     mmf_key = secrets.resolve_mmf_api_key(db)
-    sem = asyncio.Semaphore(_FETCH_CONCURRENCY)
-
-    async def _fetch_deep(url: str):
-        async with sem:
-            try:
-                return url, await scrapers.fetch_url(url, mmf_api_key=mmf_key)
-            except Exception as e:
-                logger.warning(f"Bulk enrich: detail fetch failed for {url}: {e}")
-                return url, None
-
     unique_urls = {item.source_url for item in body.items if item.source_url}
-    fetched: dict[str, Optional[ScrapedModel]] = dict(
-        await asyncio.gather(*(_fetch_deep(u) for u in unique_urls))
-    )
+    fetched = await _fetch_unique_deep(unique_urls, mmf_key)
 
     applied = deep = shallow = 0
     for model in models:
@@ -186,4 +211,65 @@ async def bulk_apply(
         "applied": applied,
         "enriched_deep": deep,
         "fallback_shallow": shallow,
+    }
+
+
+@router.post("/refresh", response_model=dict)
+async def refresh_enrich(body: RefreshRequest, db: Session = Depends(get_db)):
+    """Re-fetch storefront detail for already-enriched models and overwrite.
+
+    ``Model.source_last_fetched`` is recorded on enrich but otherwise unused —
+    a listing can gain images, tags, or a new description after first enrich.
+    This re-fetches detail for every model that already has a ``source_url``
+    (scoped by creator, an explicit id list, or staleness — none → library-wide)
+    and re-applies it.
+
+    Unlike first-time bulk enrich, a refresh is an explicit user action on data
+    that's already matched, so it overwrites aggressively: the title and
+    thumbnail are replaced, not just filled. A model whose fetch fails is left
+    untouched (counted in ``failed``) rather than clobbered with shallow data.
+    """
+    query = db.query(Model).filter(Model.source_url.isnot(None))
+    if body.creator_id is not None:
+        query = query.filter(Model.creator_id == body.creator_id)
+    if body.model_ids:
+        query = query.filter(Model.id.in_(body.model_ids))
+    if body.stale_days is not None:
+        cutoff = utcnow() - timedelta(days=body.stale_days)
+        query = query.filter(
+            or_(
+                Model.source_last_fetched.is_(None),
+                Model.source_last_fetched < cutoff,
+            )
+        )
+
+    models = query.all()
+    if not models:
+        return {"ok": True, "candidates": 0, "refreshed": 0, "failed": 0}
+
+    mmf_key = secrets.resolve_mmf_api_key(db)
+    unique_urls = {m.source_url for m in models if m.source_url}
+    fetched = await _fetch_unique_deep(unique_urls, mmf_key)
+
+    refreshed = failed = 0
+    for model in models:
+        scraped = fetched.get(model.source_url)
+        if scraped is None:
+            failed += 1
+            continue
+        # Keep the model's existing source identity if the fetch didn't carry it.
+        scraped.source_url = scraped.source_url or model.source_url
+        scraped.source_site = scraped.source_site or model.source_site
+        scraped.external_id = scraped.external_id or model.external_id
+        await apply_scraped_to_model(
+            db, model, scraped, overwrite_title=True, thumbnail_fill_only=False
+        )
+        refreshed += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "candidates": len(models),
+        "refreshed": refreshed,
+        "failed": failed,
     }

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Users, Zap, X, RefreshCw, Loader2 } from "lucide-react";
 import { api, Creator, ScanStatus } from "../api/client";
 import StorefrontEnrich from "../components/StorefrontEnrich";
+import RefreshEnrich from "../components/RefreshEnrich";
 import { useToast } from "../context/ToastContext";
 
 export default function Creators() {
@@ -55,6 +56,7 @@ export default function Creators() {
           <span className="text-sm text-gray-500 ml-1">({creators.length})</span>
         </div>
         <div className="flex items-center gap-2">
+          <RefreshEnrich scopeLabel="your whole library" />
           <div className="flex rounded border border-gray-700 overflow-hidden text-xs">
             <button
               onClick={() => setSortBy("name")}
