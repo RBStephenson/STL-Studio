@@ -32,9 +32,31 @@ class MatchCandidate:
 _STRIP_RE = re.compile(r"[^\w\s]")
 
 
+# Noise terms that pollute store titles (and old local names): support status,
+# print format / slicer, file-format and download cruft. Stripped before
+# tokenizing so they don't dilute the Jaccard union or create spurious overlap.
+# Identity, franchise, type ("bust"/"figure") and scale are deliberately kept.
+_NOISE_RE = re.compile(
+    r"\b("
+    r"un[\s_-]?supported|presupport(?:ed)?|pre[\s_-]?supported|presups?|supports?|supported|"
+    r"lychee|chitubox|hollow|solid|split|merged|cut(?:s|ted)?|"
+    r"stls?|obj|fbx|zip|rar|files?|instant|download(?:s|able)?|nsfw|sfw"
+    r")\b",
+    re.I,
+)
+
+
 def _tokens(text: str) -> set[str]:
     text = _STRIP_RE.sub(" ", text.lower())
     return {t for t in text.split() if len(t) > 1}
+
+
+def _denoise_tokens(text: str) -> set[str]:
+    """Tokenize after stripping noise terms; fall back to plain tokens if the
+    strip would leave nothing (a title that is *only* noise)."""
+    cleaned = _NOISE_RE.sub(" ", text)
+    toks = _tokens(cleaned)
+    return toks if toks else _tokens(text)
 
 
 def _score_tokens(a: set[str], b: set[str]) -> float:
@@ -94,8 +116,9 @@ def match_products_to_models(
     """
     candidates: list[MatchCandidate] = []
 
-    # Tokenize each product title once up front, not once per local model (#57).
-    product_tokens = [(product, _tokens(product.title)) for product in products]
+    # Tokenize each product title once up front (#57), denoised so support/format/
+    # file cruft in store titles doesn't dilute or fake overlap (#629).
+    product_tokens = [(product, _denoise_tokens(product.title)) for product in products]
 
     for m in models:
         best_score = 0.0
@@ -106,8 +129,10 @@ def match_products_to_models(
         # each once per model rather than once per product comparison.
         character = m.get("character") or ""
         char_tokens = _tokens(character) if character else set()
+        # Denoise local names too (old/user-edited names may still carry cruft),
+        # so both sides normalise the same way.
         name_token_sets = [
-            _tokens(name)
+            _denoise_tokens(name)
             for name in (m.get("name", ""), m.get("title") or "")
             if name
         ]

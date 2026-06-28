@@ -207,6 +207,38 @@ class TestScaleMatching:
 
 
 # ---------------------------------------------------------------------------
+# product-title denoising (#629)
+# ---------------------------------------------------------------------------
+
+class TestTitleDenoise:
+    def test_noisy_title_still_matches(self):
+        # Support/format/file cruft in the store title is stripped before scoring.
+        products = [_product("Akuma Unsupported STL Files Instant Download")]
+        result = match_products_to_models([*products], [_model(1, name="Akuma")])
+        assert len(result) == 1
+        assert result[0].score >= 0.55  # clean "akuma" vs "akuma" after denoise
+
+    def test_noise_does_not_dilute_score(self):
+        clean = match_products_to_models([_product("Akuma Bust")], [_model(1, name="Akuma Bust")])
+        noisy = match_products_to_models(
+            [_product("Akuma Bust Supported STL Lychee")], [_model(2, name="Akuma Bust")]
+        )
+        assert noisy[0].score == clean[0].score  # cruft stripped → identical
+
+    def test_identity_and_scale_preserved(self):
+        # Denoise keeps the character, type word, and scale.
+        products = [_product("Jill Valentine Bust 75mm Supported")]
+        result = match_products_to_models(products, [_model(1, name="Jill Valentine Bust", auto_tags=["75mm"])])
+        assert result[0].score >= 0.55
+
+    def test_title_that_is_only_noise_does_not_crash(self):
+        # Falls back to raw tokens; no identity to match → no false match.
+        products = [_product("Supported STL Files")]
+        result = match_products_to_models(products, [_model(1, name="Akuma")], min_score=0.20)
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
 # #57 — pre-tokenization: each title/name tokenized once, not per comparison
 # ---------------------------------------------------------------------------
 
