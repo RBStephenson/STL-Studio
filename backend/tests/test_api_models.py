@@ -1382,3 +1382,54 @@ class TestManualGroupEndpoints:
 
         resp = client.patch(f"/models/groups/{gid}", json={"rep_model_id": outsider.id})
         assert resp.status_code == 400
+
+
+class TestGroupingStrategy:
+    """P4 (#618): per-subtree grouping strategy."""
+
+    def test_set_off_ungroups_subtree(self, client, db):
+        from app.models import VariantGroup, GroupingStrategy
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin Supported", character="Goblin")
+        b = make_model(db, creator, name="Goblin Unsupported", character="Goblin")
+        # Put them in an auto group so we can see "off" tear it down.
+        g = VariantGroup(creator_id=creator.id, label="Goblin", source="auto")
+        db.add(g); db.flush()
+        a.variant_group_id = g.id; b.variant_group_id = g.id
+        commit_all(db)
+        parent = a.folder_path.rsplit("/", 1)[0]
+
+        resp = client.post("/models/grouping-strategy", json={"path": parent, "strategy": "off"})
+        assert resp.status_code == 200
+        assert db.query(GroupingStrategy).filter_by(path=parent).count() == 1
+        db.refresh(a); db.refresh(b)
+        assert a.variant_group_id is None and b.variant_group_id is None
+
+    def test_set_auto_clears_override(self, client, db):
+        from app.models import GroupingStrategy
+        creator = make_creator(db)
+        a = make_model(db, creator, name="X")
+        commit_all(db)
+        parent = a.folder_path.rsplit("/", 1)[0]
+        db.add(GroupingStrategy(path=parent, strategy="off")); commit_all(db)
+
+        resp = client.post("/models/grouping-strategy", json={"path": parent, "strategy": "auto"})
+        assert resp.status_code == 200
+        assert db.query(GroupingStrategy).filter_by(path=parent).count() == 0
+
+    def test_get_effective_strategy_nearest_ancestor(self, client, db):
+        from app.models import GroupingStrategy
+        db.add(GroupingStrategy(path="/lib/Creator", strategy="off"))
+        db.add(GroupingStrategy(path="/lib/Creator/sub", strategy="auto"))
+        commit_all(db)
+
+        r1 = client.get("/models/grouping-strategy", params={"path": "/lib/Creator/sub/Model"}).json()
+        assert r1["strategy"] == "auto"
+        r2 = client.get("/models/grouping-strategy", params={"path": "/lib/Creator/other/Model"}).json()
+        assert r2["strategy"] == "off"
+        r3 = client.get("/models/grouping-strategy", params={"path": "/elsewhere/Model"}).json()
+        assert r3["strategy"] == "auto"
+
+    def test_invalid_strategy_rejected(self, client, db):
+        resp = client.post("/models/grouping-strategy", json={"path": "/x", "strategy": "bogus"})
+        assert resp.status_code == 400

@@ -9,14 +9,14 @@ from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride, ScanRoot, STLFile, VariantGroup
+from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride, ScanRoot, STLFile, VariantGroup, GroupingStrategy
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
     ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl, FavoriteUpdate, RatingUpdate, QueueReorder, GroupReorder,
     PrintStatusUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate,
     BulkExcludeUpdate, BulkReviewUpdate, BulkEnrichUpdate, SetGroupBody, BatchSetGroupBody,
     BatchSetSourceUrl, GroupRepUpdate, BulkDeleteRequest, BulkDeleteResponse,
-    GroupMergeBody, GroupSplitBody, GroupPatchBody, VariantGroupRead,
+    GroupMergeBody, GroupSplitBody, GroupPatchBody, VariantGroupRead, GroupingStrategyBody,
 )
 
 _log = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ from app.services.variant_sync import propagate_source_url
 from app.services.scrapers.base import detect_site
 from urllib.parse import urlparse
 from app.services.tag_sync import sync_model_tags
-from app.services import scanner
+from app.services import scanner, grouping
 from app.services.scanner import resolve_creator
 from app.config import settings
 from app.utils import utcnow
@@ -1324,6 +1324,58 @@ def patch_group(group_id: int, body: GroupPatchBody, db: Session = Depends(get_d
     db.commit()
     db.refresh(group)
     return group
+
+
+@router.get("/grouping-strategy")
+def get_grouping_strategy(path: str = Query(...), db: Session = Depends(get_db)):
+    """Effective grouping strategy for a folder path (nearest ancestor, default auto)."""
+    strategies = [(grouping._norm(p), s) for (p, s) in db.query(GroupingStrategy.path, GroupingStrategy.strategy)]
+    return {"path": path, "strategy": grouping._resolve_strategy(path, strategies)}
+
+
+@router.post("/grouping-strategy")
+def set_grouping_strategy(body: GroupingStrategyBody, db: Session = Depends(get_db)):
+    """Set a per-subtree grouping strategy (#618). "off" leaves the subtree's
+    models ungrouped; "auto" clears the override (restores the proposal engine).
+    Re-runs the engine for affected creators so the change shows immediately.
+    409 while a scan is running."""
+    if scanner.get_status()["running"]:
+        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
+    if body.strategy not in ("auto", "off"):
+        raise HTTPException(status_code=400, detail="strategy must be 'auto' or 'off'.")
+
+    norm = grouping._norm(body.path)
+    if body.strategy == "off":
+        stmt = (
+            _sqlite_insert(GroupingStrategy)
+            .values(path=body.path, strategy="off")
+            .on_conflict_do_update(index_elements=["path"], set_={"strategy": "off"})
+        )
+        db.execute(stmt)
+    else:
+        db.query(GroupingStrategy).filter(GroupingStrategy.path == body.path).delete()
+    db.flush()
+
+    # Re-group the creators whose models live under this subtree so the strategy
+    # takes effect now rather than at the next scan.
+    affected = (
+        db.query(Model.creator_id)
+        .filter(Model.creator_id != None)
+        .distinct()
+        .all()
+    )
+    for (creator_id,) in affected:
+        # Cheap guard: only regroup a creator that actually has a model under path.
+        has = (
+            db.query(Model.id)
+            .filter(Model.creator_id == creator_id)
+            .filter((Model.folder_path == body.path) | (Model.folder_path.like(body.path.rstrip("/\\") + "%")))
+            .first()
+        )
+        if has:
+            grouping.regroup_creator(db, creator_id)
+    db.commit()
+    return {"ok": True, "path": body.path, "strategy": body.strategy}
 
 
 def _host_label(url: str) -> str | None:

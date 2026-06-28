@@ -23,8 +23,26 @@ from collections import Counter, defaultdict
 
 from sqlalchemy.orm import Session
 
-from app.models import Model, STLFile, VariantGroup, GroupOverride
+from app.models import Model, STLFile, VariantGroup, GroupOverride, GroupingStrategy
 from app.services import name_parser
+
+
+def _norm(path: str) -> str:
+    """Normalise a folder path for ancestor comparison (separators + trailing /)."""
+    return path.replace("\\", "/").rstrip("/")
+
+
+def _resolve_strategy(model_path: str, strategies: list[tuple[str, str]]) -> str:
+    """Nearest-ancestor strategy for a model folder, defaulting to "auto".
+
+    `strategies` is a list of (normalised_path, strategy); the longest path that is
+    the model's folder or an ancestor of it wins."""
+    mp = _norm(model_path)
+    best_len, best = -1, "auto"
+    for spath, strat in strategies:
+        if (mp == spath or mp.startswith(spath + "/")) and len(spath) > best_len:
+            best_len, best = len(spath), strat
+    return best
 
 # A file_hash shared by more than this many models is treated as a ubiquitous
 # part (a common base, a shared support raft) and ignored for grouping — it would
@@ -87,7 +105,22 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         m for m in models
         if m.variant_group_id not in manual_group_ids and m.folder_path not in override_paths
     ]
-    if not candidates:
+
+    # Per-subtree strategy (#618): models under an "off" subtree are never
+    # auto-grouped — each stays standalone. The nearest-ancestor strategy wins,
+    # defaulting to "auto".
+    strategies = [(_norm(p), s) for (p, s) in db.query(GroupingStrategy.path, GroupingStrategy.strategy)]
+    if strategies:
+        off_ids = {m.id for m in candidates if _resolve_strategy(m.folder_path, strategies) == "off"}
+        off_models = [m for m in candidates if m.id in off_ids]
+        candidates = [m for m in candidates if m.id not in off_ids]
+        for m in off_models:
+            if m.variant_group_id not in manual_group_ids:
+                m.variant_group_id = None
+    else:
+        off_models = []
+
+    if not candidates and not off_models:
         _drop_auto_groups(db, creator_id, manual_group_ids)
         return
 

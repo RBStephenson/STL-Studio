@@ -310,6 +310,13 @@ class GroupPatchBody(BaseModel):
     rep_model_id: Optional[int] = None
 
 
+class GroupingStrategyBody(BaseModel):
+    """Set a per-subtree grouping strategy (#618). strategy ∈ {auto, off}; "auto"
+    clears any override (restores the default proposal engine for the subtree)."""
+    path: str
+    strategy: str  # "auto" | "off"
+
+
 class InboxScanRequest(BaseModel):
     path: str
 

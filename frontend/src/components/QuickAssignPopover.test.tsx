@@ -6,7 +6,7 @@ const mockCollections = [
   { id: 1, name: "Dioramas", description: null, model_count: 3 },
   { id: 2, name: "Showcase", description: null, model_count: 10 },
 ];
-const mockDetail = { id: 5, collection_ids: [1], tags: ["figure"] };
+const mockDetail = { id: 5, collection_ids: [1], tags: ["figure"], folder_path: "/lib/Creator/Pack/Goblin" };
 
 vi.mock("../api/client", () => ({
   api: {
@@ -19,6 +19,8 @@ vi.mock("../api/client", () => ({
       get: vi.fn(async () => mockDetail),
       update: vi.fn(async () => ({ ok: true })),
       clearThumbnail: vi.fn(async () => ({ ok: true })),
+      getGroupingStrategy: vi.fn(async () => ({ path: "/lib/Creator/Pack", strategy: "auto" })),
+      setGroupingStrategy: vi.fn(async () => ({ ok: true, path: "/lib/Creator/Pack", strategy: "off" })),
     },
   },
 }));
@@ -53,6 +55,17 @@ describe("QuickAssignPopover (#172)", () => {
     renderPopover();
     expect(screen.getByText("Tags")).toBeInTheDocument();
     expect(screen.getByText("Collections")).toBeInTheDocument();
+  });
+
+  it("toggles per-folder auto-grouping off (#618)", async () => {
+    renderPopover();
+    const btn = await screen.findByRole("button", { name: /stop auto-grouping this folder/i });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(vi.mocked(api.models.setGroupingStrategy)).toHaveBeenCalledWith("/lib/Creator/Pack", "off")
+    );
+    // Label flips to the resume action after turning off.
+    await screen.findByRole("button", { name: /resume auto-grouping this folder/i });
   });
 
   it("shows initial tags as removable chips", () => {

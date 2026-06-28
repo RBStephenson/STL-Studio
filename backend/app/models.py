@@ -71,6 +71,19 @@ class GroupOverride(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class GroupingStrategy(Base):
+    """Per-subtree variant-grouping strategy (#618). Keyed by a folder path; the
+    nearest ancestor of a model's folder wins, defaulting to "auto" when none
+    applies. "off" tells the proposal engine to leave that subtree's models
+    ungrouped (each standalone)."""
+    __tablename__ = "grouping_strategies"
+
+    id = Column(Integer, primary_key=True)
+    path = Column(String, unique=True, nullable=False)   # folder path the strategy anchors
+    strategy = Column(String, nullable=False, default="auto")  # "auto" | "off"
+    created_at = Column(DateTime, default=utcnow)
+
+
 class Creator(Base):
     __tablename__ = "creators"
 

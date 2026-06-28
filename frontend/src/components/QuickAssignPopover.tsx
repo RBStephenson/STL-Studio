@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Tag, Layers, Check, Loader2, ImageOff, Pencil } from "lucide-react";
+import { X, Tag, Layers, Check, Loader2, ImageOff, Pencil, Ungroup } from "lucide-react";
 import { api, Collection } from "../api/client";
 import { useToast } from "../context/ToastContext";
 
@@ -49,16 +49,46 @@ export default function QuickAssignPopover({
   const [imageCleared, setImageCleared] = useState(false);
   const [clearingImage, setClearingImage] = useState(false);
 
-  // Load collections + current membership on mount
+  // Per-subtree grouping strategy (#618): the parent folder of this model.
+  const [groupFolder, setGroupFolder] = useState<string | null>(null);
+  const [groupStrategy, setGroupStrategy] = useState<"auto" | "off" | null>(null);
+  const [savingStrategy, setSavingStrategy] = useState(false);
+
+  // Load collections + current membership + grouping strategy on mount
   useEffect(() => {
-    Promise.all([api.collections.list(), api.models.get(modelId)])
-      .then(([cols, detail]) => {
-        setCollections(cols);
+    api.models.get(modelId)
+      .then((detail) => {
         setMemberIds(new Set(detail.collection_ids ?? []));
+        const parent = (detail.folder_path ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+        const folder = parent.slice(0, parent.lastIndexOf("/"));
+        if (folder) {
+          setGroupFolder(folder);
+          api.models.getGroupingStrategy(folder)
+            .then((r) => setGroupStrategy(r.strategy))
+            .catch(() => {});
+        }
       })
+      .catch(() => toast("Couldn't load model details.", "error"));
+    api.collections.list()
+      .then(setCollections)
       .catch(() => toast("Couldn't load collections.", "error"))
       .finally(() => setLoadingCollections(false));
   }, [modelId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleGrouping = async () => {
+    if (!groupFolder) return;
+    const next = groupStrategy === "off" ? "auto" : "off";
+    setSavingStrategy(true);
+    try {
+      await api.models.setGroupingStrategy(groupFolder, next);
+      setGroupStrategy(next);
+      toast(next === "off" ? "Auto-grouping off for this folder." : "Auto-grouping restored.", "success");
+    } catch (e: any) {
+      toast(e?.message || "Couldn't update grouping — try again.", "error");
+    } finally {
+      setSavingStrategy(false);
+    }
+  };
 
   // Close on outside click
   useEffect(() => {
@@ -311,6 +341,22 @@ export default function QuickAssignPopover({
           </div>
         )}
       </div>
+
+      {/* Grouping strategy (#618): stop/resume auto-grouping this folder */}
+      {groupFolder && groupStrategy !== null && (
+        <div className="px-3 py-2 border-t border-gray-700/50">
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleGrouping(); }}
+            disabled={savingStrategy}
+            title={`Folder: ${groupFolder}`}
+            className="flex items-center gap-2 w-full px-1.5 py-1 rounded text-xs text-left text-gray-300 hover:bg-gray-800 transition-colors disabled:opacity-50"
+          >
+            {savingStrategy ? <Loader2 size={11} className="animate-spin" /> : <Ungroup size={11} className="text-gray-400" />}
+            {groupStrategy === "off" ? "Resume auto-grouping this folder" : "Stop auto-grouping this folder"}
+          </button>
+        </div>
+      )}
 
       {/* Image section (#192) */}
       {hasImage && !imageCleared && (

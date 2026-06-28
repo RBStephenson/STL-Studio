@@ -161,6 +161,43 @@ class TestOverrideRespected:
         assert _groups(db, creator) == []
 
 
+class TestSubtreeStrategy:
+    def test_off_strategy_prevents_grouping(self, db):
+        from app.models import GroupingStrategy
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin Supported")
+        b = make_model(db, creator, name="Goblin Unsupported")
+        db.flush()
+        # off on the common parent folder of a + b
+        parent = a.folder_path.rsplit("/", 1)[0]
+        db.add(GroupingStrategy(path=parent, strategy="off"))
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+        db.refresh(a); db.refresh(b)
+        assert a.variant_group_id is None and b.variant_group_id is None
+
+    def test_nearest_ancestor_auto_overrides_outer_off(self, db):
+        from app.models import GroupingStrategy
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin Supported")
+        b = make_model(db, creator, name="Goblin Unsupported")
+        # Put both under a deeper subtree we can target with a closer "auto".
+        a.folder_path = "/lib/Creator/sub/Goblin Supported"
+        b.folder_path = "/lib/Creator/sub/Goblin Unsupported"
+        db.flush()
+        db.add(GroupingStrategy(path="/lib/Creator", strategy="off"))
+        db.add(GroupingStrategy(path="/lib/Creator/sub", strategy="auto"))
+        db.flush()
+
+        _run(db, creator)
+
+        # The closer "auto" wins → they group despite the outer "off".
+        assert len(_groups(db, creator)) == 1
+
+
 class TestRep:
     def test_rep_prefers_is_group_rep(self, db):
         creator = make_creator(db)

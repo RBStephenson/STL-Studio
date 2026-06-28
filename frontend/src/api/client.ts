@@ -1108,6 +1108,18 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
+    // Per-subtree grouping strategy (#618): "off" stops auto-grouping a folder,
+    // "auto" restores it.
+    getGroupingStrategy: (path: string) =>
+      request<{ path: string; strategy: "auto" | "off" }>(
+        `/models/grouping-strategy?path=${encodeURIComponent(path)}`,
+      ),
+    setGroupingStrategy: (path: string, strategy: "auto" | "off") =>
+      request<{ ok: boolean; path: string; strategy: string }>("/models/grouping-strategy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, strategy }),
+      }),
     // Persist a manual model order within a variant group (#399). Empty `ids`
     // resets the group to its heuristic order.
     reorderGroup: (creatorId: number, character: string, ids: number[]) =>
