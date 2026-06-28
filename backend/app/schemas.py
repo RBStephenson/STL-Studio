@@ -52,6 +52,7 @@ class ModelRead(ModelBase):
     removed_auto_tags: list = []
     category: Optional[str] = None
     custom_attributes: dict = {}
+    parsed_attributes: dict = {}  # scanner-detected: support_status, cut_status, slicer, version
     needs_review: bool = False
     is_inbox: bool = False
     nsfw: bool = False
@@ -74,6 +75,11 @@ class ModelRead(ModelBase):
     @classmethod
     def _coerce_list(cls, v: object) -> list:
         return v if isinstance(v, list) else []
+
+    @field_validator("parsed_attributes", mode="before")
+    @classmethod
+    def _coerce_dict(cls, v: object) -> dict:
+        return v if isinstance(v, dict) else {}
     rating: Optional[float] = None
     download_count: Optional[int] = None
     creator_id: Optional[int] = None
