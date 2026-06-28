@@ -113,7 +113,8 @@ class Model(Base):
     auto_tags = Column(JSON, default=list)        # scanner-detected: scale, type, modifiers
     removed_auto_tags = Column(JSON, default=list)  # auto-tags the user suppressed; survives rescans
     category = Column(String, nullable=True)
-    custom_attributes = Column(JSON, default=dict)  # arbitrary key/value attributes
+    custom_attributes = Column(JSON, default=dict)  # arbitrary key/value attributes (user-set)
+    parsed_attributes = Column(JSON, default=dict)  # scanner-detected variant attrs: support_status, cut_status, slicer, version
     print_settings = Column(JSON, default=dict)
     external_id = Column(String, nullable=True)   # ID on the source site
 

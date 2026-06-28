@@ -923,15 +923,30 @@ def _index_model(
             and folder.stat().st_mtime < last_scanned.timestamp()
         )
 
+        # Clean, human-readable display name derived from the raw folder name
+        # (strips scale/support/slicer/version/junk, title-cased). The raw folder
+        # name stays the source of truth on disk; folder_path is unchanged.
+        clean_name = name_parser.display_name(folder.name, creator.name)
+
         is_new = model is None
         if is_new:
             model = Model(
-                name=folder.name,
+                name=clean_name,
                 folder_path=folder_path,
                 creator_id=creator.id,
             )
             db.add(model)
             db.flush()
+        elif model.name in (folder.name, clean_name):
+            # Name still matches what the scanner would generate (raw or current
+            # derivation) — the user hasn't renamed it, so let parser improvements
+            # refresh it. A user-edited name is left untouched.
+            model.name = clean_name
+
+        # Scanner-owned structured variant attributes (support/cut/slicer/version).
+        # Kept separate from user-set custom_attributes so a rescan never clobbers
+        # user edits. Recomputed every scan so parser improvements propagate.
+        model.parsed_attributes = name_parser.parsed_attributes(folder.name)
 
         # Character grouping — use the user's durable override when present;
         # otherwise always reflect the current walk (including None) so a model

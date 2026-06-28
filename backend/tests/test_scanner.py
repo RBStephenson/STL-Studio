@@ -1284,3 +1284,80 @@ class TestGroupByCharacterFolder:
 
         m = next(m for m in _models(db, creator) if Path(m.folder_path) == leaf)
         assert m.character == "Custom Group"
+
+
+# ---------------------------------------------------------------------------
+# Clean display name + structured parsed_attributes (#608)
+# ---------------------------------------------------------------------------
+
+class TestCleanNameAndAttributes:
+    def _model_at(self, db, creator, leaf: Path) -> Model:
+        return next(m for m in _models(db, creator) if Path(m.folder_path) == leaf)
+
+    def test_new_model_gets_clean_display_name(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        leaf = creator_dir / "Ada Wong 1-6 Unsupported"
+        _stl(leaf)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert self._model_at(db, creator, leaf).name == "Ada Wong"
+
+    def test_parsed_attributes_populated(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        leaf = creator_dir / "Ada Wong 1-6 Unsupported Hollow Chitubox v2"
+        _stl(leaf)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert self._model_at(db, creator, leaf).parsed_attributes == {
+            "support_status": "unsupported",
+            "cut_status": "hollow",
+            "slicer": "chitubox",
+            "version": "v2",
+        }
+
+    def test_pure_variant_name_falls_back_to_raw(self, db, tmp_path):
+        # Nothing product-identifying in the leaf → keep the raw folder name.
+        creator_dir = tmp_path / "Creator"
+        leaf = creator_dir / "Goblin" / "75mm Unsupported"
+        _stl(leaf)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert self._model_at(db, creator, leaf).name == "75mm Unsupported"
+
+    def test_user_rename_not_clobbered_on_rescan(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        leaf = creator_dir / "Ada Wong 1-6 Unsupported"
+        _stl(leaf)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+        m = self._model_at(db, creator, leaf)
+        m.name = "My Custom Name"
+        db.commit()
+
+        _walk(db, creator, creator_dir)
+
+        assert self._model_at(db, creator, leaf).name == "My Custom Name"
+
+    def test_untouched_name_refreshes_on_rescan(self, db, tmp_path):
+        # A model whose name still equals the scanner derivation should pick up
+        # parser improvements — simulate a legacy row holding the raw folder name.
+        creator_dir = tmp_path / "Creator"
+        leaf = creator_dir / "Ada Wong 1-6 Unsupported"
+        _stl(leaf)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+        m = self._model_at(db, creator, leaf)
+        m.name = leaf.name          # legacy raw-folder-name value
+        db.commit()
+
+        _walk(db, creator, creator_dir)
+
+        assert self._model_at(db, creator, leaf).name == "Ada Wong"
