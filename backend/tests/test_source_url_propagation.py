@@ -3,6 +3,9 @@ Tests for source_url propagation across a variant group (#202): a URL written
 to one variant is copied to same-group siblings that don't have one, via all
 three write paths (metadata editor, Find on Web apply, storefront enrichment).
 """
+from unittest.mock import AsyncMock
+
+from app.routers import enrich
 from tests.conftest import make_creator, make_model
 
 URL = "https://www.myminifactory.com/object/print-ada-wong-12345"
@@ -95,8 +98,12 @@ class TestScrapeApplyPropagation:
 
 
 class TestEnrichApplyPropagation:
-    def test_bulk_apply_propagates_to_group(self, client, db):
+    def test_bulk_apply_propagates_to_group(self, client, db, monkeypatch):
         _, (target, sib, _) = _group(db)
+
+        # No live fetch: force the shallow path so the match's own source
+        # fields are what propagate (a real MMF fetch would rewrite them).
+        monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=None))
 
         resp = client.post("/enrich/storefront/apply", json={"items": [{
             "model_id": target.id,
