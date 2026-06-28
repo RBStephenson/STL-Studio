@@ -42,12 +42,13 @@ vi.mock("../context/ToastContext", () => ({ useToast: () => ({ toast: toastMock 
 import { api } from "../api/client";
 
 // This page imports a heavy component tree and each test drives several awaited
-// mock promises through React renders. The inner findBy/waitFor calls already
-// allow 5000ms, which collides with Vitest's default 5000ms per-test timeout —
-// on a slow CI runner the test is killed before its own waits resolve (flaky
-// timeouts on the dropdown-gated tests). Give the file headroom above the inner
-// waits so a genuinely-missing element still fails fast with a useful message.
+// mock promises through React renders. Under a loaded parallel CI runner the
+// test's own scheduler is starved, so an element can take >5s of wall-clock to
+// appear even though the mocks resolve instantly — the inner 5000ms findBy waits
+// then time out (#596). Inner waits use _WAIT (10s), comfortably under the 15s
+// per-test cap, so a genuinely-missing element still fails with a useful message.
 vi.setConfig({ testTimeout: 15000, hookTimeout: 15000 });
+const _WAIT = 10000;
 
 const PACK = {
   name: "PackA", source_path: "/src/PackA", file_count: 0, model_ids: [1, 2],
@@ -78,7 +79,7 @@ function setup(opts: { mapping?: { source_path: string; library_id: number } | n
 /** Click "Scan for New Files" and wait for the pack card to appear. */
 async function scan() {
   fireEvent.click(await screen.findByRole("button", { name: /scan for new files/i }));
-  return screen.findByText("PackA", {}, { timeout: 5000 });
+  return screen.findByText("PackA", {}, { timeout: _WAIT });
 }
 
 describe("ImportPreviewPage (#452 C2)", () => {
@@ -157,9 +158,9 @@ describe("ImportPreviewPage (#452 C2)", () => {
     await waitFor(() => expect(api.import.scanFolder).toHaveBeenCalledWith("/src/PackA"));
     await waitFor(
       () => expect(api.models.bulkEnrich).toHaveBeenCalledWith([1, 2], { creator_name: "Hijos De Pulvo" }),
-      { timeout: 5000 }
+      { timeout: _WAIT }
     );
-    expect(await screen.findByText("Imported", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText("Imported", {}, { timeout: _WAIT })).toBeInTheDocument();
   });
 
   it("persists notes and source_url through bulkEnrich on import (#458)", async () => {
@@ -175,7 +176,7 @@ describe("ImportPreviewPage (#452 C2)", () => {
       () => expect(api.models.bulkEnrich).toHaveBeenCalledWith(
         [1, 2], { notes: "Pack notes", source_url: "https://cults3d.com/x" },
       ),
-      { timeout: 5000 }
+      { timeout: _WAIT }
     );
   });
 
@@ -208,7 +209,7 @@ describe("ImportPreviewPage (#452 C2)", () => {
 
     await waitFor(
       () => expect(api.collections.bulkAddModels).toHaveBeenCalledWith(7, [1, 2]),
-      { timeout: 5000 }
+      { timeout: _WAIT }
     );
   });
 });
