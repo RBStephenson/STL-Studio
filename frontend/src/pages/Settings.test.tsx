@@ -436,7 +436,7 @@ describe("Settings – Library name + import destination (#452)", () => {
 
   const root = {
     id: 7, path: "/srv/minis", enabled: true, layout: "{creator}",
-    last_scanned: null, name: "minis", is_writable: false,
+    last_scanned: null, name: "minis", is_writable: false, group_by_character: false,
   };
 
   it("toggles is_writable via updateRoot", async () => {
@@ -448,6 +448,18 @@ describe("Settings – Library name + import destination (#452)", () => {
     const checkbox = await screen.findByRole("checkbox", { name: /import destination/i });
     await userEvent.click(checkbox);
     expect(api.scan.updateRoot).toHaveBeenCalledWith(7, { is_writable: true });
+  });
+
+  it("toggles group_by_character via updateRoot", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.scan.roots).mockResolvedValue([root]);
+
+    render(<Settings />);
+
+    const checkbox = await screen.findByRole("checkbox", { name: /group variants by character/i });
+    expect(checkbox).not.toBeChecked();
+    await userEvent.click(checkbox);
+    expect(api.scan.updateRoot).toHaveBeenCalledWith(7, { group_by_character: true });
   });
 
   it("saves a renamed library on blur", async () => {

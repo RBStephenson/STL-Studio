@@ -23,6 +23,10 @@ class ScanRoot(Base):
     # Folder-layout template (see services/layout.py). Describes the path levels
     # down to the creator; the scanner detects models heuristically below it.
     layout = Column(String, nullable=False, default="{creator}", server_default="{creator}")
+    # Opt-in folder-driven grouping: when on, the first folder below the creator is
+    # the character, and every model anywhere beneath it is one variant group —
+    # bypassing the name-based heuristic. Off by default. (User overrides still win.)
+    group_by_character = Column(Boolean, nullable=False, default=False, server_default="0")
     last_scanned = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 

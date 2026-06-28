@@ -41,6 +41,14 @@ vi.mock("../context/ToastContext", () => ({ useToast: () => ({ toast: toastMock 
 
 import { api } from "../api/client";
 
+// This page imports a heavy component tree and each test drives several awaited
+// mock promises through React renders. The inner findBy/waitFor calls already
+// allow 5000ms, which collides with Vitest's default 5000ms per-test timeout —
+// on a slow CI runner the test is killed before its own waits resolve (flaky
+// timeouts on the dropdown-gated tests). Give the file headroom above the inner
+// waits so a genuinely-missing element still fails fast with a useful message.
+vi.setConfig({ testTimeout: 15000, hookTimeout: 15000 });
+
 const PACK = {
   name: "PackA", source_path: "/src/PackA", file_count: 0, model_ids: [1, 2],
   creator_name: null, title: null, character: null, notes: null, source_url: null, tags: [], images: [],

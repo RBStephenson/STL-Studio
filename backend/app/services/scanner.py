@@ -462,13 +462,13 @@ def _creator_dirs_by_name(name: str, db: Session) -> list[tuple[Path, list[str]]
     Used as a fallback when _creator_dirs_for returns nothing (zero indexed
     models yet). Enables per-creator rescan to bootstrap a brand-new creator.
     """
-    results: list[tuple[Path, list[str]]] = []
+    results: list[tuple[Path, list[str], bool]] = []
     for root in db.query(ScanRoot).filter(ScanRoot.enabled == True).all():
         root_path = Path(root.path)
         roles = layout.roles_for(root.layout)
         for creator_dir, layout_tags in layout.iter_creator_dirs(root_path, roles):
             if creator_dir.name.lower() == name.lower() and creator_dir.exists():
-                results.append((creator_dir, layout_tags))
+                results.append((creator_dir, layout_tags, root.group_by_character))
     return results
 
 
@@ -477,14 +477,15 @@ def _creator_dirs_for(creator: Creator, db: Session) -> list[tuple[Path, list[st
     models, honouring each scan root's layout. Returns (creator_dir, layout_tags)
     pairs. A creator normally maps to one folder, but we handle several
     defensively (e.g. the same name under multiple {tag} branches)."""
-    roots = [(Path(r.path), layout.roles_for(r.layout))
+    roots = [(Path(r.path), layout.roles_for(r.layout), r.group_by_character)
              for r in db.query(ScanRoot).filter(ScanRoot.enabled == True).all()]
     boundaries: dict[Path, list[str]] = {}
+    group_flags: dict[Path, bool] = {}
     for (fp,) in db.query(Model.folder_path).filter(Model.creator_id == creator.id):
         if not fp:
             continue
         p = Path(fp)
-        for root, roles in roots:
+        for root, roles, grp in roots:
             try:
                 rel = p.relative_to(root)
             except ValueError:
@@ -493,9 +494,11 @@ def _creator_dirs_for(creator: Creator, db: Session) -> list[tuple[Path, list[st
             if len(rel.parts) > depth:
                 creator_dir = root.joinpath(*rel.parts[:depth + 1])
                 boundaries[creator_dir] = layout.tags_for_path(creator_dir, root, roles)
+                group_flags[creator_dir] = grp
             break
 
-    return [(d, tags) for d, tags in sorted(boundaries.items()) if d.exists()]
+    return [(d, tags, group_flags.get(d, False))
+            for d, tags in sorted(boundaries.items()) if d.exists()]
 
 
 def scan_creator(creator_id: int):
@@ -549,7 +552,7 @@ def scan_creator(creator_id: int):
                 db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
             db.commit()
 
-            for creator_dir, layout_tags in dirs:
+            for creator_dir, layout_tags, grp_by_char in dirs:
                 if _cancel_requested:
                     with _state_lock:
                         _scan_state["message"] = "cancelled"
@@ -566,6 +569,7 @@ def scan_creator(creator_id: int):
                     stl_cache={},
                     last_scanned=None,  # full reindex of this creator
                     layout_tags=layout_tags,
+                    group_by_character=grp_by_char,
                 )
 
             if not _cancel_requested:
@@ -715,6 +719,7 @@ def _scan_root(root: ScanRoot, db: Session):
                 stl_cache={},
                 last_scanned=root_last_scanned,
                 layout_tags=layout_tags,
+                group_by_character=root.group_by_character,
             )
         except Exception:
             logger.exception(f"Error scanning creator: {creator_dir.name}")
@@ -738,6 +743,7 @@ def _walk_for_models(
     parent_names: list[str] | None = None,
     layout_tags: list[str] | None = None,
     is_inbox: bool = False,
+    group_by_character: bool = False,
 ):
     if not folder.is_dir():
         return
@@ -863,7 +869,13 @@ def _walk_for_models(
             common_label = own_key
 
     for child in sorted(child_dirs):
-        if strategy == "common":
+        if group_by_character:
+            # Folder-driven grouping (opt-in): the first folder below the creator
+            # names the group; every model beneath inherits it, so the whole
+            # character subtree is one variant group. `character` is None only at
+            # the creator boundary, where each child becomes its own group.
+            child_character = character if character is not None else child.name
+        elif strategy == "common":
             child_character = common_label
         elif strategy == "leaf":
             child_character = keys.get(child.name) or own_character
@@ -872,7 +884,8 @@ def _walk_for_models(
         _walk_for_models(child, creator, db, creator_boundary,
                          character=child_character, parent_names=next_parents,
                          stl_cache=stl_cache, last_scanned=last_scanned,
-                         layout_tags=layout_tags, is_inbox=is_inbox)
+                         layout_tags=layout_tags, is_inbox=is_inbox,
+                         group_by_character=group_by_character)
 
 
 def _index_model(

@@ -29,11 +29,12 @@ def _img(folder: Path, name: str = "render.png") -> None:
     (folder / name).write_bytes(b"\x89PNG\r\n")
 
 
-def _walk(db, creator: Creator, creator_dir: Path) -> None:
+def _walk(db, creator: Creator, creator_dir: Path, group_by_character: bool = False) -> None:
     scanner._walk_for_models(
         folder=creator_dir, creator=creator, db=db,
         creator_boundary=creator_dir, character=None,
         stl_cache={}, last_scanned=None,
+        group_by_character=group_by_character,
     )
 
 
@@ -1026,7 +1027,7 @@ class TestCreatorDirsByName:
         db.commit()
 
         results = scanner._creator_dirs_by_name("Abe3D", db)
-        paths = [str(p) for p, _ in results]
+        paths = [str(p) for p, *_ in results]
         assert str(creator_dir) in paths
 
     def test_case_insensitive_name_match(self, db, tmp_path):
@@ -1041,7 +1042,7 @@ class TestCreatorDirsByName:
         db.commit()
 
         results = scanner._creator_dirs_by_name("abe3d", db)
-        assert any(p == creator_dir for p, _ in results)
+        assert any(p == creator_dir for p, *_ in results)
 
     def test_no_match_returns_empty(self, db, tmp_path):
         """Returns an empty list when no creator folder matches the name."""
@@ -1219,3 +1220,67 @@ class TestScanCompletionSummary:
     def test_summary_omits_removed_when_zero(self, db, tmp_path, monkeypatch):
         status = self._run_with_stubs(db, tmp_path, monkeypatch, models=4, files=9, removed=0)
         assert status["message"] == "done — 4 models, 9 files"
+
+
+# ---------------------------------------------------------------------------
+# Folder-driven grouping (opt-in "Group variants by character")
+# ---------------------------------------------------------------------------
+
+class TestGroupByCharacterFolder:
+    def test_everything_under_a_char_folder_is_one_group(self, db, tmp_path):
+        """With the option on, all models under a character folder share that
+        folder's name as their character — even distinctly-named siblings the
+        heuristic would otherwise split into separate groups."""
+        creator_dir = tmp_path / "Abe3D"
+        _stl(creator_dir / "Goblin King" / "Goblin King 32mm")
+        _stl(creator_dir / "Goblin King" / "Throne Diorama")          # distinct name
+        _stl(creator_dir / "Goblin King" / "Pre-Supported" / "STL")   # nested
+        creator = make_creator(db, "Abe3D")
+
+        _walk(db, creator, creator_dir, group_by_character=True)
+
+        models = _models(db, creator)
+        assert {m.character for m in models} == {"Goblin King"}  # one group for the subtree
+        assert len(models) >= 2
+
+    def test_distinct_char_folders_are_separate_groups(self, db, tmp_path):
+        creator_dir = tmp_path / "Abe3D"
+        _stl(creator_dir / "Goblin King" / "Goblin King 32mm")
+        _stl(creator_dir / "Dragon" / "Dragon 75mm")
+        creator = make_creator(db, "Abe3D")
+
+        _walk(db, creator, creator_dir, group_by_character=True)
+
+        models = _models(db, creator)
+        assert {m.character for m in models} == {"Goblin King", "Dragon"}
+        for m in models:
+            top = Path(m.folder_path).relative_to(creator_dir).parts[0]
+            assert m.character == top  # character == the first folder below the creator
+
+    def test_off_by_default_uses_heuristic(self, db, tmp_path):
+        """Same tree, option off: two distinctly-named children do NOT collapse
+        onto a single shared character (the heuristic keeps them apart)."""
+        creator_dir = tmp_path / "Abe3D"
+        _stl(creator_dir / "Goblin King" / "Goblin King 32mm")
+        _stl(creator_dir / "Goblin King" / "Throne Diorama")
+        creator = make_creator(db, "Abe3D")
+
+        _walk(db, creator, creator_dir, group_by_character=False)
+
+        chars = {m.character for m in _models(db, creator)}
+        assert chars != {"Goblin King"}                 # not force-grouped
+
+    def test_user_override_still_wins(self, db, tmp_path):
+        creator_dir = tmp_path / "Abe3D"
+        leaf = creator_dir / "Goblin King" / "Goblin King 32mm"
+        _stl(leaf)
+        creator = make_creator(db, "Abe3D")
+
+        scanner._group_overrides = {str(leaf): "Custom Group"}
+        try:
+            _walk(db, creator, creator_dir, group_by_character=True)
+        finally:
+            scanner._group_overrides = {}
+
+        m = next(m for m in _models(db, creator) if Path(m.folder_path) == leaf)
+        assert m.character == "Custom Group"

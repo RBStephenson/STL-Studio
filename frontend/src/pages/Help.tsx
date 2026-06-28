@@ -129,6 +129,13 @@ const SECTIONS: Section[] = [
           The scanner infers groups from folder names and is usually right, but you can
           fix any mis-grouping — corrections are saved and survive future rescans:
         </p>
+        <p>
+          If your folders are laid out as <code>{"{creator}/{character}/…"}</code>, turn on{" "}
+          <strong>Group variants by character</strong> for that scan root (Settings →
+          Library). The scanner then treats the first folder under the creator as the group
+          — everything beneath it is one variant group, no name-guessing. Off by default;
+          rescan to apply. Manual overrides still win.
+        </p>
         <ul>
           <li>
             <strong>Drag-to-group (Library):</strong> hover a card, grab the grip in its

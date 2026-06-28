@@ -108,6 +108,21 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
     }
   };
 
+  const toggleGroupByCharacter = async (root: ScanRoot) => {
+    try {
+      await api.scan.updateRoot(root.id, { group_by_character: !root.group_by_character });
+      onRootsChanged();
+      flash(
+        root.group_by_character
+          ? "Grouping by character folder off — rescan to apply"
+          : "Grouping by character folder on — rescan to apply",
+        "ok",
+      );
+    } catch (e: any) {
+      flash(e?.message || "Couldn't update the library", "err");
+    }
+  };
+
   const removeRoot = async (id: number, path: string) => {
     if (!confirm(`Remove "${path}" from the library?\n\nThis won't delete any files — just removes it from scanning.`)) return;
     try {
@@ -208,6 +223,18 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
                         className="accent-indigo-500"
                       />
                       Import destination
+                    </label>
+                    <label
+                      className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none ml-2"
+                      title="Treat every model inside a character folder as one variant group, instead of guessing groups from names. Rescan to apply."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={r.group_by_character}
+                        onChange={() => toggleGroupByCharacter(r)}
+                        className="accent-indigo-500"
+                      />
+                      Group variants by character
                     </label>
                   </div>
                 </div>

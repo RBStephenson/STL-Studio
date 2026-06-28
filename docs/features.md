@@ -79,6 +79,16 @@ Click it to open the group and see each variant individually.
 
 This keeps the grid tidy when a creator ships many cuts/versions of one model.
 
+### Group variants by character folder (opt-in)
+
+If your library is laid out as `{creator}/{character}/…` — every variant of a
+figure living somewhere under one character folder — you can skip the name
+heuristic entirely. Turn on **Group variants by character** for a scan root
+(Settings → Library, next to its layout) and the scanner treats the first folder
+below the creator as the group: *everything* beneath it becomes one variant
+group, regardless of how the sub-folders are named. Off by default; **rescan to
+apply**. Manual group overrides still win.
+
 ### Fixing mis-grouped models
 
 The scanner infers the character group from folder names — it's accurate for

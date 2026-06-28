@@ -168,6 +168,7 @@ export interface ScanRoot {
   last_scanned: string | null;
   name: string | null;
   is_writable: boolean;
+  group_by_character: boolean;
 }
 
 export interface Library {
@@ -1183,13 +1184,13 @@ export const api = {
       }),
     roots: () => request<ScanRoot[]>("/scan/roots"),
     libraries: () => request<Library[]>("/scan/libraries"),
-    addRoot: (path: string, layout?: string, opts?: { name?: string; is_writable?: boolean }) =>
+    addRoot: (path: string, layout?: string, opts?: { name?: string; is_writable?: boolean; group_by_character?: boolean }) =>
       request<ScanRoot>("/scan/roots", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path, layout: layout || "{creator}", ...opts }),
       }),
-    updateRoot: (id: number, body: { layout?: string; enabled?: boolean; name?: string; is_writable?: boolean }) =>
+    updateRoot: (id: number, body: { layout?: string; enabled?: boolean; name?: string; is_writable?: boolean; group_by_character?: boolean }) =>
       request<ScanRoot>(`/scan/roots/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

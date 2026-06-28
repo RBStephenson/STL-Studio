@@ -278,6 +278,7 @@ class ScanRootCreate(BaseModel):
     layout: str = "{creator}"
     name: Optional[str] = None
     is_writable: bool = False
+    group_by_character: bool = False
 
 
 class ScanRootUpdate(BaseModel):
@@ -285,6 +286,7 @@ class ScanRootUpdate(BaseModel):
     enabled: Optional[bool] = None
     name: Optional[str] = None
     is_writable: Optional[bool] = None
+    group_by_character: Optional[bool] = None
 
 
 class LibraryRead(BaseModel):

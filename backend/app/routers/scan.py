@@ -308,6 +308,7 @@ def add_root(body: ScanRootCreate, db: Session = Depends(get_db)):
         layout=(body.layout or "{creator}").strip(),
         name=(body.name or "").strip() or p.name,
         is_writable=body.is_writable,
+        group_by_character=body.group_by_character,
     )
     db.add(root)
     db.commit()
@@ -332,6 +333,8 @@ def update_root(root_id: int, body: ScanRootUpdate, db: Session = Depends(get_db
         root.name = body.name.strip() or Path(root.path).name
     if body.is_writable is not None:
         root.is_writable = body.is_writable
+    if body.group_by_character is not None:
+        root.group_by_character = body.group_by_character
     db.commit()
     db.refresh(root)
     return root
