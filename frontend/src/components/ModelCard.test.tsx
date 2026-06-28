@@ -73,6 +73,26 @@ describe("ModelCard quick-assign button (#172)", () => {
   });
 });
 
+describe("ModelCard parsed-attribute badges (#609)", () => {
+  it("renders a support-status badge with a readable label", () => {
+    renderCard({ parsed_attributes: { support_status: "unsupported" } });
+    expect(screen.getByText("Unsupported")).toBeInTheDocument();
+    expect(screen.getByTitle("Print-support status")).toBeInTheDocument();
+  });
+
+  it("renders cut/slicer/version chips", () => {
+    renderCard({ parsed_attributes: { cut_status: "hollow", slicer: "chitubox", version: "v2" } });
+    expect(screen.getByText("hollow")).toBeInTheDocument();
+    expect(screen.getByText("chitubox")).toBeInTheDocument();
+    expect(screen.getByText("v2")).toBeInTheDocument();
+  });
+
+  it("shows no attribute chips when parsed_attributes is empty", () => {
+    renderCard({ parsed_attributes: {} });
+    expect(screen.queryByTitle("Print-support status")).toBeNull();
+  });
+});
+
 describe("ModelCard painting-guide badge (#263)", () => {
   it("shows the Guide badge when the model has a guide", () => {
     render(<MemoryRouter><ModelCard model={MODEL as Model} hasGuide={true} /></MemoryRouter>);

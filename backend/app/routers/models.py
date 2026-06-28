@@ -51,6 +51,8 @@ def _apply_filters(
     min_rating: int | None = None,
     excluded: bool = False,
     added_within_days: int | None = None,
+    support_status: str | None = None,
+    slicer: str | None = None,
 ):
     """Apply standard Library filters to a Model query. Does not handle sort, page, or character."""
     q = q.filter(Model.excluded == excluded)
@@ -105,6 +107,16 @@ def _apply_filters(
         q = q.filter(Model.user_rating != None, Model.user_rating >= min_rating)
     if added_within_days is not None:
         q = q.filter(Model.created_at >= utcnow() - timedelta(days=added_within_days))
+    # Scanner-detected variant attributes live in the parsed_attributes JSON blob.
+    # json_extract returns the scalar value (or NULL when the key is absent).
+    if support_status:
+        q = q.filter(
+            func.json_extract(Model.parsed_attributes, "$.support_status") == support_status
+        )
+    if slicer:
+        q = q.filter(
+            func.json_extract(Model.parsed_attributes, "$.slicer") == slicer
+        )
     return q
 
 
@@ -259,6 +271,8 @@ def list_models(
     min_rating: int | None = Query(None, ge=1, le=5),
     excluded: bool = False,  # default: hide user-excluded models; pass true for the Excluded view
     added_within_days: int | None = Query(None, ge=1, le=365),  # "Recently added" window (#170)
+    support_status: str | None = None,
+    slicer: str | None = None,
     sort: str = Query("name"),  # "name" | "added" | "creator" | "rating" | "queue" | "queued_at" | "printed_at"
     group_variants: bool = Query(True),
     db: Session = Depends(get_db),
@@ -271,6 +285,7 @@ def list_models(
         nsfw=nsfw, is_favorite=is_favorite,
         print_status=print_status, exclude_printed=exclude_printed, min_rating=min_rating,
         excluded=excluded, added_within_days=added_within_days,
+        support_status=support_status, slicer=slicer,
     )
     # character filter is list_models-only (not exposed via Library URL state)
     if character:

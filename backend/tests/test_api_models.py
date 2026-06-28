@@ -1134,3 +1134,51 @@ class TestBatchSetGroup:
             json={"model_ids": [m.id], "character": "Goblin"},
         )
         assert resp.status_code == 409
+
+
+class TestParsedAttributeFilters:
+    def _mk(self, db, creator, name, attrs):
+        m = make_model(db, creator, name=name)
+        m.parsed_attributes = attrs
+        return m
+
+    def test_filter_support_status(self, client, db):
+        creator = make_creator(db)
+        self._mk(db, creator, "Unsup", {"support_status": "unsupported"})
+        self._mk(db, creator, "Presup", {"support_status": "pre-supported"})
+        self._mk(db, creator, "Plain", {})
+        commit_all(db)
+
+        resp = client.get("/models?support_status=unsupported")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "Unsup"
+
+    def test_filter_slicer(self, client, db):
+        creator = make_creator(db)
+        self._mk(db, creator, "Lych", {"slicer": "lychee"})
+        self._mk(db, creator, "Chitu", {"slicer": "chitubox"})
+        commit_all(db)
+
+        resp = client.get("/models?slicer=chitubox")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "Chitu"
+
+    def test_parsed_attributes_serialized(self, client, db):
+        creator = make_creator(db)
+        self._mk(db, creator, "M", {"support_status": "unsupported", "slicer": "lychee"})
+        commit_all(db)
+
+        resp = client.get("/models")
+        item = resp.json()["items"][0]
+        assert item["parsed_attributes"] == {"support_status": "unsupported", "slicer": "lychee"}
+
+    def test_no_filter_returns_all(self, client, db):
+        creator = make_creator(db)
+        self._mk(db, creator, "A", {"support_status": "unsupported"})
+        self._mk(db, creator, "B", {})
+        commit_all(db)
+
+        resp = client.get("/models")
+        assert resp.json()["total"] == 2

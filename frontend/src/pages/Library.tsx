@@ -163,6 +163,8 @@ export default function Library() {
   const excludedParam = searchParams.get("excluded") === "1";
   const inboxParam   = searchParams.get("is_inbox") === "1";
   const minRating    = searchParams.get("min_rating") ?? "";  // "" | "1".."5" (#167)
+  const supportParam = searchParams.get("support_status") ?? ""; // "" | "unsupported" | "pre-supported" | "supported" (#609)
+  const slicerParam  = searchParams.get("slicer") ?? "";        // "" | "lychee" | "chitubox" (#609)
   const addedDays    = searchParams.get("added_days") ?? ""; // "Recently added" window (#170)
   const sortParam    = searchParams.get("sort") ?? "";       // "" | "name" | "added" | "creator" (#247)
 
@@ -311,6 +313,8 @@ export default function Library() {
       if (excludedParam) params.excluded    = true;
       if (inboxParam)   params.is_inbox   = true;
       if (minRating)   params.min_rating   = minRating;
+      if (supportParam) params.support_status = supportParam;
+      if (slicerParam)  params.slicer       = slicerParam;
       if (addedDays)   params.added_within_days = addedDays;
       if (effectiveSort && effectiveSort !== "name") params.sort = effectiveSort;
       const data = await api.models.list(params);
@@ -320,7 +324,7 @@ export default function Library() {
     } finally {
       if (fetchId === fetchIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, printStatusParam, excludePrinted, excludedParam, inboxParam, minRating, addedDays, effectiveSort]);
+  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, printStatusParam, excludePrinted, excludedParam, inboxParam, minRating, supportParam, slicerParam, addedDays, effectiveSort]);
 
   useEffect(() => { fetchModels(); }, [fetchModels]);
   useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);
@@ -357,7 +361,7 @@ export default function Library() {
   }, [savingPreset]);
 
   const totalPages = Math.ceil(total / pageSize);
-  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || printStatusParam || excludePrinted || minRating || addedDays);
+  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || printStatusParam || excludePrinted || minRating || supportParam || slicerParam || addedDays);
 
   const visibleTags = allTags.filter(({ tag }) =>
     !tagSearch || tag.includes(tagSearch.toLowerCase())
@@ -993,6 +997,32 @@ export default function Library() {
               {SITES.map((s) => (
                 <option key={s} value={s} className="capitalize">{s}</option>
               ))}
+            </select>
+
+            <select
+              value={supportParam}
+              onChange={(e) => setParam("support_status", e.target.value)}
+              title="Filter by print-support status"
+              className={`bg-gray-800 border rounded px-2 py-1.5 text-sm focus:outline-none focus:border-indigo-500 ${
+                supportParam ? "border-indigo-700 text-indigo-300" : "border-gray-700 text-gray-200"
+              }`}
+            >
+              <option value="">All supports</option>
+              <option value="unsupported">Unsupported</option>
+              <option value="pre-supported">Pre-supported</option>
+              <option value="supported">Supported</option>
+            </select>
+            <select
+              value={slicerParam}
+              onChange={(e) => setParam("slicer", e.target.value)}
+              title="Filter by slicer project format"
+              className={`bg-gray-800 border rounded px-2 py-1.5 text-sm focus:outline-none focus:border-indigo-500 ${
+                slicerParam ? "border-indigo-700 text-indigo-300" : "border-gray-700 text-gray-200"
+              }`}
+            >
+              <option value="">All slicers</option>
+              <option value="lychee">Lychee</option>
+              <option value="chitubox">Chitubox</option>
             </select>
 
             <TriToggle label="NSFW" value={nsfwParam} onChange={(v) => setParam("nsfw", v)} />

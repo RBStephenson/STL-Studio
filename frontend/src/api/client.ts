@@ -78,6 +78,15 @@ export const PRINT_STATUS_LABELS: Record<PrintStatus, string> = {
   printed: "Printed",
 };
 
+/** Scanner-detected structured variant attributes (#608). All optional —
+ *  only present when the folder name carried the signal. */
+export interface ParsedAttributes {
+  support_status?: "unsupported" | "pre-supported" | "supported";
+  cut_status?: "solid" | "hollow" | "split" | "merged" | "full-cut";
+  slicer?: "lychee" | "chitubox";
+  version?: string;
+}
+
 export interface Model {
   id: number;
   name: string;
@@ -95,6 +104,7 @@ export interface Model {
   auto_tags: string[];
   removed_auto_tags: string[];
   category: string | null;
+  parsed_attributes: ParsedAttributes;
   needs_review: boolean;
   is_inbox: boolean;
   nsfw: boolean;
