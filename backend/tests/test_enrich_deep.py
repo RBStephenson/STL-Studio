@@ -137,3 +137,54 @@ def test_bulk_apply_passes_mmf_key_to_fetch(client, db, monkeypatch):
     resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
     assert resp.status_code == 200
     fetch.assert_awaited_once_with(_URL, mmf_api_key="test-mmf-key")
+
+
+# ---------------------------------------------------------------------------
+# Group-level matching (#628)
+# ---------------------------------------------------------------------------
+
+from app.services.matcher import MatchCandidate
+from app.services.scrapers.storefront import StorefrontProduct
+from app.models import VariantGroup
+
+
+def _cand(model_id, score):
+    return MatchCandidate(
+        local_model_id=model_id, local_name="x", local_folder="/f",
+        product=StorefrontProduct(title="t", source_url="u", source_site="gumroad"),
+        score=score, confidence="high",
+    )
+
+
+def test_collapse_keeps_best_candidate_per_group():
+    # a,b in group 10; c ungrouped. Best of the group (b) survives; c kept.
+    group_of = {1: 10, 2: 10, 3: None}
+    out = enrich._collapse_candidates_to_groups(
+        [_cand(1, 0.5), _cand(2, 0.8), _cand(3, 0.4)], group_of
+    )
+    ids = {c.local_model_id for c in out}
+    assert ids == {2, 3}                       # one per group + the ungrouped one
+    assert out[0].local_model_id == 2          # sorted by score desc
+
+
+def test_apply_propagates_match_to_group_siblings(client, db, monkeypatch):
+    creator = make_creator(db)
+    a = make_model(db, creator, name="dragon a")
+    b = make_model(db, creator, name="dragon b")
+    g = VariantGroup(creator_id=creator.id, label="Dragon", source="auto")
+    db.add(g); db.flush()
+    a.variant_group_id = g.id; b.variant_group_id = g.id
+    db.commit()
+
+    fetch = AsyncMock(return_value=_deep())
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+
+    # Apply only the collapsed candidate (model a) — b is a silent sibling.
+    resp = client.post("/enrich/storefront/apply", json={"items": [_item(a)]})
+    assert resp.status_code == 200
+    assert resp.json()["applied"] == 2          # propagated to b
+
+    db.refresh(a); db.refresh(b)
+    assert a.category == "Creatures"
+    assert b.category == "Creatures"            # sibling got the deep data
+    assert fetch.await_count == 1               # still one fetch for the shared URL
