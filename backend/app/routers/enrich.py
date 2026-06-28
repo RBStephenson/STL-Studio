@@ -97,6 +97,24 @@ class RefreshRequest(BaseModel):
     stale_days: Optional[int] = None
 
 
+def _collapse_candidates_to_groups(candidates, group_of: dict[int, int | None]):
+    """Keep one candidate per variant group — the highest-scoring member. Ungrouped
+    models (variant_group_id is None) each keep their own candidate. Order by score
+    is preserved by re-sorting at the end (callers already sort by score)."""
+    best_by_group: dict[int, object] = {}
+    out = []
+    for c in candidates:
+        gid = group_of.get(c.local_model_id)
+        if gid is None:
+            out.append(c)
+            continue
+        cur = best_by_group.get(gid)
+        if cur is None or c.score > cur.score:
+            best_by_group[gid] = c
+    out.extend(best_by_group.values())
+    return sorted(out, key=lambda c: -c.score)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -140,6 +158,12 @@ async def match_storefront(
 
     candidates = match_products_to_models(products, model_dicts, min_score=min_score)
 
+    # Collapse to one candidate per variant group (#628): variants share a store
+    # listing, so keep the best-scoring member's match per group and let apply
+    # propagate it to siblings. Ungrouped models are unaffected.
+    group_of = {m.id: m.variant_group_id for m in models}
+    candidates = _collapse_candidates_to_groups(candidates, group_of)
+
     return [
         MatchResult(
             local_model_id=c.local_model_id,
@@ -169,7 +193,27 @@ async def bulk_apply(
     nothing regresses.
     """
     item_map = {item.model_id: item for item in body.items}
-    models = db.query(Model).filter(Model.id.in_(item_map.keys())).all()
+    selected = db.query(Model).filter(Model.id.in_(item_map.keys())).all()
+
+    # Propagate a group match to every variant (#628): a candidate is collapsed to
+    # one member per group, so applying it must reach the siblings that share the
+    # listing. Map each group to its selected item, then fold in all members.
+    group_item = {}
+    for m in selected:
+        if m.variant_group_id is not None and m.variant_group_id not in group_item:
+            group_item[m.variant_group_id] = item_map[m.id]
+
+    models = list(selected)
+    if group_item:
+        have = {m.id for m in models}
+        siblings = db.query(Model).filter(
+            Model.variant_group_id.in_(group_item.keys()),
+            Model.excluded == False,  # noqa: E712
+        ).all()
+        models.extend(s for s in siblings if s.id not in have)
+
+    def _item_for(m):
+        return item_map.get(m.id) or group_item[m.variant_group_id]
 
     # Fetch each *unique* product URL once (variants share a listing), bounded so
     # we don't hammer a source. MMF needs the key threaded; Cults self-resolves.
@@ -179,7 +223,7 @@ async def bulk_apply(
 
     applied = deep = shallow = 0
     for model in models:
-        item = item_map[model.id]
+        item = _item_for(model)
         scraped = fetched.get(item.source_url)
 
         if scraped is not None:
