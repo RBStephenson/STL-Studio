@@ -25,6 +25,11 @@ _URL_RE = re.compile(
     re.I,
 )
 
+# Cults "short URL" form, e.g. https://cults3d.com/:899311 — a numeric creation
+# id, not a slug. The GraphQL API keys on slug, so we resolve the redirect to the
+# canonical page and pull the slug from there.
+_SHORT_RE = re.compile(r"cults3d\.com/:(\d+)", re.I)
+
 _FETCH_QUERY = """
 query FetchCreation($slug: String!) {
   creation(slug: $slug) {
@@ -72,6 +77,22 @@ def extract_id(url: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+async def _resolve_short_url(url: str) -> Optional[str]:
+    """Resolve a Cults `:<id>` short URL to its canonical page URL by following the
+    redirect. Returns the canonical URL (slug-bearing), or None if the URL isn't a
+    short form or the redirect can't be resolved."""
+    if not _SHORT_RE.search(url):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            r = await client.get(url)
+            canonical = str(r.url)
+            return canonical if extract_id(canonical) else None
+    except Exception as e:
+        logger.warning(f"Cults3D: could not resolve short URL {url}: {e}")
+        return None
+
+
 def _auth_header(username: str, api_key: str) -> str:
     token = base64.b64encode(f"{username}:{api_key}".encode()).decode()
     return f"Basic {token}"
@@ -93,7 +114,15 @@ def _get_credentials() -> Optional[tuple[str, str]]:
 
 
 async def fetch(url: str) -> Optional[ScrapedModel]:
+    canonical = url
     slug = extract_id(url)
+    if not slug:
+        # A `:<id>` short URL (e.g. what older enrich runs persisted) — resolve
+        # its redirect to the canonical slug page before querying the API.
+        resolved = await _resolve_short_url(url)
+        if resolved:
+            canonical = resolved
+            slug = extract_id(resolved)
     if not slug:
         logger.warning(f"Could not extract slug from Cults3D URL: {url}")
         return None
@@ -132,7 +161,7 @@ async def fetch(url: str) -> Optional[ScrapedModel]:
         logger.warning(f"Cults3D: no creation found for slug {slug!r}")
         return None
 
-    return _to_scraped_model(creation, url, slug)
+    return _to_scraped_model(creation, canonical, slug)
 
 
 def _to_scraped_model(creation: dict, source_url: str, slug: str) -> ScrapedModel:
@@ -145,7 +174,6 @@ def _to_scraped_model(creation: dict, source_url: str, slug: str) -> ScrapedMode
     likes = creation.get("likesCount")
     downloads = creation.get("downloadsCount")
     creator_nick = (creation.get("creator") or {}).get("nick")
-    short_url = creation.get("shortUrl") or source_url
 
     # Collect all images: cover first, then gallery illustrations, then blueprint previews.
     seen: set[str] = set()
@@ -163,9 +191,11 @@ def _to_scraped_model(creation: dict, source_url: str, slug: str) -> ScrapedMode
         _add((bp or {}).get("imageUrl"))
 
     return ScrapedModel(
+        # Store the canonical slug URL (the page we fetched), NOT creation.shortUrl
+        # — the `:<id>` short form can't be re-parsed by our slug-keyed fetch (#637).
         title=title,
         description=description,
-        source_url=short_url,
+        source_url=source_url,
         source_site=SITE,
         external_id=slug,
         creator_name=creator_nick,

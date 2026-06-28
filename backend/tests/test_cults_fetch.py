@@ -49,3 +49,49 @@ def test_missing_category_and_license_are_none():
     )
     assert m.category is None
     assert m.license is None
+
+
+# ---------------------------------------------------------------------------
+# shortUrl round-trip bug (#637)
+# ---------------------------------------------------------------------------
+
+import pytest
+
+
+def test_source_url_is_canonical_not_shorturl():
+    # Even though creation.shortUrl is the unparseable ":<id>" form, we persist
+    # the canonical page URL we fetched so a later re-fetch round-trips.
+    canonical = "https://cults3d.com/en/3d-model/game/goblin-warband"
+    m = cults3d._to_scraped_model(
+        _creation(shortUrl="https://cults3d.com/:899311"), canonical, "goblin-warband"
+    )
+    assert m.source_url == canonical
+
+
+def test_extract_id_handles_canonical_and_short():
+    assert cults3d.extract_id("https://cults3d.com/en/3d-model/game/goblin-warband") == "goblin-warband"
+    # The ":<id>" short form has no slug → None (resolved via redirect instead).
+    assert cults3d.extract_id("https://cults3d.com/:899311") is None
+
+
+@pytest.mark.anyio
+async def test_resolve_short_url_follows_redirect(monkeypatch):
+    canonical = "https://cults3d.com/en/3d-model/game/goblin-warband"
+
+    class _Resp:
+        url = canonical
+
+    class _Client:
+        def __init__(self, *a, **k): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url): return _Resp()
+
+    monkeypatch.setattr(cults3d.httpx, "AsyncClient", _Client)
+    assert await cults3d._resolve_short_url("https://cults3d.com/:899311") == canonical
+
+
+@pytest.mark.anyio
+async def test_resolve_short_url_ignores_non_short(monkeypatch):
+    # A canonical URL isn't a short form → no network call, returns None.
+    assert await cults3d._resolve_short_url("https://cults3d.com/en/3d-model/game/x") is None
