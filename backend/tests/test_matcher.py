@@ -20,8 +20,9 @@ def _product(title: str) -> StorefrontProduct:
 
 
 def _model(id_: int, name: str = "", title: str | None = None, folder: str = "/f",
-           character: str | None = None) -> dict:
-    return {"id": id_, "name": name, "title": title, "character": character, "folder_path": folder}
+           character: str | None = None, auto_tags: list | None = None) -> dict:
+    return {"id": id_, "name": name, "title": title, "character": character,
+            "auto_tags": auto_tags or [], "folder_path": folder}
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +170,40 @@ class TestCharacterMatching:
         products = [_product("Ada Wong")]
         result = match_products_to_models(products, [_model(1, name="Ada Wong", character="Ada Wong")])
         assert result[0].score <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# scale token re-added from auto_tags (#627)
+# ---------------------------------------------------------------------------
+
+class TestScaleMatching:
+    def test_mm_scale_boosts_matching_product(self):
+        # display_name stripped scale; auto_tags re-add it so the 75mm listing wins.
+        products = [_product("Orc Warrior 75mm"), _product("Orc Warrior 32mm")]
+        with_scale = match_products_to_models(products, [_model(1, name="Orc Warrior", auto_tags=["75mm"])])
+        assert with_scale[0].product.title == "Orc Warrior 75mm"
+
+    def test_scale_raises_score_vs_no_scale(self):
+        products = [_product("Orc Warrior 75mm bust")]
+        with_scale = match_products_to_models(products, [_model(1, name="Orc Warrior", auto_tags=["75mm"])])
+        without = match_products_to_models(products, [_model(2, name="Orc Warrior", auto_tags=[])])
+        assert with_scale[0].score >= without[0].score
+
+    def test_scale_alone_does_not_create_false_match(self):
+        # No name overlap, only shared scale → must not produce a spurious match.
+        products = [_product("Totally Different Thing 75mm")]
+        result = match_products_to_models(
+            products, [_model(1, name="", auto_tags=["75mm"])], min_score=0.20
+        )
+        assert result == []
+
+    def test_non_scale_auto_tags_ignored(self):
+        # Only scale-shaped tags are injected; "bust"/"nsfw" don't leak in here.
+        products = [_product("Generic 75mm")]
+        result = match_products_to_models(
+            products, [_model(1, name="Hero", auto_tags=["bust", "nsfw"])], min_score=0.20
+        )
+        assert result == []
 
 
 # ---------------------------------------------------------------------------

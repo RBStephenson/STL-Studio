@@ -134,7 +134,7 @@ async def match_storefront(
 
     model_dicts = [
         {"id": m.id, "name": m.name, "title": m.title, "character": m.character,
-         "folder_path": m.folder_path}
+         "auto_tags": m.auto_tags, "folder_path": m.folder_path}
         for m in models
     ]
 
