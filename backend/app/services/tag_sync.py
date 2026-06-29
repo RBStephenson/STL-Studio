@@ -56,13 +56,13 @@ def bulk_sync_model_tags(models: list[Model], db: Session) -> None:
         return
     ids = [m.id for m in models]
     db.query(ModelTag).filter(ModelTag.model_id.in_(ids)).delete(synchronize_session=False)
-    rows = [
-        {"model_id": model.id, "tag": tag, "is_auto": is_auto}
+    new_rows = [
+        ModelTag(model_id=model.id, tag=tag, is_auto=is_auto)
         for model in models
         for tag, is_auto in _tag_map_for(model).items()
     ]
-    if rows:
-        db.bulk_insert_mappings(ModelTag, rows)
+    if new_rows:
+        db.add_all(new_rows)
 
 
 def rebuild_all_tags(db: Session) -> int:
