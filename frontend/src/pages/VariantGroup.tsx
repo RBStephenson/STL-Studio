@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Layers, MoveRight, X, Keyboard, Pencil, Check, Image as ImageIcon, GripVertical, ListRestart, Link as LinkIcon } from "lucide-react";
 import {
   DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors,
@@ -379,6 +379,7 @@ function SortableCard({ id, children }: { id: number; children: React.ReactNode 
 
 export default function VariantGroup() {
   const { creatorId, character } = useParams<{ creatorId: string; character: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
@@ -391,6 +392,7 @@ export default function VariantGroup() {
 
   const decodedCharacter = character ? decodeURIComponent(character) : "";
   const numCreatorId = Number(creatorId);
+  const groupId = searchParams.get("gid") ? Number(searchParams.get("gid")) : null;
   const from = (location.state as { from?: string } | null)?.from ?? "/";
 
   useEffect(() => {
@@ -399,21 +401,21 @@ export default function VariantGroup() {
     setSelected(new Set());
     hadVariants.current = false;
     api.models
-      .variants(numCreatorId, decodedCharacter)
+      .variants(numCreatorId, decodedCharacter, groupId)
       .then((data) => {
         setVariants(data.items);
         if (data.items.length > 0) hadVariants.current = true;
       })
       .finally(() => setLoading(false));
-  }, [numCreatorId, decodedCharacter]);
+  }, [numCreatorId, decodedCharacter, groupId]);
 
   const reloadVariants = useCallback(() => {
     if (!numCreatorId || !decodedCharacter) return;
     api.models
-      .variants(numCreatorId, decodedCharacter)
+      .variants(numCreatorId, decodedCharacter, groupId)
       .then((data) => setVariants(data.items))
       .catch(() => {});
-  }, [numCreatorId, decodedCharacter]);
+  }, [numCreatorId, decodedCharacter, groupId]);
 
   // Navigate back once the group has been emptied by bulk/single ops.
   useEffect(() => {

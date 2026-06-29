@@ -1063,8 +1063,10 @@ export const api = {
       }),
     characters: (creatorId: number) =>
       request<string[]>(`/models/characters?creator_id=${creatorId}`),
-    variants: (creatorId: number, character: string) =>
-      request<ModelList>(`/models/variants?creator_id=${creatorId}&character=${encodeURIComponent(character)}`),
+    variants: (creatorId: number, character: string, groupId?: number | null) => {
+      const gid = groupId ? `&group_id=${groupId}` : "";
+      return request<ModelList>(`/models/variants?creator_id=${creatorId}&character=${encodeURIComponent(character)}${gid}`);
+    },
     splitPack: (id: number) =>
       request<{ ok: boolean; created: number; message: string }>(`/models/${id}/split`, {
         method: "POST",
