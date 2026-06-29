@@ -55,7 +55,7 @@ def bulk_sync_model_tags(models: list[Model], db: Session) -> None:
     if not models:
         return
     ids = [m.id for m in models]
-    db.query(ModelTag).filter(ModelTag.model_id.in_(ids)).delete(synchronize_session=False)
+    db.query(ModelTag).filter(ModelTag.model_id.in_(ids)).delete(synchronize_session="fetch")
     new_rows = [
         ModelTag(model_id=model.id, tag=tag, is_auto=is_auto)
         for model in models
