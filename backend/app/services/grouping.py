@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
+from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 
 from app.models import Model, STLFile, VariantGroup, GroupOverride, GroupingStrategy
@@ -252,12 +253,19 @@ def prune_empty_groups(db: Session) -> int:
     orphans left by older races (#639) and is a cheap post-scan safety net. Manual
     groups are left alone — a user may have emptied one intentionally. Returns the
     number deleted."""
-    empties = [
-        g for g in db.query(VariantGroup).filter(VariantGroup.source == "auto")
-        if db.query(Model.id).filter(
-            Model.variant_group_id == g.id, Model.excluded == False  # noqa: E712
-        ).first() is None
-    ]
+    member_counts = (
+        db.query(Model.variant_group_id, func.count(Model.id).label("cnt"))
+        .filter(Model.excluded == False)  # noqa: E712
+        .group_by(Model.variant_group_id)
+        .subquery()
+    )
+    empties = (
+        db.query(VariantGroup)
+        .filter(VariantGroup.source == "auto")
+        .outerjoin(member_counts, VariantGroup.id == member_counts.c.variant_group_id)
+        .filter(member_counts.c.cnt == None)  # noqa: E711
+        .all()
+    )
     for g in empties:
         db.delete(g)
     if empties:
