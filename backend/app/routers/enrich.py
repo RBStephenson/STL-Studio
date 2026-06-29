@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/enrich", tags=["enrich"])
 
+_MAX_CREATOR_MODELS = 5_000
+
 # Each selected match triggers a detail fetch (MMF/Cults API or Gumroad scrape).
 # Bound the parallelism so we don't hammer a source or serialize the whole batch.
 _FETCH_CONCURRENCY = 5
@@ -146,9 +148,18 @@ async def match_storefront(
     if not products:
         raise HTTPException(status_code=422, detail="No products found at that URL.")
 
-    models = db.query(Model).filter(Model.creator_id == creator_id).all()
-    if not models:
+    model_count = db.query(Model).filter(Model.creator_id == creator_id).count()
+    if model_count == 0:
         raise HTTPException(status_code=404, detail="No local models found for this creator.")
+    if model_count > _MAX_CREATOR_MODELS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Creator has {model_count} models, which exceeds the match limit of "
+                f"{_MAX_CREATOR_MODELS}. Narrow the request or paginate by creator subset."
+            ),
+        )
+    models = db.query(Model).filter(Model.creator_id == creator_id).all()
 
     creator = db.get(Creator, creator_id)
 
