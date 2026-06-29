@@ -9,6 +9,11 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/test-setup.ts",
+    // Vitest runs all test files in parallel forks with no worker cap; on small
+    // CI runners the heavy ImportPreviewPage render is starved of CPU and its
+    // findBy waits time out (#596) — a load artifact, not a real failure. Retry
+    // re-runs a failed test (a genuinely broken one still fails all attempts).
+    retry: 2,
   },
   server: {
     host: "0.0.0.0",
