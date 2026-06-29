@@ -281,10 +281,10 @@ def _prune_stale_paths(db: Session, available_root_paths: list[str]):
         n = os.path.normcase(os.path.normpath(folder_path))
         return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
-    rows = db.query(Model.id, Model.folder_path).all()
+    rows = db.query(Model.id, Model.folder_path).filter(Model.folder_path != None).all()  # noqa: E711
     under = [r for r in rows if _under_online_root(r.folder_path)]
     total = len(under)
-    stale_ids = [r.id for r in under if r.folder_path and not Path(r.folder_path).exists()]
+    stale_ids = [r.id for r in under if not Path(r.folder_path).exists()]
     if not stale_ids:
         return 0
     if _exceeds_prune_cap(len(stale_ids), total, "folder path missing on disk"):
@@ -332,9 +332,13 @@ def _prune_ignored(db: Session, root_paths: list[str]):
                 return False
             current = parent
 
-    rows = db.query(Model.id, Model.folder_path, Model.excluded).all()
-    total = len(rows)
-    ignored_ids = [r.id for r in rows if not r.excluded and _is_ignored(r.folder_path)]
+    total = db.query(Model.id).count()
+    rows = (
+        db.query(Model.id, Model.folder_path)
+        .filter(Model.excluded == False, Model.folder_path != None)  # noqa: E711, E712
+        .all()
+    )
+    ignored_ids = [r.id for r in rows if _is_ignored(r.folder_path)]
     if not ignored_ids:
         return 0
     if _exceeds_prune_cap(len(ignored_ids), total, "matched an ignore pattern"):
@@ -375,13 +379,28 @@ def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]
         n = os.path.normcase(os.path.normpath(folder_path))
         return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
-    rows = db.query(Model.id, Model.folder_path, Model.updated_at, Model.excluded).all()
-    under = [r for r in rows if _under_root(r.folder_path)]
-    total = len(under)
-    stale_ids = [
-        r.id for r in under
-        if not r.excluded and r.updated_at is not None and r.updated_at < scan_start
-    ]
+    # Load only non-excluded candidates with a stale timestamp — the common case
+    # (most models visited this scan) fetches nothing. Root membership still
+    # requires Python-side normpath comparison (see docstring re: LIKE metacharacters).
+    all_under_rows = (
+        db.query(Model.id, Model.folder_path)
+        .filter(Model.excluded == False, Model.folder_path != None)  # noqa: E711, E712
+        .all()
+    )
+    under_all = [r for r in all_under_rows if _under_root(r.folder_path)]
+    total = len(under_all)
+
+    stale_rows = (
+        db.query(Model.id, Model.folder_path)
+        .filter(
+            Model.excluded == False,  # noqa: E712
+            Model.folder_path != None,  # noqa: E711
+            Model.updated_at != None,  # noqa: E711
+            Model.updated_at < scan_start,
+        )
+        .all()
+    )
+    stale_ids = [r.id for r in stale_rows if _under_root(r.folder_path)]
     if not stale_ids:
         return 0
     if _exceeds_prune_cap(len(stale_ids), total, "not visited this run"):
