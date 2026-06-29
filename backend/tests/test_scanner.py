@@ -1319,8 +1319,9 @@ class TestCleanNameAndAttributes:
             "version": "v2",
         }
 
-    def test_pure_variant_name_falls_back_to_raw(self, db, tmp_path):
-        # Nothing product-identifying in the leaf → keep the raw folder name.
+    def test_structural_leaf_named_after_product(self, db, tmp_path):
+        # A structural leaf ("75mm Unsupported") under a product is named after the
+        # product (its character), not the structural folder name (#641).
         creator_dir = tmp_path / "Creator"
         leaf = creator_dir / "Goblin" / "75mm Unsupported"
         _stl(leaf)
@@ -1328,7 +1329,7 @@ class TestCleanNameAndAttributes:
 
         _walk(db, creator, creator_dir)
 
-        assert self._model_at(db, creator, leaf).name == "75mm Unsupported"
+        assert self._model_at(db, creator, leaf).name == "Goblin"
 
     def test_user_rename_not_clobbered_on_rescan(self, db, tmp_path):
         creator_dir = tmp_path / "Creator"
@@ -1361,3 +1362,45 @@ class TestCleanNameAndAttributes:
         _walk(db, creator, creator_dir)
 
         assert self._model_at(db, creator, leaf).name == "Ada Wong"
+
+
+# ---------------------------------------------------------------------------
+# Structural leaf folders are named after their product, not "STL" (#641)
+# ---------------------------------------------------------------------------
+
+class TestStructuralLeafNaming:
+    def _names(self, db, creator):
+        return {m.name for m in _models(db, creator)}
+
+    def test_stl_leaf_named_after_product_character(self, db, tmp_path):
+        # {creator}/{product}/STL/*.stl — the model must be "Absolute Batman", not "STL".
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Absolute Batman" / "STL", name="b.stl")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        names = self._names(db, creator)
+        assert "STL" not in names
+        assert "Absolute Batman" in names
+
+    def test_supported_unsupported_named_after_product(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Goblin" / "supported", name="g.stl")
+        _stl(creator_dir / "Goblin" / "unsupported", name="g.stl")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        names = self._names(db, creator)
+        assert names == {"Goblin"}  # both variants named after the product
+        assert "supported" not in names and "unsupported" not in names
+
+    def test_nonstructural_leaf_name_unchanged(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Dragon Bust", name="d.stl")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert "Dragon" in self._names(db, creator)  # display_name strips the "Bust" type token

@@ -946,6 +946,22 @@ def _index_model(
         # name stays the source of truth on disk; folder_path is unchanged.
         clean_name = name_parser.display_name(folder.name, creator.name)
 
+        # A structural leaf folder (STL, supported, presupported, renders…) carries
+        # no product identity — naming the model "STL"/"supported" produces junk
+        # cards (#641). Name it after its product instead: the grouping character,
+        # else the nearest non-structural ancestor folder.
+        if name_parser.is_structural_folder(folder.name):
+            product = character
+            if not product:
+                for anc in folder.parents:
+                    if anc == creator_boundary or anc == anc.parent:
+                        break
+                    if not name_parser.is_structural_folder(anc.name):
+                        product = anc.name
+                        break
+            if product:
+                clean_name = name_parser.display_name(product, creator.name) or product
+
         is_new = model is None
         if is_new:
             model = Model(
