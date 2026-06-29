@@ -721,13 +721,6 @@ def _scan_root(root: ScanRoot, db: Session):
                 layout_tags=layout_tags,
                 group_by_character=root.group_by_character,
             )
-            # Propose durable variant groups from blended signals (#615). Runs on
-            # this creator's freshly-indexed models; manual groups are preserved.
-            # Independent of group_by_character — display still rides `character`
-            # until the P2 read-path switchover.
-            with _db_lock:
-                grouping.regroup_creator(thread_db, creator_id)
-                thread_db.commit()
         except Exception:
             logger.exception(f"Error scanning creator: {creator_dir.name}")
         finally:
@@ -737,6 +730,24 @@ def _scan_root(root: ScanRoot, db: Session):
         futures = [executor.submit(_scan_one, d, tags) for d, tags in creator_entries]
         for future in as_completed(futures):
             future.result()  # propagate any unexpected exception to the outer handler
+
+    # Propose durable variant groups (#615) once per *distinct* creator, AFTER the
+    # parallel walk, on a single session. Running it inside the thread pool (once
+    # per creator-dir) raced across sessions and left orphaned/duplicate groups
+    # (#639). Sequential single-session regrouping is race-free. Manual groups are
+    # preserved; empty auto groups are pruned.
+    group_db = SessionLocal()
+    try:
+        for cid in dict.fromkeys(creator_ids.values()):
+            try:
+                grouping.regroup_creator(group_db, cid)
+            except Exception:
+                logger.exception(f"Error regrouping creator id={cid}")
+                group_db.rollback()
+        grouping.prune_empty_groups(group_db)
+        group_db.commit()
+    finally:
+        group_db.close()
 
 
 def _walk_for_models(
