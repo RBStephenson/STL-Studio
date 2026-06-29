@@ -53,6 +53,16 @@ _HASH_BUCKET_CAP = 8
 # same part set prepared differently.
 _FILENAME_JACCARD = 0.6
 
+# A filename shared by more than this many models is generic (body.stl, base.stl,
+# supports.stl…) and carries no product identity — ignored for the filename
+# signal so it can't chain unrelated sculpts together (#639).
+_FILENAME_BUCKET_CAP = 8
+
+# Require at least this many shared *distinct, non-generic* filenames before the
+# filename signal merges two models (#639) — a single shared "body.stl" is not
+# evidence of the same product.
+_FILENAME_MIN_SHARED = 2
+
 # Skip the O(n^2) filename-overlap pass for creators with more models than this,
 # so a pathological creator can't stall a scan. Hash + name signals still apply.
 _FILENAME_PASS_MODEL_CAP = 400
@@ -155,19 +165,29 @@ def regroup_creator(db: Session, creator_id: int) -> None:
                 signal[first] = signal[other] = "hash"
 
     # --- signal 2: STL filename overlap ---
+    # Drop generic filenames (shared by many models) so common part names like
+    # body/base/supports.stl don't fake overlap between unrelated sculpts (#639).
     if len(ids) <= _FILENAME_PASS_MODEL_CAP:
+        fname_freq: dict[str, int] = defaultdict(int)
+        for mid in ids:
+            for fn in filenames.get(mid, ()):
+                fname_freq[fn] += 1
+        distinctive = {
+            mid: {fn for fn in filenames.get(mid, ()) if fname_freq[fn] <= _FILENAME_BUCKET_CAP}
+            for mid in ids
+        }
         for i in range(len(ids)):
             a = ids[i]
-            fa = filenames.get(a)
+            fa = distinctive.get(a)
             if not fa:
                 continue
             for j in range(i + 1, len(ids)):
                 b = ids[j]
-                fb = filenames.get(b)
+                fb = distinctive.get(b)
                 if not fb:
                     continue
                 inter = len(fa & fb)
-                if inter and inter / len(fa | fb) >= _FILENAME_JACCARD:
+                if inter >= _FILENAME_MIN_SHARED and inter / len(fa | fb) >= _FILENAME_JACCARD:
                     uf.union(a, b)
                     signal.setdefault(a, "filename")
                     signal.setdefault(b, "filename")
@@ -197,7 +217,14 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     _drop_auto_groups(db, creator_id, manual_group_ids)
 
     for members in clusters.values():
-        if len(members) < 2:
+        # Don't group a cluster with no real product identity — i.e. every member
+        # is a structural/junk folder ("supported", "unsupported", "STL"). These
+        # only ever clustered by filename/hash; grouping + labeling them with a
+        # junk name produces the duplicate "supported" groups (#639).
+        if len(members) < 2 or not any(
+            keys.get(mid) and not name_parser.is_structural_folder(by_id[mid].name)
+            for mid in members
+        ):
             for mid in members:
                 by_id[mid].variant_group_id = None
             continue
@@ -218,6 +245,24 @@ def regroup_creator(db: Session, creator_id: int) -> None:
             by_id[mid].variant_group_id = group.id
 
     db.flush()
+
+
+def prune_empty_groups(db: Session) -> int:
+    """Delete auto variant groups that have no (non-excluded) members. Cleans up
+    orphans left by older races (#639) and is a cheap post-scan safety net. Manual
+    groups are left alone — a user may have emptied one intentionally. Returns the
+    number deleted."""
+    empties = [
+        g for g in db.query(VariantGroup).filter(VariantGroup.source == "auto")
+        if db.query(Model.id).filter(
+            Model.variant_group_id == g.id, Model.excluded == False  # noqa: E712
+        ).first() is None
+    ]
+    for g in empties:
+        db.delete(g)
+    if empties:
+        db.flush()
+    return len(empties)
 
 
 def _drop_auto_groups(db: Session, creator_id: int, manual_group_ids: set[int]) -> None:

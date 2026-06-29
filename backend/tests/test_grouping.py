@@ -198,6 +198,85 @@ class TestSubtreeStrategy:
         assert len(_groups(db, creator)) == 1
 
 
+class TestFilenameHardening:
+    def test_generic_shared_filename_does_not_group(self, db):
+        # Two unrelated sculpts share only generic part names → must not group (#639).
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Dragon")
+        b = make_model(db, creator, name="Wizard")
+        db.flush()
+        for fn in ("body.stl", "base.stl"):
+            _stl(db, a, fn); _stl(db, b, fn)
+        _stl(db, a, "dragon_wings.stl"); _stl(db, b, "wizard_staff.stl")
+        # Make body/base generic by spreading them across many models.
+        for i in range(9):
+            m = make_model(db, creator, name=f"Filler{i}")
+            db.flush()
+            _stl(db, m, "body.stl"); _stl(db, m, "base.stl")
+        db.flush()
+
+        _run(db, creator)
+
+        db.refresh(a); db.refresh(b)
+        assert a.variant_group_id is None or a.variant_group_id != b.variant_group_id
+
+    def test_single_shared_distinctive_file_not_enough(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        b = make_model(db, creator, name="Beta")
+        db.flush()
+        _stl(db, a, "shared.stl"); _stl(db, a, "a1.stl"); _stl(db, a, "a2.stl")
+        _stl(db, b, "shared.stl"); _stl(db, b, "b1.stl"); _stl(db, b, "b2.stl")
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []  # 1 shared distinct file < min
+
+
+class TestStructuralOnlyNotGrouped:
+    def test_structural_named_members_not_grouped(self, db):
+        # Folders literally named supported/unsupported that share files must not
+        # become a junk-labeled "supported" group (#639).
+        creator = make_creator(db)
+        a = make_model(db, creator, name="supported")
+        b = make_model(db, creator, name="unsupported")
+        db.flush()
+        for fn in ("body.stl", "head.stl", "arm.stl"):
+            _stl(db, a, fn); _stl(db, b, fn)
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+        db.refresh(a); db.refresh(b)
+        assert a.variant_group_id is None and b.variant_group_id is None
+
+
+class TestPruneEmptyGroups:
+    def test_prunes_empty_auto_group(self, db):
+        creator = make_creator(db)
+        g = VariantGroup(creator_id=creator.id, label="Orphan", source="auto")
+        db.add(g); db.flush()
+        n = grouping.prune_empty_groups(db)
+        assert n == 1
+        assert db.query(VariantGroup).count() == 0
+
+    def test_keeps_nonempty_and_manual_empty(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A"); b = make_model(db, creator, name="B")
+        full = VariantGroup(creator_id=creator.id, label="Full", source="auto")
+        manual_empty = VariantGroup(creator_id=creator.id, label="Manual", source="manual")
+        db.add_all([full, manual_empty]); db.flush()
+        a.variant_group_id = full.id; b.variant_group_id = full.id
+        db.flush()
+
+        grouping.prune_empty_groups(db)
+
+        labels = {g.label for g in db.query(VariantGroup)}
+        assert labels == {"Full", "Manual"}
+
+
 class TestRep:
     def test_rep_prefers_is_group_rep(self, db):
         creator = make_creator(db)
