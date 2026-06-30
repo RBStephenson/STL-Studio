@@ -185,7 +185,7 @@ describe("ModelCard inline rename (#191)", () => {
   });
 
   it("renames a whole variant group on double-click + Enter", async () => {
-    renderCard({ variant_count: 3, character: "Akuma" } as any);
+    renderCard({ variant_count: 3, character: "Akuma", title: null } as any);
     fireEvent.doubleClick(screen.getByText("Akuma"));
     const input = screen.getByLabelText("Rename group") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Oni" } });
@@ -196,6 +196,17 @@ describe("ModelCard inline rename (#191)", () => {
       expect(vi.mocked(api.models.batchSetGroup)).toHaveBeenCalledWith([1, 2], "Oni")
     );
     expect(screen.getByText("Oni")).toBeInTheDocument();
+  });
+
+  it("shows enriched title instead of character slug for an enriched group", () => {
+    renderCard({ variant_count: 3, character: "1.Firestar-Regular-stls", title: "Firestar 3D printing model" } as any);
+    expect(screen.getByText("Firestar 3D printing model")).toBeInTheDocument();
+    expect(screen.queryByText("1.Firestar-Regular-stls")).not.toBeInTheDocument();
+  });
+
+  it("falls back to character when group has no title", () => {
+    renderCard({ variant_count: 3, character: "Akuma", title: null } as any);
+    expect(screen.getByText("Akuma")).toBeInTheDocument();
   });
 
   it("opens the rename editor from the quick-assign popover", () => {

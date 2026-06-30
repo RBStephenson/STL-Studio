@@ -257,7 +257,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   })();
 
   const displayName = isGroup && localCharacter
-    ? localCharacter
+    ? (localTitle || localCharacter)
     : (localTitle || model.name);
   const removedAuto = new Set(model.removed_auto_tags ?? []);
   const visibleAutoTags = (model.auto_tags ?? []).filter((t) => !removedAuto.has(t));
