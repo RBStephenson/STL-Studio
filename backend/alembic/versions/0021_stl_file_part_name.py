@@ -1,14 +1,14 @@
 """Add part_name to stl_files
 
-Revision ID: 0017
-Revises: 0016
+Revision ID: 0021
+Revises: 0020
 Create Date: 2026-06-29
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0017"
-down_revision = "0016"
+revision = "0021"
+down_revision = "0020"
 branch_labels = None
 depends_on = None
 
