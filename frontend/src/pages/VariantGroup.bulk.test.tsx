@@ -3,7 +3,9 @@ import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import VariantGroup from "./VariantGroup";
 
-const batchSetGroup = vi.fn();
+const mergeGroup = vi.fn();
+const splitGroup = vi.fn();
+const patchGroup = vi.fn();
 const batchThumbnailFromUrl = vi.fn();
 const applyGroup = vi.fn();
 const setGroupRep = vi.fn();
@@ -16,8 +18,9 @@ vi.mock("../api/client", () => ({
     models: {
       variants: (...a: unknown[]) => variantsMock(...a),
       characters: vi.fn().mockResolvedValue(["Rocky", "Apollo"]),
-      setGroupOverride: vi.fn().mockResolvedValue({}),
-      batchSetGroup: (...a: unknown[]) => batchSetGroup(...a),
+      mergeGroup: (...a: unknown[]) => mergeGroup(...a),
+      splitGroup: (...a: unknown[]) => splitGroup(...a),
+      patchGroup: (...a: unknown[]) => patchGroup(...a),
       batchThumbnailFromUrl: (...a: unknown[]) => batchThumbnailFromUrl(...a),
       setGroupRep: (...a: unknown[]) => setGroupRep(...a),
       reorderGroup: (...a: unknown[]) => reorderGroup(...a),
@@ -41,9 +44,11 @@ function LocationProbe() {
   return <div data-testid="loc">{loc.pathname}</div>;
 }
 
+// gid=5 mirrors modelLinkTo's real links: every durable group carries one
+// post-#678, and moveToGroup/removeFromGroup/saveRename all depend on it.
 const renderPage = () =>
   render(
-    <MemoryRouter initialEntries={["/groups/3/Rocky"]}>
+    <MemoryRouter initialEntries={["/groups/3/Rocky?gid=5"]}>
       <Routes>
         <Route path="/groups/:creatorId/:character" element={<><VariantGroup /><LocationProbe /></>} />
         <Route path="*" element={<LocationProbe />} />
@@ -54,7 +59,9 @@ const renderPage = () =>
 const flush = () => act(async () => { await Promise.resolve(); });
 
 beforeEach(() => {
-  batchSetGroup.mockReset();
+  mergeGroup.mockReset();
+  splitGroup.mockReset();
+  patchGroup.mockReset();
   batchThumbnailFromUrl.mockReset();
   applyGroup.mockReset();
   setGroupRep.mockReset();
@@ -71,7 +78,9 @@ beforeEach(() => {
 
 describe("VariantGroup bulk management (#183)", () => {
   it("moves only the selected models to another group and drops them from the grid", async () => {
-    batchSetGroup.mockResolvedValue({ ok: true, character: "Apollo", updated: [10], missing: [] });
+    // The lookup call (variantsMock, same fixture) finds no rep with a
+    // variant_group_id, so this creates a brand-new durable group labeled "Apollo".
+    mergeGroup.mockResolvedValue({ id: 99, creator_id: 3, label: "Apollo", rep_model_id: null, source: "manual", reason: null, confidence: null });
     renderPage();
     await flush();
 
@@ -80,25 +89,48 @@ describe("VariantGroup bulk management (#183)", () => {
     fireEvent.change(screen.getByLabelText("Target group"), { target: { value: "Apollo" } });
     await act(async () => { fireEvent.click(screen.getByText("Move")); });
 
-    expect(batchSetGroup).toHaveBeenCalledWith([10], "Apollo");
+    expect(mergeGroup).toHaveBeenCalledWith([10], { label: "Apollo" });
     await waitFor(() => expect(screen.queryByTestId("card-10")).toBeNull());
     expect(screen.getByTestId("card-11")).toBeTruthy();
   });
 
+  it("moves selected models into an existing durable group when the target already has one", async () => {
+    variantsMock.mockImplementation((_creatorId: number, character: string) =>
+      character === "Apollo"
+        ? Promise.resolve({ items: [{ id: 20, variant_group_id: 7, variant_group: { label: "Apollo Creed" } }] })
+        : Promise.resolve({
+            items: [
+              { id: 10, name: "Bust", character: "Rocky", is_group_rep: false },
+              { id: 11, name: "Full size", character: "Rocky", is_group_rep: false },
+            ],
+          }),
+    );
+    mergeGroup.mockResolvedValue({ id: 7, creator_id: 3, label: "Apollo Creed", rep_model_id: 20, source: "manual", reason: null, confidence: null });
+    renderPage();
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Select Bust"));
+    fireEvent.click(screen.getByLabelText("Move selected to group"));
+    fireEvent.change(screen.getByLabelText("Target group"), { target: { value: "Apollo" } });
+    await act(async () => { fireEvent.click(screen.getByText("Move")); });
+
+    expect(mergeGroup).toHaveBeenCalledWith([10], { groupId: 7, label: "Apollo Creed" });
+  });
+
   it("ungroups all selected models and navigates back when the group empties", async () => {
-    batchSetGroup.mockResolvedValue({ ok: true, character: null, updated: [10, 11], missing: [] });
+    splitGroup.mockResolvedValue({ ok: true, removed: [10, 11] });
     renderPage();
     await flush();
 
     fireEvent.click(screen.getByText("Select all"));
     await act(async () => { fireEvent.click(screen.getByText("Ungroup")); });
 
-    expect(batchSetGroup).toHaveBeenCalledWith([10, 11], null);
+    expect(splitGroup).toHaveBeenCalledWith(5, [10, 11]);
     await waitFor(() => expect(screen.getByTestId("loc").textContent).toBe("/"));
   });
 
   it("renames the whole group and navigates to the new group URL", async () => {
-    batchSetGroup.mockResolvedValue({ ok: true, character: "Rocky II", updated: [10, 11], missing: [] });
+    patchGroup.mockResolvedValue({ id: 5, creator_id: 3, label: "Rocky II", rep_model_id: null, source: "manual", reason: null, confidence: null });
     renderPage();
     await flush();
 
@@ -106,7 +138,7 @@ describe("VariantGroup bulk management (#183)", () => {
     fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "Rocky II" } });
     await act(async () => { fireEvent.click(screen.getByLabelText("Save name")); });
 
-    expect(batchSetGroup).toHaveBeenCalledWith([10, 11], "Rocky II");
+    expect(patchGroup).toHaveBeenCalledWith(5, { label: "Rocky II" });
     await waitFor(() =>
       expect(screen.getByTestId("loc").textContent).toBe("/groups/3/Rocky%20II"),
     );
@@ -196,19 +228,6 @@ describe("VariantGroup bulk management (#183)", () => {
     expect(variantsMock).toHaveBeenCalledTimes(2);
   });
 
-  it("reports skipped models from a partial bulk result", async () => {
-    batchSetGroup.mockResolvedValue({ ok: true, character: "Apollo", updated: [10], missing: [11] });
-    renderPage();
-    await flush();
-
-    fireEvent.click(screen.getByText("Select all"));
-    fireEvent.click(screen.getByLabelText("Move selected to group"));
-    fireEvent.change(screen.getByLabelText("Target group"), { target: { value: "Apollo" } });
-    await act(async () => { fireEvent.click(screen.getByText("Move")); });
-
-    expect(toast).toHaveBeenCalledWith(expect.stringContaining("1 skipped"), "success");
-  });
-
   it("shows Reset order when a manual order exists and clears it (#399)", async () => {
     variantsMock.mockResolvedValue({
       items: [
@@ -232,5 +251,41 @@ describe("VariantGroup bulk management (#183)", () => {
     renderPage();
     await flush();
     expect(screen.queryByText("Reset order")).not.toBeInTheDocument();
+  });
+
+  // No ?gid= on the URL — shouldn't happen via modelLinkTo post-#678, but guard
+  // the durable-write paths against it rather than calling split/patch with a
+  // garbage id.
+  const renderPageNoGid = () =>
+    render(
+      <MemoryRouter initialEntries={["/groups/3/Rocky"]}>
+        <Routes>
+          <Route path="/groups/:creatorId/:character" element={<><VariantGroup /><LocationProbe /></>} />
+          <Route path="*" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+  it("refuses to ungroup without a durable group id", async () => {
+    renderPageNoGid();
+    await flush();
+
+    fireEvent.click(screen.getByText("Select all"));
+    await act(async () => { fireEvent.click(screen.getByText("Ungroup")); });
+
+    expect(splitGroup).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("no durable group id"), "error");
+  });
+
+  it("refuses to rename without a durable group id", async () => {
+    renderPageNoGid();
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: /Rocky/ }));
+    fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "Rocky II" } });
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save name")); });
+
+    expect(patchGroup).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("no durable group id"), "error");
   });
 });

@@ -18,16 +18,18 @@ import { measureGridColumns } from "../utils/libraryKeys";
 import { reorderedIds } from "../utils/reorderList";
 import { useLibraryKeyboard } from "../hooks/useLibraryKeyboard";
 
-// Shared write path for every group op (rename/move/ungroup, single or bulk):
-// each reduces to "set GroupOverride for a SET of models". Resolves true on
-// success so callers can apply optimistic updates; toasts + returns false on
-// failure. Reports any models the backend skipped (unknown ids → `missing`).
-type ApplyGroup = (ids: number[], character: string | null) => Promise<boolean>;
+// Shared write paths for every group op (#678): move resolves (or creates) the
+// target durable group and merges ids into it; remove splits ids out of the
+// current durable group. Resolve true on success so callers can apply
+// optimistic updates; toast + return false on failure.
+type MoveToGroup = (ids: number[], targetLabel: string) => Promise<boolean>;
+type RemoveFromGroup = (ids: number[]) => Promise<boolean>;
 
-function GroupAction({ model, creatorId, applyGroup, onRemoved, onMoved, onRepChanged }: {
+function GroupAction({ model, creatorId, moveToGroup, removeFromGroup, onRemoved, onMoved, onRepChanged }: {
   model: Model;
   creatorId: number;
-  applyGroup: ApplyGroup;
+  moveToGroup: MoveToGroup;
+  removeFromGroup: RemoveFromGroup;
   onRemoved: (id: number) => void;
   onMoved: (id: number) => void;
   onRepChanged: () => void;
@@ -65,14 +67,14 @@ function GroupAction({ model, creatorId, applyGroup, onRemoved, onMoved, onRepCh
     const trimmed = target.trim();
     if (!trimmed || trimmed === model.character) { setMoving(false); return; }
     setSaving(true);
-    const ok = await applyGroup([model.id], trimmed);
+    const ok = await moveToGroup([model.id], trimmed);
     setSaving(false);
     setMoving(false);
     if (ok) onMoved(model.id);
   };
 
   const remove = async () => {
-    if (await applyGroup([model.id], null)) onRemoved(model.id);
+    if (await removeFromGroup([model.id])) onRemoved(model.id);
   };
 
   const listId = `group-move-${model.id}`;
@@ -434,28 +436,44 @@ export default function VariantGroup() {
 
   const removeVariant = useCallback((id: number) => removeVariants([id]), [removeVariants]);
 
-  // Shared write path: set GroupOverride for a set of models, surfacing partial
-  // success (`missing`) and the scan-in-progress 409 as toasts. Optimistic list
-  // updates are the caller's responsibility (see removeVariants).
-  const applyGroup = useCallback<ApplyGroup>(async (ids, character) => {
+  // Move ids into the durable group for `targetLabel` (#678). Resolves an
+  // existing group by looking up any current member of that character/label —
+  // same character-based lookup the target-group autocomplete already used —
+  // and merges into it; falls back to creating a brand-new group when none is
+  // found. Optimistic list updates are the caller's responsibility.
+  const moveToGroup = useCallback<MoveToGroup>(async (ids, targetLabel) => {
     try {
-      const res = await api.models.batchSetGroup(ids, character);
-      const moved = res.updated.length;
-      const skipped = res.missing.length;
-      const where = character === null ? "removed from group" : `moved to "${character}"`;
-      const noun = moved === 1 ? "model" : "models";
-      toast(
-        skipped > 0
-          ? `${moved} ${noun} ${where}; ${skipped} skipped.`
-          : `${moved} ${noun} ${where}.`,
-        "success",
-      );
+      const { items } = await api.models.variants(numCreatorId, targetLabel);
+      const rep = items[0];
+      const groupId = rep?.variant_group_id ?? null;
+      const label = rep?.variant_group?.label || targetLabel;
+      await api.models.mergeGroup(ids, groupId ? { groupId, label } : { label });
+      const noun = ids.length === 1 ? "model" : "models";
+      toast(`${ids.length} ${noun} moved to "${label}".`, "success");
       return true;
     } catch (e: any) {
-      toast(e?.message || "Couldn't update group — try again.", "error");
+      toast(e?.message || "Couldn't move to that group — try again.", "error");
       return false;
     }
-  }, [toast]);
+  }, [numCreatorId, toast]);
+
+  // Split ids out of this page's durable group (#678). Requires the ?gid= this
+  // page was opened with — every durable group now carries one post-Phase 3.
+  const removeFromGroup = useCallback<RemoveFromGroup>(async (ids) => {
+    if (groupId == null) {
+      toast("Can't remove from a group with no durable group id.", "error");
+      return false;
+    }
+    try {
+      await api.models.splitGroup(groupId, ids);
+      const noun = ids.length === 1 ? "model" : "models";
+      toast(`${ids.length} ${noun} removed from group.`, "success");
+      return true;
+    } catch (e: any) {
+      toast(e?.message || "Couldn't remove from group — try again.", "error");
+      return false;
+    }
+  }, [groupId, toast]);
 
   // --- Selection -------------------------------------------------------------
   const toggleSelect = useCallback((id: number) => {
@@ -519,12 +537,12 @@ export default function VariantGroup() {
   const moveSelected = async (targetGroup: string) => {
     const trimmed = targetGroup.trim();
     if (!trimmed || trimmed === decodedCharacter || selectedIds.length === 0) return;
-    if (await applyGroup(selectedIds, trimmed)) removeVariants(selectedIds);
+    if (await moveToGroup(selectedIds, trimmed)) removeVariants(selectedIds);
   };
 
   const ungroupSelected = async () => {
     if (selectedIds.length === 0) return;
-    if (await applyGroup(selectedIds, null)) removeVariants(selectedIds);
+    if (await removeFromGroup(selectedIds)) removeVariants(selectedIds);
   };
 
   // Set one image on every selected member (#184). Fetched once server-side,
@@ -584,14 +602,23 @@ export default function VariantGroup() {
   const saveRename = async () => {
     const trimmed = renameValue.trim();
     if (!trimmed || trimmed === decodedCharacter) { setRenaming(false); return; }
-    const ids = variants.map((v) => v.id);
-    if (await applyGroup(ids, trimmed)) {
+    // Relabels the durable VariantGroup row directly (#678) — it no longer
+    // rewrites each member's `character` column, so the route must carry the
+    // ?gid= forward or the page can't resolve its own group on the next load.
+    if (groupId == null) {
+      toast("Can't rename a group with no durable group id.", "error");
+      return;
+    }
+    try {
+      await api.models.patchGroup(groupId, { label: trimmed });
       setRenaming(false);
       // The route's :character param is now stale — navigate to the new group.
-      navigate(`/groups/${numCreatorId}/${encodeURIComponent(trimmed)}`, {
+      navigate(`/groups/${numCreatorId}/${encodeURIComponent(trimmed)}?gid=${groupId}`, {
         replace: true,
         state: { from },
       });
+    } catch (e: any) {
+      toast(e?.message || "Couldn't rename group — try again.", "error");
     }
   };
 
@@ -770,7 +797,8 @@ export default function VariantGroup() {
                   <GroupAction
                     model={model}
                     creatorId={numCreatorId}
-                    applyGroup={applyGroup}
+                    moveToGroup={moveToGroup}
+                    removeFromGroup={removeFromGroup}
                     onRemoved={removeVariant}
                     onMoved={removeVariant}
                     onRepChanged={reloadVariants}
