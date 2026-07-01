@@ -244,7 +244,9 @@ class STLFile(Base):
     filename = Column(String, nullable=False)
     size_bytes = Column(BigInteger, nullable=True)
     file_hash = Column(String, nullable=True, index=True)
-    part_type = Column(String, nullable=True)   # user-assigned part category (head, arm, base…)
+    part_type = Column(String, nullable=True)   # user-assigned part category
+    part_name = Column(String, nullable=True)   # user-assigned display name (overrides auto-generated label)
+    sup_of_id = Column(Integer, ForeignKey("stl_files.id"), nullable=True)  # explicit sup relationship
     created_at = Column(DateTime, default=utcnow)
 
     model = relationship("Model", back_populates="stl_files")

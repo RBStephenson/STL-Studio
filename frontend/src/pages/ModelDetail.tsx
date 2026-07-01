@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, Fragment } from "react";
 import { GalleryRotator, GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2 } from "lucide-react";
 import { api, ApiError, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
@@ -150,13 +150,70 @@ function CollectionsSection({ modelId, initialIds }: { modelId: number; initialI
 }
 
 const PART_TYPE_SUGGESTIONS = [
-  "head", "torso", "body",
-  "right arm", "left arm", "arms",
-  "right leg", "left leg", "legs",
-  "hands", "feet", "base",
-  "weapon", "shield", "cloak", "cape",
-  "hair", "wings", "tail", "accessories",
+  "Head", "Torso", "Body",
+  "Right Arm", "Left Arm", "Arms",
+  "Right Leg", "Left Leg", "Legs",
+  "Hands", "Feet", "Base",
+  "Weapon", "Shield", "Cloak", "Cape",
+  "Hair", "Wings", "Tail", "Accessories",
 ];
+
+const toPascalCase = (s: string): string =>
+  s.trim().split(/\s+/).filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+
+function autoPartName(filename: string): string {
+  return filename
+    .replace(/\.(stl|STL)$/, "")
+    .replace(/^Sup_/i, "")
+    .replace(/_/g, " ")
+    .trim();
+}
+
+const ALPHA_BANDS = [
+  ["A", "D"], ["E", "H"], ["I", "L"], ["M", "P"], ["Q", "T"], ["U", "Z"],
+] as const;
+
+function buildAlphaBand(first: string): string {
+  const u = first.toUpperCase();
+  if (/[0-9]/.test(u)) return "0–9";
+  for (const [start, end] of ALPHA_BANDS) {
+    if (u >= start && u <= end) return `${start}–${end}`;
+  }
+  return "#";
+}
+
+function groupAlphabetically<T extends { id: number; filename: string }>(files: T[]): Array<[string, T[]]> {
+  const order = [...ALPHA_BANDS.map(([s, e]) => `${s}–${e}`), "0–9", "#"];
+  const map = new Map<string, T[]>();
+  for (const f of files) {
+    const band = buildAlphaBand(f.filename[0] ?? "");
+    if (!map.has(band)) map.set(band, []);
+    map.get(band)!.push(f);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
+}
+
+type FileEntry<T> = { file: T; depth: 0 | 1 };
+
+function buildFileHierarchy<T extends { id: number; filename: string; sup_of_id?: number | null }>(
+  files: T[]
+): FileEntry<T>[] {
+  const supIds = new Set(files.filter((f) => f.sup_of_id != null).map((f) => f.id));
+  const result: FileEntry<T>[] = [];
+  for (const f of files.filter((f) => !supIds.has(f.id)).sort((a, b) => a.filename.localeCompare(b.filename))) {
+    result.push({ file: f, depth: 0 });
+    const sups = files.filter((s) => s.sup_of_id === f.id).sort((a, b) => a.filename.localeCompare(b.filename));
+    for (const sup of sups) result.push({ file: sup, depth: 1 });
+  }
+  // Orphaned sup files (parent not in this group) fall through as top-level.
+  for (const f of files.filter((f) => supIds.has(f.id))) {
+    if (!result.find((r) => r.file.id === f.id)) result.push({ file: f, depth: 0 });
+  }
+  return result;
+}
 
 type ViewMode = "images" | "3d";
 
@@ -235,6 +292,7 @@ export default function ModelDetail() {
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [editing, setEditing] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("images");
+  const [selectedStlFileId, setSelectedStlFileId] = useState<number | null>(null);
   const [nsfw, setNsfw] = useState(false);
   const [favorite, setFavorite] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
@@ -246,6 +304,10 @@ export default function ModelDetail() {
   const [editingTags, setEditingTags] = useState(false);
   const [tagSuggestions, setTagSuggestions] = useState<{ tag: string; count: number }[]>([]);
   const [partTypes, setPartTypes] = useState<Record<number, string>>({});
+  const [partNames, setPartNames] = useState<Record<number, string>>({});
+  const [filesCollapsed, setFilesCollapsed] = useState<Set<string>>(new Set());
+  const [hTableCollapsed, setHTableCollapsed] = useState<Set<string>>(new Set());
+  const [linkingBaseId, setLinkingBaseId] = useState<number | null>(null);
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
@@ -260,6 +322,35 @@ export default function ModelDetail() {
   const [nextNav, setNextNav] = useState<NavTarget | null | undefined>(undefined);
   const navFetchIdRef = useRef(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  // stl_files merged with live partTypes so STLViewer sees label changes immediately
+  const stlFilesWithLiveTypes = useMemo(
+    () =>
+      (model?.stl_files ?? []).map((f) => ({
+        ...f,
+        part_type: partTypes[f.id] !== undefined ? (partTypes[f.id] || null) : f.part_type,
+      })),
+    [model?.stl_files, partTypes],
+  );
+
+  // stl_files grouped by PERSISTED part_type so the file list stays stable while
+  // the user is typing — DOM elements don't remount mid-edit. Files only move
+  // between sections after a successful save (model is updated in-place below).
+  const groupedStlFiles = useMemo(() => {
+    const labeled = new Map<string, NonNullable<typeof model>["stl_files"]>();
+    const unlabeled: NonNullable<typeof model>["stl_files"] = [];
+    for (const f of model?.stl_files ?? []) {
+      if (f.part_type) {
+        const key = toPascalCase(f.part_type);
+        if (!labeled.has(key)) labeled.set(key, []);
+        labeled.get(key)!.push(f);
+      } else {
+        unlabeled.push(f);
+      }
+    }
+    const sortedLabeled = [...labeled.entries()].sort(([a], [b]) => a.localeCompare(b));
+    return { labeled: sortedLabeled, unlabeled };
+  }, [model?.stl_files]);
 
   useEffect(() => {
     if (!lightboxOpen) return;
@@ -296,10 +387,28 @@ export default function ModelDetail() {
       setTags(model.tags ?? []);
       setRemovedAutoTags(model.removed_auto_tags ?? []);
       const pts: Record<number, string> = {};
-      model.stl_files.forEach((f) => { if (f.part_type) pts[f.id] = f.part_type; });
+      model.stl_files.forEach((f) => { if (f.part_type) pts[f.id] = toPascalCase(f.part_type); });
       setPartTypes(pts);
+      const pns: Record<number, string> = {};
+      model.stl_files.forEach((f) => { if (f.part_name) pns[f.id] = f.part_name; });
+      setPartNames(pns);
     }
   }, [model]);
+
+  // When the viewer selects a file, uncollapse its section in the file list and scroll to it.
+  useEffect(() => {
+    if (!selectedStlFileId || !model) return;
+    const file = model.stl_files.find((f) => f.id === selectedStlFileId);
+    if (!file) return;
+    const sectionKey = settings.part_categories_enabled
+      ? (file.part_type ? toPascalCase(file.part_type) : "__uncategorized__")
+      : buildAlphaBand(file.filename[0]?.toUpperCase() ?? "");
+    setFilesCollapsed((prev) => { const n = new Set(prev); n.delete(sectionKey); return n; });
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-file-row="${selectedStlFileId}"]`)
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }, [selectedStlFileId]);
 
   // Reset UI-only state when navigating to a different model
   useEffect(() => {
@@ -426,17 +535,102 @@ export default function ModelDetail() {
   };
 
   const savePartType = async (fileId: number, value: string) => {
-    const pt = value.trim().toLowerCase() || "";
-    // Revert target is the last-persisted value, not live input state (onChange
-    // already mutated partTypes before this blur fires).
-    const saved = model?.stl_files.find((f) => f.id === fileId)?.part_type ?? "";
-    if (pt === saved) return;
+    const pt = toPascalCase(value);
+    // Always normalise the displayed value to Pascal case, even if no save is needed.
+    const thisFile = model?.stl_files.find((f) => f.id === fileId);
+    const saved = thisFile?.part_type ?? "";
     setPartTypes((prevState) => ({ ...prevState, [fileId]: pt }));
+
+    // Find ALL linked files: sups of this file (if base) + base of this file (if sup) + sibling sups.
+    const linkedFiles: NonNullable<typeof model>["stl_files"] = [];
+    if (thisFile) {
+      const directSups = model?.stl_files.filter((f) => f.sup_of_id === fileId) ?? [];
+      linkedFiles.push(...directSups);
+      if (thisFile.sup_of_id != null) {
+        const base = model?.stl_files.find((f) => f.id === thisFile.sup_of_id);
+        if (base) {
+          linkedFiles.push(base);
+          const siblings = model?.stl_files.filter((f) => f.sup_of_id === base.id && f.id !== fileId) ?? [];
+          linkedFiles.push(...siblings);
+        }
+      }
+      // Filename fallback when no explicit sup_of_id relationship exists.
+      if (linkedFiles.length === 0) {
+        const counterpartName = /^Sup_/i.test(thisFile.filename)
+          ? thisFile.filename.replace(/^Sup_/i, "")
+          : `Sup_${thisFile.filename}`;
+        const counterpart = model?.stl_files.find((f) => f.filename === counterpartName) ?? null;
+        if (counterpart) linkedFiles.push(counterpart);
+      }
+    }
+
+    const linkedNeedingUpdate = linkedFiles.filter((p) => p.part_type !== (pt || null));
+    const thisNeedsUpdate = pt !== saved;
+    if (!thisNeedsUpdate && linkedNeedingUpdate.length === 0) return;
+
     try {
-      await api.models.updateSTLFile(fileId, { part_type: pt || null });
+      if (thisNeedsUpdate) {
+        await api.models.updateSTLFile(fileId, { part_type: pt || null });
+        setModel((prev) =>
+          prev
+            ? { ...prev, stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, part_type: pt || null } : f) }
+            : prev
+        );
+      }
+      for (const paired of linkedNeedingUpdate) {
+        setPartTypes((prevState) => ({ ...prevState, [paired.id]: pt }));
+        await api.models.updateSTLFile(paired.id, { part_type: pt || null });
+        setModel((prev) =>
+          prev
+            ? { ...prev, stl_files: prev.stl_files.map((f) => f.id === paired.id ? { ...f, part_type: pt || null } : f) }
+            : prev
+        );
+      }
     } catch {
-      setPartTypes((prevState) => ({ ...prevState, [fileId]: saved }));  // revert on failure
-      toast("Couldn't save label — try again.", "error");
+      setPartTypes((prevState) => ({ ...prevState, [fileId]: saved }));
+      toast("Couldn't save category — try again.", "error");
+    }
+  };
+
+  const patchStlFile = (fileId: number, patch: Partial<{ sup_of_id: number | null; part_type: string | null; part_name: string | null }>) =>
+    setModel((prev) =>
+      prev ? { ...prev, stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, ...patch } : f) } : prev
+    );
+
+  const savePartName = async (fileId: number, value: string) => {
+    const trimmed = value.trim() || null;
+    try {
+      await api.models.updateSTLFile(fileId, { part_name: trimmed });
+      patchStlFile(fileId, { part_name: trimmed });
+    } catch {
+      toast("Couldn't save name — try again.", "error");
+    }
+  };
+
+  const linkSup = async (baseId: number, supId: number) => {
+    try {
+      await api.models.updateSTLFile(supId, { sup_of_id: baseId });
+      patchStlFile(supId, { sup_of_id: baseId });
+      // Sync the base file's category to the newly linked sup file so they
+      // appear in the same group and render as a hierarchy.
+      const basePt = partTypes[baseId] ?? model?.stl_files.find((f) => f.id === baseId)?.part_type ?? null;
+      if (basePt) {
+        const pt = toPascalCase(basePt);
+        await api.models.updateSTLFile(supId, { part_type: pt });
+        patchStlFile(supId, { part_type: pt });
+        setPartTypes((prev) => ({ ...prev, [supId]: pt }));
+      }
+    } catch {
+      toast("Couldn't link files — try again.", "error");
+    }
+  };
+
+  const unlinkSup = async (supId: number) => {
+    try {
+      await api.models.updateSTLFile(supId, { sup_of_id: null });
+      patchStlFile(supId, { sup_of_id: null });
+    } catch {
+      toast("Couldn't unlink file — try again.", "error");
     }
   };
 
@@ -920,10 +1114,14 @@ export default function ModelDetail() {
           {viewMode === "3d" && (
             <Suspense fallback={<div className="flex items-center justify-center h-64 text-gray-400">Loading viewer…</div>}>
               <STLViewer
-                files={model.stl_files}
+                files={stlFilesWithLiveTypes}
                 getUrl={api.stlUrl}
                 modelId={model.id}
                 onThumbnailCaptured={load}
+                categoriesEnabled={settings.part_categories_enabled}
+                selectedFileId={selectedStlFileId ?? undefined}
+                onSelectFile={setSelectedStlFileId}
+                hidePicker={settings.horizontal_parts_layout}
               />
             </Suspense>
           )}
@@ -1338,10 +1536,58 @@ export default function ModelDetail() {
             );
           })()}
 
-          {/* Collections */}
+          {/* Collections — always in right column */}
           <CollectionsSection key={model.id} modelId={model.id} initialIds={model.collection_ids} />
 
+          {/* Location — in right column right under collections when horizontal layout */}
+          {settings.horizontal_parts_layout && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                <Folder size={14} />
+                Location
+              </h3>
+              <div className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
+                <p className="text-xs text-gray-400 break-all font-mono leading-relaxed">
+                  {model.native_folder_path || model.folder_path}
+                </p>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={copyPath} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                    {copiedPath ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
+                    {copiedPath ? "Copied!" : "Copy path"}
+                  </button>
+                  <button onClick={openFolder} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                    <FolderDown size={11} />
+                    Open folder
+                  </button>
+                </div>
+                {openFolderError && <p className="text-xs text-amber-400 mt-1.5">{openFolderError}</p>}
+              </div>
+            </div>
+          )}
+
+          {/* Other Files — in right column when horizontal layout */}
+          {settings.horizontal_parts_layout && (model.other_files ?? []).length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                <FileBox size={14} />
+                Other Files ({(model.other_files ?? []).length})
+              </h3>
+              <div className="space-y-1">
+                {(model.other_files ?? []).map((fp) => {
+                  const name = fp.split(/[\\/]/).pop() ?? fp;
+                  return (
+                    <a key={fp} href={api.documentUrl(fp)} download={name} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-600 hover:bg-gray-800 text-xs text-gray-300 hover:text-gray-100 transition-colors">
+                      <FileBox size={12} className="shrink-0 text-gray-500" />
+                      <span className="truncate">{name}</span>
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* STL Files list */}
+          {!settings.horizontal_parts_layout && (
           <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -1368,45 +1614,183 @@ export default function ModelDetail() {
                 </div>
               )}
             </div>
-            <datalist id="part-type-list">
-              {PART_TYPE_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
-            </datalist>
-            <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
-              {model.stl_files.map((f) => {
+            {/* Files list — hierarchical, with sup files indented below their base */}
+            {(() => {
+              // Determine which files are sups of which bases across the whole model.
+              const supFileIds = new Set(model.stl_files.filter((f) => f.sup_of_id != null).map((f) => f.id));
+
+              // Render a single file row (with hierarchy depth treatment).
+              const renderRow = (f: typeof model.stl_files[0], depth: 0 | 1, withCategory: boolean) => {
+                const isSup = depth === 1;
                 const pt = partTypes[f.id] ?? "";
+                const isBase = !isSup && !supFileIds.has(f.id);
+                const isSelected = selectedStlFileId === f.id;
+
                 return (
-                  <div
-                    key={f.id}
-                    className="flex items-center gap-2 text-xs bg-gray-900 border border-gray-800 px-3 py-1.5 rounded"
-                  >
-                    <span className="text-gray-300 truncate flex-1 min-w-0">{f.filename}</span>
-                    <input
-                      list="part-type-list"
-                      value={pt}
-                      placeholder="Label…"
-                      onChange={(e) => setPartTypes((prev) => ({ ...prev, [f.id]: e.target.value }))}
-                      onBlur={(e) => savePartType(f.id, e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      className="w-28 shrink-0 bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-2 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none"
-                    />
-                    {f.size_bytes && (
-                      <a
-                        href={api.stlUrl(f.path)}
-                        download={f.filename}
+                  <div key={f.id} className="flex flex-col gap-0.5">
+                    <div
+                      data-file-row={f.id}
+                      onClick={() => { setSelectedStlFileId(f.id); setViewMode("3d"); }}
+                      className={`flex items-center gap-1.5 text-xs border px-2 py-1.5 rounded cursor-pointer transition-colors ${isSup ? "ml-4" : ""} ${isSelected ? "bg-indigo-950/40 border-indigo-500/60" : "bg-gray-900 border-gray-800 hover:border-gray-700"}`}
+                    >
+                      {/* Hierarchy indicator */}
+                      {isSup && <span className="text-gray-600 shrink-0 select-none">↳</span>}
+
+                      {/* Filename */}
+                      <span className="text-gray-300 truncate flex-1 min-w-0" title={f.filename}>{f.filename}</span>
+
+                      {/* Category input (categories mode only) */}
+                      {withCategory && (
+                        <input
+                          list="part-category-list"
+                          value={pt}
+                          placeholder="Category…"
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => { const v = e.target.value; setPartTypes((prev) => ({ ...prev, [f.id]: toPascalCase(v) + (v.endsWith(" ") ? " " : "") })); }}
+                          onBlur={(e) => savePartType(f.id, e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                          className="w-28 shrink-0 bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-2 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none"
+                        />
+                      )}
+
+                      {/* Size */}
+                      {f.size_bytes ? (
+                        <a href={api.stlUrl(f.path)} download={f.filename} onClick={(e) => e.stopPropagation()} className="text-gray-600 hover:text-gray-400 shrink-0 tabular-nums transition-colors w-14 text-right">
+                          {(f.size_bytes / 1024 / 1024).toFixed(1)} MB
+                        </a>
+                      ) : <span className="w-14 shrink-0" />}
+
+                      {/* Link / Unlink */}
+                      {isSup ? (
+                        <button
+                          title="Remove supported-version link"
+                          onClick={(e) => { e.stopPropagation(); unlinkSup(f.id); }}
+                          className="shrink-0 text-gray-600 hover:text-rose-400 transition-colors"
+                        >
+                          <Unlink2 size={14} />
+                        </button>
+                      ) : isBase ? (
+                        <button
+                          title="Link a supported version"
+                          onClick={(e) => { e.stopPropagation(); setLinkingBaseId(linkingBaseId === f.id ? null : f.id); }}
+                          className={`shrink-0 transition-colors ${linkingBaseId === f.id ? "text-indigo-400" : "text-gray-600 hover:text-indigo-400"}`}
+                        >
+                          <Link2 size={14} />
+                        </button>
+                      ) : <span className="w-[11px] shrink-0" />}
+                    </div>
+
+                    {/* Inline sup-picker */}
+                    {isBase && linkingBaseId === f.id && (
+                      <div
+                        className="ml-4 flex items-center gap-2 px-2 py-1.5 bg-gray-800 rounded border border-indigo-600/60"
                         onClick={(e) => e.stopPropagation()}
-                        className="text-gray-600 hover:text-gray-400 shrink-0 transition-colors"
                       >
-                        {(f.size_bytes / 1024 / 1024).toFixed(1)} MB
-                      </a>
+                        <Link2 size={14} className="text-indigo-400 shrink-0" />
+                        <select
+                          autoFocus
+                          defaultValue=""
+                          className="flex-1 min-w-0 bg-gray-700 text-xs text-gray-300 rounded px-1.5 py-0.5 border border-gray-600 focus:outline-none focus:border-indigo-500"
+                          onChange={(e) => { if (e.target.value) { linkSup(f.id, parseInt(e.target.value)); setLinkingBaseId(null); } }}
+                          onBlur={() => setLinkingBaseId(null)}
+                        >
+                          <option value="" disabled>Select supported-version file…</option>
+                          {model.stl_files
+                            .filter((sf) => sf.id !== f.id)
+                            .sort((a, b) => a.filename.localeCompare(b.filename))
+                            .map((sf) => {
+                              const alreadyHere = sf.sup_of_id === f.id;
+                              const linkedElsewhere = sf.sup_of_id != null && !alreadyHere;
+                              return (
+                                <option key={sf.id} value={sf.id} disabled={alreadyHere}>
+                                  {sf.filename}{alreadyHere ? " ✓ (already this file's sup)" : linkedElsewhere ? " (linked to another)" : ""}
+                                </option>
+                              );
+                            })}
+                        </select>
+                        <button onMouseDown={(e) => e.preventDefault()} onClick={() => setLinkingBaseId(null)} className="shrink-0 text-gray-500 hover:text-gray-300">
+                          <X size={11} />
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
-              })}
-            </div>
+              };
+
+              // Render a group of files as a collapsible section.
+              const renderSection = (
+                key: string,
+                header: React.ReactNode,
+                files: typeof model.stl_files,
+                withCategory: boolean,
+                defaultOpen = true,
+              ) => {
+                const isCollapsed = filesCollapsed.has(key);
+                const hierarchy = buildFileHierarchy(files);
+                return (
+                  <div key={key} className="flex flex-col gap-0.5">
+                    <button
+                      onClick={() => setFilesCollapsed((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; })}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 text-left transition-colors"
+                    >
+                      {header}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-gray-600 tabular-nums">{files.length}</span>
+                        {!isCollapsed ? <ChevronDown size={11} className="text-gray-600" /> : <ChevronRight size={11} className="text-gray-600" />}
+                      </div>
+                    </button>
+                    {(defaultOpen ? !isCollapsed : !isCollapsed) && hierarchy.map(({ file: f, depth }) => renderRow(f, depth, withCategory))}
+                  </div>
+                );
+              };
+
+              return (
+                <div className="flex flex-col gap-1 max-h-96 overflow-y-auto">
+                  {settings.part_categories_enabled && (
+                    <datalist id="part-category-list">
+                      {PART_TYPE_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
+                    </datalist>
+                  )}
+
+                  {settings.part_categories_enabled ? (
+                    <>
+                      {groupedStlFiles.labeled.map(([cat, catFiles]) =>
+                        renderSection(
+                          cat,
+                          <span className="text-xs font-medium text-gray-400">{toPascalCase(cat)}</span>,
+                          catFiles,
+                          true,
+                        )
+                      )}
+                      {groupedStlFiles.unlabeled.length > 0 && renderSection(
+                        "__uncategorized__",
+                        <span className="text-xs font-medium text-gray-500">
+                          Uncategorized · {groupedStlFiles.unlabeled.length} of {model.stl_files.length}
+                        </span>,
+                        groupedStlFiles.unlabeled,
+                        true,
+                        groupedStlFiles.labeled.length === 0,
+                      )}
+                    </>
+                  ) : (
+                    groupAlphabetically([...model.stl_files].sort((a, b) => a.filename.localeCompare(b.filename))).map(([band, bandFiles]) =>
+                      renderSection(
+                        band,
+                        <span className="text-xs font-medium text-gray-400 font-mono">{band}</span>,
+                        bandFiles,
+                        false,
+                      )
+                    )
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
-          {/* Other Files (PDFs, TXTs, ZIPs, etc.) */}
-          {(model.other_files ?? []).length > 0 && (
+          )} {/* end !horizontal_parts_layout for STL files */}
+
+          {/* Other Files (PDFs, TXTs, ZIPs, etc.) — right column only when NOT horizontal */}
+          {!settings.horizontal_parts_layout && (model.other_files ?? []).length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
                 <FileBox size={14} />
@@ -1431,8 +1815,8 @@ export default function ModelDetail() {
             </div>
           )}
 
-          {/* File location */}
-          <div className="mt-auto">
+          {/* File location — right column only when NOT horizontal */}
+          {!settings.horizontal_parts_layout && <div className="mt-auto">
             <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
               <Folder size={14} />
               Location
@@ -1461,11 +1845,196 @@ export default function ModelDetail() {
                 <p className="text-xs text-amber-400 mt-1.5">{openFolderError}</p>
               )}
             </div>
-          </div>
+          </div>} {/* end !horizontal_parts_layout for location */}
 
           </>)} {/* end display mode */}
         </div>
       </div>
+
+      {/* Full-width below-grid area: Collections, Location, STL files table, Other Files */}
+      {settings.horizontal_parts_layout && !editing && model && (() => {
+        const supFileIds = new Set(model.stl_files.filter((f) => f.sup_of_id != null).map((f) => f.id));
+        const colCount = settings.part_categories_enabled ? 5 : 4;
+        const renderHRow = (f: typeof model.stl_files[0], depth: 0 | 1) => {
+          const isSup = depth === 1;
+          const isBase = !isSup && !supFileIds.has(f.id);
+          const pt = partTypes[f.id] ?? "";
+          const pn = partNames[f.id] ?? "";
+          const isSelected = selectedStlFileId === f.id;
+          return (
+            <tr
+              key={f.id}
+              data-file-row={f.id}
+              onClick={() => { setSelectedStlFileId(f.id); setViewMode("3d"); }}
+              className={`cursor-pointer transition-colors ${isSelected ? "bg-indigo-950/40" : "hover:bg-gray-800/40"}`}
+            >
+              <td className="px-3 py-1.5">
+                <div className={`flex items-center gap-1 ${isSup ? "pl-4" : ""}`}>
+                  {isSup && <span className="text-gray-600 shrink-0 select-none text-[10px]">↳</span>}
+                  <input
+                    value={pn}
+                    placeholder={autoPartName(f.filename)}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setPartNames((prev) => ({ ...prev, [f.id]: e.target.value }))}
+                    onBlur={(e) => { const v = e.target.value.trim(); if (v !== (f.part_name ?? "")) savePartName(f.id, v); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    className="w-full bg-transparent border border-transparent hover:border-gray-700 focus:border-indigo-500 rounded px-1.5 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:bg-gray-800 transition-colors"
+                  />
+                </div>
+              </td>
+              <td className="px-3 py-1.5">
+                <span className="text-gray-400 font-mono truncate" title={f.filename}>{f.filename}</span>
+              </td>
+              {settings.part_categories_enabled && (
+                <td className="px-3 py-1.5">
+                  <input
+                    list="part-category-list-h"
+                    value={pt}
+                    placeholder="Category…"
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => { const v = e.target.value; setPartTypes((prev) => ({ ...prev, [f.id]: toPascalCase(v) + (v.endsWith(" ") ? " " : "") })); }}
+                    onBlur={(e) => savePartType(f.id, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    className="w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-1.5 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none"
+                  />
+                </td>
+              )}
+              <td className="px-3 py-1.5 text-right">
+                {f.size_bytes ? (
+                  <a href={api.stlUrl(f.path)} download={f.filename} onClick={(e) => e.stopPropagation()} className="text-gray-600 hover:text-gray-400 tabular-nums transition-colors">
+                    {(f.size_bytes / 1024 / 1024).toFixed(1)} MB
+                  </a>
+                ) : null}
+              </td>
+              <td className="px-3 py-1.5">
+                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  {isSup ? (
+                    <button title="Remove link" onClick={() => unlinkSup(f.id)} className="text-gray-600 hover:text-rose-400 transition-colors">
+                      <Unlink2 size={14} />
+                    </button>
+                  ) : isBase ? (
+                    <button title="Link a sup" onClick={() => setLinkingBaseId(linkingBaseId === f.id ? null : f.id)} className={`transition-colors ${linkingBaseId === f.id ? "text-indigo-400" : "text-gray-600 hover:text-indigo-400"}`}>
+                      <Link2 size={14} />
+                    </button>
+                  ) : null}
+                  {isBase && linkingBaseId === f.id && (
+                    <select
+                      autoFocus
+                      defaultValue=""
+                      className="bg-gray-700 text-xs text-gray-300 rounded px-1.5 py-0.5 border border-gray-600 focus:outline-none focus:border-indigo-500"
+                      onChange={(e) => { if (e.target.value) { linkSup(f.id, parseInt(e.target.value)); setLinkingBaseId(null); } }}
+                      onBlur={() => setLinkingBaseId(null)}
+                    >
+                      <option value="" disabled>Link sup…</option>
+                      {model.stl_files
+                        .filter((sf) => sf.id !== f.id)
+                        .sort((a, b) => a.filename.localeCompare(b.filename))
+                        .map((sf) => {
+                          const alreadyHere = sf.sup_of_id === f.id;
+                          const linkedElsewhere = sf.sup_of_id != null && !alreadyHere;
+                          return (
+                            <option key={sf.id} value={sf.id} disabled={alreadyHere}>
+                              {sf.filename}{alreadyHere ? " ✓" : linkedElsewhere ? " (linked)" : ""}
+                            </option>
+                          );
+                        })}
+                    </select>
+                  )}
+                </div>
+              </td>
+            </tr>
+          );
+        };
+        const toggleHTable = (key: string) => setHTableCollapsed((prev) => {
+          const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n;
+        });
+        const renderHGroupHeader = (key: string, label: React.ReactNode, count: number) => {
+          const isCollapsed = hTableCollapsed.has(key);
+          return (
+            <tr
+              key={`hdr-${key}`}
+              className="cursor-pointer select-none bg-gray-800/70 hover:bg-gray-800 border-b border-gray-700/60"
+              onClick={() => toggleHTable(key)}
+            >
+              <td colSpan={colCount} className="px-3 py-1.5">
+                <div className="flex items-center justify-between">
+                  {label}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-600 tabular-nums">{count}</span>
+                    {isCollapsed ? <ChevronRight size={11} className="text-gray-600" /> : <ChevronDown size={11} className="text-gray-600" />}
+                  </div>
+                </div>
+              </td>
+            </tr>
+          );
+        };
+        return (
+          <div className="flex flex-col gap-5 mt-4">
+
+            {/* STL Files — horizontal table */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <FileBox size={14} />
+                  Files ({model.stl_files.length})
+                </h3>
+                <div className="flex gap-2">
+                  <button onClick={downloadAllFiles} disabled={downloadingAll} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 disabled:opacity-40 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                    <FolderDown size={12} />
+                    {downloadingAll ? "Zipping…" : "Download all"}
+                  </button>
+                  <button onClick={() => setShowKitBuilder(true)} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-indigo-950 border border-gray-700 hover:border-indigo-600 text-xs text-gray-400 hover:text-indigo-300 transition-colors">
+                    <Wrench size={12} />
+                    Kit Builder
+                  </button>
+                </div>
+              </div>
+              {settings.part_categories_enabled && (
+                <datalist id="part-category-list-h">
+                  {PART_TYPE_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
+                </datalist>
+              )}
+              <div className="overflow-x-auto overflow-y-auto max-h-[520px] rounded-lg border border-gray-800">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="border-b border-gray-700 bg-gray-900">
+                      <th className="px-3 py-2 text-left text-gray-500 font-medium w-52">Name</th>
+                      <th className="px-3 py-2 text-left text-gray-500 font-medium">Filename</th>
+                      {settings.part_categories_enabled && <th className="px-3 py-2 text-left text-gray-500 font-medium w-36">Category</th>}
+                      <th className="px-3 py-2 text-right text-gray-500 font-medium w-20">Size</th>
+                      <th className="px-3 py-2 w-14"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800/60">
+                    {settings.part_categories_enabled ? (
+                      <>
+                        {groupedStlFiles.labeled.map(([cat, catFiles]) => (
+                          <Fragment key={cat}>
+                            {renderHGroupHeader(cat, <span className="text-xs font-medium text-gray-400">{toPascalCase(cat)}</span>, catFiles.length)}
+                            {!hTableCollapsed.has(cat) && buildFileHierarchy(catFiles).map(({ file: f, depth }) => renderHRow(f, depth))}
+                          </Fragment>
+                        ))}
+                        {groupedStlFiles.unlabeled.length > 0 && (() => {
+                          const key = "__uncategorized__";
+                          return (
+                            <Fragment key={key}>
+                              {renderHGroupHeader(key, <span className="text-xs font-medium text-gray-500">Uncategorized · {groupedStlFiles.unlabeled.length} of {model.stl_files.length}</span>, groupedStlFiles.unlabeled.length)}
+                              {!hTableCollapsed.has(key) && buildFileHierarchy(groupedStlFiles.unlabeled).map(({ file: f, depth }) => renderHRow(f, depth))}
+                            </Fragment>
+                          );
+                        })()}
+                      </>
+                    ) : (
+                      buildFileHierarchy(model.stl_files).map(({ file: f, depth }) => renderHRow(f, depth))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        );
+      })()}
 
       {showImagePicker && (
         <ImagePicker

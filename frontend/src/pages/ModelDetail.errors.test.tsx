@@ -36,7 +36,7 @@ vi.mock("../api/client", () => ({
 
 vi.mock("../context/NSFWContext", () => ({ useNSFW: () => ({ showNSFW: true }) }));
 vi.mock("../context/AppSettingsContext", () => ({
-  useAppSettings: () => ({ settings: { painting_guides_enabled: false } }),
+  useAppSettings: () => ({ settings: { painting_guides_enabled: false, part_categories_enabled: true }, update: vi.fn() }),
 }));
 vi.mock("../context/ToastContext", () => ({ useToast: () => ({ toast: toastMock }) }));
 vi.mock("../context/ConfirmContext", () => ({ useConfirm: () => vi.fn(async () => true) }));
@@ -127,11 +127,11 @@ describe("ModelDetail error handling (#221)", () => {
     renderAt();
     await waitFor(() => expect(screen.getByText("Goblin")).toBeInTheDocument());
 
-    const input = screen.getByPlaceholderText("Label…") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("Category…") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "head" } });
     fireEvent.blur(input);
 
-    await waitFor(() => expect(toastMock).toHaveBeenCalledWith("Couldn't save label — try again.", "error"));
+    await waitFor(() => expect(toastMock).toHaveBeenCalledWith("Couldn't save category — try again.", "error"));
     await waitFor(() => expect(input.value).toBe(""));
   });
 });

@@ -570,7 +570,21 @@ def update_stl_file(file_id: int, body: STLFileUpdate, db: Session = Depends(get
     data = body.model_dump(exclude_unset=True)
     if "part_type" in data:
         pt = data["part_type"]
-        f.part_type = pt.strip().lower() if pt and pt.strip() else None
+        f.part_type = pt.strip() if pt and pt.strip() else None
+    if "part_name" in data:
+        pn = data["part_name"]
+        f.part_name = pn.strip() if pn and pn.strip() else None
+    if "sup_of_id" in data:
+        sup_id = data["sup_of_id"]
+        if sup_id is not None:
+            if sup_id == file_id:
+                raise HTTPException(status_code=400, detail="sup_of_id cannot reference the file itself")
+            target = db.query(STLFile).filter(STLFile.id == sup_id).first()
+            if not target:
+                raise HTTPException(status_code=400, detail="sup_of_id references a nonexistent file")
+            if target.model_id != f.model_id:
+                raise HTTPException(status_code=400, detail="sup_of_id must reference a file within the same model")
+        f.sup_of_id = sup_id
     db.commit()
     return {"ok": True}
 

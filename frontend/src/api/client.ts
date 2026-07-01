@@ -160,6 +160,8 @@ export interface STLFile {
   filename: string;
   size_bytes: number | null;
   part_type: string | null;
+  part_name: string | null;
+  sup_of_id?: number | null;
 }
 
 export interface ModelDetail extends Model {
@@ -288,6 +290,8 @@ export interface AppSettings {
   // NOT here — it's write-only via the dedicated /settings/ai endpoints.
   ai_model: string;
   ai_effort: AiEffort;
+  part_categories_enabled: boolean;
+  horizontal_parts_layout: boolean;
 }
 
 export type AiEffort = "low" | "medium" | "high";

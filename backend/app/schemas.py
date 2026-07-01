@@ -26,6 +26,8 @@ class STLFileRead(BaseModel):
     filename: str
     size_bytes: Optional[int] = None
     part_type: Optional[str] = None
+    part_name: Optional[str] = None
+    sup_of_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -243,6 +245,8 @@ class ExcludeUpdate(BaseModel):
 
 class STLFileUpdate(BaseModel):
     part_type: Optional[str] = None
+    part_name: Optional[str] = None
+    sup_of_id: Optional[int] = None
 
 
 class BulkTagUpdate(BaseModel):
@@ -480,6 +484,10 @@ class AppSettingsRead(BaseModel):
     ai_model: str = ""
     # AI generation effort → extended-thinking budget (low = off). (#517)
     ai_effort: str = "low"
+    # Group model files by user-assigned category in the file list and 3D viewer.
+    part_categories_enabled: bool = False
+    # Show STL files as a full-width horizontal table below the two-column layout.
+    horizontal_parts_layout: bool = False
 
 
 class AppSettingsUpdate(BaseModel):
@@ -503,6 +511,8 @@ class AppSettingsUpdate(BaseModel):
     guide_theme_defaults: Optional[GuideTheme] = None
     ai_model: Optional[str] = Field(None, max_length=200)
     ai_effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    part_categories_enabled: Optional[bool] = None
+    horizontal_parts_layout: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
