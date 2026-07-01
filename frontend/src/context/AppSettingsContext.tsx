@@ -17,6 +17,8 @@ const DEFAULTS: AppSettings = {
   guide_theme_defaults: {},
   ai_model: "",
   ai_effort: "low",
+  part_categories_enabled: false,
+  horizontal_parts_layout: false,
 };
 
 interface AppSettingsContextValue {

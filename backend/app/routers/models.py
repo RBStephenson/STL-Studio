@@ -538,7 +538,12 @@ def update_stl_file(file_id: int, body: STLFileUpdate, db: Session = Depends(get
     data = body.model_dump(exclude_unset=True)
     if "part_type" in data:
         pt = data["part_type"]
-        f.part_type = pt.strip().lower() if pt and pt.strip() else None
+        f.part_type = pt.strip() if pt and pt.strip() else None
+    if "part_name" in data:
+        pn = data["part_name"]
+        f.part_name = pn.strip() if pn and pn.strip() else None
+    if "sup_of_id" in data:
+        f.sup_of_id = data["sup_of_id"]
     db.commit()
     return {"ok": True}
 

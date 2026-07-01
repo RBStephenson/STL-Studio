@@ -517,9 +517,9 @@ class TestSTLFilePartType:
         resp = client.patch(f"/models/stl-files/{stl.id}", json={"part_type": "Head"})
         assert resp.status_code == 200
 
-        # Verify it's stored normalized (lowercase)
+        # Verify it's stored with original casing (no longer lowercased)
         db.refresh(stl)
-        assert stl.part_type == "head"
+        assert stl.part_type == "Head"
 
     def test_clear_part_type(self, client, db):
         creator = make_creator(db)

@@ -17,6 +17,8 @@ DEFAULTS = {
     "guide_theme_defaults": {k: None for k in _THEME_KEYS},
     "ai_model": "",
     "ai_effort": "low",
+    "part_categories_enabled": False,
+    "horizontal_parts_layout": False,
 }
 
 
