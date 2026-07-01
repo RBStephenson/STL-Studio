@@ -476,44 +476,57 @@ export default function ModelDetail() {
     }
   };
 
-  const openSetGroup = () => {
-    setGroupInput(model?.character ?? "");
+  // #678 Phase 4: merge into / remove from a durable VariantGroup. Creating a
+  // brand-new group from a single ungrouped model is deliberately unsupported
+  // here (undesigned UX per the plan) — the picker only accepts an existing
+  // group, resolved the same way VariantGroup.tsx's moveToGroup does: look up
+  // any current member of that label and take its variant_group_id.
+  const openMergePicker = () => {
+    setGroupInput("");
     setSettingGroup(true);
     if (model?.creator_id) {
       api.models.characters(model.creator_id).then(setGroupSuggestions).catch(() => {});
     }
   };
 
-  const saveGroup = async () => {
+  const mergeIntoGroup = async () => {
     if (!model || savingGroup) return;
+    const trimmed = groupInput.trim();
+    if (!trimmed) return;
     setSavingGroup(true);
     try {
-      const trimmed = groupInput.trim();
-      await api.models.setGroupOverride(model.id, trimmed || null);
-      toast(trimmed ? `Moved to group "${trimmed}".` : "Removed from group.", "success");
+      const { items } = await api.models.variants(model.creator_id!, trimmed);
+      const rep = items.find((m) => m.id !== model.id);
+      if (!rep?.variant_group_id) {
+        toast(`No existing group named "${trimmed}" — pick one from the list.`, "error");
+        return;
+      }
+      const label = rep.variant_group?.label || trimmed;
+      await api.models.mergeGroup([model.id], { groupId: rep.variant_group_id, label });
+      toast(`Merged into "${label}".`, "success");
       setSettingGroup(false);
       load();
     } catch (e: any) {
-      toast(e?.message || "Couldn't save group — try again.", "error");
+      toast(e?.message || "Couldn't merge into that group — try again.", "error");
     } finally {
       setSavingGroup(false);
     }
   };
 
-  const clearGroup = async () => {
-    if (!model) return;
+  const removeFromGroup = async () => {
+    if (!model || model.variant_group_id == null) return;
     const ok = await confirm({
-      title: "Clear the group override?",
-      message: "The model will return to its scanner-detected group on the next rescan.",
-      confirmLabel: "Clear override",
+      title: "Remove from this group?",
+      message: "This model will no longer be grouped with its variants. You can merge it into a group again anytime.",
+      confirmLabel: "Remove",
     });
     if (!ok) return;
     try {
-      await api.models.clearGroupOverride(model.id);
-      toast("Group override cleared — rescan to apply heuristic.", "success");
+      await api.models.splitGroup(model.variant_group_id, [model.id]);
+      toast("Removed from group.", "success");
       load();
     } catch (e: any) {
-      toast(e?.message || "Couldn't clear override — try again.", "error");
+      toast(e?.message || "Couldn't remove from group — try again.", "error");
     }
   };
 
@@ -805,19 +818,21 @@ export default function ModelDetail() {
   useEffect(() => { setLoading(true); }, [id]);
 
   // Fetch sibling variants for the variant switcher. Keyed on the (creator,
-  // character) group plus a version counter bumped by load(), so in-place
+  // character, group) plus a version counter bumped by load(), so in-place
   // refreshes (thumbnail capture/picker, metadata save) update the switcher
-  // thumbnails even though creator/character are unchanged.
+  // thumbnails even though creator/character are unchanged. Passes
+  // variant_group_id (#678) so the durable group is authoritative — a lone
+  // scanner-attribute character match isn't enough to resolve siblings.
   useEffect(() => {
-    if (model?.creator_id && model.character) {
+    if (model?.creator_id && (model.variant_group_id != null || model.character)) {
       api.models
-        .variants(model.creator_id, model.character)
+        .variants(model.creator_id, model.character ?? "", model.variant_group_id)
         .then((data) => setVariants(data.items))
         .catch(() => setVariants([]));
     } else {
       setVariants([]);
     }
-  }, [model?.creator_id, model?.character, variantVersion]);
+  }, [model?.creator_id, model?.character, model?.variant_group_id, variantVersion]);
 
   useEffect(() => {
     if (!navOrigin || !id) {
@@ -1233,19 +1248,19 @@ export default function ModelDetail() {
                 <Split size={14} />
                 {splitting ? "Splitting…" : "Split pack"}
               </button>
-              {model.has_group_override ? (
+              {model.variant_group_id != null ? (
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={openSetGroup}
-                    title="Change the group this model belongs to"
+                    onClick={openMergePicker}
+                    title="Merge this model into a different group"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-900/50 hover:bg-indigo-800/60 border border-indigo-700 text-sm text-indigo-300 transition-colors"
                   >
                     <Tag size={14} />
-                    Group: {model.character ?? "none"}
+                    Group: {model.variant_group?.label ?? model.character ?? "unnamed"}
                   </button>
                   <button
-                    onClick={clearGroup}
-                    title="Remove override and restore scanner-detected grouping on next rescan"
+                    onClick={removeFromGroup}
+                    title="Remove this model from its group"
                     className="px-2 py-1.5 rounded bg-gray-800 hover:bg-red-900/40 border border-gray-700 hover:border-red-600 text-xs text-gray-500 hover:text-red-400 transition-colors"
                   >
                     ✕
@@ -1253,18 +1268,18 @@ export default function ModelDetail() {
                 </div>
               ) : (
                 <button
-                  onClick={openSetGroup}
-                  title="Assign this model to a character group (persists across rescans)"
+                  onClick={openMergePicker}
+                  title="Merge this model into an existing group (persists across rescans)"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 text-sm text-gray-300 transition-colors"
                 >
                   <Tag size={14} />
-                  Set group
+                  Merge into group
                 </button>
               )}
             </div>
           </div>
 
-          {/* ---- Set group inline form ---- */}
+          {/* ---- Merge-into-group inline form (#678) ---- */}
           {settingGroup && (
             <div className="flex items-center gap-2 px-1 py-2">
               <Tag size={14} className="text-indigo-400 shrink-0" />
@@ -1274,19 +1289,19 @@ export default function ModelDetail() {
                 list="group-suggestions"
                 value={groupInput}
                 onChange={(e) => setGroupInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") saveGroup(); if (e.key === "Escape") setSettingGroup(false); }}
-                placeholder="Group name (leave blank to ungroup)"
+                onKeyDown={(e) => { if (e.key === "Enter") mergeIntoGroup(); if (e.key === "Escape") setSettingGroup(false); }}
+                placeholder="Existing group name…"
                 className="flex-1 px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-sm text-gray-200 outline-none"
               />
               <datalist id="group-suggestions">
                 {groupSuggestions.map((s) => <option key={s} value={s} />)}
               </datalist>
               <button
-                onClick={saveGroup}
-                disabled={savingGroup}
+                onClick={mergeIntoGroup}
+                disabled={savingGroup || !groupInput.trim()}
                 className="px-3 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-sm text-white disabled:opacity-40"
               >
-                {savingGroup ? "Saving…" : "Save"}
+                {savingGroup ? "Merging…" : "Merge"}
               </button>
               <button
                 onClick={() => setSettingGroup(false)}
@@ -1316,7 +1331,7 @@ export default function ModelDetail() {
             <div className="flex flex-col gap-2">
               <p className="text-xs text-gray-600 flex items-center gap-1.5">
                 <Layers size={12} className="text-indigo-400" />
-                {variants.length} variants of {model.character}
+                {variants.length} variants of {model.variant_group?.label ?? model.character}
               </p>
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {variants.map((v) => {
