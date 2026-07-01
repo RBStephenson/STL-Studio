@@ -1218,6 +1218,20 @@ def batch_set_group(body: BatchSetGroupBody, db: Session = Depends(get_db)):
 # source="manual" so the scanner's proposal engine never reassigns the members.
 # ---------------------------------------------------------------------------
 
+def _clear_group_override(db: Session, model: Model) -> None:
+    """Delete the GroupOverride row for a model and clear its character, if any.
+
+    Merges (#676) dual-write a GroupOverride (and mirror the label onto
+    model.character) alongside variant_group_id so membership survives even if
+    variant_group_id is later cleared elsewhere. When a model is deliberately
+    removed from its group (split, or a dissolve that drops a group below 2
+    members), both must be cleared too — otherwise the legacy character grouping
+    key (_group_key_py) still matches it to ex-groupmates that share the same
+    character value, silently undoing the split."""
+    db.query(GroupOverride).filter(GroupOverride.path == model.folder_path).delete()
+    model.character = None
+
+
 def _prune_empty_group(db: Session, group_id: int | None) -> None:
     """Delete a group that has dropped below 2 members; clear the lone member."""
     if group_id is None:
@@ -1226,6 +1240,7 @@ def _prune_empty_group(db: Session, group_id: int | None) -> None:
     if len(remaining) < 2:
         for m in remaining:
             m.variant_group_id = None
+            _clear_group_override(db, m)
         grp = db.get(VariantGroup, group_id)
         if grp is not None:
             db.delete(grp)
@@ -1309,6 +1324,7 @@ def split_group(group_id: int, body: GroupSplitBody, db: Session = Depends(get_d
     )
     for m in removed:
         m.variant_group_id = None
+        _clear_group_override(db, m)
     group.source = "manual"
     # If the designated rep left, fall back to a remaining member.
     if group.rep_model_id in ids:

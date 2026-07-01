@@ -1469,6 +1469,27 @@ class TestManualGroupEndpoints:
         assert c.variant_group_id is None
         assert db.get(VariantGroup, gid) is not None  # 2 left → survives
 
+    def test_split_clears_group_override_and_character(self, client, db):
+        """#676: a merge dual-writes GroupOverride + character onto every member.
+        A split member must lose both, or the legacy character grouping key
+        (_group_key_py) still matches it to its ex-groupmates — silently undoing
+        the split."""
+        from app.models import GroupOverride
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A"); b = make_model(db, creator, name="B"); c = make_model(db, creator, name="C")
+        commit_all(db)
+        gid = client.post("/models/groups/merge", json={"model_ids": [a.id, b.id, c.id], "label": "My Group"}).json()["id"]
+
+        resp = client.post(f"/models/groups/{gid}/split", json={"model_ids": [c.id]})
+        assert resp.status_code == 200
+        db.refresh(c)
+        assert c.character is None
+        assert db.query(GroupOverride).filter(GroupOverride.path == c.folder_path).first() is None
+        # Remaining members keep their shared label — only the split model is affected.
+        db.refresh(a)
+        assert a.character == "My Group"
+        assert db.query(GroupOverride).filter(GroupOverride.path == a.folder_path).first() is not None
+
     def test_split_dissolves_group_below_two(self, client, db):
         from app.models import VariantGroup
         creator = make_creator(db)
@@ -1481,6 +1502,22 @@ class TestManualGroupEndpoints:
         assert db.get(VariantGroup, gid) is None
         db.refresh(a)
         assert a.variant_group_id is None
+
+    def test_split_dissolve_clears_override_on_last_member_too(self, client, db):
+        """When a split drops the group below 2 members, _prune_empty_group nulls
+        variant_group_id on whoever is left — their GroupOverride/character must
+        be cleared too, not just the explicitly-split member's."""
+        from app.models import GroupOverride
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A"); b = make_model(db, creator, name="B")
+        commit_all(db)
+        gid = client.post("/models/groups/merge", json={"model_ids": [a.id, b.id], "label": "My Group"}).json()["id"]
+
+        resp = client.post(f"/models/groups/{gid}/split", json={"model_ids": [b.id]})
+        assert resp.status_code == 200
+        db.refresh(a)
+        assert a.character is None
+        assert db.query(GroupOverride).filter(GroupOverride.path == a.folder_path).first() is None
 
     def test_patch_label_and_rep(self, client, db):
         creator = make_creator(db)
