@@ -248,6 +248,59 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     db.flush()
 
 
+def backfill_manual_groups_from_overrides(db: Session) -> int:
+    """One-time (but idempotent/re-runnable) migration (#678 Phase 1): turn user
+    character overrides into first-class durable manual groups.
+
+    Only `GroupOverride` rows with a non-null `character` (an explicit user
+    grouping decision) and only models with no `variant_group_id` yet are
+    touched — already-grouped models and `character=None` (explicit-ungroup,
+    Phase 5's concern) are left alone. Returns the number of groups created."""
+    overrides = {
+        p: c for (p, c) in db.query(GroupOverride.path, GroupOverride.character)
+        if c is not None
+    }
+    if not overrides:
+        return 0
+
+    candidates = (
+        db.query(Model)
+        .filter(
+            Model.folder_path.in_(overrides.keys()),
+            Model.excluded == False,  # noqa: E712
+            Model.variant_group_id.is_(None),
+        )
+        .all()
+    )
+
+    buckets: dict[tuple[int, str], list[Model]] = defaultdict(list)
+    for m in candidates:
+        character = overrides[m.folder_path]
+        buckets[(m.creator_id, character)].append(m)
+
+    created = 0
+    for (creator_id, character), members in buckets.items():
+        if len(members) < 2:
+            continue
+        rep = next((m for m in members if m.is_group_rep), members[0])
+        group = VariantGroup(
+            creator_id=creator_id,
+            label=character,
+            rep_model_id=rep.id,
+            source="manual",
+            reason="manual",
+            confidence=1.0,
+        )
+        db.add(group)
+        db.flush()
+        for m in members:
+            m.variant_group_id = group.id
+        created += 1
+
+    db.flush()
+    return created
+
+
 def prune_empty_groups(db: Session) -> int:
     """Delete auto variant groups that have no (non-excluded) members. Cleans up
     orphans left by older races (#639) and is a cheap post-scan safety net. Manual
