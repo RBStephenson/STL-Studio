@@ -1,8 +1,15 @@
 """Variant-grouping proposal engine (#615). Exercises the blended signals
 (file_hash / filename / name) and the manual-group lock."""
-from app.models import Model, STLFile, VariantGroup
+from app.models import GroupOverride, Model, STLFile, VariantGroup
 from app.services import grouping
 from tests.conftest import make_creator, make_model, make_stl_file
+
+
+def _override(db, model, character):
+    o = GroupOverride(path=model.folder_path, character=character)
+    db.add(o)
+    db.flush()
+    return o
 
 
 def _stl(db, model, filename, file_hash=None):
@@ -319,3 +326,131 @@ class TestRep:
         _run(db, creator)
 
         assert _groups(db, creator)[0].rep_model_id == rep.id
+
+
+class TestBackfillManualGroupsFromOverrides:
+    """#678 Phase 1: migrate user character overrides into durable manual groups."""
+
+    def test_override_trio_becomes_manual_group(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin A")
+        b = make_model(db, creator, name="Goblin B")
+        c = make_model(db, creator, name="Goblin C")
+        _override(db, a, "Goblin King")
+        _override(db, b, "Goblin King")
+        _override(db, c, "Goblin King")
+        db.flush()
+
+        created = grouping.backfill_manual_groups_from_overrides(db)
+
+        assert created == 1
+        groups = db.query(VariantGroup).filter_by(creator_id=creator.id).all()
+        assert len(groups) == 1
+        group = groups[0]
+        assert group.source == "manual"
+        assert group.label == "Goblin King"
+        assert {a.id, b.id, c.id} == {m.id for m in group.models}
+
+    def test_rep_prefers_is_group_rep(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin A")
+        rep = make_model(db, creator, name="Goblin B")
+        rep.is_group_rep = True
+        _override(db, a, "Goblin King")
+        _override(db, rep, "Goblin King")
+        db.flush()
+
+        grouping.backfill_manual_groups_from_overrides(db)
+
+        group = db.query(VariantGroup).filter_by(creator_id=creator.id).one()
+        assert group.rep_model_id == rep.id
+
+    def test_two_characters_become_two_groups(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin A")
+        b = make_model(db, creator, name="Goblin B")
+        c = make_model(db, creator, name="Dragon A")
+        d = make_model(db, creator, name="Dragon B")
+        _override(db, a, "Goblin King")
+        _override(db, b, "Goblin King")
+        _override(db, c, "Dragon Lord")
+        _override(db, d, "Dragon Lord")
+        db.flush()
+
+        created = grouping.backfill_manual_groups_from_overrides(db)
+
+        assert created == 2
+        labels = {g.label for g in db.query(VariantGroup).filter_by(creator_id=creator.id)}
+        assert labels == {"Goblin King", "Dragon Lord"}
+
+    def test_singleton_override_not_grouped(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin A")
+        _override(db, a, "Goblin King")
+        db.flush()
+
+        created = grouping.backfill_manual_groups_from_overrides(db)
+
+        assert created == 0
+        assert db.query(VariantGroup).count() == 0
+        db.refresh(a)
+        assert a.variant_group_id is None
+
+    def test_explicit_ungroup_override_untouched(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin A")
+        b = make_model(db, creator, name="Goblin B")
+        _override(db, a, None)
+        _override(db, b, None)
+        db.flush()
+
+        created = grouping.backfill_manual_groups_from_overrides(db)
+
+        assert created == 0
+        assert db.query(VariantGroup).count() == 0
+
+    def test_already_grouped_model_skipped(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin A")
+        b = make_model(db, creator, name="Goblin B")
+        existing = VariantGroup(creator_id=creator.id, label="Existing", source="auto")
+        db.add(existing)
+        db.flush()
+        a.variant_group_id = existing.id
+        _override(db, a, "Goblin King")
+        _override(db, b, "Goblin King")
+        db.flush()
+
+        created = grouping.backfill_manual_groups_from_overrides(db)
+
+        assert created == 0
+        db.refresh(a)
+        assert a.variant_group_id == existing.id
+        db.refresh(b)
+        assert b.variant_group_id is None
+
+    def test_scanner_derived_character_without_override_not_migrated(self, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="Goblin A", character="Goblin")
+        make_model(db, creator, name="Goblin B", character="Goblin")
+        db.flush()
+
+        created = grouping.backfill_manual_groups_from_overrides(db)
+
+        assert created == 0
+        assert db.query(VariantGroup).count() == 0
+
+    def test_idempotent_rerun_creates_nothing(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin A")
+        b = make_model(db, creator, name="Goblin B")
+        _override(db, a, "Goblin King")
+        _override(db, b, "Goblin King")
+        db.flush()
+
+        first = grouping.backfill_manual_groups_from_overrides(db)
+        second = grouping.backfill_manual_groups_from_overrides(db)
+
+        assert first == 1
+        assert second == 0
+        assert db.query(VariantGroup).filter_by(creator_id=creator.id).count() == 1
