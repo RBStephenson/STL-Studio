@@ -1,21 +1,27 @@
 """Variant-grouping proposal engine (#615, epic #613).
 
 Given a creator's indexed models, propose durable variant groups by blending
-three signals, strongest first:
+four signals, strongest first:
 
+  0. user character override — a `GroupOverride(character=...)` row is a
+     deliberate user pin (#678 Phase 2); the engine forces its members
+     together rather than mirroring the plain name heuristic.
   1. file_hash overlap  — two folders sharing identical meshes are almost
-     certainly variants of one product (strongest, near-free: hashes already
-     indexed on STLFile).
+     certainly variants of one product (near-free: hashes already indexed on
+     STLFile).
   2. STL filename overlap — folders whose STL file *names* substantially overlap
      are the same part set prepared differently (supported/unsupported/hollow…).
   3. name key            — name_parser.character_key, the existing heuristic
-     (weakest on its own; the baseline when no content signal exists).
+     (weakest on its own; the baseline when no content or override signal
+     exists).
 
-The engine derives groups from scratch from these signals — it deliberately
-does NOT read the model's current `character` assignment, so it can correct the
-name heuristic rather than merely mirror it. It writes `variant_group_id` and
-recreates the creator's `auto` groups each run; `source="manual"` groups and
-their members are never touched.
+Absent an override, the engine derives groups from scratch from the content
+signals — it does NOT read the model's current `character` assignment, so it
+can correct the name heuristic rather than merely mirror it. It writes
+`variant_group_id` and recreates the creator's `auto` groups each run;
+`source="manual"` groups and their members are never touched. A
+`GroupOverride(character=None)` row (explicit "ungroup this") is still fully
+excluded from proposals.
 """
 from __future__ import annotations
 
@@ -68,7 +74,7 @@ _FILENAME_MIN_SHARED = 2
 # so a pathological creator can't stall a scan. Hash + name signals still apply.
 _FILENAME_PASS_MODEL_CAP = 400
 
-_CONFIDENCE = {"hash": 0.9, "filename": 0.7, "name": 0.6}
+_CONFIDENCE = {"override": 0.95, "hash": 0.9, "filename": 0.7, "name": 0.6}
 
 
 class _UnionFind:
@@ -104,18 +110,26 @@ def regroup_creator(db: Session, creator_id: int) -> None:
             VariantGroup.creator_id == creator_id, VariantGroup.source == "manual"
         )
     }
-    # Models the user has manually grouped/moved/ungrouped (a GroupOverride row)
-    # are off-limits too — their grouping is a deliberate decision the proposal
-    # engine must not overturn on rescan.
-    override_paths = {
-        p for (p,) in db.query(GroupOverride.path).filter(
+    # A GroupOverride with character=None is an explicit "ungroup this, sticky
+    # across rescans" decision — always off-limits. A GroupOverride with a
+    # character set used to exclude its model outright (#678 pre-Phase 2); now
+    # it is fed into the engine as a forced grouping signal below instead, so
+    # the user's character grouping becomes a durable group.
+    override_rows = {
+        p: c for (p, c) in db.query(GroupOverride.path, GroupOverride.character).filter(
             GroupOverride.path.in_([m.folder_path for m in models])
         )
     }
-    candidates = [
-        m for m in models
-        if m.variant_group_id not in manual_group_ids and m.folder_path not in override_paths
-    ]
+    ungroup_paths = {p for p, c in override_rows.items() if c is None}
+    overrides: dict[int, str] = {}  # model_id -> user-forced character
+    candidates = []
+    for m in models:
+        if m.variant_group_id in manual_group_ids or m.folder_path in ungroup_paths:
+            continue
+        candidates.append(m)
+        forced = override_rows.get(m.folder_path)
+        if forced is not None:
+            overrides[m.id] = forced
 
     # Per-subtree strategy (#618): models under an "off" subtree are never
     # auto-grouped — each stays standalone. The nearest-ancestor strategy wins,
@@ -153,7 +167,19 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     uf = _UnionFind(ids)
     signal: dict[int, str] = {}  # model_id -> strongest signal that merged it
 
-    # --- signal 1: file_hash overlap (strongest) ---
+    # --- signal 0: user character override (strongest — a deliberate pin) ---
+    override_index: dict[str, list[int]] = defaultdict(list)
+    for mid in ids:
+        if mid in overrides:
+            override_index[overrides[mid]].append(mid)
+    for bucket in override_index.values():
+        if len(bucket) >= 2:
+            first = bucket[0]
+            for other in bucket[1:]:
+                uf.union(first, other)
+                signal[first] = signal[other] = "override"
+
+    # --- signal 1: file_hash overlap (strongest content signal) ---
     hash_index: dict[str, list[int]] = defaultdict(list)
     for mid in ids:
         for h in hashes.get(mid, ()):
@@ -163,7 +189,12 @@ def regroup_creator(db: Session, creator_id: int) -> None:
             first = bucket[0]
             for other in bucket[1:]:
                 uf.union(first, other)
-                signal[first] = signal[other] = "hash"
+                # Don't downgrade a model already pinned by the stronger override
+                # signal (#678 Phase 2).
+                if signal.get(first) != "override":
+                    signal[first] = "hash"
+                if signal.get(other) != "override":
+                    signal[other] = "hash"
 
     # --- signal 2: STL filename overlap ---
     # Drop generic filenames (shared by many models) so common part names like
@@ -223,14 +254,15 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         # only ever clustered by filename/hash; grouping + labeling them with a
         # junk name produces the duplicate "supported" groups (#639).
         if len(members) < 2 or not any(
-            keys.get(mid) and not name_parser.is_structural_folder(by_id[mid].name)
+            mid in overrides
+            or (keys.get(mid) and not name_parser.is_structural_folder(by_id[mid].name))
             for mid in members
         ):
             for mid in members:
                 by_id[mid].variant_group_id = None
             continue
         strongest = _strongest_signal(members, signal)
-        label = _label_for(members, keys, by_id)
+        label = _label_for(members, keys, by_id, overrides)
         rep = next((m for m in members if by_id[m].is_group_rep), members[0])
         group = VariantGroup(
             creator_id=creator_id,
@@ -351,14 +383,20 @@ def _creator_name(db: Session, creator_id: int) -> str | None:
 
 def _strongest_signal(members: list[int], signal: dict[int, str]) -> str:
     present = {signal.get(m) for m in members} - {None}
-    for s in ("hash", "filename", "name"):
+    for s in ("override", "hash", "filename", "name"):
         if s in present:
             return s
     return "name"
 
 
-def _label_for(members: list[int], keys: dict[int, str], by_id: dict[int, Model]) -> str:
-    """Most common name key among members, else the first member's name."""
+def _label_for(
+    members: list[int], keys: dict[int, str], by_id: dict[int, Model], overrides: dict[int, str]
+) -> str:
+    """User character override wins (a deliberate pin); else most common name key;
+    else the first member's name."""
+    member_overrides = [overrides[m] for m in members if m in overrides]
+    if member_overrides:
+        return Counter(member_overrides).most_common(1)[0][0]
     member_keys = [keys[m] for m in members if m in keys]
     if member_keys:
         return Counter(member_keys).most_common(1)[0][0]
@@ -366,6 +404,8 @@ def _label_for(members: list[int], keys: dict[int, str], by_id: dict[int, Model]
 
 
 def _reason_for(signal: str, members: list[int], keys: dict[int, str], label: str) -> str:
+    if signal == "override":
+        return f"user character: {label}"
     if signal == "hash":
         return "shared mesh files"
     if signal == "filename":

@@ -169,24 +169,17 @@ class TestOverrideRespected:
 
 
 class TestOverrideEngineExclusionGolden678:
-    """#678 Phase 0 — freeze the current fork BEFORE unification: the durable
-    engine deliberately EXCLUDES any folder with a GroupOverride row, so a
-    user's character grouping never becomes a durable group today (it lives only
-    in the read-path `ch:` fallback).
+    """#678 Phase 2 — flip of the Phase 0 golden: the engine now feeds a user
+    character override in as a forced grouping signal (strongest, like a manual
+    pin) instead of excluding the model outright. Reviewed, deliberate flip —
+    see git history for the pre-Phase-2 exclusion behavior this replaces."""
 
-    Phase 2 will deliberately change this — a user character override will be fed
-    to the engine as a forced signal so it emits a durable group. When that lands,
-    THIS golden is the one that flips, as a reviewed edit, not silent drift.
-    """
-
-    def test_user_character_override_is_not_auto_grouped_today(self, db):
+    def test_user_character_override_is_now_auto_grouped(self, db):
         from app.models import GroupOverride
         creator = make_creator(db)
-        # Two models the engine WOULD group by name key (shared "Goblin")...
         a = make_model(db, creator, name="Goblin Supported")
         b = make_model(db, creator, name="Goblin Unsupported")
         db.flush()
-        # ...but the user has a character override on both, so the engine skips them.
         db.add(GroupOverride(path=a.folder_path, character="Goblin"))
         db.add(GroupOverride(path=b.folder_path, character="Goblin"))
         db.flush()
@@ -194,9 +187,14 @@ class TestOverrideEngineExclusionGolden678:
         _run(db, creator)
 
         db.refresh(a); db.refresh(b)
-        # Excluded from proposals → no durable group despite the shared name key.
-        assert a.variant_group_id is None and b.variant_group_id is None
-        assert _groups(db, creator) == []
+        assert a.variant_group_id is not None
+        assert a.variant_group_id == b.variant_group_id
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert groups[0].source == "auto"
+        assert groups[0].label == "Goblin"
+        assert groups[0].reason == "user character: Goblin"
+        assert groups[0].confidence == 0.95
 
 
 class TestSubtreeStrategy:
@@ -454,3 +452,111 @@ class TestBackfillManualGroupsFromOverrides:
         assert first == 1
         assert second == 0
         assert db.query(VariantGroup).filter_by(creator_id=creator.id).count() == 1
+
+
+class TestEngineOwnsOverrides:
+    """#678 Phase 2: user character overrides become a forced grouping signal
+    (stronger than hash/filename/name), so their durable group survives rescans
+    without the read-path `ch:` fallback."""
+
+    def test_override_forces_group_across_distinct_names(self, db):
+        # No shared name key, no shared files — only the override ties them.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        b = make_model(db, creator, name="Beta")
+        db.flush()
+        db.add(GroupOverride(path=a.folder_path, character="Hero"))
+        db.add(GroupOverride(path=b.folder_path, character="Hero"))
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert groups[0].label == "Hero"
+        assert groups[0].reason == "user character: Hero"
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+
+    def test_override_wins_over_hash_signal_in_reason(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        b = make_model(db, creator, name="Beta")
+        db.flush()
+        _stl(db, a, "x.stl", file_hash="deadbeef")
+        _stl(db, b, "y.stl", file_hash="deadbeef")
+        db.add(GroupOverride(path=a.folder_path, character="Hero"))
+        db.add(GroupOverride(path=b.folder_path, character="Hero"))
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert groups[0].reason == "user character: Hero"
+        assert groups[0].confidence == 0.95
+
+    def test_singleton_override_stays_ungrouped(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        db.flush()
+        db.add(GroupOverride(path=a.folder_path, character="Hero"))
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+        db.refresh(a)
+        assert a.variant_group_id is None
+
+    def test_explicit_ungroup_still_excluded_when_others_have_char_override(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        b = make_model(db, creator, name="Beta")
+        db.flush()
+        db.add(GroupOverride(path=a.folder_path, character=None))
+        db.add(GroupOverride(path=b.folder_path, character="Hero"))
+        db.flush()
+
+        _run(db, creator)
+
+        db.refresh(a)
+        assert a.variant_group_id is None
+        assert _groups(db, creator) == []  # b alone is a singleton
+
+    def test_rerun_does_not_duplicate_override_group(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        b = make_model(db, creator, name="Beta")
+        db.flush()
+        db.add(GroupOverride(path=a.folder_path, character="Hero"))
+        db.add(GroupOverride(path=b.folder_path, character="Hero"))
+        db.flush()
+
+        _run(db, creator)
+        _run(db, creator)
+
+        assert len(_groups(db, creator)) == 1
+
+    def test_manual_group_from_phase1_backfill_untouched_by_engine(self, db):
+        # A model already durably grouped (e.g. by the Phase 1 backfill) as
+        # source="manual" must not be re-proposed or merged by the engine, even
+        # though its GroupOverride row is still present.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        b = make_model(db, creator, name="Beta")
+        db.flush()
+        manual = VariantGroup(creator_id=creator.id, label="Hero", source="manual")
+        db.add(manual)
+        db.flush()
+        a.variant_group_id = manual.id
+        b.variant_group_id = manual.id
+        db.add(GroupOverride(path=a.folder_path, character="Hero"))
+        db.add(GroupOverride(path=b.folder_path, character="Hero"))
+        db.flush()
+
+        _run(db, creator)
+
+        db.refresh(manual)
+        assert manual.source == "manual"
+        assert {m.id for m in manual.models} == {a.id, b.id}
+        assert _groups(db, creator) == [manual]
