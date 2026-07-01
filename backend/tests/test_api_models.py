@@ -550,6 +550,69 @@ class TestSTLFilePartType:
 
 
 # ---------------------------------------------------------------------------
+# STL file sup_of_id validation
+# ---------------------------------------------------------------------------
+
+class TestSTLFileSupOfId:
+    def test_valid_same_model_link_accepted(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        base = make_stl_file(db, model, filename="Body.stl")
+        sup = make_stl_file(db, model, filename="Sup_Body.stl")
+        commit_all(db)
+
+        resp = client.patch(f"/models/stl-files/{sup.id}", json={"sup_of_id": base.id})
+        assert resp.status_code == 200
+        db.refresh(sup)
+        assert sup.sup_of_id == base.id
+
+    def test_clear_sup_link_accepted(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        base = make_stl_file(db, model, filename="Body.stl")
+        sup = make_stl_file(db, model, filename="Sup_Body.stl")
+        sup.sup_of_id = base.id
+        commit_all(db)
+
+        resp = client.patch(f"/models/stl-files/{sup.id}", json={"sup_of_id": None})
+        assert resp.status_code == 200
+        db.refresh(sup)
+        assert sup.sup_of_id is None
+
+    def test_self_link_rejected(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        stl = make_stl_file(db, model, filename="Body.stl")
+        commit_all(db)
+
+        resp = client.patch(f"/models/stl-files/{stl.id}", json={"sup_of_id": stl.id})
+        assert resp.status_code == 400
+        assert "itself" in resp.json()["detail"]
+
+    def test_nonexistent_target_rejected(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        stl = make_stl_file(db, model, filename="Body.stl")
+        commit_all(db)
+
+        resp = client.patch(f"/models/stl-files/{stl.id}", json={"sup_of_id": 99999})
+        assert resp.status_code == 400
+        assert "nonexistent" in resp.json()["detail"]
+
+    def test_cross_model_link_rejected(self, client, db):
+        creator = make_creator(db)
+        model_a = make_model(db, creator, name="ModelA")
+        model_b = make_model(db, creator, name="ModelB")
+        base = make_stl_file(db, model_a, filename="Body.stl")
+        sup = make_stl_file(db, model_b, filename="Sup_Body.stl")
+        commit_all(db)
+
+        resp = client.patch(f"/models/stl-files/{sup.id}", json={"sup_of_id": base.id})
+        assert resp.status_code == 400
+        assert "same model" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
 # Print queue ordering
 # ---------------------------------------------------------------------------
 

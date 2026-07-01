@@ -145,7 +145,8 @@ function partLabel(file: STLFile, category: string): string {
   const withoutExt = file.filename.replace(/\.(stl|STL)$/, "");
   const withoutSup = withoutExt.replace(/^Sup_/i, "");
   if (file.part_type) return withoutSup.replace(/_/g, " ");
-  const withoutCat = withoutSup.replace(new RegExp(`^${category}_?`, "i"), "");
+  const escapedCat = category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const withoutCat = withoutSup.replace(new RegExp(`^${escapedCat}_?`, "i"), "");
   return (withoutCat || withoutSup).replace(/_/g, " ");
 }
 

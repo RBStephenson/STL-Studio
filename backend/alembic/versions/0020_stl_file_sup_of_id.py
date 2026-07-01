@@ -22,12 +22,14 @@ def upgrade() -> None:
         conn.execute(sa.text("ALTER TABLE stl_files ADD COLUMN sup_of_id INTEGER REFERENCES stl_files(id)"))
 
     # Auto-populate from Sup_X.stl / X.stl filename pairs.
-    rows = conn.execute(sa.text("SELECT id, filename FROM stl_files")).fetchall()
-    by_filename = {r[1]: r[0] for r in rows}
-    for file_id, filename in rows:
+    # Key by (model_id, filename) so common names like Body.stl don't
+    # accidentally link across different models.
+    rows = conn.execute(sa.text("SELECT id, model_id, filename FROM stl_files")).fetchall()
+    by_model_filename: dict[tuple, int] = {(r[1], r[2]): r[0] for r in rows}
+    for file_id, model_id, filename in rows:
         if filename.lower().startswith("sup_"):
             base_name = filename[4:]  # strip "Sup_"
-            base_id = by_filename.get(base_name)
+            base_id = by_model_filename.get((model_id, base_name))
             if base_id is not None:
                 conn.execute(
                     sa.text("UPDATE stl_files SET sup_of_id = :base WHERE id = :id"),
