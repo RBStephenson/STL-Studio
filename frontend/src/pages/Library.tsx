@@ -542,6 +542,21 @@ export default function Library() {
     [toast],
   );
 
+  const mergeIntoDurableGroup = useCallback(
+    async (ids: number[], groupId: number | null, label: string): Promise<boolean> => {
+      try {
+        await api.models.mergeGroup(ids, groupId ? { groupId, label } : { label });
+        const noun = ids.length === 1 ? "model" : "models";
+        toast(`${ids.length} ${noun} merged into "${label}".`, "success");
+        return true;
+      } catch (err: any) {
+        toast(err?.message || "Couldn't merge into this group - try again.", "error");
+        return false;
+      }
+    },
+    [toast],
+  );
+
   const nameOfModel = (id: number) => {
     const m = models.find((x) => x.id === id);
     return m ? m.title || m.name : "this model";
@@ -594,7 +609,11 @@ export default function Library() {
       case "apply":
         // #137 — target already grouped: inherit its name, write immediately.
         if (intent.skipped > 0) toast(`${intent.skipped} from another creator skipped.`, "info");
-        if (await applyGroup(intent.sourceIds, intent.character)) {
+        if (
+          target?.variant_group_id
+            ? await mergeIntoDurableGroup(intent.sourceIds, target.variant_group_id, intent.character)
+            : await applyGroup(intent.sourceIds, intent.character)
+        ) {
           clearSelection();
           fetchModels();
         }
@@ -630,11 +649,17 @@ export default function Library() {
     setMerging(true);
     try {
       // The Library only holds the group's representative card, so resolve the
-      // full membership before reassigning it to the target's character.
-      const members = await api.models.variants(source.creator_id!, source.character!);
-      const name = target.character || target.title || target.name;
-      const ids = Array.from(new Set([...members.items.map((m) => m.id), target.id]));
-      const ok = await applyGroup(ids, name);
+      // full membership before merging it into the durable target group.
+      const members = await api.models.variants(
+        source.creator_id!,
+        source.character || "",
+        source.variant_group_id,
+      );
+      const name = target.variant_group?.label || target.character || target.title || target.name;
+      const ids = target.variant_group_id
+        ? members.items.map((m) => m.id)
+        : Array.from(new Set([...members.items.map((m) => m.id), target.id]));
+      const ok = await mergeIntoDurableGroup(ids, target.variant_group_id, name);
       if (ok) {
         setPendingGroupMerge(null);
         clearSelection();

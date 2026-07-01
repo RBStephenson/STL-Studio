@@ -1251,9 +1251,9 @@ class TestVariantGroupReadPath:
         data = client.get(f"/models/variants?creator_id={creator.id}&character=Goblin").json()
         assert data["total"] == 2
 
-    def test_character_override_clears_group(self, client, db):
+    def test_character_override_clears_auto_group(self, client, db):
         # Renaming/ungrouping via set-group must win under the group-preferring read
-        # path: the override clears variant_group_id.
+        # path: the override clears auto variant_group_id.
         creator = make_creator(db)
         a = make_model(db, creator, name="A", character="Alpha")
         b = make_model(db, creator, name="B", character="Beta")
@@ -1266,11 +1266,25 @@ class TestVariantGroupReadPath:
         assert a.variant_group_id is None
         assert a.character == "Renamed"
 
+    def test_character_override_preserves_manual_group(self, client, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A", character="Alpha")
+        b = make_model(db, creator, name="B", character="Beta")
+        group = self._group(db, creator, [a, b], source="manual")
+        commit_all(db)
+
+        resp = client.post(f"/models/{a.id}/set-group", json={"character": "Renamed"})
+        assert resp.status_code == 200
+        db.refresh(a)
+        assert a.variant_group_id == group.id
+        assert a.character == "Renamed"
+
 
 class TestManualGroupEndpoints:
     """P3 (#617): manual merge / split / relabel."""
 
     def test_merge_creates_manual_group(self, client, db):
+        from app.models import GroupOverride
         creator = make_creator(db)
         a = make_model(db, creator, name="A", character="Alpha")
         b = make_model(db, creator, name="B", character="Beta")
@@ -1283,6 +1297,16 @@ class TestManualGroupEndpoints:
         assert g["label"] == "My Group"
         db.refresh(a); db.refresh(b)
         assert a.variant_group_id == g["id"] == b.variant_group_id
+        overrides = {
+            row.path: row.character
+            for row in db.query(GroupOverride).filter(
+                GroupOverride.path.in_([a.folder_path, b.folder_path])
+            )
+        }
+        assert overrides == {
+            a.folder_path: "My Group",
+            b.folder_path: "My Group",
+        }
 
     def test_merge_requires_two_without_group_id(self, client, db):
         creator = make_creator(db)

@@ -1152,10 +1152,13 @@ def _apply_group_override(db: Session, model: Model, character: str | None) -> N
     db.execute(stmt)
     model.character = character
     # A user character override must win under the group-preferring read path
-    # (#616): clear any auto variant_group_id so grouping falls back to this
-    # character (or ungroups when character is None). P3 introduces proper manual
-    # groups; until then character overrides remain the manual-grouping mechanism.
-    model.variant_group_id = None
+    # (#616): clear any auto/missing variant_group_id so grouping falls back to
+    # this character (or ungroups when character is None). Durable manual groups
+    # are user-curated too, so a character override must not orphan them (#675).
+    if model.variant_group_id is not None:
+        group = db.get(VariantGroup, model.variant_group_id)
+        if group is None or group.source != "manual":
+            model.variant_group_id = None
     model.updated_at = utcnow()
 
 
@@ -1264,8 +1267,20 @@ def merge_group(body: GroupMergeBody, db: Session = Depends(get_db)):
     group.source = "manual"
 
     orphaned = {m.variant_group_id for m in models if m.variant_group_id not in (None, group.id)}
+    override_character = _normalize_group(group.label) or models[0].character or models[0].name
     for m in models:
         m.variant_group_id = group.id
+        stmt = (
+            _sqlite_insert(GroupOverride)
+            .values(path=m.folder_path, character=override_character)
+            .on_conflict_do_update(
+                index_elements=["path"],
+                set_={"character": override_character},
+            )
+        )
+        db.execute(stmt)
+        m.character = override_character
+        m.updated_at = utcnow()
     if group.rep_model_id is None:
         group.rep_model_id = next((m.id for m in models if m.is_group_rep), models[0].id)
     db.flush()
