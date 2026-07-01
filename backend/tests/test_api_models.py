@@ -5,7 +5,7 @@ Covers: listing, search, variant grouping, variants endpoint,
         stats, bulk tag, model patch, STL file part_type.
 """
 import pytest
-from tests.conftest import make_creator, make_model, make_stl_file
+from tests.conftest import make_creator, make_model, make_stl_file, make_variant_group
 from app.services.tag_sync import sync_model_tags
 
 
@@ -94,11 +94,16 @@ class TestListModels:
 
 class TestVariantGrouping:
     def _make_variant_group(self, db):
-        """Create a creator with 3 variants under character='Akuma'."""
+        """Create a creator with 3 durably-grouped variants under character='Akuma'
+        (#678 Phase 3: a durable VariantGroup, not bare `character`, is what
+        collapses at the read path — mirrors what a scan's regroup_creator pass
+        leaves behind)."""
         creator = make_creator(db, "PolyMind")
         v1 = make_model(db, creator, name="Full_cutted", character="Akuma")
         v2 = make_model(db, creator, name="No_cuts", character="Akuma")
         v3 = make_model(db, creator, name="Semi_cutted", character="Akuma")
+        db.flush()
+        make_variant_group(db, creator, [v1, v2, v3], label="Akuma")
         commit_all(db)
         return creator, [v1, v2, v3]
 
@@ -154,14 +159,15 @@ class TestVariantGrouping:
         assert item["variant_count"] == 2
 
     def test_variant_count_correct_on_later_page(self, client, db):
-        # vc_map is scoped to the current page's (creator_id, character) pairs
-        # (#393); a representative that lands on page 2 must still get its count.
+        # vc_map is scoped to the current page's variant_group_id set (#393);
+        # a representative that lands on page 2 must still get its count.
         filler = make_creator(db, "Aaa Filler")
         for i in range(3):
             make_model(db, filler, name=f"Filler {i}", character=f"Solo{i}")
         zed = make_creator(db, "Zzz Group")
-        for i in range(4):
-            make_model(db, zed, name=f"Variant {i}", character="Boss")
+        boss_models = [make_model(db, zed, name=f"Variant {i}", character="Boss") for i in range(4)]
+        db.flush()
+        make_variant_group(db, zed, boss_models, label="Boss")
         commit_all(db)
 
         resp = client.get("/models?group_variants=true&page=2&page_size=2&sort=creator")
@@ -172,8 +178,10 @@ class TestVariantGrouping:
     def test_group_representative_prefers_thumbnail(self, client, db):
         creator = make_creator(db, "Creator")
         # v1 has no thumbnail, v2 has one — v2 should be representative
-        make_model(db, creator, name="No_thumb", character="Hero", thumbnail_path=None)
+        v1 = make_model(db, creator, name="No_thumb", character="Hero", thumbnail_path=None)
         v2 = make_model(db, creator, name="Has_thumb", character="Hero", thumbnail_path="/tmp/thumb.jpg")
+        db.flush()
+        make_variant_group(db, creator, [v1, v2], label="Hero", heuristic_rep=True)
         commit_all(db)
 
         resp = client.get("/models?group_variants=true")
@@ -184,9 +192,11 @@ class TestVariantGrouping:
         # #302 auto-promotion: a favorited member outranks a merely-thumbnailed
         # one so its ⭐ chip shows on the Library card.
         creator = make_creator(db, "Creator")
-        make_model(db, creator, name="Has_thumb", character="Hero", thumbnail_path="/tmp/t.jpg")
+        v1 = make_model(db, creator, name="Has_thumb", character="Hero", thumbnail_path="/tmp/t.jpg")
         fav = make_model(db, creator, name="Favorited", character="Hero")
         fav.is_favorite = True
+        db.flush()
+        make_variant_group(db, creator, [v1, fav], label="Hero", heuristic_rep=True)
         commit_all(db)
 
         resp = client.get("/models?group_variants=true")
@@ -195,9 +205,11 @@ class TestVariantGrouping:
     def test_group_representative_promotes_queued(self, client, db):
         # A queued member also auto-promotes so its 🖨 chip is visible.
         creator = make_creator(db, "Creator")
-        make_model(db, creator, name="Has_thumb", character="Hero", thumbnail_path="/tmp/t.jpg")
+        v1 = make_model(db, creator, name="Has_thumb", character="Hero", thumbnail_path="/tmp/t.jpg")
         queued = make_model(db, creator, name="Queued", character="Hero")
         queued.print_status = "queued"
+        db.flush()
+        make_variant_group(db, creator, [v1, queued], label="Hero", heuristic_rep=True)
         commit_all(db)
 
         resp = client.get("/models?group_variants=true")
@@ -209,6 +221,8 @@ class TestVariantGrouping:
         pick = make_model(db, creator, name="Designated", character="Hero")
         fav = make_model(db, creator, name="Favorited", character="Hero")
         fav.is_favorite = True
+        db.flush()
+        make_variant_group(db, creator, [pick, fav], label="Hero", heuristic_rep=True)
         commit_all(db)
 
         client.patch(f"/models/{pick.id}/group-rep", json={"is_group_rep": True})
@@ -268,6 +282,8 @@ class TestGroupReorder:
         v1 = make_model(db, creator, name="V1", character="Hero")
         v2 = make_model(db, creator, name="V2", character="Hero")
         v3 = make_model(db, creator, name="V3", character="Hero")
+        db.flush()
+        make_variant_group(db, creator, [v1, v2, v3], label="Hero", heuristic_rep=True)
         commit_all(db)
         return creator, v1, v2, v3
 
@@ -336,6 +352,8 @@ class TestGroupRepOverride:
         # v_other has a thumbnail and the lower id, so it would win by default.
         v_other = make_model(db, creator, name="A_has_thumb", character="Hero", thumbnail_path="/tmp/a.jpg")
         v_pick = make_model(db, creator, name="B_pick", character="Hero", thumbnail_path="/tmp/b.jpg")
+        db.flush()
+        make_variant_group(db, creator, [v_other, v_pick], label="Hero", heuristic_rep=True)
         commit_all(db)
 
         # Default: lowest-id thumbnailed model represents the group.
@@ -353,6 +371,8 @@ class TestGroupRepOverride:
         creator = make_creator(db, "Creator")
         v1 = make_model(db, creator, name="V1", character="Hero")
         v2 = make_model(db, creator, name="V2", character="Hero")
+        db.flush()
+        make_variant_group(db, creator, [v1, v2], label="Hero", heuristic_rep=True)
         commit_all(db)
 
         client.patch(f"/models/{v1.id}/group-rep", json={"is_group_rep": True})
@@ -369,6 +389,8 @@ class TestGroupRepOverride:
         creator = make_creator(db, "Creator")
         v_thumb = make_model(db, creator, name="A_thumb", character="Hero", thumbnail_path="/tmp/a.jpg")
         v_pick = make_model(db, creator, name="B_pick", character="Hero")
+        db.flush()
+        make_variant_group(db, creator, [v_thumb, v_pick], label="Hero", heuristic_rep=True)
         commit_all(db)
 
         client.patch(f"/models/{v_pick.id}/group-rep", json={"is_group_rep": True})
@@ -793,11 +815,13 @@ class TestGetNeighbors:
 
     def test_grouped_variant_resolved_to_representative(self, client, db):
         creator = make_creator(db)
-        # Two standalone models (no character) and a variant group (Rep + NonRep).
+        # Two standalone models (no character) and a durable variant group (Rep + NonRep).
         ace = make_model(db, creator, name="Ace")
         rep = make_model(db, creator, name="Rep", character="Hero")
         non_rep = make_model(db, creator, name="NonRep", character="Hero")
         zed = make_model(db, creator, name="Zed")
+        db.flush()
+        make_variant_group(db, creator, [rep, non_rep], label="Hero", rep=rep)
         commit_all(db)
 
         # Default sort: ORDER BY character, name. SQLite NULLs sort first (ASC),
@@ -1248,7 +1272,8 @@ class TestParsedAttributeFilters:
 
 
 class TestVariantGroupReadPath:
-    """P2 (#616): grouping read path prefers variant_group_id, falls back to character."""
+    """P2 (#616) / #678 Phase 3: grouping read path is driven solely by
+    variant_group_id — character is no longer a grouping key."""
 
     def _group(self, db, creator, members, label="G", rep=None, source="auto"):
         from app.models import VariantGroup
@@ -1275,15 +1300,16 @@ class TestVariantGroupReadPath:
         assert data["items"][0]["id"] == a.id
         assert data["items"][0]["variant_count"] == 2
 
-    def test_null_group_falls_back_to_character(self, client, db):
+    def test_null_group_no_longer_falls_back_to_character(self, client, db):
         creator = make_creator(db)
         make_model(db, creator, name="x1", character="Goblin")
         make_model(db, creator, name="x2", character="Goblin")
         commit_all(db)
 
         data = client.get("/models?group_variants=true").json()
-        assert data["total"] == 1
-        assert data["items"][0]["variant_count"] == 2
+        assert data["total"] == 2
+        for item in data["items"]:
+            assert item["variant_count"] == 1
 
     def test_rep_model_id_is_the_survivor(self, client, db):
         creator = make_creator(db)
@@ -1344,19 +1370,19 @@ class TestVariantGroupReadPath:
 
 
 class TestGroupingKeyGoldens678:
-    """#678 Phase 0 — freeze the read-path grouping-key behavior BEFORE the
-    two-systems unification refactor, so later phases have a regression net.
-
-    These document the current `_group_key_sql` contract across every state a
-    model can be in. When Phase 3 removes the `ch:` fallback, the character-only
-    cases here are expected to change — and that change should be a deliberate,
-    reviewed edit to these goldens, never a silent drift.
+    """#678 Phase 3 — `_group_key_sql` is now `vg:`-only; the `ch:` legacy
+    fallback is gone. States 3 and 4 below are the deliberate, reviewed flip
+    from the Phase 0 goldens this class replaces: a bare `character` value with
+    no durable `variant_group_id` no longer collapses at the read path — by this
+    point Phases 1-2 durably group every live character grouping on the next
+    scan, so a bare `character` with no group is stale/pre-scan data, not a
+    live grouping signal.
 
     Grouping-key states (see models.py `_group_key_sql`):
       1. durable auto group     -> vg:<id>   (collapses)
       2. durable manual group   -> vg:<id>   (collapses)
-      3. user character override -> ch:<creator>:<char>  (collapses, LEGACY)
-      4. scanner-derived character (no override) -> ch: (collapses, LEGACY)
+      3. user character override, no durable group yet -> NULL key (never collapses)
+      4. scanner-derived character, no durable group -> NULL key (never collapses)
       5. explicit ungroup / no character -> NULL key (never collapses)
     """
 
@@ -1391,10 +1417,10 @@ class TestGroupingKeyGoldens678:
         assert data["total"] == 1
         assert data["items"][0]["variant_count"] == 2
 
-    def test_state3_user_character_override_collapses_by_ch(self, client, db):
-        # LEGACY behavior Phase 1 must preserve via migration: a user character
-        # group of models the durable engine would NOT auto-group (distinct names,
-        # no shared hash/filename) still collapses today via the `ch:` fallback.
+    def test_state3_user_character_override_no_longer_collapses(self, client, db):
+        # A user character override with no durable variant_group_id yet (e.g.
+        # written before the next rescan runs the Phase 1/2 backfill/engine) no
+        # longer collapses at the read path — character is not a grouping key.
         from app.models import GroupOverride
         creator = make_creator(db)
         a = make_model(db, creator, name="Totally Distinct One", character="MyGroup")
@@ -1403,19 +1429,21 @@ class TestGroupingKeyGoldens678:
         db.add(GroupOverride(path=b.folder_path, character="MyGroup"))
         commit_all(db)
         data = client.get("/models?group_variants=true").json()
-        assert data["total"] == 1
-        assert data["items"][0]["variant_count"] == 2
+        assert data["total"] == 2
+        for item in data["items"]:
+            assert item["variant_count"] == 1
 
-    def test_state4_scanner_derived_character_collapses_by_ch(self, client, db):
-        # No override rows — just a shared character string (as the scanner's name
-        # parser would set). Collapses via `ch:` today.
+    def test_state4_scanner_derived_character_no_longer_collapses(self, client, db):
+        # A bare shared character string with no durable variant_group_id (as the
+        # scanner's name parser sets pre-scan-engine) no longer collapses.
         creator = make_creator(db)
         make_model(db, creator, name="x1", character="Goblin")
         make_model(db, creator, name="x2", character="Goblin")
         commit_all(db)
         data = client.get("/models?group_variants=true").json()
-        assert data["total"] == 1
-        assert data["items"][0]["variant_count"] == 2
+        assert data["total"] == 2
+        for item in data["items"]:
+            assert item["variant_count"] == 1
 
     def test_state5_no_character_never_collapses(self, client, db):
         creator = make_creator(db)
@@ -1429,7 +1457,7 @@ class TestGroupingKeyGoldens678:
 
     def test_vg_wins_over_character_when_both_present(self, client, db):
         # A model in a durable group whose members carry differing character values
-        # collapses by the group, not the character — vg: takes precedence over ch:.
+        # still collapses by the group — character has no bearing on the key at all.
         creator = make_creator(db)
         a = make_model(db, creator, name="A", character="Alpha")
         b = make_model(db, creator, name="B", character="Beta")

@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import Creator, Model, STLFile
+from app.models import Creator, Model, STLFile, VariantGroup
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,34 @@ def make_model(
     db.add(m)
     db.flush()
     return m
+
+
+def make_variant_group(
+    db,
+    creator: Creator,
+    members: list[Model],
+    label: str = "Group",
+    source: str = "auto",
+    rep: Model | None = None,
+    heuristic_rep: bool = False,
+) -> VariantGroup:
+    """Durably group `members` (#678 Phase 3+: variant_group_id is the sole
+    grouping key — a plain `character` value never collapses at the read path
+    on its own). Mirrors what a scan's `grouping.regroup_creator` pass, or a
+    manual merge, leaves behind.
+
+    Defaults to `members[0]` as the designated rep; pass `heuristic_rep=True`
+    to leave `rep_model_id` unset so `_rep_order`'s thumbnail/favorite/queued
+    heuristic decides instead (for tests of that heuristic itself)."""
+    g = VariantGroup(creator_id=creator.id, label=label, source=source)
+    db.add(g)
+    db.flush()
+    for m in members:
+        m.variant_group_id = g.id
+    if not heuristic_rep:
+        g.rep_model_id = (rep or members[0]).id
+    db.flush()
+    return g
 
 
 def make_stl_file(
