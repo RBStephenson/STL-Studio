@@ -254,6 +254,16 @@ class BulkTagUpdate(BaseModel):
     remove_tags: list[str] = []
 
 
+class TagRenameBody(BaseModel):
+    old_tag: str
+    new_tag: str
+
+
+class TagMergeBody(BaseModel):
+    source_tag: str
+    target_tag: str
+
+
 class BulkExcludeUpdate(BaseModel):
     ids: list[int]
     excluded: bool
