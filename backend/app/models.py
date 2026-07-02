@@ -184,6 +184,7 @@ class Model(Base):
 
     # Stats from source site
     rating = Column(Float, nullable=True)
+    like_count = Column(Integer, nullable=True)  # store like/heart count (#699 1.2)
     download_count = Column(Integer, nullable=True)
 
     # Housekeeping

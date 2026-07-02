@@ -99,6 +99,7 @@ class ModelRead(ModelBase):
     def _coerce_dict(cls, v: object) -> dict:
         return v if isinstance(v, dict) else {}
     rating: Optional[float] = None
+    like_count: Optional[int] = None
     download_count: Optional[int] = None
     creator_id: Optional[int] = None
     created_at: datetime

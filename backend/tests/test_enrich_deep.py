@@ -124,6 +124,40 @@ def test_falls_back_to_shallow_when_fetch_returns_none(client, db, monkeypatch):
     assert not model.tags
 
 
+def test_apply_leaves_needs_review_set_when_already_true(client, db, monkeypatch):
+    """#699 1.3: bulk apply is unreviewed data — don't clear a flag a human hasn't seen."""
+    creator = make_creator(db)
+    model = make_model(db, creator, name="dragon", needs_review=True)
+    db.commit()
+
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+
+    resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
+    assert resp.status_code == 200
+
+    db.refresh(model)
+    assert model.needs_review is True
+
+
+def test_apply_does_not_reassign_creator(client, db, monkeypatch):
+    """#699 1.1: a differently-spelled scraped creator_name must not move the
+    model to a new/different Creator during bulk apply."""
+    creator = make_creator(db, name="abe3d")
+    model = make_model(db, creator, name="dragon")
+    db.commit()
+
+    monkeypatch.setattr(
+        enrich.scrapers, "fetch_url",
+        AsyncMock(return_value=_deep(creator_name="Abe 3D Prints")),
+    )
+
+    resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
+    assert resp.status_code == 200
+
+    db.refresh(model)
+    assert model.creator_id == creator.id
+
+
 def test_bulk_apply_passes_mmf_key_to_fetch(client, db, monkeypatch):
     """The resolved MMF key is threaded into the detail fetch."""
     creator = make_creator(db)

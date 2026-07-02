@@ -169,6 +169,26 @@ def test_refresh_overwrites_aggressively(client, db, monkeypatch):
     assert model.description == "A fearsome dragon with full detail."
 
 
+def test_refresh_does_not_reassign_creator(client, db, monkeypatch):
+    """#699 1.1: refresh must not re-point creator_id even though it overwrites
+    other fields aggressively — a differently-spelled scraped creator_name would
+    otherwise silently split the library on every periodic refresh."""
+    creator = make_creator(db, name="abe3d")
+    model = _enriched_model(db, creator, name="dragon")
+    db.commit()
+
+    monkeypatch.setattr(
+        enrich.scrapers, "fetch_url",
+        AsyncMock(return_value=_deep(creator_name="Abe 3D Prints")),
+    )
+
+    resp = client.post("/enrich/refresh", json={})
+    assert resp.json()["refreshed"] == 1
+
+    db.refresh(model)
+    assert model.creator_id == creator.id
+
+
 def test_refresh_failed_fetch_leaves_model_untouched(client, db, monkeypatch):
     creator = make_creator(db)
     model = _enriched_model(db, creator, name="orphan")

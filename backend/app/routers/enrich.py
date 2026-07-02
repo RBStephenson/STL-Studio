@@ -148,7 +148,11 @@ async def match_storefront(
     if not products:
         raise HTTPException(status_code=422, detail="No products found at that URL.")
 
-    model_count = db.query(Model).filter(Model.creator_id == creator_id).count()
+    models = db.query(Model).filter(
+        Model.creator_id == creator_id,
+        Model.excluded == False,  # noqa: E712
+    ).all()
+    model_count = len(models)
     if model_count == 0:
         raise HTTPException(status_code=404, detail="No local models found for this creator.")
     if model_count > _MAX_CREATOR_MODELS:
@@ -159,7 +163,6 @@ async def match_storefront(
                 f"{_MAX_CREATOR_MODELS}. Narrow the request or paginate by creator subset."
             ),
         )
-    models = db.query(Model).filter(Model.creator_id == creator_id).all()
 
     creator = db.get(Creator, creator_id)
 
@@ -259,10 +262,14 @@ async def bulk_apply(
             )
             shallow += 1
 
-        # Bulk policy: fill (don't overwrite) the title, and never replace an
-        # existing local thumbnail.
+        # Bulk policy: fill (don't overwrite) the title, never replace an existing
+        # local thumbnail, never re-point creator_id (store spelling can differ
+        # from the local creator being enriched — #699 1.1), and leave
+        # needs_review set since no human reviewed the deep data (#699 1.3).
         await apply_scraped_to_model(
-            db, model, scraped, overwrite_title=False, thumbnail_fill_only=True
+            db, model, scraped,
+            overwrite_title=False, thumbnail_fill_only=True,
+            reassign_creator=False, clear_needs_review=False,
         )
         applied += 1
 
@@ -322,8 +329,12 @@ async def refresh_enrich(body: RefreshRequest, db: Session = Depends(get_db)):
         scraped.source_url = scraped.source_url or model.source_url
         scraped.source_site = scraped.source_site or model.source_site
         scraped.external_id = scraped.external_id or model.external_id
+        # Refresh operates on already-matched data, so it overwrites aggressively —
+        # but still never re-points creator_id (#699 1.1); a refresh isn't a review.
         await apply_scraped_to_model(
-            db, model, scraped, overwrite_title=True, thumbnail_fill_only=False
+            db, model, scraped,
+            overwrite_title=True, thumbnail_fill_only=False,
+            reassign_creator=False, clear_needs_review=True,
         )
         refreshed += 1
 

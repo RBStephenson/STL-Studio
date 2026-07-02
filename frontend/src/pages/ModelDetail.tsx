@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, Fragment } from "react";
 import { GalleryRotator, GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Heart, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2 } from "lucide-react";
 import { api, ApiError, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
@@ -1390,10 +1390,10 @@ export default function ModelDetail() {
 
           {/* Stats row */}
           <div className="flex items-center gap-4 text-sm text-gray-400">
-            {model.rating != null && (
-              <span className="flex items-center gap-1 text-yellow-400">
-                <Star size={14} fill="currentColor" />
-                {model.rating.toLocaleString()}
+            {model.like_count != null && (
+              <span title="Likes on the source site" className="flex items-center gap-1 text-yellow-400">
+                <Heart size={14} fill="currentColor" />
+                {model.like_count.toLocaleString()}
               </span>
             )}
             {model.download_count != null && (
