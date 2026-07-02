@@ -1,5 +1,4 @@
 """Tests for the print-status lifecycle endpoint (#166)."""
-import pytest
 from tests.conftest import make_creator, make_model
 
 

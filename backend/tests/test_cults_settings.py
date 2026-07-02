@@ -3,8 +3,7 @@
 Credentials are write-only — API never returns plaintext, only a masked hint.
 Uses the same Fernet pattern as AI API key (see test_ai_settings.py).
 """
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from cryptography.fernet import Fernet

@@ -7,7 +7,6 @@ Call rebuild_all_tags() once at startup when migrating from JSON-only storage.
 """
 import logging
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.models import Model, ModelTag
 

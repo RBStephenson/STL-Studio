@@ -558,7 +558,6 @@ class TestMixComponents:
     def test_trailing_zero_code_matches_shelf_code_without_zero(self):
         # Shelf stores '77.72' (PaintRack strips trailing zeros); swatch says
         # 'VMC Gunmetal Grey 77.720' — the extra zero must not block resolution.
-        resolve = lambda n, b: None  # force _by_code path via make_db_resolver
         # Test _strip_decimal_zeros directly.
         from app.painting.services.importing import _strip_decimal_zeros
         assert _strip_decimal_zeros("77.720") == "77.72"

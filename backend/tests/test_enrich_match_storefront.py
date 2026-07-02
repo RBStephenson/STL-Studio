@@ -2,7 +2,7 @@
 Tests for GET /enrich/storefront/match — focuses on the model-count guard
 added in #655 (unbounded fetch).
 """
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.fernet import Fernet

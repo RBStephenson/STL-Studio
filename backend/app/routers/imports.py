@@ -546,7 +546,6 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
             skipped=len(ineligible), ineligible=ineligible,
         )
 
-    eligible_set = set(eligible_ids)
 
     try:
         result = reorganize_apply.apply_manifest(db, resp.manifest_id, eligible_ids)

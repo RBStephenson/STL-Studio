@@ -1,5 +1,4 @@
 """Tests for tag rename, merge, and delete endpoints (#165)."""
-import pytest
 from tests.conftest import make_creator, make_model
 from app.services.tag_sync import sync_model_tags
 from app.models import ModelTag

@@ -149,7 +149,7 @@ def _migrate_schema():
 def _seed_tag_index():
     """Populate model_tags from JSON columns if the table is empty (one-time migration)."""
     import logging
-    from sqlalchemy import func, text
+    from sqlalchemy import func
     from app.models import Model, ModelTag
     from app.services.tag_sync import rebuild_all_tags
 

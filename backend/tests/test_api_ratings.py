@@ -94,7 +94,7 @@ class TestRatingSort:
         creator = make_creator(db)
         a = make_model(db, creator, name="A")
         b = make_model(db, creator, name="B")
-        c = make_model(db, creator, name="C")
+        make_model(db, creator, name="C")
         db.commit()
         client.patch(f"/models/{a.id}/rating", json={"rating": 2})
         client.patch(f"/models/{b.id}/rating", json={"rating": 5})

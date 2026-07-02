@@ -11,7 +11,6 @@ Two public WordPress AJAX endpoints power this:
                         Used when the user pastes a specific bundle URL; returns
                         one StorefrontProduct per miniature for file-level matching.
 """
-import html
 import re
 import logging
 import httpx

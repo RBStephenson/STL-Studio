@@ -13,7 +13,6 @@ import pytest
 
 from tests.conftest import make_creator, make_model
 
-import app.routers.enrich as enrich
 import app.services.enrich_refresh as enrich_refresh
 import app.services.thumbnails as thumbnails
 
