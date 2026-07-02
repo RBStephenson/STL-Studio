@@ -31,7 +31,7 @@ vi.mock("../api/client", async (importOriginal) => {
         setExcluded: vi.fn(async () => ({ ok: true, excluded: false })),
         update: vi.fn(async () => ({})),
         variants: vi.fn(async () => ({ items: [{ id: 1 }, { id: 2 }], total: 2 })),
-        batchSetGroup: vi.fn(async () => ({ ok: true, character: "Oni", updated: [1, 2], missing: [] })),
+        patchGroup: vi.fn(async () => ({ id: 42, creator_id: 1, label: "Oni", rep_model_id: null, source: "auto", reason: null, confidence: null })),
       },
     },
   };
@@ -185,17 +185,26 @@ describe("ModelCard inline rename (#191)", () => {
   });
 
   it("renames a whole variant group on double-click + Enter", async () => {
-    renderCard({ variant_count: 3, character: "Akuma", title: null } as any);
+    renderCard({ variant_count: 3, character: "Akuma", title: null, variant_group_id: 42 } as any);
     fireEvent.doubleClick(screen.getByText("Akuma"));
     const input = screen.getByLabelText("Rename group") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Oni" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    // Resolves the group's members, then rewrites their shared character.
-    await waitFor(() => expect(vi.mocked(api.models.variants)).toHaveBeenCalledWith(1, "Akuma"));
+    // Relabels the durable VariantGroup row directly — every member follows.
     await waitFor(() =>
-      expect(vi.mocked(api.models.batchSetGroup)).toHaveBeenCalledWith([1, 2], "Oni")
+      expect(vi.mocked(api.models.patchGroup)).toHaveBeenCalledWith(42, { label: "Oni" })
     );
     expect(screen.getByText("Oni")).toBeInTheDocument();
+  });
+
+  it("refuses to rename a group with no durable group id and reverts the input", async () => {
+    renderCard({ variant_count: 3, character: "Akuma", title: null, variant_group_id: null } as any);
+    fireEvent.doubleClick(screen.getByText("Akuma"));
+    const input = screen.getByLabelText("Rename group") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Oni" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByText("Akuma")).toBeInTheDocument());
+    expect(vi.mocked(api.models.patchGroup)).not.toHaveBeenCalled();
   });
 
   it("shows enriched title instead of character slug for an enriched group", () => {
