@@ -6,7 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.database import Base, engine, SessionLocal
-from app.routers import models, scan, files, collections, scrape, enrich, database, settings, reorganize, imports, cults
+from app.routers import (
+    models, tags, groups, print_queue, thumbnails,
+    scan, files, collections, scrape, enrich, database, settings, reorganize, imports, cults,
+)
 # Registers the paint_*/guide_* tables on Base so create_all (run in
 # _run_migrations at startup) sees the full metadata.
 from app.painting import models as painting_models  # noqa: F401
@@ -304,6 +307,14 @@ def create_app(api_prefix: str = "") -> FastAPI:
     )
 
     for router in (
+        # The tag/group/print-queue/thumbnail routers carry literal `/models/...`
+        # paths (e.g. /grouping-strategy, /bulk) that must be matched before the
+        # core models router's `/{model_id}` catch-all — so models.router is
+        # registered LAST of this family (STUDIO-58).
+        tags.router,
+        groups.router,
+        print_queue.router,
+        thumbnails.router,
         models.router,
         scan.router,
         files.router,
