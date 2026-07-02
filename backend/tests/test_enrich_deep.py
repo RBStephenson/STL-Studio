@@ -67,7 +67,7 @@ def test_apply_writes_deep_fields(client, db, monkeypatch):
     resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
     assert resp.status_code == 200
     data = resp.json()
-    assert data == {"ok": True, "applied": 1, "enriched_deep": 1, "fallback_shallow": 0}
+    assert data == {"ok": True, "applied": 1, "enriched_deep": 1, "fallback_shallow": 0, "errors": 0}
 
     db.refresh(model)
     assert model.description == "A fearsome dragon with full detail."
@@ -156,6 +156,63 @@ def test_apply_does_not_reassign_creator(client, db, monkeypatch):
 
     db.refresh(model)
     assert model.creator_id == creator.id
+
+
+def test_shared_scraped_model_not_mutated_across_siblings(client, db, monkeypatch):
+    """#699 2.2: two models share a product URL but were matched with different
+    external_ids — each must keep its own effective id, and the cached
+    ScrapedModel (shared by every sibling) must be untouched after the loop."""
+    creator = make_creator(db)
+    a = make_model(db, creator, name="dragon a")
+    b = make_model(db, creator, name="dragon b")
+    db.commit()
+
+    shared = _deep(external_id=None)  # fetch didn't carry an id
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=shared))
+
+    resp = client.post("/enrich/storefront/apply", json={
+        "items": [
+            _item(a, external_id="first-id"),
+            _item(b, external_id="second-id"),
+        ],
+    })
+    assert resp.status_code == 200
+
+    db.refresh(a); db.refresh(b)
+    assert a.external_id == "first-id"
+    assert b.external_id == "second-id"
+    assert shared.external_id is None  # the shared object was never mutated
+
+
+def test_apply_error_isolation_reports_errors_and_keeps_others(client, db, monkeypatch):
+    """#699 2.3: one model raising during apply must not 500 the batch or roll
+    back the others — it's counted in ``errors`` instead."""
+    creator = make_creator(db)
+    a = make_model(db, creator, name="dragon a")
+    b = make_model(db, creator, name="dragon b")
+    db.commit()
+
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+
+    real_apply = enrich.apply_scraped_to_model
+    calls = {"n": 0}
+
+    async def _flaky(db_, model, scraped, **kw):
+        calls["n"] += 1
+        if model.id == a.id:
+            raise RuntimeError("boom")
+        return await real_apply(db_, model, scraped, **kw)
+
+    monkeypatch.setattr(enrich, "apply_scraped_to_model", _flaky)
+
+    resp = client.post("/enrich/storefront/apply", json={"items": [_item(a), _item(b)]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["errors"] == 1
+    assert data["applied"] == 1
+
+    db.refresh(b)
+    assert b.category == "Creatures"  # the non-failing model was still applied
 
 
 def test_bulk_apply_passes_mmf_key_to_fetch(client, db, monkeypatch):

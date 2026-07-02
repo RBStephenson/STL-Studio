@@ -75,6 +75,47 @@ def test_image_urls_skips_images_without_sizes():
     assert mmf._image_urls({}) == []
 
 
+# --- _parse (HTML/JSON-LD scrape fallback) ----------------------------------
+
+_URL = "https://www.myminifactory.com/object/dragon-123"
+
+
+def _html_with_ld(image) -> str:
+    ld = {"@type": "Product", "name": "Dragon", "image": image}
+    return f"""
+    <html><head>
+    <script type="application/ld+json">{json.dumps(ld)}</script>
+    </head><body></body></html>
+    """
+
+
+def test_parse_json_ld_string_image_extracted_as_single_url():
+    """#699 2.1: schema.org allows ``image`` to be a plain string. Iterating a
+    string (instead of wrapping it) yields individual characters."""
+    html = _html_with_ld("https://static.mmf.example/dragon.jpg")
+    model = mmf._parse(html, _URL)
+    assert model.image_urls == ["https://static.mmf.example/dragon.jpg"]
+
+
+def test_parse_json_ld_list_image_still_works():
+    html = _html_with_ld([
+        "https://static.mmf.example/dragon-1.jpg",
+        "https://static.mmf.example/dragon-2.jpg",
+    ])
+    model = mmf._parse(html, _URL)
+    assert model.image_urls == [
+        "https://static.mmf.example/dragon-1.jpg",
+        "https://static.mmf.example/dragon-2.jpg",
+    ]
+
+
+def test_parse_json_ld_missing_image_key_does_not_error():
+    ld = {"@type": "Product", "name": "Dragon"}
+    html = f"<html><head><script type='application/ld+json'>{json.dumps(ld)}</script></head></html>"
+    model = mmf._parse(html, _URL)
+    assert model.image_urls == []
+
+
 # --- fetch gating ----------------------------------------------------------
 
 def test_fetch_uses_api_when_key_set(obj):
