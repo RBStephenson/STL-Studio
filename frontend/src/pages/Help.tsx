@@ -134,7 +134,7 @@ const SECTIONS: Section[] = [
           <strong>Group variants by character</strong> for that scan root (Settings →
           Library). The scanner then treats the first folder under the creator as the group
           — everything beneath it is one variant group, no name-guessing. Off by default;
-          rescan to apply. Manual overrides still win.
+          rescan to apply. Manual groupings still win.
         </p>
         <ul>
           <li>
@@ -171,13 +171,16 @@ const SECTIONS: Section[] = [
             the default (favorited/queued first, then by thumbnail, then by name).
           </li>
           <li>
-            <strong>From a model:</strong> the <strong>Set group</strong> button in the model
-            header assigns or changes the group; leave it blank to ungroup.
+            <strong>From a model:</strong> the <strong>Merge into group</strong> button in the
+            model header joins an existing group (autocompletes from that creator's groups);
+            once grouped it becomes a <strong>Group: [name]</strong> chip with a{" "}
+            <strong>×</strong> to remove the model from the group.
           </li>
         </ul>
         <p className="text-gray-500">
-          A group override applies immediately (no rescan needed) and takes precedence over
-          the scanner's guess until you clear it.
+          Grouping is durable — it applies immediately (no rescan needed) and a future rescan
+          never undoes it. Removing a model from a group keeps it out of auto-grouping until
+          you merge it into a group again.
         </p>
       </>
     ),
@@ -200,6 +203,18 @@ const SECTIONS: Section[] = [
           </li>
           <li>Edit metadata, tags, source URL, and the NSFW flag (full form via <strong>Edit</strong>).</li>
           <li>See and <strong>label each STL file</strong> (head, arm, base, etc.).</li>
+          <li>
+            A part can have multiple <strong>sup variants</strong> — alternate
+            supported/cut versions — and the part picker shows one button per sup
+            variant (s1, s2, …). The file list and part picker stay in sync in both
+            directions; changing a part's category applies to the base file and all
+            its sups.
+          </li>
+          <li>
+            <strong>Settings → Preferences → Horizontal parts layout</strong> swaps
+            the two-column page for a full-width scrollable files table — handy for
+            models with a lot of parts.
+          </li>
           <li><strong>Download all</strong> files as a zip, or open the <strong>Kit Builder</strong>.</li>
           <li>
             See the model's <strong>Location</strong> on disk — copy the path, or
