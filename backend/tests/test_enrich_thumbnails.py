@@ -14,6 +14,7 @@ import pytest
 from tests.conftest import make_creator, make_model
 
 import app.routers.enrich as enrich
+import app.services.enrich_refresh as enrich_refresh
 import app.services.thumbnails as thumbnails
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfakepngdata"
@@ -32,7 +33,7 @@ def _no_detail_fetch(monkeypatch):
     """Force the shallow-fallback path so these tests stay focused on thumbnail
     handling: the deep detail fetch returns nothing, so apply uses the item's
     own fields (the deep path is covered in test_enrich_deep.py)."""
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=None))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=None))
 
 
 _REAL_ASYNC_CLIENT = httpx.AsyncClient

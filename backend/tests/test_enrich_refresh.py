@@ -1,12 +1,16 @@
 """
-Re-enrich / refresh-stale: POST /enrich/refresh re-fetches storefront detail for
-models that already carry a ``source_url`` and re-applies it, overwriting more
-aggressively than first-time bulk enrich (it's an explicit refresh of matched
-data). Scope is by creator, an explicit id list, or staleness — none of which is
-set means library-wide.
+Re-enrich / refresh-stale.
 
-The detail fetch (scrapers.fetch_url) is mocked; the per-site adapters are tested
-elsewhere.
+STUDIO-11 (#699 2.4): a library-wide refresh can take minutes, so the actual
+work moved to services/enrich_refresh.py and runs off the request path in a
+background thread (mirroring services/scanner.py). Most of the behavioural
+coverage below calls ``enrich_refresh.run_refresh(..., db=db)`` directly —
+same convention test_scanner.py uses for scan_all_roots — so tests run
+synchronously against the test session instead of a real thread opening its
+own SessionLocal() (which would point at a different, tableless in-memory DB;
+see conftest.db). A separate section covers the /enrich/refresh HTTP route
+itself: starting the thread, the 409-when-running guard, and the status
+endpoint.
 """
 from datetime import timedelta
 from unittest.mock import AsyncMock
@@ -15,7 +19,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 import app.routers.enrich as enrich
-from app.services import secrets
+from app.services import enrich_refresh, secrets
 from app.services.scrapers.base import ScrapedModel
 from app.utils import utcnow
 from tests.conftest import make_creator, make_model
@@ -28,6 +32,16 @@ def _fixed_secret_key(monkeypatch):
     secrets.reset_cache()
     yield
     secrets.reset_cache()
+
+
+@pytest.fixture(autouse=True)
+def _reset_refresh_state():
+    """The module-level status dict persists across tests otherwise."""
+    yield
+    with enrich_refresh._state_lock:
+        enrich_refresh._refresh_state.update(
+            running=False, message="idle", candidates=0, refreshed=0, failed=0, errors=0,
+        )
 
 
 _URL = "https://www.myminifactory.com/object/dragon-123"
@@ -58,72 +72,78 @@ def _enriched_model(db, creator, *, name="dragon", url=_URL, last_fetched=None, 
     return m
 
 
-def test_refresh_library_wide(client, db, monkeypatch):
+# ---------------------------------------------------------------------------
+# Core refresh logic — run_refresh(db=...) directly, no thread
+# ---------------------------------------------------------------------------
+
+def test_refresh_library_wide(db, monkeypatch):
     creator = make_creator(db)
     a = _enriched_model(db, creator, name="dragon a")
     b = _enriched_model(db, creator, name="dragon b", url="https://www.myminifactory.com/object/orc-9")
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "candidates": 2, "refreshed": 2, "failed": 0, "errors": 0}
+    result = enrich_refresh.run_refresh(db=db)
+    assert result == {
+        "running": False, "message": result["message"],
+        "candidates": 2, "refreshed": 2, "failed": 0, "errors": 0,
+    }
 
     db.refresh(a); db.refresh(b)
     assert a.category == "Creatures"
     assert b.category == "Creatures"
 
 
-def test_refresh_skips_models_without_source_url(client, db, monkeypatch):
+def test_refresh_skips_models_without_source_url(db, monkeypatch):
     creator = make_creator(db)
     enriched = _enriched_model(db, creator, name="has url")
     make_model(db, creator, name="never enriched")  # no source_url
     db.commit()
 
     fetch = AsyncMock(return_value=_deep())
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", fetch)
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.json()["candidates"] == 1  # only the model with a source_url
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["candidates"] == 1  # only the model with a source_url
     db.refresh(enriched)
     assert enriched.category == "Creatures"
 
 
-def test_refresh_scopes_by_creator(client, db, monkeypatch):
+def test_refresh_scopes_by_creator(db, monkeypatch):
     a = make_creator(db, name="Creator A")
     b = make_creator(db, name="Creator B")
     in_scope = _enriched_model(db, a, name="a model")
     out_scope = _enriched_model(db, b, name="b model", url="https://www.myminifactory.com/object/x-2")
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
 
-    resp = client.post("/enrich/refresh", json={"creator_id": a.id})
-    assert resp.json()["candidates"] == 1
+    result = enrich_refresh.run_refresh(creator_id=a.id, db=db)
+    assert result["candidates"] == 1
 
     db.refresh(in_scope); db.refresh(out_scope)
     assert in_scope.category == "Creatures"
     assert out_scope.category is None  # untouched
 
 
-def test_refresh_scopes_by_model_ids(client, db, monkeypatch):
+def test_refresh_scopes_by_model_ids(db, monkeypatch):
     creator = make_creator(db)
     a = _enriched_model(db, creator, name="a")
     b = _enriched_model(db, creator, name="b", url="https://www.myminifactory.com/object/x-2")
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
 
-    resp = client.post("/enrich/refresh", json={"model_ids": [a.id]})
-    assert resp.json()["candidates"] == 1
+    result = enrich_refresh.run_refresh(model_ids=[a.id], db=db)
+    assert result["candidates"] == 1
 
     db.refresh(a); db.refresh(b)
     assert a.category == "Creatures"
     assert b.category is None
 
 
-def test_refresh_staleness_filter(client, db, monkeypatch):
+def test_refresh_staleness_filter(db, monkeypatch):
     """stale_days keeps only models not fetched within the window (or never)."""
     creator = make_creator(db)
     fresh = _enriched_model(
@@ -140,10 +160,10 @@ def test_refresh_staleness_filter(client, db, monkeypatch):
     )
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
 
-    resp = client.post("/enrich/refresh", json={"stale_days": 30})
-    assert resp.json()["candidates"] == 2  # stale + never, not fresh
+    result = enrich_refresh.run_refresh(stale_days=30, db=db)
+    assert result["candidates"] == 2  # stale + never, not fresh
 
     db.refresh(fresh); db.refresh(stale); db.refresh(never)
     assert fresh.category is None  # skipped — fetched recently
@@ -151,7 +171,7 @@ def test_refresh_staleness_filter(client, db, monkeypatch):
     assert never.category == "Creatures"
 
 
-def test_refresh_overwrites_aggressively(client, db, monkeypatch):
+def test_refresh_overwrites_aggressively(db, monkeypatch):
     """Refresh overwrites an existing title (bulk enrich only fills an empty one)."""
     creator = make_creator(db)
     model = _enriched_model(db, creator, name="dragon")
@@ -159,17 +179,17 @@ def test_refresh_overwrites_aggressively(client, db, monkeypatch):
     model.description = "old description"
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.json()["refreshed"] == 1
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["refreshed"] == 1
 
     db.refresh(model)
     assert model.title == "Dragon Deluxe"           # overwritten
     assert model.description == "A fearsome dragon with full detail."
 
 
-def test_refresh_does_not_reassign_creator(client, db, monkeypatch):
+def test_refresh_does_not_reassign_creator(db, monkeypatch):
     """#699 1.1: refresh must not re-point creator_id even though it overwrites
     other fields aggressively — a differently-spelled scraped creator_name would
     otherwise silently split the library on every periodic refresh."""
@@ -178,34 +198,37 @@ def test_refresh_does_not_reassign_creator(client, db, monkeypatch):
     db.commit()
 
     monkeypatch.setattr(
-        enrich.scrapers, "fetch_url",
+        enrich_refresh.scrapers, "fetch_url",
         AsyncMock(return_value=_deep(creator_name="Abe 3D Prints")),
     )
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.json()["refreshed"] == 1
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["refreshed"] == 1
 
     db.refresh(model)
     assert model.creator_id == creator.id
 
 
-def test_refresh_failed_fetch_leaves_model_untouched(client, db, monkeypatch):
+def test_refresh_failed_fetch_leaves_model_untouched(db, monkeypatch):
     creator = make_creator(db)
     model = _enriched_model(db, creator, name="orphan")
     model.title = "Keep Me"
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=None))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=None))
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.json() == {"ok": True, "candidates": 1, "refreshed": 0, "failed": 1, "errors": 0}
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["candidates"] == 1
+    assert result["refreshed"] == 0
+    assert result["failed"] == 1
+    assert result["errors"] == 0
 
     db.refresh(model)
     assert model.title == "Keep Me"      # not clobbered with shallow data
     assert model.description is None
 
 
-def test_refresh_one_fetch_per_unique_url(client, db, monkeypatch):
+def test_refresh_one_fetch_per_unique_url(db, monkeypatch):
     """Variants share a product URL — fetch once, fan out to every model."""
     creator = make_creator(db)
     a = _enriched_model(db, creator, name="variant a")
@@ -213,10 +236,10 @@ def test_refresh_one_fetch_per_unique_url(client, db, monkeypatch):
     db.commit()
 
     fetch = AsyncMock(return_value=_deep())
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", fetch)
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.json()["refreshed"] == 2
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["refreshed"] == 2
     assert fetch.await_count == 1
 
     db.refresh(a); db.refresh(b)
@@ -224,16 +247,33 @@ def test_refresh_one_fetch_per_unique_url(client, db, monkeypatch):
     assert b.category == "Creatures"
 
 
-def test_refresh_empty_library_returns_zero(client, db, monkeypatch):
+def test_refresh_empty_library_returns_zero(db, monkeypatch):
     fetch = AsyncMock(return_value=_deep())
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", fetch)
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.json() == {"ok": True, "candidates": 0, "refreshed": 0, "failed": 0, "errors": 0}
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["candidates"] == 0
+    assert result["refreshed"] == 0
+    assert result["failed"] == 0
+    assert result["errors"] == 0
     fetch.assert_not_awaited()
 
 
-def test_refresh_shared_scraped_model_not_mutated_across_siblings(client, db, monkeypatch):
+def test_refresh_passes_mmf_key_to_fetch(db, monkeypatch):
+    creator = make_creator(db)
+    _enriched_model(db, creator, name="dragon")
+    db.commit()
+
+    secrets.set_mmf_api_key(db, "test-mmf-key")
+    fetch = AsyncMock(return_value=_deep())
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", fetch)
+
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["refreshed"] == 1
+    fetch.assert_awaited_once_with(_URL, mmf_api_key="test-mmf-key")
+
+
+def test_refresh_shared_scraped_model_not_mutated_across_siblings(db, monkeypatch):
     """#699 2.2: variant siblings on the same URL each get their own effective
     source identity — the cached ScrapedModel must not be mutated in place."""
     creator = make_creator(db)
@@ -244,16 +284,15 @@ def test_refresh_shared_scraped_model_not_mutated_across_siblings(client, db, mo
     db.commit()
 
     shared = _deep(external_id=None)
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=shared))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=shared))
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.status_code == 200
+    enrich_refresh.run_refresh(db=db)
 
     assert shared.external_id is None  # the shared object was never mutated
 
 
-def test_refresh_error_isolation_reports_errors_and_keeps_others(client, db, monkeypatch):
-    """#699 2.3: one model raising during apply must not 500 the batch — it's
+def test_refresh_error_isolation_reports_errors_and_keeps_others(db, monkeypatch):
+    """#699 2.3: one model raising during apply must not abort the batch — it's
     counted in ``errors`` while the other model still refreshes."""
     creator = make_creator(db)
     a = _enriched_model(db, creator, name="dragon a", url="https://www.myminifactory.com/object/a-1")
@@ -263,36 +302,75 @@ def test_refresh_error_isolation_reports_errors_and_keeps_others(client, db, mon
     async def _fetch(url, mmf_api_key=None):
         return _deep(source_url=url, external_id=url)
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", _fetch)
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", _fetch)
 
-    real_apply = enrich.apply_scraped_to_model
+    real_apply = enrich_refresh.apply_scraped_to_model
 
     async def _flaky(db_, model, scraped, **kw):
         if model.id == a.id:
             raise RuntimeError("boom")
         return await real_apply(db_, model, scraped, **kw)
 
-    monkeypatch.setattr(enrich, "apply_scraped_to_model", _flaky)
+    monkeypatch.setattr(enrich_refresh, "apply_scraped_to_model", _flaky)
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["errors"] == 1
-    assert data["refreshed"] == 1
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["errors"] == 1
+    assert result["refreshed"] == 1
 
     db.refresh(b)
     assert b.category == "Creatures"
 
 
-def test_refresh_passes_mmf_key_to_fetch(client, db, monkeypatch):
-    creator = make_creator(db)
-    _enriched_model(db, creator, name="dragon")
-    db.commit()
+def test_run_refresh_updates_status_while_and_after_running(db, monkeypatch):
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+    assert enrich_refresh.get_status()["running"] is False
 
-    secrets.set_mmf_api_key(db, "test-mmf-key")
-    fetch = AsyncMock(return_value=_deep())
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+    result = enrich_refresh.run_refresh(db=db)
 
-    resp = client.post("/enrich/refresh", json={})
-    assert resp.status_code == 200
-    fetch.assert_awaited_once_with(_URL, mmf_api_key="test-mmf-key")
+    assert result["running"] is False
+    assert enrich_refresh.get_status() == result
+
+
+# ---------------------------------------------------------------------------
+# HTTP route — starts a thread, doesn't block the request
+# ---------------------------------------------------------------------------
+
+class TestRefreshRoute:
+    def test_start_returns_immediately_without_running_the_job(self, client, monkeypatch):
+        """The route must not itself do the fetch/apply work — only launch it."""
+        called = {}
+
+        def _fake_run_refresh(**kwargs):
+            called.update(kwargs)
+            return {"running": False, "message": "done", "candidates": 0, "refreshed": 0, "failed": 0, "errors": 0}
+
+        monkeypatch.setattr(enrich.enrich_refresh, "run_refresh", _fake_run_refresh)
+
+        resp = client.post("/enrich/refresh", json={"creator_id": 3, "stale_days": 7})
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "running": True, "message": "refresh started"}
+
+        # Thread is daemon + async-started; give it a moment to invoke the target.
+        import time
+        for _ in range(50):
+            if called:
+                break
+            time.sleep(0.01)
+        assert called == {"creator_id": 3, "model_ids": None, "stale_days": 7}
+
+    def test_409_when_already_running(self, client, monkeypatch):
+        monkeypatch.setattr(
+            enrich.enrich_refresh, "get_status",
+            lambda: {"running": True, "message": "starting", "candidates": 0, "refreshed": 0, "failed": 0, "errors": 0},
+        )
+        resp = client.post("/enrich/refresh", json={})
+        assert resp.status_code == 409
+
+    def test_status_endpoint_delegates_to_service(self, client, monkeypatch):
+        monkeypatch.setattr(
+            enrich.enrich_refresh, "get_status",
+            lambda: {"running": True, "message": "starting", "candidates": 5, "refreshed": 2, "failed": 0, "errors": 0},
+        )
+        resp = client.get("/enrich/refresh/status")
+        assert resp.status_code == 200
+        assert resp.json()["candidates"] == 5

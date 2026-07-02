@@ -14,6 +14,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 import app.routers.enrich as enrich
+from app.services import enrich_refresh
 from app.services import secrets
 from app.services.scrapers.base import ScrapedModel
 from tests.conftest import make_creator, make_model
@@ -62,7 +63,7 @@ def test_apply_writes_deep_fields(client, db, monkeypatch):
     model = make_model(db, creator, name="dragon")
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
 
     resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
     assert resp.status_code == 200
@@ -87,7 +88,7 @@ def test_one_fetch_per_unique_url_fans_to_all_models(client, db, monkeypatch):
     db.commit()
 
     fetch = AsyncMock(return_value=_deep())
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", fetch)
 
     resp = client.post("/enrich/storefront/apply", json={
         "items": [_item(a), _item(b)],
@@ -106,7 +107,7 @@ def test_falls_back_to_shallow_when_fetch_returns_none(client, db, monkeypatch):
     model = make_model(db, creator, name="orphan")
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=None))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=None))
 
     resp = client.post("/enrich/storefront/apply", json={
         "items": [_item(model, title="Shallow Title")],
@@ -130,7 +131,7 @@ def test_apply_leaves_needs_review_set_when_already_true(client, db, monkeypatch
     model = make_model(db, creator, name="dragon", needs_review=True)
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
 
     resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
     assert resp.status_code == 200
@@ -147,7 +148,7 @@ def test_apply_does_not_reassign_creator(client, db, monkeypatch):
     db.commit()
 
     monkeypatch.setattr(
-        enrich.scrapers, "fetch_url",
+        enrich_refresh.scrapers, "fetch_url",
         AsyncMock(return_value=_deep(creator_name="Abe 3D Prints")),
     )
 
@@ -168,7 +169,7 @@ def test_shared_scraped_model_not_mutated_across_siblings(client, db, monkeypatc
     db.commit()
 
     shared = _deep(external_id=None)  # fetch didn't carry an id
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=shared))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=shared))
 
     resp = client.post("/enrich/storefront/apply", json={
         "items": [
@@ -192,7 +193,7 @@ def test_apply_error_isolation_reports_errors_and_keeps_others(client, db, monke
     b = make_model(db, creator, name="dragon b")
     db.commit()
 
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
 
     real_apply = enrich.apply_scraped_to_model
     calls = {"n": 0}
@@ -223,7 +224,7 @@ def test_bulk_apply_passes_mmf_key_to_fetch(client, db, monkeypatch):
 
     secrets.set_mmf_api_key(db, "test-mmf-key")
     fetch = AsyncMock(return_value=_deep())
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", fetch)
 
     resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
     assert resp.status_code == 200
@@ -268,7 +269,7 @@ def test_apply_propagates_match_to_group_siblings(client, db, monkeypatch):
     db.commit()
 
     fetch = AsyncMock(return_value=_deep())
-    monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", fetch)
 
     # Apply only the collapsed candidate (model a) — b is a silent sibling.
     resp = client.post("/enrich/storefront/apply", json={"items": [_item(a)]})

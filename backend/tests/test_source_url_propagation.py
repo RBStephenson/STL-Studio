@@ -6,6 +6,7 @@ three write paths (metadata editor, Find on Web apply, storefront enrichment).
 from unittest.mock import AsyncMock
 
 from app.routers import enrich
+from app.services import enrich_refresh
 from tests.conftest import make_creator, make_model
 
 URL = "https://www.myminifactory.com/object/print-ada-wong-12345"
@@ -103,7 +104,7 @@ class TestEnrichApplyPropagation:
 
         # No live fetch: force the shallow path so the match's own source
         # fields are what propagate (a real MMF fetch would rewrite them).
-        monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=None))
+        monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=None))
 
         resp = client.post("/enrich/storefront/apply", json={"items": [{
             "model_id": target.id,
