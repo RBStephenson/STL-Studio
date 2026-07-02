@@ -68,7 +68,7 @@ def test_refresh_library_wide(client, db, monkeypatch):
 
     resp = client.post("/enrich/refresh", json={})
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "candidates": 2, "refreshed": 2, "failed": 0}
+    assert resp.json() == {"ok": True, "candidates": 2, "refreshed": 2, "failed": 0, "errors": 0}
 
     db.refresh(a); db.refresh(b)
     assert a.category == "Creatures"
@@ -198,7 +198,7 @@ def test_refresh_failed_fetch_leaves_model_untouched(client, db, monkeypatch):
     monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=None))
 
     resp = client.post("/enrich/refresh", json={})
-    assert resp.json() == {"ok": True, "candidates": 1, "refreshed": 0, "failed": 1}
+    assert resp.json() == {"ok": True, "candidates": 1, "refreshed": 0, "failed": 1, "errors": 0}
 
     db.refresh(model)
     assert model.title == "Keep Me"      # not clobbered with shallow data
@@ -229,8 +229,59 @@ def test_refresh_empty_library_returns_zero(client, db, monkeypatch):
     monkeypatch.setattr(enrich.scrapers, "fetch_url", fetch)
 
     resp = client.post("/enrich/refresh", json={})
-    assert resp.json() == {"ok": True, "candidates": 0, "refreshed": 0, "failed": 0}
+    assert resp.json() == {"ok": True, "candidates": 0, "refreshed": 0, "failed": 0, "errors": 0}
     fetch.assert_not_awaited()
+
+
+def test_refresh_shared_scraped_model_not_mutated_across_siblings(client, db, monkeypatch):
+    """#699 2.2: variant siblings on the same URL each get their own effective
+    source identity — the cached ScrapedModel must not be mutated in place."""
+    creator = make_creator(db)
+    a = _enriched_model(db, creator, name="variant a")
+    b = _enriched_model(db, creator, name="variant b")  # same _URL
+    a.external_id = None
+    b.external_id = None
+    db.commit()
+
+    shared = _deep(external_id=None)
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", AsyncMock(return_value=shared))
+
+    resp = client.post("/enrich/refresh", json={})
+    assert resp.status_code == 200
+
+    assert shared.external_id is None  # the shared object was never mutated
+
+
+def test_refresh_error_isolation_reports_errors_and_keeps_others(client, db, monkeypatch):
+    """#699 2.3: one model raising during apply must not 500 the batch — it's
+    counted in ``errors`` while the other model still refreshes."""
+    creator = make_creator(db)
+    a = _enriched_model(db, creator, name="dragon a", url="https://www.myminifactory.com/object/a-1")
+    b = _enriched_model(db, creator, name="dragon b", url="https://www.myminifactory.com/object/b-2")
+    db.commit()
+
+    async def _fetch(url, mmf_api_key=None):
+        return _deep(source_url=url, external_id=url)
+
+    monkeypatch.setattr(enrich.scrapers, "fetch_url", _fetch)
+
+    real_apply = enrich.apply_scraped_to_model
+
+    async def _flaky(db_, model, scraped, **kw):
+        if model.id == a.id:
+            raise RuntimeError("boom")
+        return await real_apply(db_, model, scraped, **kw)
+
+    monkeypatch.setattr(enrich, "apply_scraped_to_model", _flaky)
+
+    resp = client.post("/enrich/refresh", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["errors"] == 1
+    assert data["refreshed"] == 1
+
+    db.refresh(b)
+    assert b.category == "Creatures"
 
 
 def test_refresh_passes_mmf_key_to_fetch(client, db, monkeypatch):

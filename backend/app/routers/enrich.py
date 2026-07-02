@@ -2,6 +2,7 @@
 Bulk enrichment endpoints — storefront scrape + fuzzy match + batch apply.
 """
 import asyncio
+import dataclasses
 import logging
 from datetime import timedelta
 
@@ -240,16 +241,21 @@ async def bulk_apply(
     unique_urls = {item.source_url for item in body.items if item.source_url}
     fetched = await _fetch_unique_deep(unique_urls, mmf_key)
 
-    applied = deep = shallow = 0
+    applied = deep = shallow = errors = 0
     for model in models:
         item = _item_for(model)
-        scraped = fetched.get(item.source_url)
+        base = fetched.get(item.source_url)
 
-        if scraped is not None:
-            # Keep the source identity from the match if the fetch didn't carry it.
-            scraped.source_url = scraped.source_url or item.source_url
-            scraped.source_site = scraped.source_site or item.source_site
-            scraped.external_id = scraped.external_id or item.external_id
+        if base is not None:
+            # Fill in the source identity from the match without mutating the
+            # shared ScrapedModel — it's reused across every sibling that
+            # references the same product URL (#699 2.2).
+            scraped = dataclasses.replace(
+                base,
+                source_url=base.source_url or item.source_url,
+                source_site=base.source_site or item.source_site,
+                external_id=base.external_id or item.external_id,
+            )
             deep += 1
         else:
             # Unsupported site / fetch failed — preserve the old shallow behaviour.
@@ -262,16 +268,20 @@ async def bulk_apply(
             )
             shallow += 1
 
-        # Bulk policy: fill (don't overwrite) the title, never replace an existing
-        # local thumbnail, never re-point creator_id (store spelling can differ
-        # from the local creator being enriched — #699 1.1), and leave
-        # needs_review set since no human reviewed the deep data (#699 1.3).
-        await apply_scraped_to_model(
-            db, model, scraped,
-            overwrite_title=False, thumbnail_fill_only=True,
-            reassign_creator=False, clear_needs_review=False,
-        )
-        applied += 1
+        try:
+            # Bulk policy: fill (don't overwrite) the title, never replace an existing
+            # local thumbnail, never re-point creator_id (store spelling can differ
+            # from the local creator being enriched — #699 1.1), and leave
+            # needs_review set since no human reviewed the deep data (#699 1.3).
+            await apply_scraped_to_model(
+                db, model, scraped,
+                overwrite_title=False, thumbnail_fill_only=True,
+                reassign_creator=False, clear_needs_review=False,
+            )
+            applied += 1
+        except Exception as e:
+            logger.warning(f"Enrich: apply failed for model {model.id} ({item.source_url}): {e}")
+            errors += 1
 
     db.commit()
     return {
@@ -279,6 +289,7 @@ async def bulk_apply(
         "applied": applied,
         "enriched_deep": deep,
         "fallback_shallow": shallow,
+        "errors": errors,
     }
 
 
@@ -313,30 +324,38 @@ async def refresh_enrich(body: RefreshRequest, db: Session = Depends(get_db)):
 
     models = query.all()
     if not models:
-        return {"ok": True, "candidates": 0, "refreshed": 0, "failed": 0}
+        return {"ok": True, "candidates": 0, "refreshed": 0, "failed": 0, "errors": 0}
 
     mmf_key = secrets.resolve_mmf_api_key(db)
     unique_urls = {m.source_url for m in models if m.source_url}
     fetched = await _fetch_unique_deep(unique_urls, mmf_key)
 
-    refreshed = failed = 0
+    refreshed = failed = errors = 0
     for model in models:
-        scraped = fetched.get(model.source_url)
-        if scraped is None:
+        base = fetched.get(model.source_url)
+        if base is None:
             failed += 1
             continue
-        # Keep the model's existing source identity if the fetch didn't carry it.
-        scraped.source_url = scraped.source_url or model.source_url
-        scraped.source_site = scraped.source_site or model.source_site
-        scraped.external_id = scraped.external_id or model.external_id
-        # Refresh operates on already-matched data, so it overwrites aggressively —
-        # but still never re-points creator_id (#699 1.1); a refresh isn't a review.
-        await apply_scraped_to_model(
-            db, model, scraped,
-            overwrite_title=True, thumbnail_fill_only=False,
-            reassign_creator=False, clear_needs_review=True,
+        # Keep the model's existing source identity without mutating the shared
+        # ScrapedModel — it's reused across every sibling on the same URL (#699 2.2).
+        scraped = dataclasses.replace(
+            base,
+            source_url=base.source_url or model.source_url,
+            source_site=base.source_site or model.source_site,
+            external_id=base.external_id or model.external_id,
         )
-        refreshed += 1
+        try:
+            # Refresh operates on already-matched data, so it overwrites aggressively —
+            # but still never re-points creator_id (#699 1.1); a refresh isn't a review.
+            await apply_scraped_to_model(
+                db, model, scraped,
+                overwrite_title=True, thumbnail_fill_only=False,
+                reassign_creator=False, clear_needs_review=True,
+            )
+            refreshed += 1
+        except Exception as e:
+            logger.warning(f"Enrich: refresh apply failed for model {model.id} ({model.source_url}): {e}")
+            errors += 1
 
     db.commit()
     return {
@@ -344,4 +363,5 @@ async def refresh_enrich(body: RefreshRequest, db: Session = Depends(get_db)):
         "candidates": len(models),
         "refreshed": refreshed,
         "failed": failed,
+        "errors": errors,
     }
