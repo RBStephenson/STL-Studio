@@ -165,25 +165,31 @@ variant leaves, the group view closes back to where you came from.
 
 **From a model's detail page**
 
-Click a model, then find the **Set group** button in the header (alongside
-*Edit*, *Find on Web*, and *Split pack*):
+Click a model, then find the **Merge into group** button in the header
+(alongside *Edit*, *Find on Web*, and *Split pack*):
 
-- Click **Set group** to open an inline input. Start typing — existing groups
-  for that creator appear as suggestions so you can pick from a list rather
-  than type the full name from memory. Leave the field blank and save to
-  **ungroup** the model. Press **Enter** or click **Save**; press **Escape** to
-  cancel.
-- Once an override is active, the button changes to an indigo **Group: [name]**
-  chip. Click it to change the assignment, or click **✕** beside it to clear
-  the override (restoring scanner-detected grouping on the next rescan).
+- Click **Merge into group** to open an inline input. Start typing — existing
+  groups for that creator appear as suggestions so you can pick from a list
+  rather than type the full name from memory. Confirm an existing group's
+  name to join it. (This only joins an *existing* group — to build a brand-new
+  group from a single loose model, use drag-to-group or the group view
+  instead.)
+- Once grouped, the button changes to an indigo **Group: [name]** chip. Click
+  it to merge into a different group, or click **✕** beside it to remove the
+  model from the group.
 
-**How overrides work**
+**How grouping durability works**
 
-A group override is written to the database and applied immediately — the
-model moves to the new group without needing a rescan. On every future rescan
-the scanner sees the override and applies it instead of the heuristic, so your
-corrections are permanent. Clearing an override removes the record; the scanner
-will re-derive the group on the next rescan.
+Every manual grouping action — drag-to-group, merge, split, rename, "Merge
+into group" — writes directly to a durable **variant group** record, applied
+immediately (no rescan needed). Because the group is a first-class record
+rather than a per-model note, a future rescan never undoes it: the scanner's
+auto-grouping only ever proposes groups for models that aren't already in one.
+
+Removing a model from a group (via **Ungroup**, **× Remove**, or clearing
+**Set group**) pins it as explicitly ungrouped, sticky across rescans, so the
+scanner won't just re-propose the same group next time. Explicitly regrouping
+it (drag, merge, or **Set group** again) clears that pin.
 
 ## Model detail
 
@@ -200,6 +206,23 @@ Click a card to open the model. From here you can:
 - Add the model to one or more **Collections** (see below).
 - See the model's **Location** on disk — copy the path, or (standalone only)
   click **Open folder** to jump to it in your file manager.
+
+### File parts, sup variants & label naming
+
+Each STL file can be labeled with a **part type** (head, arm, base…) and an
+editable **Name**. A part can have multiple **sup variants** — alternate
+supported/cut versions of the same part (`s1`, `s2`, …) — and the part picker
+renders one button per sup variant so you can switch which cut you're viewing
+without hunting through the file list. Selecting a row in the file list and
+the corresponding button in the part picker stay in sync in both directions,
+auto-unfolding collapsed sections as needed. Changing a part's category
+applies to every file linked to it (the base file and all its sups).
+
+**Settings → Preferences → Horizontal parts layout** swaps the two-column
+model detail page for a full-width, scrollable files table below the main
+grid (with **Collections**, **Location**, and **Other Files** moved into the
+right column) — handy for models with a lot of parts. The part picker is
+hidden in this mode since the table serves the same purpose.
 
 ## 3D viewer
 

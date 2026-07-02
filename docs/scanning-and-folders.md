@@ -88,10 +88,10 @@ If none match, the scanner recurses deeper, carrying the deepest **meaningful**
 (non-structural) folder name along as **character** context, which powers
 [variant grouping](features.md#variant-grouping).
 
-When the heuristic gets it wrong, you can fix it with a
-[group override](features.md#fixing-mis-grouped-models) — your correction
-is saved to the database and applied on every future rescan instead of the
-heuristic value.
+When the heuristic gets it wrong, you can fix it by
+[merging the model into a group](features.md#fixing-mis-grouped-models) —
+the correction is a durable group membership, so future rescans leave it
+alone instead of re-deriving it from the heuristic.
 
 ## Thumbnails
 
