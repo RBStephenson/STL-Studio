@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
+from app.database import Base
 from app.main import app, create_app
 
 
@@ -301,4 +302,46 @@ def test_migrate_schema_prunes_orphaned_collection_models(monkeypatch):
     with engine.connect() as conn:
         rows = conn.execute(text("SELECT id FROM collection_models")).fetchall()
     assert [r[0] for r in rows] == [1]
+    engine.dispose()
+
+
+def _schema_snapshot(engine) -> dict[str, set[str]]:
+    """{table -> column names}, ignoring Alembic's bookkeeping table."""
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    return {
+        table: {c["name"] for c in inspector.get_columns(table)}
+        for table in inspector.get_table_names()
+        if table != "alembic_version"
+    }
+
+
+def test_create_all_matches_alembic_upgrade_head(monkeypatch, tmp_path):
+    """The metadata (create_all) and the migration chain must not drift.
+
+    Fresh DBs are built by create_all + stamp head, so `upgrade head` never
+    runs on them in production. This pins the invariant that lets that be safe:
+    running the full migration chain on a create_all DB is a no-op — every
+    add_column/create_table migration is guarded and finds its object already
+    present. If a migration ever alters schema in a way create_all doesn't
+    reflect (or a model column lands without a matching migration), the
+    before/after snapshots diverge and this fails. (STUDIO-57)
+    """
+    from pathlib import Path
+    from alembic.config import Config
+    from alembic import command
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'drift.db'}")
+    Base.metadata.create_all(engine)
+    before = _schema_snapshot(engine)
+
+    # env.py binds to app.database.engine; point the whole run at this DB.
+    monkeypatch.setattr("app.database.engine", engine)
+    cfg = Config(str(Path(main_module.__file__).parent.parent / "alembic.ini"))
+    command.stamp(cfg, "0001")   # create_all built the schema; anchor at baseline
+    command.upgrade(cfg, "head")  # must be a clean no-op on a create_all DB
+
+    after = _schema_snapshot(engine)
+    assert before == after
     engine.dispose()

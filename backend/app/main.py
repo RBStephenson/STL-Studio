@@ -7,20 +7,27 @@ from fastapi.responses import JSONResponse
 
 from app.database import Base, engine, SessionLocal
 from app.routers import models, scan, files, collections, scrape, enrich, database, settings, reorganize, imports, cults
-# Registers the paint_*/guide_* tables on Base before create_all below.
+# Registers the paint_*/guide_* tables on Base so create_all (run in
+# _run_migrations at startup) sees the full metadata.
 from app.painting import models as painting_models  # noqa: F401
 from app.painting.routers import router as painting_router
 
-Base.metadata.create_all(bind=engine)
-
 
 def _migrate_schema():
-    """Add columns that didn't exist in earlier schema versions."""
+    """Bring a legacy (pre-Alembic) DB's columns up to date, one final time.
+
+    FROZEN (STUDIO-57): do NOT append to the `migrations` list below. This
+    hand-rolled additive loop only runs for DBs that predate Alembic (no
+    alembic_version table) — see _run_migrations. Every schema change from now
+    on is an Alembic migration; new columns are created by `create_all` on
+    fresh DBs and by an Alembic revision on already-managed ones.
+    """
     import logging
     from sqlalchemy import text
     logger = logging.getLogger(__name__)
 
-    # (table, column, column definition) for additive migrations
+    # (table, column, column definition) for additive migrations.
+    # FROZEN — see docstring. New columns go in an Alembic revision, not here.
     migrations = [
         ("stl_files", "part_type", "TEXT"),
         ("models", "is_favorite", "BOOLEAN DEFAULT 0"),
@@ -168,13 +175,18 @@ def _seed_tag_index():
 
 
 def _run_migrations() -> None:
-    """Run Alembic migrations at startup.
+    """Create tables and reconcile schema at startup.
 
-    Legacy DBs (created before Alembic was introduced) have no alembic_version
-    table. For those we run the hand-rolled _migrate_schema() one final time to
-    bring all columns up to date, then stamp the DB at revision 0001 (baseline)
-    so future Alembic migrations apply cleanly. New and already-stamped DBs go
-    straight through `upgrade head`.
+    `create_all` is the table creator: on a fresh DB it builds the whole
+    schema from the live metadata; on a legacy/managed DB it only adds tables
+    introduced since that DB was created (create_all never alters or drops).
+    It runs here — inside the lifespan, deterministically before Alembic —
+    rather than as an import-time side effect (STUDIO-57).
+
+    Legacy DBs (created before Alembic) have no alembic_version table. For
+    those we run the frozen _migrate_schema() one final time to add any missing
+    columns, then stamp at head so future Alembic migrations apply cleanly.
+    Already-managed DBs go straight through `upgrade head`.
     """
     import logging
     from pathlib import Path
@@ -185,6 +197,11 @@ def _run_migrations() -> None:
     import sys
 
     logger = logging.getLogger(__name__)
+
+    # Table creation, moved off import time (STUDIO-57). alembic_version is not
+    # part of the metadata, so this never affects the legacy-vs-managed branch
+    # below.
+    Base.metadata.create_all(bind=engine)
     if getattr(sys, "frozen", False):
         # PyInstaller bundle: alembic.ini and alembic/ are extracted to sys._MEIPASS
         base = Path(sys._MEIPASS)  # type: ignore[attr-defined]
