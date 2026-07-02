@@ -240,13 +240,13 @@ async def bulk_apply(
             shallow += 1
 
         try:
-            # Bulk policy: fill (don't overwrite) the title, never replace an existing
-            # local thumbnail, never re-point creator_id (store spelling can differ
-            # from the local creator being enriched — #699 1.1), and leave
-            # needs_review set since no human reviewed the deep data (#699 1.3).
+            # Bulk policy: fill (don't overwrite) the title, always refresh the
+            # thumbnail from the source, never re-point creator_id (store spelling
+            # can differ from the local creator being enriched — #699 1.1), and
+            # leave needs_review set since no human reviewed the deep data (#699 1.3).
             await apply_scraped_to_model(
                 db, model, scraped,
-                overwrite_title=False, thumbnail_fill_only=True,
+                overwrite_title=False, thumbnail_fill_only=False,
                 reassign_creator=False, clear_needs_review=False,
             )
             applied += 1

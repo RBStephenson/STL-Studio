@@ -95,7 +95,7 @@ def test_bulk_apply_falls_back_to_url_on_download_failure(client, db, thumb_dir,
     assert model.thumbnail_path is None
 
 
-def test_bulk_apply_never_overwrites_existing_local_thumbnail(client, db, thumb_dir, monkeypatch):
+def test_bulk_apply_overwrites_existing_local_thumbnail(client, db, thumb_dir, monkeypatch):
     creator = make_creator(db)
     model = make_model(db, creator, thumbnail_path="/somewhere/local.png")
     db.commit()
@@ -110,10 +110,10 @@ def test_bulk_apply_never_overwrites_existing_local_thumbnail(client, db, thumb_
 
     resp = client.post("/enrich/storefront/apply", json={"items": [_apply_item(model)]})
     assert resp.status_code == 200
-    assert calls["n"] == 0  # fill-only: no download attempted
+    assert calls["n"] == 1  # bulk enrich refreshes the thumbnail from source
 
     db.refresh(model)
-    assert model.thumbnail_path == "/somewhere/local.png"
+    assert model.thumbnail_path == str(thumb_dir / f"{model.id}.png")
     assert model.thumbnail_url is None
 
 
