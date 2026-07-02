@@ -92,7 +92,7 @@ A folder is only indexed as a model if it contains 3D files.
 - **Hide printed** chip excludes already-printed models while keeping variant grouping on; **negative tag filter** (click a tag twice) excludes by tag
 - Filter presets saved server-side; all filter state lives in the URL
 - **Variant grouping** — folders that share a parent character (e.g. `Full_cutted`, `No_cuts`, `Semi_cutted` under `Akuma/`) are collapsed into a single group card with a variant count badge; click to open the group and select individual variants
-- **Fix grouping** — drag a card onto another from the same creator to group them, or use **Set group** on a model / **Move to group** in a group view; overrides persist across rescans
+- **Fix grouping** — drag a card onto another from the same creator to group them, or use **Merge into group** on a model / **Move to group** in a group view; group membership is durable and persists across rescans
 - **Group variants by character** — opt-in per scan root (Settings → Library): for a `{creator}/{character}/…` layout, treats everything under a character folder as one variant group instead of guessing from names. Off by default; rescan to apply
 - Pagination with jump-to-page input (Prev / page / Next)
 
