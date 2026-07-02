@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text as _sqltext, func, or_
 
 from app.database import SessionLocal
-from app.models import Creator, Model, STLFile, ScanRoot, ModelTag, CollectionModel, PackOverride, GroupOverride
+from app.models import Creator, Model, STLFile, ScanRoot, ModelTag, CollectionModel, PackOverride
 from app.services import name_parser, layout, grouping
 from app.services.scan_rules import (
     IgnoreMatcher, load_ignore_matcher, load_tag_rules, load_parts_names,
@@ -74,9 +74,6 @@ _cancel_requested = False
 # boundaries. Module-level because only one scan runs at a time (held by the
 # library write lock) and threading it through every recursive call would be noisy.
 _pack_overrides: set[str] = set()
-# User-assigned character groupings keyed by model folder_path (see GroupOverride).
-# None value = explicitly ungrouped. Applied in _index_model instead of the heuristic.
-_group_overrides: dict[str, str | None] = {}
 # Configurable folder/file ignore patterns (#31). Loaded from app_settings at the
 # start of every scan; the walk skips any folder it matches. Module-level for the
 # same reason as the overrides above — one scan at a time, threading it through
@@ -114,11 +111,6 @@ def _load_pack_overrides(db: Session) -> None:
     _pack_overrides = {row[0] for row in db.query(PackOverride.path)}
 
 
-def _load_group_overrides(db: Session) -> None:
-    global _group_overrides
-    _group_overrides = {row[0]: row[1] for row in db.query(GroupOverride.path, GroupOverride.character)}
-
-
 def _load_scan_rules(db: Session) -> None:
     global _ignore_matcher
     _ignore_matcher = load_ignore_matcher(db)
@@ -145,7 +137,6 @@ def scan_all_roots(db: Session | None = None):
         own_db = db is None
         try:
             _load_pack_overrides(_db)
-            _load_group_overrides(_db)
             _load_scan_rules(_db)
 
             # Clear needs_review for any model that already has indexed STL files —
@@ -540,7 +531,6 @@ def scan_creator(creator_id: int):
                 return
 
             _load_pack_overrides(db)
-            _load_group_overrides(db)
             _load_scan_rules(db)
 
             # Clear stale needs_review on this creator's already-indexed models.
@@ -1001,13 +991,11 @@ def _index_model(
         # user edits. Recomputed every scan so parser improvements propagate.
         model.parsed_attributes = name_parser.parsed_attributes(folder.name)
 
-        # Character grouping — use the user's durable override when present;
-        # otherwise always reflect the current walk (including None) so a model
-        # whose path is all-structural clears any stale character.
-        if folder_path in _group_overrides:
-            model.character = _group_overrides[folder_path]
-        else:
-            model.character = character
+        # Character grouping — a read-only scanner-derived attribute (#678 Phase 5):
+        # always reflect the current walk (including None) so a model whose path
+        # is all-structural clears any stale character. Grouping itself is owned
+        # entirely by variant_group_id / the proposal engine, not this column.
+        model.character = character
 
         # Auto-detected signals, merged with layout-derived tags (from {tag}
         # folder levels above the creator). Lower-cased and de-duplicated, order
@@ -1263,7 +1251,6 @@ def scan_inbox_folder(
         try:
             inbox = Path(path)
             _load_pack_overrides(_db)
-            _load_group_overrides(_db)
             _load_scan_rules(_db)
 
             if _has_stls(inbox, recurse=False):

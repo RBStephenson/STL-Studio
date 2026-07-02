@@ -9,12 +9,12 @@ from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.models import Model, Creator, ModelTag, CollectionModel, GroupOverride, ScanRoot, STLFile, VariantGroup, GroupingStrategy
+from app.models import Model, Creator, ModelTag, CollectionModel, ScanRoot, STLFile, VariantGroup, GroupingStrategy
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead,
     ModelUpdate, ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl, FavoriteUpdate, RatingUpdate, QueueReorder, GroupReorder,
     PrintStatusUpdate, ExcludeUpdate, STLFileUpdate, BulkTagUpdate,
-    BulkExcludeUpdate, BulkReviewUpdate, BulkEnrichUpdate, SetGroupBody, BatchSetGroupBody,
+    BulkExcludeUpdate, BulkReviewUpdate, BulkEnrichUpdate,
     BatchSetSourceUrl, GroupRepUpdate, BulkDeleteRequest, BulkDeleteResponse,
     GroupMergeBody, GroupSplitBody, GroupPatchBody, VariantGroupRead, GroupingStrategyBody,
     AiOrganizeResult, AiOrganizeSuggestion,
@@ -721,8 +721,10 @@ def bulk_review_models(body: BulkReviewUpdate, db: Session = Depends(get_db)):
 
 @router.patch("/bulk/enrich")
 def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
-    """Set creator, character, and/or title across multiple models in one request.
-    Any field omitted from the payload is left unchanged on each model."""
+    """Set creator, title, notes, and/or source_url across multiple models in one
+    request. Any field omitted from the payload is left unchanged on each model.
+    Grouping (character/variant_group) is not editable here (#678 Phase 5) — use
+    the durable-group merge/split/patch endpoints instead."""
     if not body.ids:
         raise HTTPException(status_code=400, detail="No model IDs provided")
     # Trim before validation: a whitespace-only creator_name is truthy but must
@@ -731,7 +733,7 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
     if body.creator_name is not None and not creator_name:
         raise HTTPException(status_code=400, detail="Creator name cannot be blank")
     if not any([
-        creator_name, body.character is not None, body.title is not None,
+        creator_name, body.title is not None,
         body.notes is not None, body.source_url is not None,
     ]):
         raise HTTPException(status_code=400, detail="At least one field to update must be provided")
@@ -740,14 +742,10 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
 
     creator_id = resolve_creator(creator_name, db).id if creator_name else None
-    character = _normalize_group(body.character) if body.character is not None else None
     models_to_update = db.query(Model).filter(Model.id.in_(body.ids)).all()
     for model in models_to_update:
         if creator_id is not None:
             model.creator_id = creator_id
-        if body.character is not None:
-            # Write a durable GroupOverride so the value survives rescans.
-            _apply_group_override(db, model, character)
         if body.title is not None:
             model.title = body.title.strip() or None
         if body.notes is not None:
@@ -1183,103 +1181,19 @@ def split_pack(model_id: int, db: Session = Depends(get_db)):
     return result
 
 
-def _normalize_group(character: str | None) -> str | None:
-    """Empty/whitespace target → None (explicit ungroup); else the trimmed name."""
-    return character.strip() if character and character.strip() else None
-
-
-def _apply_group_override(db: Session, model: Model, character: str | None) -> None:
-    """Upsert a GroupOverride for one model and reflect it on the row immediately.
-
-    Shared by the single (set_group) and bulk (batch_set_group) paths. Does NOT
-    commit — the caller owns the transaction so a bulk write is atomic. The upsert
-    is conflict-safe (avoids a TOCTOU race on concurrent writes to the same path)."""
-    stmt = (
-        _sqlite_insert(GroupOverride)
-        .values(path=model.folder_path, character=character)
-        .on_conflict_do_update(index_elements=["path"], set_={"character": character})
-    )
-    db.execute(stmt)
-    model.character = character
-    # A user character override must win under the group-preferring read path
-    # (#616): clear any auto/missing variant_group_id so grouping falls back to
-    # this character (or ungroups when character is None). Durable manual groups
-    # are user-curated too, so a character override must not orphan them (#675).
-    if model.variant_group_id is not None:
-        group = db.get(VariantGroup, model.variant_group_id)
-        if group is None or group.source != "manual":
-            model.variant_group_id = None
-    model.updated_at = utcnow()
-
-
-@router.post("/{model_id}/set-group")
-def set_group(model_id: int, body: SetGroupBody, db: Session = Depends(get_db)):
-    """Assign a model to a specific character group (or explicitly ungroup it).
-    The override is persisted so it survives rescans. Also updates model.character
-    immediately so the change takes effect without waiting for a rescan.
-    Returns 409 if a scan is running — the scan would overwrite character on commit."""
-    if scanner.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
-
-    model = db.query(Model).filter(Model.id == model_id).first()
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-
-    character = _normalize_group(body.character)
-    _apply_group_override(db, model, character)
-    db.commit()
-    return {"ok": True, "character": character}
-
-
-@router.post("/group/batch-set")
-def batch_set_group(body: BatchSetGroupBody, db: Session = Depends(get_db)):
-    """Assign many models to one character group (or ungroup them) in a single
-    atomic transaction. Powers group-level rename / merge / split / ungroup.
-
-    `character=null` writes a NULL override — sticky ungroup that survives rescans,
-    mirroring the per-model X button (NOT the heuristic-restoring DELETE path).
-    Unknown ids are skipped and reported rather than failing the whole batch.
-    Returns 409 if a scan is running (it would overwrite character on commit)."""
-    if scanner.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
-
-    if not body.model_ids:
-        raise HTTPException(status_code=400, detail="model_ids must not be empty.")
-
-    character = _normalize_group(body.character)
-    requested = list(dict.fromkeys(body.model_ids))  # de-dupe, preserve order
-    models = db.query(Model).filter(Model.id.in_(requested)).all()
-    found = {m.id for m in models}
-
-    for model in models:
-        _apply_group_override(db, model, character)
-    db.commit()
-
-    return {
-        "ok": True,
-        "character": character,
-        "updated": [m.id for m in models],
-        "missing": [mid for mid in requested if mid not in found],
-    }
-
-
 # ---------------------------------------------------------------------------
 # Manual variant groups (#617): user-curated merge / split / relabel. These set
 # source="manual" so the scanner's proposal engine never reassigns the members.
 # ---------------------------------------------------------------------------
 
-def _clear_group_override(db: Session, model: Model) -> None:
-    """Delete the GroupOverride row for a model and clear its character, if any.
+def _mark_ungrouped(db: Session, model: Model) -> None:
+    """Pin a model as explicitly ungrouped, sticky across rescans (#678 Phase 5).
 
-    Merges (#676) dual-write a GroupOverride (and mirror the label onto
-    model.character) alongside variant_group_id so membership survives even if
-    variant_group_id is later cleared elsewhere. When a model is deliberately
-    removed from its group (split, or a dissolve that drops a group below 2
-    members), both must be cleared too — otherwise the legacy character grouping
-    key (_group_key_py) still matches it to ex-groupmates that share the same
-    character value, silently undoing the split."""
-    db.query(GroupOverride).filter(GroupOverride.path == model.folder_path).delete()
-    model.character = None
+    Used when a model is deliberately removed from its group (split, or a
+    dissolve that drops a group below 2 members) — without this the proposal
+    engine would happily re-propose the same auto group on the next scan."""
+    model.no_group = True
+    model.updated_at = utcnow()
 
 
 def _prune_empty_group(db: Session, group_id: int | None) -> None:
@@ -1290,7 +1204,7 @@ def _prune_empty_group(db: Session, group_id: int | None) -> None:
     if len(remaining) < 2:
         for m in remaining:
             m.variant_group_id = None
-            _clear_group_override(db, m)
+            _mark_ungrouped(db, m)
         grp = db.get(VariantGroup, group_id)
         if grp is not None:
             db.delete(grp)
@@ -1332,19 +1246,10 @@ def merge_group(body: GroupMergeBody, db: Session = Depends(get_db)):
     group.source = "manual"
 
     orphaned = {m.variant_group_id for m in models if m.variant_group_id not in (None, group.id)}
-    override_character = _normalize_group(group.label) or models[0].character or models[0].name
     for m in models:
         m.variant_group_id = group.id
-        stmt = (
-            _sqlite_insert(GroupOverride)
-            .values(path=m.folder_path, character=override_character)
-            .on_conflict_do_update(
-                index_elements=["path"],
-                set_={"character": override_character},
-            )
-        )
-        db.execute(stmt)
-        m.character = override_character
+        # An explicit merge overrides any earlier "keep me out" pin (#678 Phase 5).
+        m.no_group = False
         m.updated_at = utcnow()
     if group.rep_model_id is None:
         group.rep_model_id = next((m.id for m in models if m.is_group_rep), models[0].id)
@@ -1374,7 +1279,7 @@ def split_group(group_id: int, body: GroupSplitBody, db: Session = Depends(get_d
     )
     for m in removed:
         m.variant_group_id = None
-        _clear_group_override(db, m)
+        _mark_ungrouped(db, m)
     group.source = "manual"
     # If the designated rep left, fall back to a remaining member.
     if group.rep_model_id in ids:
@@ -1509,20 +1414,6 @@ def batch_set_source_url(body: BatchSetSourceUrl, db: Session = Depends(get_db))
     }
 
 
-@router.delete("/{model_id}/set-group")
-def clear_group(model_id: int, db: Session = Depends(get_db)):
-    """Remove a group override, restoring heuristic grouping on the next rescan.
-    Clears model.character immediately so the UI reflects the removed override
-    (the heuristic value is unknown until the next scan)."""
-    model = db.query(Model).filter(Model.id == model_id).first()
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-
-    deleted = db.query(GroupOverride).filter(GroupOverride.path == model.folder_path).delete()
-    model.character = None
-    model.updated_at = utcnow()
-    db.commit()
-    return {"ok": True, "deleted": deleted > 0}
 
 
 @router.get("/{model_id}/neighbors")
@@ -1597,8 +1488,4 @@ def get_model(model_id: int, db: Session = Depends(get_db)):
     result = ModelDetail.model_validate(model)
     result.native_folder_path = settings.to_native_path(model.folder_path)
     result.collection_ids = [link.collection_id for link in model.collection_links]
-    override = db.query(GroupOverride).filter(GroupOverride.path == model.folder_path).first()
-    if override:
-        result.has_group_override = True
-        result.group_override = override.character
     return result

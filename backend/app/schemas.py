@@ -99,6 +99,7 @@ class ModelRead(ModelBase):
     def _coerce_dict(cls, v: object) -> dict:
         return v if isinstance(v, dict) else {}
     rating: Optional[float] = None
+    like_count: Optional[int] = None
     download_count: Optional[int] = None
     creator_id: Optional[int] = None
     created_at: datetime
@@ -112,8 +113,6 @@ class ModelDetail(ModelRead):
     stl_files: list[STLFileRead] = []
     creator: Optional[CreatorRead] = None
     collection_ids: list[int] = []
-    has_group_override: bool = False
-    group_override: Optional[str] = None  # the override value (None = explicitly ungrouped)
 
 
 class ModelList(BaseModel):
@@ -268,7 +267,6 @@ class BulkReviewUpdate(BaseModel):
 class BulkEnrichUpdate(BaseModel):
     ids: list[int]
     creator_name: Optional[str] = None
-    character: Optional[str] = None
     title: Optional[str] = None
     notes: Optional[str] = None
     source_url: Optional[str] = None
@@ -282,17 +280,6 @@ class BulkDeleteRequest(BaseModel):
 class BulkDeleteResponse(BaseModel):
     deleted: int
     folders_removed: int
-
-
-class SetGroupBody(BaseModel):
-    character: Optional[str] = None  # None = explicitly ungroup; string = target group name
-
-
-class BatchSetGroupBody(BaseModel):
-    """Assign many models to one group (or ungroup) in a single transaction.
-    Powers group rename / merge / split / ungroup on the VariantGroup page."""
-    model_ids: list[int]
-    character: Optional[str] = None  # None = explicitly ungroup all; string = target group name
 
 
 class GroupMergeBody(BaseModel):
@@ -685,7 +672,6 @@ class ReorganizeEntry(BaseModel):
 
     # Path-keyed references this move invalidates (decision D); Phase 2 repaths.
     pack_override_paths: list[str]
-    group_override_paths: list[str]
 
     # Blockers / flags.
     collision: bool

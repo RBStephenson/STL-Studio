@@ -121,11 +121,10 @@ describe("BulkTagBar enrich mode (#429)", () => {
     expect(screen.getByRole("button", { name: /enrich/i })).toBeInTheDocument();
   });
 
-  it("shows creator/character/title fields when enrich mode active", () => {
+  it("shows creator/title fields when enrich mode active", () => {
     render(<BulkTagBar {...baseProps()} />);
     fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
     expect(screen.getByPlaceholderText("Creator")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Character")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Title")).toBeInTheDocument();
   });
 
@@ -145,31 +144,17 @@ describe("BulkTagBar enrich mode (#429)", () => {
     );
   });
 
-  it("calls bulkEnrich with all three fields when all provided", async () => {
+  it("calls bulkEnrich with both fields when both provided", async () => {
     render(<BulkTagBar {...baseProps()} />);
     fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
     fireEvent.change(screen.getByPlaceholderText("Creator"), { target: { value: "MC" } });
-    fireEvent.change(screen.getByPlaceholderText("Character"), { target: { value: "Orc" } });
     fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "Big Pack" } });
     fireEvent.click(screen.getByRole("button", { name: /apply/i }));
     await waitFor(() =>
       expect(vi.mocked(api.models.bulkEnrich)).toHaveBeenCalledWith(
         [1, 2],
-        { creator_name: "MC", character: "Orc", title: "Big Pack" }
+        { creator_name: "MC", title: "Big Pack" }
       )
-    );
-  });
-
-  it("sends blank character when clear-character toggled (#438)", async () => {
-    render(<BulkTagBar {...baseProps()} />);
-    fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
-    // Toggle the ✕ button next to Character (first ✕ in the panel)
-    const clearBtns = screen.getAllByTitle(/clear character/i);
-    fireEvent.click(clearBtns[0]);
-    expect(screen.getByRole("button", { name: /apply/i })).not.toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /apply/i }));
-    await waitFor(() =>
-      expect(vi.mocked(api.models.bulkEnrich)).toHaveBeenCalledWith([1, 2], { character: "" })
     );
   });
 
@@ -188,12 +173,12 @@ describe("BulkTagBar enrich mode (#429)", () => {
   it("clearing one field does not include untouched fields", async () => {
     render(<BulkTagBar {...baseProps()} />);
     fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
-    fireEvent.click(screen.getAllByTitle(/clear character/i)[0]);
+    fireEvent.click(screen.getAllByTitle(/clear title/i)[0]);
     fireEvent.click(screen.getByRole("button", { name: /apply/i }));
     await waitFor(() => {
       const call = vi.mocked(api.models.bulkEnrich).mock.calls[0][1];
-      expect(call).not.toHaveProperty("title");
       expect(call).not.toHaveProperty("creator_name");
+      expect(call).toHaveProperty("title", "");
     });
   });
 

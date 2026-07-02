@@ -54,7 +54,6 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
         proposed_dir=e.proposed_dir,
         eligible=e.eligible,
         pack_override_paths=e.pack_override_paths,
-        group_override_paths=e.group_override_paths,
         collision=e.collision,
         collision_kind=e.collision_kind,
         collision_with=e.collision_with,

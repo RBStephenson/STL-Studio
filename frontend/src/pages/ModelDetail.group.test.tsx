@@ -76,7 +76,6 @@ const baseModel = {
   thumbnail_url: null,
   creator_id: 3,
   character: "Rocky",
-  has_group_override: false,
   variant_group_id: null,
   variant_group: null,
 };

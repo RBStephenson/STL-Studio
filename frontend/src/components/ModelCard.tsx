@@ -1,6 +1,6 @@
 import { memo, useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
+import { Package, Star, Heart, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
 import { Model, PrintStatus, PRINT_STATUS_CYCLE, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -92,7 +92,12 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   const [rating, setRating] = useState<number | null>(model.user_rating ?? null);
   const [imageCleared, setImageCleared] = useState(false);
   const [localTitle, setLocalTitle] = useState(model.title ?? "");
-  const [localCharacter, setLocalCharacter] = useState(model.character ?? "");
+  // Group display name: the durable VariantGroup's label is authoritative
+  // (#678 Phase 5) — model.character is a scanner-derived attribute the next
+  // rescan can silently change, and merge/patch no longer mirror the group
+  // label onto it. Fall back to character for the (should-be-rare) case of a
+  // group with no label yet.
+  const [localGroupLabel, setLocalGroupLabel] = useState(model.variant_group?.label ?? model.character ?? "");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -111,11 +116,13 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
 
   // Keep the optimistic name in sync if the parent reloads with fresh data.
   useEffect(() => { setLocalTitle(model.title ?? ""); }, [model.title]);
-  useEffect(() => { setLocalCharacter(model.character ?? ""); }, [model.character]);
+  useEffect(() => {
+    setLocalGroupLabel(model.variant_group?.label ?? model.character ?? "");
+  }, [model.variant_group?.label, model.character]);
   useEffect(() => { if (editingName) nameInputRef.current?.select(); }, [editingName]);
 
   const startRename = () => {
-    setNameDraft(isGroup ? localCharacter : (localTitle || model.name));
+    setNameDraft(isGroup ? localGroupLabel : (localTitle || model.name));
     setEditingName(true);
   };
 
@@ -124,17 +131,17 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   // isGroup card carries a variant_group_id — the ch:-fallback (character with
   // no durable group) no longer groups anything.
   const renameGroup = async (next: string) => {
-    const prev = localCharacter;
+    const prev = localGroupLabel;
     if (model.variant_group_id == null) {
       toast("Can't rename a group with no durable group id.", "error");
       return;
     }
-    setLocalCharacter(next);
+    setLocalGroupLabel(next);
     try {
       await api.models.patchGroup(model.variant_group_id, { label: next });
       onMutate?.();
     } catch {
-      setLocalCharacter(prev);  // revert on failure
+      setLocalGroupLabel(prev);  // revert on failure
       toast("Couldn't rename group — try again.", "error");
     }
   };
@@ -154,7 +161,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   const commitRename = async () => {
     const next = nameDraft.trim();
     setEditingName(false);
-    const current = isGroup ? localCharacter : (localTitle || model.name);
+    const current = isGroup ? localGroupLabel : (localTitle || model.name);
     if (!next || next === current) return;
     await (isGroup ? renameGroup(next) : renameModel(next));
   };
@@ -254,8 +261,8 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     return null;
   })();
 
-  const displayName = isGroup && localCharacter
-    ? (localTitle || localCharacter)
+  const displayName = isGroup && localGroupLabel
+    ? (localTitle || localGroupLabel)
     : (localTitle || model.name);
   const removedAuto = new Set(model.removed_auto_tags ?? []);
   const visibleAutoTags = (model.auto_tags ?? []).filter((t) => !removedAuto.has(t));
@@ -510,10 +517,10 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             <StarRating value={rating} onChange={changeRating} size={13} />
           </div>
           <div className="flex items-center gap-1.5 ml-auto">
-            {model.rating != null && (
-              <span title="Rating from the source site" className="flex items-center gap-0.5 text-xs text-gray-500">
-                <Star size={11} fill="currentColor" />
-                {model.rating.toFixed(1)}
+            {model.like_count != null && (
+              <span title="Likes on the source site" className="flex items-center gap-0.5 text-xs text-gray-500">
+                <Heart size={11} fill="currentColor" />
+                {model.like_count.toLocaleString()}
               </span>
             )}
             <button

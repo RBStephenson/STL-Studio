@@ -259,7 +259,10 @@ def _parse(html: str, url: str) -> Optional[ScrapedModel]:
                 if isinstance(author, dict):
                     creator_name = creator_name or author.get("name")
                     creator_url = creator_url or author.get("url")
-                for img in ld.get("image", []):
+                imgs = ld.get("image") or []
+                if isinstance(imgs, str):
+                    imgs = [imgs]
+                for img in imgs:
                     src = img if isinstance(img, str) else img.get("url", "")
                     if src and src not in images:
                         images.append(src)

@@ -6,6 +6,26 @@ interface RefreshResult {
   candidates: number;
   refreshed: number;
   failed: number;
+  errors: number;
+}
+
+interface RefreshStatus extends RefreshResult {
+  running: boolean;
+  message: string;
+}
+
+// The refresh runs off the request path (background thread) since a
+// library-wide re-fetch can take minutes — poll status until it's done.
+const POLL_INTERVAL_MS = 1000;
+
+async function pollUntilDone(): Promise<RefreshStatus> {
+  for (;;) {
+    const r = await fetch("/api/enrich/refresh/status");
+    if (!r.ok) throw new Error("Couldn't check refresh status");
+    const status: RefreshStatus = await r.json();
+    if (!status.running) return status;
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
 }
 
 interface Props {
@@ -54,8 +74,13 @@ export default function RefreshEnrich({ creatorId, scopeLabel, compact, onDone }
           ...(staleDays !== null ? { stale_days: staleDays } : {}),
         }),
       });
+      if (r.status === 409) {
+        toast("A refresh is already running — try again shortly.", "info");
+        return;
+      }
       if (!r.ok) throw new Error("Refresh failed");
-      const result: RefreshResult = await r.json();
+
+      const result = await pollUntilDone();
 
       if (result.candidates === 0) {
         toast("Nothing to refresh — no matching models with a source URL.", "info");

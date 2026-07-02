@@ -1,57 +1,29 @@
 """
 Bulk enrichment endpoints — storefront scrape + fuzzy match + batch apply.
 """
-import asyncio
+import dataclasses
 import logging
-from datetime import timedelta
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
 from app.models import Model, Creator
-from app.services import scrapers, secrets
+from app.services import enrich_refresh, secrets
+from app.services.enrich_refresh import fetch_unique_deep
 from app.services.scrapers.base import ScrapedModel
 from app.services.scrapers.storefront import scrape_storefront
 from app.services.matcher import match_products_to_models
 from app.services.metadata_apply import apply_scraped_to_model
-from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/enrich", tags=["enrich"])
 
 _MAX_CREATOR_MODELS = 5_000
-
-# Each selected match triggers a detail fetch (MMF/Cults API or Gumroad scrape).
-# Bound the parallelism so we don't hammer a source or serialize the whole batch.
-_FETCH_CONCURRENCY = 5
-
-
-async def _fetch_unique_deep(
-    urls: set[str], mmf_key: Optional[str]
-) -> dict[str, Optional[ScrapedModel]]:
-    """Fetch full detail for each unique product URL once, bounded-concurrently.
-
-    Variants share a product listing, so a URL is only fetched once and fanned
-    out to every model that references it. A URL whose fetch fails maps to None
-    so callers can decide how to degrade. Shared by the bulk-apply and refresh
-    paths so their fetch behaviour can't drift.
-    """
-    sem = asyncio.Semaphore(_FETCH_CONCURRENCY)
-
-    async def _one(url: str):
-        async with sem:
-            try:
-                return url, await scrapers.fetch_url(url, mmf_api_key=mmf_key)
-            except Exception as e:
-                logger.warning(f"Enrich: detail fetch failed for {url}: {e}")
-                return url, None
-
-    return dict(await asyncio.gather(*(_one(u) for u in urls)))
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +120,11 @@ async def match_storefront(
     if not products:
         raise HTTPException(status_code=422, detail="No products found at that URL.")
 
-    model_count = db.query(Model).filter(Model.creator_id == creator_id).count()
+    models = db.query(Model).filter(
+        Model.creator_id == creator_id,
+        Model.excluded == False,  # noqa: E712
+    ).all()
+    model_count = len(models)
     if model_count == 0:
         raise HTTPException(status_code=404, detail="No local models found for this creator.")
     if model_count > _MAX_CREATOR_MODELS:
@@ -159,7 +135,6 @@ async def match_storefront(
                 f"{_MAX_CREATOR_MODELS}. Narrow the request or paginate by creator subset."
             ),
         )
-    models = db.query(Model).filter(Model.creator_id == creator_id).all()
 
     creator = db.get(Creator, creator_id)
 
@@ -235,18 +210,23 @@ async def bulk_apply(
     # we don't hammer a source. MMF needs the key threaded; Cults self-resolves.
     mmf_key = secrets.resolve_mmf_api_key(db)
     unique_urls = {item.source_url for item in body.items if item.source_url}
-    fetched = await _fetch_unique_deep(unique_urls, mmf_key)
+    fetched = await fetch_unique_deep(unique_urls, mmf_key)
 
-    applied = deep = shallow = 0
+    applied = deep = shallow = errors = 0
     for model in models:
         item = _item_for(model)
-        scraped = fetched.get(item.source_url)
+        base = fetched.get(item.source_url)
 
-        if scraped is not None:
-            # Keep the source identity from the match if the fetch didn't carry it.
-            scraped.source_url = scraped.source_url or item.source_url
-            scraped.source_site = scraped.source_site or item.source_site
-            scraped.external_id = scraped.external_id or item.external_id
+        if base is not None:
+            # Fill in the source identity from the match without mutating the
+            # shared ScrapedModel — it's reused across every sibling that
+            # references the same product URL (#699 2.2).
+            scraped = dataclasses.replace(
+                base,
+                source_url=base.source_url or item.source_url,
+                source_site=base.source_site or item.source_site,
+                external_id=base.external_id or item.external_id,
+            )
             deep += 1
         else:
             # Unsupported site / fetch failed — preserve the old shallow behaviour.
@@ -259,12 +239,20 @@ async def bulk_apply(
             )
             shallow += 1
 
-        # Bulk policy: fill (don't overwrite) the title, and never replace an
-        # existing local thumbnail.
-        await apply_scraped_to_model(
-            db, model, scraped, overwrite_title=False, thumbnail_fill_only=True
-        )
-        applied += 1
+        try:
+            # Bulk policy: fill (don't overwrite) the title, never replace an existing
+            # local thumbnail, never re-point creator_id (store spelling can differ
+            # from the local creator being enriched — #699 1.1), and leave
+            # needs_review set since no human reviewed the deep data (#699 1.3).
+            await apply_scraped_to_model(
+                db, model, scraped,
+                overwrite_title=False, thumbnail_fill_only=True,
+                reassign_creator=False, clear_needs_review=False,
+            )
+            applied += 1
+        except Exception as e:
+            logger.warning(f"Enrich: apply failed for model {model.id} ({item.source_url}): {e}")
+            errors += 1
 
     db.commit()
     return {
@@ -272,65 +260,43 @@ async def bulk_apply(
         "applied": applied,
         "enriched_deep": deep,
         "fallback_shallow": shallow,
+        "errors": errors,
     }
 
 
 @router.post("/refresh", response_model=dict)
-async def refresh_enrich(body: RefreshRequest, db: Session = Depends(get_db)):
-    """Re-fetch storefront detail for already-enriched models and overwrite.
+def refresh_enrich(body: RefreshRequest):
+    """Kick off a re-fetch of storefront detail for already-enriched models.
 
     ``Model.source_last_fetched`` is recorded on enrich but otherwise unused —
     a listing can gain images, tags, or a new description after first enrich.
-    This re-fetches detail for every model that already has a ``source_url``
-    (scoped by creator, an explicit id list, or staleness — none → library-wide)
-    and re-applies it.
+    Scope is by creator, an explicit id list, or staleness — none → library-wide,
+    which can mean re-fetching every enriched model in the library. That's
+    minutes for a big library, so this runs off the request path (#699 2.4):
+    the actual work happens in services/enrich_refresh.py on a background
+    thread, mirroring /scan/start. Poll GET /enrich/refresh/status for progress.
 
     Unlike first-time bulk enrich, a refresh is an explicit user action on data
     that's already matched, so it overwrites aggressively: the title and
     thumbnail are replaced, not just filled. A model whose fetch fails is left
     untouched (counted in ``failed``) rather than clobbered with shallow data.
     """
-    query = db.query(Model).filter(Model.source_url.isnot(None))
-    if body.creator_id is not None:
-        query = query.filter(Model.creator_id == body.creator_id)
-    if body.model_ids:
-        query = query.filter(Model.id.in_(body.model_ids))
-    if body.stale_days is not None:
-        cutoff = utcnow() - timedelta(days=body.stale_days)
-        query = query.filter(
-            or_(
-                Model.source_last_fetched.is_(None),
-                Model.source_last_fetched < cutoff,
-            )
-        )
+    if enrich_refresh.get_status()["running"]:
+        raise HTTPException(status_code=409, detail="Refresh already running")
 
-    models = query.all()
-    if not models:
-        return {"ok": True, "candidates": 0, "refreshed": 0, "failed": 0}
+    thread = threading.Thread(
+        target=enrich_refresh.run_refresh,
+        kwargs={
+            "creator_id": body.creator_id,
+            "model_ids": body.model_ids,
+            "stale_days": body.stale_days,
+        },
+        daemon=True,
+    )
+    thread.start()
+    return {"ok": True, "running": True, "message": "refresh started"}
 
-    mmf_key = secrets.resolve_mmf_api_key(db)
-    unique_urls = {m.source_url for m in models if m.source_url}
-    fetched = await _fetch_unique_deep(unique_urls, mmf_key)
 
-    refreshed = failed = 0
-    for model in models:
-        scraped = fetched.get(model.source_url)
-        if scraped is None:
-            failed += 1
-            continue
-        # Keep the model's existing source identity if the fetch didn't carry it.
-        scraped.source_url = scraped.source_url or model.source_url
-        scraped.source_site = scraped.source_site or model.source_site
-        scraped.external_id = scraped.external_id or model.external_id
-        await apply_scraped_to_model(
-            db, model, scraped, overwrite_title=True, thumbnail_fill_only=False
-        )
-        refreshed += 1
-
-    db.commit()
-    return {
-        "ok": True,
-        "candidates": len(models),
-        "refreshed": refreshed,
-        "failed": failed,
-    }
+@router.get("/refresh/status", response_model=dict)
+def refresh_status():
+    return enrich_refresh.get_status()

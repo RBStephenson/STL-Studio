@@ -33,9 +33,7 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
   const [enrichCreator, setEnrichCreator] = useState("");
-  const [enrichCharacter, setEnrichCharacter] = useState("");
   const [enrichTitle, setEnrichTitle] = useState("");
-  const [clearCharacter, setClearCharacter] = useState(false);
   const [clearTitle, setClearTitle] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const colInputRef = useRef<HTMLInputElement>(null);
@@ -53,9 +51,7 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
     setColSearch("");
     setColOpen(false);
     setEnrichCreator("");
-    setEnrichCharacter("");
     setEnrichTitle("");
-    setClearCharacter(false);
     setClearTitle(false);
     setStatus("idle");
     setMessage("");
@@ -189,10 +185,8 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
   };
 
   const applyEnrich = async () => {
-    const fields: { creator_name?: string; character?: string; title?: string } = {};
+    const fields: { creator_name?: string; title?: string } = {};
     if (enrichCreator.trim()) fields.creator_name = enrichCreator.trim();
-    if (clearCharacter) fields.character = "";
-    else if (enrichCharacter.trim()) fields.character = enrichCharacter.trim();
     if (clearTitle) fields.title = "";
     else if (enrichTitle.trim()) fields.title = enrichTitle.trim();
     if (Object.keys(fields).length === 0) return;
@@ -340,23 +334,6 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
             />
             <input
               type="text"
-              value={clearCharacter ? "" : enrichCharacter}
-              onChange={e => setEnrichCharacter(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") applyEnrich(); if (e.key === "Escape") reset(); }}
-              placeholder={clearCharacter ? "— clearing —" : "Character"}
-              disabled={clearCharacter}
-              className="w-32 bg-gray-800 border border-gray-600 rounded px-2.5 py-1 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 disabled:opacity-40"
-            />
-            <button
-              type="button"
-              onClick={() => { setClearCharacter(v => !v); setEnrichCharacter(""); }}
-              title={clearCharacter ? "Cancel clear character" : "Clear character"}
-              className={`px-1.5 py-1 rounded text-xs transition-colors shrink-0 ${clearCharacter ? "bg-red-700 text-white" : "bg-gray-700 text-gray-400 hover:text-red-400"}`}
-            >
-              ✕
-            </button>
-            <input
-              type="text"
               value={clearTitle ? "" : enrichTitle}
               onChange={e => setEnrichTitle(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") applyEnrich(); if (e.key === "Escape") reset(); }}
@@ -374,7 +351,7 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
             </button>
             <button
               onClick={applyEnrich}
-              disabled={!enrichCreator.trim() && !enrichCharacter.trim() && !enrichTitle.trim() && !clearCharacter && !clearTitle}
+              disabled={!enrichCreator.trim() && !enrichTitle.trim() && !clearTitle}
               className="flex items-center gap-1 px-3 py-1 rounded text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 transition-colors shrink-0"
             >
               Apply

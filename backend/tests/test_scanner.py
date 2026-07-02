@@ -1270,21 +1270,6 @@ class TestGroupByCharacterFolder:
         chars = {m.character for m in _models(db, creator)}
         assert chars != {"Goblin King"}                 # not force-grouped
 
-    def test_user_override_still_wins(self, db, tmp_path):
-        creator_dir = tmp_path / "Abe3D"
-        leaf = creator_dir / "Goblin King" / "Goblin King 32mm"
-        _stl(leaf)
-        creator = make_creator(db, "Abe3D")
-
-        scanner._group_overrides = {str(leaf): "Custom Group"}
-        try:
-            _walk(db, creator, creator_dir, group_by_character=True)
-        finally:
-            scanner._group_overrides = {}
-
-        m = next(m for m in _models(db, creator) if Path(m.folder_path) == leaf)
-        assert m.character == "Custom Group"
-
 
 # ---------------------------------------------------------------------------
 # Clean display name + structured parsed_attributes (#608)

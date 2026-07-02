@@ -14,7 +14,7 @@ import os
 import pytest
 
 from app.config import settings
-from app.models import GroupOverride, Model, PackOverride, STLFile
+from app.models import Model, PackOverride, STLFile
 from app.services import reorganize_apply, write_lock
 from app.services.reorganize_apply import ApplyError, _safe_move, apply_manifest
 from tests.conftest import make_creator, make_model, make_stl_file
@@ -404,12 +404,11 @@ class TestPathConfinement:
 
 
 class TestOverrideRepath:
-    def test_pack_and_group_overrides_repathed(self, db, tmp_path, write_mode, client):
+    def test_pack_override_repathed(self, db, tmp_path, write_mode, client):
         _root(db, tmp_path)
         m = _seed(db, tmp_path)
         old = m.folder_path
         db.add(PackOverride(path=old))
-        db.add(GroupOverride(path=old, character="Joker"))
         db.commit()
         preview = _preview(client)
         entry = preview["entries"][0]
@@ -422,4 +421,22 @@ class TestOverrideRepath:
         assert resp.status_code == 200
         new_dir = entry["proposed_dir"]
         assert db.query(PackOverride).filter_by(path=new_dir).first() is not None
-        assert db.query(GroupOverride).filter_by(path=new_dir).first() is not None
+
+    def test_no_group_pin_survives_a_move_with_no_repathing(self, db, tmp_path, write_mode, client):
+        """Model.no_group (#678 Phase 5) lives on the Model row, not a path-keyed
+        override table — it should just travel with the model, no repath logic
+        needed (unlike the retired GroupOverride mechanism this replaces)."""
+        _root(db, tmp_path)
+        m = _seed(db, tmp_path)
+        m.no_group = True
+        db.commit()
+        preview = _preview(client)
+        entry = preview["entries"][0]
+        mid = preview["manifest_id"]
+        if entry["kind"] == "in_place":
+            pytest.skip("destination equals source — no move to verify")
+        resp = client.post("/reorganize/apply",
+                           json={"manifest_id": mid, "entry_ids": [m.id]})
+        assert resp.status_code == 200
+        db.refresh(m)
+        assert m.no_group is True

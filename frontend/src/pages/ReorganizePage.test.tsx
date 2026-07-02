@@ -36,7 +36,7 @@ function entry(over: Record<string, unknown>) {
   return {
     model_id: 1, model_name: "Joker Bust", files: [], kind: "move",
     proposed_dir: "/lib/Abe3D/Joker/Bust", eligible: true,
-    pack_override_paths: [], group_override_paths: [],
+    pack_override_paths: [],
     collision: false, collision_kind: "none", collision_with: [],
     unclassifiable: false, missing_fields: [], over_length: false,
     reserved_name: false, overlaps_other: false, spans_multiple_dirs: false,

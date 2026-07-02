@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
     Creator,
-    GroupOverride,
     ImportSourceMapping,
     Model,
     PackOverride,
@@ -85,7 +84,6 @@ class Entry:
     proposed_dir: str
     eligible: bool
     pack_override_paths: list[str]
-    group_override_paths: list[str]
     collision: bool
     collision_kind: str
     collision_with: list[int]
@@ -197,7 +195,6 @@ def build_manifest(
         return best if best is not None else primary_dest
 
     pack_paths = [_canon(p) for (p,) in db.query(PackOverride.path).all() if p]
-    group_paths = [_canon(p) for (p,) in db.query(GroupOverride.path).all() if p]
 
     models_q = (
         db.query(Model)
@@ -223,7 +220,7 @@ def build_manifest(
 
     entries: list[Entry] = []
     for m in models:
-        entries.append(_build_entry(m, segments, root_keys, pack_paths, group_paths,
+        entries.append(_build_entry(m, segments, root_keys, pack_paths,
                                     overrides.get(m.id), _dest_for(m),
                                     slugify_title=slugify_title))
 
@@ -237,7 +234,6 @@ def _build_entry(
     segments: list[str],
     root_keys: list[tuple[str, str]],
     pack_paths: list[str],
-    group_paths: list[str],
     override: dict | None = None,
     dest_root: str | None = None,
     slugify_title: bool = False,
@@ -337,7 +333,6 @@ def _build_entry(
 
     # Path-keyed overrides this move invalidates (under the model's folder).
     pack_refs = [p for p in pack_paths if _key(p) == cur_key or _key(p).startswith(cur_key + "/")]
-    group_refs = [p for p in group_paths if _key(p) == cur_key or _key(p).startswith(cur_key + "/")]
 
     # Escape = no anchor root to place the model under. For in-library models that
     # means it sits outside every scan root; for inbox models it means there is no
@@ -369,7 +364,6 @@ def _build_entry(
         proposed_dir=proposed_dir,
         eligible=eligible,
         pack_override_paths=pack_refs,
-        group_override_paths=group_refs,
         collision=False,
         collision_kind="none",
         collision_with=[],

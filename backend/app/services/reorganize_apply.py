@@ -35,7 +35,7 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import GroupOverride, Model, PackOverride, ReorganizeManifest, ScanRoot, STLFile
+from app.models import Model, PackOverride, ReorganizeManifest, ScanRoot, STLFile
 from app.services import write_lock
 from app.utils import utcnow
 
@@ -342,10 +342,13 @@ def apply_manifest(
 
 
 def _repath_db(db: Session, selected: list[dict]) -> None:
-    """Update Model.folder_path, STLFile.path, and the path-keyed PackOverride /
-    GroupOverride references — all in one transaction under the write lock. A
-    row-by-row repath in a partially-moved state would race the unique constraints
-    on STLFile.path / Model.folder_path."""
+    """Update Model.folder_path, STLFile.path, and the path-keyed PackOverride
+    references — all in one transaction under the write lock. A row-by-row
+    repath in a partially-moved state would race the unique constraints on
+    STLFile.path / Model.folder_path.
+
+    GroupOverride no longer needs this (#678 Phase 5): the equivalent flag
+    (Model.no_group) lives on the Model row itself, so it moves for free."""
     for entry in selected:
         model = db.get(Model, entry["model_id"])
         if model is not None:
@@ -361,7 +364,6 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
         new_dir = entry["proposed_dir"]
         if old_dir is not None:
             _repath_overrides(db, PackOverride, old_dir, new_dir)
-            _repath_overrides(db, GroupOverride, old_dir, new_dir)
     db.commit()
 
 
@@ -377,8 +379,8 @@ def _entry_source_dir(entry: dict) -> str | None:
 
 
 def _repath_overrides(db: Session, model_cls, old_dir: str, new_dir: str) -> None:
-    """Repath any PackOverride/GroupOverride whose path is the moved dir or nested
-    under it, preserving the suffix below the model dir."""
+    """Repath any path-keyed override row (e.g. PackOverride) whose path is the
+    moved dir or nested under it, preserving the suffix below the model dir."""
     old_key = _key(old_dir)
     for row in db.query(model_cls).all():
         rk = _key(row.path or "")
@@ -564,5 +566,4 @@ def _repath_db_undo(
     for proposed_dir, source_dir in override_dirs:
         if proposed_dir and source_dir:
             _repath_overrides(db, PackOverride, proposed_dir, source_dir)
-            _repath_overrides(db, GroupOverride, proposed_dir, source_dir)
     db.commit()

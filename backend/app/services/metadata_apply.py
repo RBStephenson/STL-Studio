@@ -4,11 +4,18 @@ Single writer shared by the per-model Find-on-Web path (scrape router) and the
 bulk creator-enrichment path (enrich router), so both apply the same field set
 with the same semantics — no drift between "enrich one" and "enrich many".
 
-The two call sites differ only in two policies, exposed as flags:
+The two call sites differ in policy, exposed as flags:
   * ``overwrite_title`` — the reviewed single-model path overwrites the title;
     the bulk path only fills an empty title (less human review per item).
   * ``thumbnail_fill_only`` — the bulk path never replaces an existing local
     thumbnail; the single-model path always refreshes it.
+  * ``reassign_creator`` — the reviewed single-model path may re-point the
+    model's creator; the bulk/refresh paths never do (the store's spelling of
+    a creator name can differ from the local creator being enriched, and
+    reassigning would silently split the library — #699 1.1). Fills
+    ``creator_id`` when it is NULL regardless of the flag.
+  * ``clear_needs_review`` — the reviewed single-model path clears the flag;
+    bulk apply leaves it since no human looked at the deep data (#699 1.3).
 """
 import logging
 
@@ -31,6 +38,8 @@ async def apply_scraped_to_model(
     *,
     overwrite_title: bool = True,
     thumbnail_fill_only: bool = False,
+    reassign_creator: bool = True,
+    clear_needs_review: bool = True,
 ) -> None:
     """Write the populated fields of ``scraped`` onto ``model`` (no commit)."""
     if scraped.title and (overwrite_title or not model.title):
@@ -66,16 +75,17 @@ async def apply_scraped_to_model(
     if scraped.license:
         model.license = scraped.license
     if scraped.like_count is not None:
-        model.rating = scraped.like_count  # store likes as proxy for rating
+        model.like_count = scraped.like_count
     if scraped.download_count is not None:
         model.download_count = scraped.download_count
 
-    if scraped.creator_name:
+    if scraped.creator_name and (reassign_creator or model.creator_id is None):
         model.creator_id = resolve_creator(scraped.creator_name, db).id
 
     if scraped.source_url:
         propagate_source_url(db, model)
 
     model.source_last_fetched = utcnow()
-    model.needs_review = False
+    if clear_needs_review:
+        model.needs_review = False
     model.updated_at = utcnow()

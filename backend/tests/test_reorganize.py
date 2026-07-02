@@ -6,7 +6,7 @@ Focuses on the "dangerous population" the issue calls out — pack-split / share
 folders, collisions, sentinels, scan-root escape, override capture — not just
 the happy path. No test moves any files.
 """
-from app.models import Creator, GroupOverride, PackOverride, ReorganizeManifest, ScanRoot
+from app.models import Creator, PackOverride, ReorganizeManifest, ScanRoot
 from tests.conftest import make_creator, make_model, make_stl_file
 
 
@@ -125,16 +125,14 @@ class TestScanRootEscape:
 
 
 class TestOverrideCapture:
-    def test_pack_and_group_override_paths_captured(self, client, db, tmp_path):
+    def test_pack_override_paths_captured(self, client, db, tmp_path):
         _root(db, tmp_path)
         m = _model_with_file(db, tmp_path)
         db.add(PackOverride(path=m.folder_path))
-        db.add(GroupOverride(path=m.folder_path, character="Joker"))
         db.commit()
 
         entry = client.get("/reorganize/preview").json()["entries"][0]
         assert m.folder_path.replace("\\", "/") in entry["pack_override_paths"]
-        assert m.folder_path.replace("\\", "/") in entry["group_override_paths"]
 
 
 class TestSpansMultipleDirs:
