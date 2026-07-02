@@ -6,7 +6,6 @@ of duplicating routers/migrations, so the two deployments cannot drift. These
 tests pin that guarantee: identical route sets (modulo prefix) and a startup
 migration that brings an old-schema DB fully up to date.
 """
-from fastapi.routing import APIRoute
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
@@ -15,10 +14,12 @@ from app.main import app, create_app
 
 
 def _api_routes(app_) -> set[tuple[str, frozenset]]:
+    # Enumerate via the OpenAPI schema rather than walking app.routes:
+    # FastAPI 0.139 made include_router lazy (_IncludedRouter), so mounted
+    # routes no longer appear as APIRoute instances on the app object.
     return {
-        (r.path, frozenset(r.methods))
-        for r in app_.routes
-        if isinstance(r, APIRoute)
+        (path, frozenset(op.upper() for op in ops))
+        for path, ops in app_.openapi()["paths"].items()
     }
 
 
