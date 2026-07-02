@@ -1,6 +1,6 @@
 import { memo, useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Package, Star, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
+import { Package, Star, Heart, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
 import { Model, PrintStatus, PRINT_STATUS_CYCLE, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -517,10 +517,10 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             <StarRating value={rating} onChange={changeRating} size={13} />
           </div>
           <div className="flex items-center gap-1.5 ml-auto">
-            {model.rating != null && (
-              <span title="Rating from the source site" className="flex items-center gap-0.5 text-xs text-gray-500">
-                <Star size={11} fill="currentColor" />
-                {model.rating.toFixed(1)}
+            {model.like_count != null && (
+              <span title="Likes on the source site" className="flex items-center gap-0.5 text-xs text-gray-500">
+                <Heart size={11} fill="currentColor" />
+                {model.like_count.toLocaleString()}
               </span>
             )}
             <button

@@ -90,3 +90,24 @@ def test_within_limit_returns_candidates(client, db, monkeypatch):
     )
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+def test_excluded_model_never_matched(client, db, monkeypatch):
+    """#699 1.4: match_storefront must filter excluded models like bulk_apply's
+    sibling propagation does — an excluded model shouldn't surface as a match
+    candidate to be enriched directly."""
+    creator = make_creator(db)
+    excluded = make_model(db, creator, name="dragon")
+    excluded.excluded = True
+    db.commit()
+
+    monkeypatch.setattr(
+        enrich_module, "scrape_storefront", AsyncMock(return_value=[_product(title="dragon")])
+    )
+
+    resp = client.get(
+        "/enrich/storefront/match",
+        params={"url": _STOREFRONT_URL, "creator_id": creator.id, "min_score": 0.0},
+    )
+    # No non-excluded models for this creator -> 404, not a match list containing it.
+    assert resp.status_code == 404

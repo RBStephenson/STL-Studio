@@ -92,3 +92,74 @@ def test_thumbnail_fill_only_skips_when_present(db):
     db.commit(); db.refresh(model)
     assert model.thumbnail_path == "/local/x.png"
     assert model.thumbnail_url is None
+
+
+def test_reassign_creator_false_keeps_existing_creator(db):
+    creator = make_creator(db, name="abe3d")
+    other = make_creator(db, name="Abe 3D Prints")
+    model = make_model(db, creator, name="m")
+    db.commit()
+
+    _run(apply_scraped_to_model(
+        db, model, _scraped(creator_name="Abe 3D Prints"), reassign_creator=False
+    ))
+    db.commit(); db.refresh(model)
+    assert model.creator_id == creator.id
+    assert model.creator_id != other.id
+
+
+def test_reassign_creator_true_moves_creator(db):
+    creator = make_creator(db, name="abe3d")
+    model = make_model(db, creator, name="m")
+    db.commit()
+
+    _run(apply_scraped_to_model(
+        db, model, _scraped(creator_name="Abe 3D Prints"), reassign_creator=True
+    ))
+    db.commit(); db.refresh(model)
+    assert model.creator_id != creator.id
+
+
+def test_reassign_creator_false_still_fills_null_creator(db):
+    creator = make_creator(db, name="abe3d")
+    model = make_model(db, creator, name="m")
+    model.creator_id = None
+    db.commit()
+
+    _run(apply_scraped_to_model(
+        db, model, _scraped(creator_name="Abe 3D Prints"), reassign_creator=False
+    ))
+    db.commit(); db.refresh(model)
+    assert model.creator_id is not None
+
+
+def test_clear_needs_review_false_leaves_flag_set(db):
+    creator = make_creator(db)
+    model = make_model(db, creator, name="m", needs_review=True)
+    db.commit()
+
+    _run(apply_scraped_to_model(db, model, _scraped(), clear_needs_review=False))
+    db.commit(); db.refresh(model)
+    assert model.needs_review is True
+
+
+def test_clear_needs_review_true_clears_flag(db):
+    creator = make_creator(db)
+    model = make_model(db, creator, name="m", needs_review=True)
+    db.commit()
+
+    _run(apply_scraped_to_model(db, model, _scraped(), clear_needs_review=True))
+    db.commit(); db.refresh(model)
+    assert model.needs_review is False
+
+
+def test_like_count_written_rating_untouched(db):
+    creator = make_creator(db)
+    model = make_model(db, creator, name="m")
+    model.rating = 4.2
+    db.commit()
+
+    _run(apply_scraped_to_model(db, model, _scraped(like_count=123)))
+    db.commit(); db.refresh(model)
+    assert model.like_count == 123
+    assert model.rating == 4.2

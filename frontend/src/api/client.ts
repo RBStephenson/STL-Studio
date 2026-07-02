@@ -137,6 +137,7 @@ export interface Model {
   other_files: string[];
   primary_image_path: string | null;
   rating: number | null;
+  like_count: number | null;
   download_count: number | null;
   creator_id: number | null;
   created_at: string;
