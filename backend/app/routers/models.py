@@ -17,6 +17,7 @@ from app.schemas import (
     BulkExcludeUpdate, BulkReviewUpdate, BulkEnrichUpdate,
     BatchSetSourceUrl, GroupRepUpdate, BulkDeleteRequest, BulkDeleteResponse,
     GroupMergeBody, GroupSplitBody, GroupPatchBody, VariantGroupRead, GroupingStrategyBody,
+    TagRenameBody, TagMergeBody,
 )
 
 _log = logging.getLogger(__name__)
@@ -418,10 +419,10 @@ def rebuild_tags(db: Session = Depends(get_db)):
 
 
 @router.patch("/tags/rename")
-def rename_tag(body: dict, db: Session = Depends(get_db)):
+def rename_tag(body: TagRenameBody, db: Session = Depends(get_db)):
     """Rename a tag on all models that carry it."""
-    old = (body.get("old_tag") or "").strip().lower()
-    new = (body.get("new_tag") or "").strip().lower()
+    old = body.old_tag.strip().lower()
+    new = body.new_tag.strip().lower()
     if not old or not new:
         raise HTTPException(status_code=422, detail="old_tag and new_tag are required")
     if old == new:
@@ -450,10 +451,10 @@ def rename_tag(body: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/tags/merge")
-def merge_tags(body: dict, db: Session = Depends(get_db)):
+def merge_tags(body: TagMergeBody, db: Session = Depends(get_db)):
     """Merge source_tag into target_tag: all models get target_tag, source_tag removed."""
-    source = (body.get("source_tag") or "").strip().lower()
-    target = (body.get("target_tag") or "").strip().lower()
+    source = body.source_tag.strip().lower()
+    target = body.target_tag.strip().lower()
     if not source or not target:
         raise HTTPException(status_code=422, detail="source_tag and target_tag are required")
     if source == target:
@@ -1257,7 +1258,6 @@ def set_grouping_strategy(body: GroupingStrategyBody, db: Session = Depends(get_
     if body.strategy not in ("auto", "off"):
         raise HTTPException(status_code=400, detail="strategy must be 'auto' or 'off'.")
 
-    norm = grouping._norm(body.path)
     if body.strategy == "off":
         stmt = (
             _sqlite_insert(GroupingStrategy)

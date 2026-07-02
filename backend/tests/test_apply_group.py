@@ -1,5 +1,4 @@
 """Set store page + fetch & apply metadata to selected variants (#545)."""
-import pytest
 
 from app.models import Model
 from app.services.scrapers.base import ScrapedModel

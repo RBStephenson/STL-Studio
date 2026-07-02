@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Check, X, ChevronDown, ChevronUp, Loader2, Zap } from "lucide-react";
+import { Search, Check, ChevronDown, ChevronUp, Loader2, Zap } from "lucide-react";
 import RefreshEnrich from "./RefreshEnrich";
 
 interface Product {

@@ -15,7 +15,7 @@ generator raises until then.
 from __future__ import annotations
 
 import threading
-from typing import Callable, Optional
+from typing import Callable
 
 from sqlalchemy.orm import Session
 

@@ -5,7 +5,6 @@ three write paths (metadata editor, Find on Web apply, storefront enrichment).
 """
 from unittest.mock import AsyncMock
 
-from app.routers import enrich
 from app.services import enrich_refresh
 from tests.conftest import make_creator, make_model
 

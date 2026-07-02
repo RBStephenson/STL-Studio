@@ -1,5 +1,4 @@
 """Tests for tag rename, merge, and delete endpoints (#165)."""
-import pytest
 from tests.conftest import make_creator, make_model
 from app.services.tag_sync import sync_model_tags
 from app.models import ModelTag
@@ -77,6 +76,24 @@ def test_rename_tag_missing_params(client, db):
     assert r.status_code == 422
 
     r2 = client.patch("/models/tags/rename", json={"new_tag": "x"})
+    assert r2.status_code == 422
+
+
+def test_rename_tag_blank_or_wrong_type_params(client, db):
+    # Whitespace-only passes schema validation but fails the emptiness check.
+    r = client.patch("/models/tags/rename", json={"old_tag": "  ", "new_tag": "x"})
+    assert r.status_code == 422
+
+    # Non-string values are rejected by the request schema (#STUDIO-56).
+    r2 = client.patch("/models/tags/rename", json={"old_tag": 3, "new_tag": ["x"]})
+    assert r2.status_code == 422
+
+
+def test_merge_tags_blank_or_wrong_type_params(client, db):
+    r = client.post("/models/tags/merge", json={"source_tag": "", "target_tag": "x"})
+    assert r.status_code == 422
+
+    r2 = client.post("/models/tags/merge", json={"source_tag": {"a": 1}, "target_tag": "x"})
     assert r2.status_code == 422
 
 
