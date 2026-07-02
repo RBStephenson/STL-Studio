@@ -11,7 +11,7 @@ python-multipart==0.0.32
 nh3==0.3.6  # HTML sanitization for imported guide content (#440)
 watchdog==6.0.0
 apscheduler==3.11.2
-cryptography==44.0.0  # Fernet encryption-at-rest for the AI API key (#517)
+cryptography==48.0.1  # Fernet encryption-at-rest for the AI API key (#517)
 
 # Painting module (#182). Color math + image handling are used from M1;
 # playwright's browser (Chromium) install is deferred to M3 — the pip
@@ -21,4 +21,4 @@ scikit-image==0.26.0
 pillow==12.2.0
 playwright==1.60.0
 anthropic==0.109.2
-pypdf==5.1.0  # merge per-guide PDFs into a series bundle (#490)
+pypdf==6.13.3  # merge per-guide PDFs into a series bundle (#490)
