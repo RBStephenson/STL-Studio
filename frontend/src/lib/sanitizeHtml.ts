@@ -34,6 +34,7 @@ const SAFE_URL = /^(https?:|mailto:|\/|#)/i;
 // Allow only http(s)/mailto/relative/fragment links (e.g. creator-credit href).
 export function sanitizeUrl(url: string | null | undefined): string | undefined {
   if (!url) return undefined;
+  // eslint-disable-next-line no-control-regex -- stripping control chars is the point
   const trimmed = url.replace(/[\x00-\x20]/g, "");
   if (trimmed.startsWith("//")) return undefined; // protocol-relative
   return SAFE_URL.test(trimmed) ? trimmed : undefined;

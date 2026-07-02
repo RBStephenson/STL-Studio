@@ -10,7 +10,6 @@ import pytest
 from cryptography.fernet import Fernet
 
 from app.models import AppSetting  # noqa: F401 (ensures table import side effects)
-from app.painting.models import Guide
 from app.painting.schemas import GuideDraft
 from app.painting.services import draft_jobs
 from app.services import secrets

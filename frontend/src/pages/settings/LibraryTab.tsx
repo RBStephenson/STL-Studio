@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { HardDrive, Plus, Trash2, FolderSearch, FolderTree, RefreshCw, Tag, LayoutPanelTop } from "lucide-react";
 import { api, ScanRoot } from "../../api/client";
 import FolderPicker from "../../components/FolderPicker";
-import HelpLink from "../../components/HelpLink";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
 import { useAppSettings } from "../../context/AppSettingsContext";

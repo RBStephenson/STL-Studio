@@ -225,7 +225,7 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured,
   const [fullscreen, setFullscreen] = useState(false);
   const [capturing, setCapturing] = useState(false);
   // Map of base-file ID → the active sup variant's ID. Absent = base is shown.
-  const [supEnabled, setSupEnabled] = useState<Map<number, number>>(new Map());
+  const [, setSupEnabled] = useState<Map<number, number>>(new Map());
   // All categories except the first start collapsed
   const [collapsed, setCollapsed] = useState<Set<string>>(
     () => new Set(categoryKeys.slice(1)),

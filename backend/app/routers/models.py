@@ -1258,7 +1258,6 @@ def set_grouping_strategy(body: GroupingStrategyBody, db: Session = Depends(get_
     if body.strategy not in ("auto", "off"):
         raise HTTPException(status_code=400, detail="strategy must be 'auto' or 'off'.")
 
-    norm = grouping._norm(body.path)
     if body.strategy == "off":
         stmt = (
             _sqlite_insert(GroupingStrategy)

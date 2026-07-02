@@ -5,7 +5,6 @@ GET  /cults/creation/{slug}        — fetch single creation by slug or full URL
 """
 from __future__ import annotations
 
-from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
