@@ -119,21 +119,19 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     setEditingName(true);
   };
 
-  // Renaming a variant group rewrites the shared `character` on every member,
-  // so the whole group follows; a plain model just updates its own title.
+  // Renaming a variant group relabels the durable VariantGroup row, so every
+  // member follows; a plain model just updates its own title. Post-#678 every
+  // isGroup card carries a variant_group_id — the ch:-fallback (character with
+  // no durable group) no longer groups anything.
   const renameGroup = async (next: string) => {
     const prev = localCharacter;
-    if (model.creator_id == null) {
-      toast("Can't rename a group with no creator.", "error");
+    if (model.variant_group_id == null) {
+      toast("Can't rename a group with no durable group id.", "error");
       return;
     }
     setLocalCharacter(next);
     try {
-      const { items } = await api.models.variants(model.creator_id, prev);
-      const res = await api.models.batchSetGroup(items.map((m) => m.id), next);
-      if (res.missing?.length) {
-        toast(`Renamed, but ${res.missing.length} variant(s) couldn't be updated.`, "error");
-      }
+      await api.models.patchGroup(model.variant_group_id, { label: next });
       onMutate?.();
     } catch {
       setLocalCharacter(prev);  // revert on failure
