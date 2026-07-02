@@ -145,6 +145,8 @@ class TestBulkEnrich:
     def test_409_when_scan_running(self, client, db):
         """Returns 409 when a scan is in progress, matching set-group / batch-set-group behaviour."""
         _, a, _, _ = _setup(db)
-        with patch("app.routers.models.scanner.get_status", return_value={"running": True}):
+        # Patch at the source module so it's robust to which router owns the
+        # endpoint (bulk_enrich lives in routers/tags.py after STUDIO-58).
+        with patch("app.services.scanner.get_status", return_value={"running": True}):
             r = client.patch("/models/bulk/enrich", json={"ids": [a.id], "notes": "n"})
         assert r.status_code == 409
