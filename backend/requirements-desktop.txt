@@ -8,4 +8,4 @@
 # On Windows pywebview uses the EdgeChromium backend, which pulls pythonnet /
 # clr-loader; the WebView2 runtime ships with Windows 11 (and is a documented
 # runtime dependency for older Windows).
-pywebview==5.4
+pywebview==6.2.1
