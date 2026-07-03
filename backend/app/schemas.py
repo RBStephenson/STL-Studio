@@ -490,6 +490,10 @@ class AppSettingsRead(BaseModel):
     ai_organize_enabled: bool = False
     ai_organize_url: str = ""
     ai_organize_model: str = ""
+    # Per-function AI API selection: ID of an AiApiConfig row (or None = unset).
+    ai_guides_enabled: bool = False
+    ai_guides_api: Optional[int] = None
+    ai_organize_api: Optional[int] = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -518,6 +522,9 @@ class AppSettingsUpdate(BaseModel):
     ai_organize_enabled: Optional[bool] = None
     ai_organize_url: Optional[str] = Field(None, max_length=500)
     ai_organize_model: Optional[str] = Field(None, max_length=200)
+    ai_guides_enabled: Optional[bool] = None
+    ai_guides_api: Optional[int] = None
+    ai_organize_api: Optional[int] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
@@ -558,6 +565,38 @@ class AppSettingsUpdate(BaseModel):
         return out
 
     model_config = {"extra": "forbid"}
+
+
+# --- Named AI API configs -------------------------------------------------
+
+class AiApiConfigRead(BaseModel):
+    """A named AI API endpoint configuration returned to the client.
+
+    Encrypted keys are never returned — only whether one is set and a hint.
+    """
+    id: int
+    name: str
+    api_type: str
+    url: Optional[str] = None
+    model: str
+    effort: Optional[str] = None
+    key_set: bool
+    key_hint: Optional[str] = None
+
+
+class AiApiConfigCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    api_type: str = Field(..., pattern="^(anthropic|openai)$")
+    url: Optional[str] = Field(None, max_length=500)
+    model: str = Field("", max_length=200)
+    effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+
+
+class AiApiConfigUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    url: Optional[str] = Field(None, max_length=500)
+    model: Optional[str] = Field(None, max_length=200)
+    effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
 
 
 # --- AI settings (#517) ---------------------------------------------------

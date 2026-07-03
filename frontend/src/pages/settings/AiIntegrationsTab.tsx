@@ -1,18 +1,548 @@
 import { useEffect, useState } from "react";
-import { Bot, Link2, Boxes, Wand2 } from "lucide-react";
-import { api, AiEffort, AiSettings, AiOrganizeSettings, CultsSettings, MmfSettings } from "../../api/client";
+import { Bot, Link2, Wand2, Plus, Pencil, Trash2, X } from "lucide-react";
+import { api, AiApiConfig, CultsSettings, MmfSettings } from "../../api/client";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+type ApiType = "anthropic" | "openai";
+
+interface DraftConfig {
+  name: string;
+  api_type: ApiType;
+  url: string;
+  model: string;
+  effort: string;
+}
+
+const EMPTY_DRAFT: DraftConfig = {
+  name: "",
+  api_type: "anthropic",
+  url: "",
+  model: "",
+  effort: "low",
+};
+
+const ANTHROPIC_MODELS = [
+  { value: "claude-opus-4-8", label: "Opus 4.8 — most capable" },
+  { value: "claude-sonnet-4-6", label: "Sonnet 4.6 — balanced" },
+  { value: "claude-haiku-4-5", label: "Haiku 4.5 — fastest" },
+];
+
+// ── Shared field styles ───────────────────────────────────────────────────────
+
+const INPUT = "w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none";
+const SELECT = INPUT;
+const BTN_PRIMARY = "text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-2 disabled:opacity-50";
+const BTN_GHOST = "text-sm text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-3 py-2";
+const BTN_DANGER = "text-sm text-rose-300 hover:text-rose-200 border border-gray-700 hover:border-rose-800 rounded px-3 py-2";
+
+// ── Config form (shared between Add and Edit) ─────────────────────────────────
+
+function ConfigForm({
+  draft,
+  onChange,
+  modelList,
+  modelListLoading,
+  modelListError,
+  onFetchModels,
+  keySet,
+  keyHint,
+  keyDraft,
+  onKeyDraftChange,
+  onSaveKey,
+  onClearKey,
+  editingKey,
+  onEditKey,
+  onCancelKey,
+  onSubmit,
+  onCancel,
+  submitLabel,
+}: {
+  draft: DraftConfig;
+  onChange: (patch: Partial<DraftConfig>) => void;
+  modelList: string[];
+  modelListLoading: boolean;
+  modelListError: string | null;
+  onFetchModels: (url: string) => void;
+  keySet: boolean;
+  keyHint: string | null;
+  keyDraft: string;
+  onKeyDraftChange: (v: string) => void;
+  onSaveKey: () => void;
+  onClearKey: () => void;
+  editingKey: boolean;
+  onEditKey: () => void;
+  onCancelKey: () => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  submitLabel: string;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Name + Type */}
+      <div className="flex flex-wrap gap-4">
+        <div className="flex-1 min-w-40">
+          <label className="block text-xs text-gray-400 mb-1">Name</label>
+          <input
+            type="text"
+            value={draft.name}
+            onChange={(e) => onChange({ name: e.target.value })}
+            placeholder="e.g. Ollama Local, Anthropic Creative"
+            className={INPUT}
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Type</label>
+          <select
+            value={draft.api_type}
+            onChange={(e) => onChange({ api_type: e.target.value as ApiType })}
+            className={SELECT}
+          >
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI-compatible</option>
+          </select>
+        </div>
+      </div>
+
+      {/* OpenAI-specific: URL */}
+      {draft.api_type === "openai" && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Base URL</label>
+          <input
+            type="text"
+            value={draft.url}
+            onChange={(e) => onChange({ url: e.target.value })}
+            onBlur={(e) => onFetchModels(e.target.value)}
+            placeholder="http://localhost:11434"
+            className={INPUT}
+          />
+          <p className="text-xs text-gray-600 mt-1">Ollama default: <code className="text-gray-500">http://localhost:11434</code></p>
+        </div>
+      )}
+
+      {/* Model */}
+      <div>
+        <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1.5">
+          Model
+          {modelListLoading && <span className="text-gray-600 text-xs animate-pulse">fetching…</span>}
+        </label>
+        {draft.api_type === "anthropic" ? (
+          <select value={draft.model} onChange={(e) => onChange({ model: e.target.value })} className={SELECT}>
+            <option value="">-- Select --</option>
+            {ANTHROPIC_MODELS.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+        ) : (
+          <select
+            value={draft.model}
+            onChange={(e) => onChange({ model: e.target.value })}
+            disabled={modelListLoading || modelList.length === 0}
+            className={SELECT}
+          >
+            {modelListLoading ? (
+              <option value="">Loading…</option>
+            ) : modelList.length === 0 ? (
+              <option value="">Enter a base URL above to load models</option>
+            ) : (
+              <>
+                <option value="">-- Select a model --</option>
+                {modelList.map((m) => <option key={m} value={m}>{m}</option>)}
+                {draft.model && !modelList.includes(draft.model) && (
+                  <option value={draft.model}>{draft.model} (current)</option>
+                )}
+              </>
+            )}
+          </select>
+        )}
+        {modelListError && <p className="text-xs text-rose-400 mt-1">{modelListError}</p>}
+      </div>
+
+      {/* Anthropic-specific: Effort */}
+      {draft.api_type === "anthropic" && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Effort</label>
+          <select value={draft.effort} onChange={(e) => onChange({ effort: e.target.value })} className={SELECT}>
+            <option value="low">Low — fastest (default)</option>
+            <option value="medium">Medium — more reasoning</option>
+            <option value="high">High — deepest reasoning</option>
+          </select>
+        </div>
+      )}
+
+      {/* API Key */}
+      <div>
+        <label className="block text-xs text-gray-400 mb-1">
+          API key{draft.api_type === "openai" && <span className="text-gray-600 ml-1">(optional — Ollama doesn't need one)</span>}
+        </label>
+        {keySet && !editingKey ? (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
+              Key set <span className="text-gray-500">••••{keyHint?.replace(/^…/, "")}</span>
+            </span>
+            <button type="button" onClick={onEditKey} className={BTN_GHOST}>Replace</button>
+            <button type="button" onClick={onClearKey} className={BTN_DANGER}>Clear</button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              value={keyDraft}
+              onChange={(e) => onKeyDraftChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") onSaveKey(); }}
+              placeholder={draft.api_type === "anthropic" ? "sk-ant-…" : "sk-… or any string"}
+              className={`flex-1 max-w-sm ${INPUT}`}
+            />
+            <button type="button" onClick={onSaveKey} disabled={!keyDraft.trim()} className={BTN_PRIMARY}>
+              Save key
+            </button>
+            {keySet && (
+              <button type="button" onClick={onCancelKey} className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2">
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={!draft.name.trim()}
+          className={BTN_PRIMARY}
+        >
+          {submitLabel}
+        </button>
+        <button type="button" onClick={onCancel} className={BTN_GHOST}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Config card (compact + expand-to-edit) ─────────────────────────────────
+
+function ConfigCard({
+  config,
+  onUpdated,
+  onDeleted,
+  flash,
+}: {
+  config: AiApiConfig;
+  onUpdated: (c: AiApiConfig) => void;
+  onDeleted: (id: number) => void;
+  flash: (msg: string, type: "ok" | "err") => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState<DraftConfig>({
+    name: config.name,
+    api_type: config.api_type,
+    url: config.url ?? "",
+    model: config.model,
+    effort: config.effort ?? "low",
+  });
+  const [modelList, setModelList] = useState<string[]>([]);
+  const [modelListLoading, setModelListLoading] = useState(false);
+  const [modelListError, setModelListError] = useState<string | null>(null);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [editingKey, setEditingKey] = useState(false);
+  const [localConfig, setLocalConfig] = useState(config);
+
+  const fetchModels = async (url: string) => {
+    if (!url.trim() || draft.api_type !== "openai") return;
+    setModelListLoading(true);
+    setModelListError(null);
+    try {
+      const r = await api.settings.aiOrganize.getModels(url);
+      setModelList(r.models);
+    } catch (e: any) {
+      setModelListError(e?.message || "Could not reach endpoint");
+      setModelList([]);
+    } finally {
+      setModelListLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (config.api_type === "openai" && config.url) fetchModels(config.url);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = async () => {
+    try {
+      const updated = await api.settings.aiApis.update(localConfig.id, {
+        name: draft.name.trim(),
+        url: draft.api_type === "openai" ? (draft.url.trim() || null) : null,
+        model: draft.model,
+        effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
+      });
+      setLocalConfig(updated);
+      onUpdated(updated);
+      setExpanded(false);
+      flash(`"${updated.name}" updated`, "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not save", "err");
+    }
+  };
+
+  const saveKey = async () => {
+    if (!keyDraft.trim()) return;
+    try {
+      const updated = await api.settings.aiApis.setKey(localConfig.id, keyDraft.trim());
+      setLocalConfig(updated);
+      onUpdated(updated);
+      setKeyDraft("");
+      setEditingKey(false);
+      flash("Key saved", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not save key", "err");
+    }
+  };
+
+  const clearKey = async () => {
+    try {
+      const updated = await api.settings.aiApis.clearKey(localConfig.id);
+      setLocalConfig(updated);
+      onUpdated(updated);
+      flash("Key cleared", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not clear key", "err");
+    }
+  };
+
+  const deleteConfig = async () => {
+    try {
+      await api.settings.aiApis.delete(localConfig.id);
+      onDeleted(localConfig.id);
+      flash(`"${localConfig.name}" removed`, "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not delete", "err");
+    }
+  };
+
+  if (!expanded) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-200 font-medium truncate">{localConfig.name}</span>
+            <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
+              localConfig.api_type === "anthropic"
+                ? "bg-violet-900/60 text-violet-300"
+                : "bg-sky-900/60 text-sky-300"
+            }`}>
+              {localConfig.api_type === "anthropic" ? "Anthropic" : "OpenAI-compat"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+            {localConfig.model && <span>{localConfig.model}</span>}
+            {localConfig.url && <span className="truncate max-w-[200px]">{localConfig.url}</span>}
+            {localConfig.effort && localConfig.api_type === "anthropic" && <span>effort: {localConfig.effort}</span>}
+            <span>{localConfig.key_set ? `Key ••••${localConfig.key_hint?.replace(/^…/, "")}` : "No key"}</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="shrink-0 text-gray-500 hover:text-gray-200 transition-colors p-1"
+          title="Edit"
+        >
+          <Pencil size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={deleteConfig}
+          className="shrink-0 text-gray-600 hover:text-rose-400 transition-colors p-1"
+          title="Delete"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-4 py-4 bg-gray-900 border border-indigo-800/50 rounded-lg">
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Edit API</span>
+        <button type="button" onClick={() => setExpanded(false)} className="text-gray-600 hover:text-gray-300">
+          <X size={14} />
+        </button>
+      </div>
+      <ConfigForm
+        draft={draft}
+        onChange={(p) => setDraft((prev) => ({ ...prev, ...p }))}
+        modelList={modelList}
+        modelListLoading={modelListLoading}
+        modelListError={modelListError}
+        onFetchModels={fetchModels}
+        keySet={localConfig.key_set}
+        keyHint={localConfig.key_hint}
+        keyDraft={keyDraft}
+        onKeyDraftChange={setKeyDraft}
+        onSaveKey={saveKey}
+        onClearKey={clearKey}
+        editingKey={editingKey}
+        onEditKey={() => setEditingKey(true)}
+        onCancelKey={() => { setEditingKey(false); setKeyDraft(""); }}
+        onSubmit={save}
+        onCancel={() => setExpanded(false)}
+        submitLabel="Save changes"
+      />
+    </div>
+  );
+}
+
+// ── Add-new form card ─────────────────────────────────────────────────────────
+
+function AddConfigCard({
+  onCreated,
+  flash,
+  onCancel,
+}: {
+  onCreated: (c: AiApiConfig) => void;
+  flash: (msg: string, type: "ok" | "err") => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState<DraftConfig>(EMPTY_DRAFT);
+  const [pendingId, setPendingId] = useState<number | null>(null);
+  const [modelList, setModelList] = useState<string[]>([]);
+  const [modelListLoading, setModelListLoading] = useState(false);
+  const [modelListError, setModelListError] = useState<string | null>(null);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [editingKey, setEditingKey] = useState(false);
+  const [pendingConfig, setPendingConfig] = useState<AiApiConfig | null>(null);
+
+  const fetchModels = async (url: string) => {
+    if (!url.trim() || draft.api_type !== "openai") return;
+    setModelListLoading(true);
+    setModelListError(null);
+    try {
+      const r = await api.settings.aiOrganize.getModels(url);
+      setModelList(r.models);
+    } catch (e: any) {
+      setModelListError(e?.message || "Could not reach endpoint");
+      setModelList([]);
+    } finally {
+      setModelListLoading(false);
+    }
+  };
+
+  const create = async () => {
+    if (!draft.name.trim()) return;
+    try {
+      const created = await api.settings.aiApis.create({
+        name: draft.name.trim(),
+        api_type: draft.api_type,
+        url: draft.api_type === "openai" ? (draft.url.trim() || null) : null,
+        model: draft.model,
+        effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
+      });
+      setPendingId(created.id);
+      setPendingConfig(created);
+      flash(`"${created.name}" added — set a key if required`, "ok");
+      onCreated(created);
+    } catch (e: any) {
+      flash(e?.message || "Could not create", "err");
+    }
+  };
+
+  const saveKey = async () => {
+    if (!keyDraft.trim() || !pendingId) return;
+    try {
+      const updated = await api.settings.aiApis.setKey(pendingId, keyDraft.trim());
+      setPendingConfig(updated);
+      setKeyDraft("");
+      setEditingKey(false);
+      flash("Key saved", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not save key", "err");
+    }
+  };
+
+  const clearKey = async () => {
+    if (!pendingId) return;
+    try {
+      const updated = await api.settings.aiApis.clearKey(pendingId);
+      setPendingConfig(updated);
+      flash("Key cleared", "ok");
+    } catch (e: any) {
+      flash(e?.message || "Could not clear key", "err");
+    }
+  };
+
+  return (
+    <div className="px-4 py-4 bg-gray-900 border border-dashed border-gray-700 rounded-lg">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">New API</p>
+      <ConfigForm
+        draft={draft}
+        onChange={(p) => setDraft((prev) => ({ ...prev, ...p }))}
+        modelList={modelList}
+        modelListLoading={modelListLoading}
+        modelListError={modelListError}
+        onFetchModels={fetchModels}
+        keySet={pendingConfig?.key_set ?? false}
+        keyHint={pendingConfig?.key_hint ?? null}
+        keyDraft={keyDraft}
+        onKeyDraftChange={setKeyDraft}
+        onSaveKey={saveKey}
+        onClearKey={clearKey}
+        editingKey={editingKey}
+        onEditKey={() => setEditingKey(true)}
+        onCancelKey={() => { setEditingKey(false); setKeyDraft(""); }}
+        onSubmit={create}
+        onCancel={onCancel}
+        submitLabel={pendingId ? "Saved ✓" : "Add API"}
+      />
+    </div>
+  );
+}
+
+// ── API selector for AI Functions ─────────────────────────────────────────────
+
+function ApiSelector({
+  value,
+  configs,
+  onChange,
+}: {
+  value: number | null;
+  configs: AiApiConfig[];
+  onChange: (id: number | null) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 mt-2 ml-6">
+      <label className="text-xs text-gray-500 shrink-0">Use API</label>
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+        className="bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+      >
+        <option value="">— not configured —</option>
+        {configs.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+            {c.api_type === "anthropic" ? " (Anthropic)" : " (OpenAI-compat)"}
+          </option>
+        ))}
+      </select>
+      {configs.length === 0 && (
+        <span className="text-xs text-gray-600">Add an API above first</span>
+      )}
+    </div>
+  );
+}
+
+// ── Main tab ──────────────────────────────────────────────────────────────────
 
 export default function AiIntegrationsTab() {
   const { settings, update } = useAppSettings();
   const { success, error, flash } = useSettingsFlash();
 
-  // Anthropic
-  const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
-  const [aiKeyDraft, setAiKeyDraft] = useState("");
-  const [editingKey, setEditingKey] = useState(false);
+  const [configs, setConfigs] = useState<AiApiConfig[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
 
   // Cults3D
   const [cultsSettings, setCultsSettings] = useState<CultsSettings | null>(null);
@@ -25,18 +555,10 @@ export default function AiIntegrationsTab() {
   const [mmfKeyDraft, setMmfKeyDraft] = useState("");
   const [editingMmf, setEditingMmf] = useState(false);
 
-  // AI Organizer
-  const [organizeSettings, setOrganizeSettings] = useState<AiOrganizeSettings | null>(null);
-  const [organizeKeyDraft, setOrganizeKeyDraft] = useState("");
-  const [editingOrganizeKey, setEditingOrganizeKey] = useState(false);
-  const [organizeModels, setOrganizeModels] = useState<string[]>([]);
-  const [organizeModelsLoading, setOrganizeModelsLoading] = useState(false);
-  const [organizeModelsError, setOrganizeModelsError] = useState<string | null>(null);
-
   useEffect(() => {
     let alive = true;
-    api.settings.ai.get()
-      .then((s) => { if (alive) setAiSettings(s); })
+    api.settings.aiApis.list()
+      .then((cs) => { if (alive) setConfigs(cs); })
       .catch(() => {});
     api.settings.cults.get()
       .then((s) => { if (alive) setCultsSettings(s); })
@@ -44,49 +566,8 @@ export default function AiIntegrationsTab() {
     api.settings.mmf.get()
       .then((s) => { if (alive) setMmfSettings(s); })
       .catch(() => {});
-    api.settings.aiOrganize.get()
-      .then((s) => { if (alive) setOrganizeSettings(s); })
-      .catch(() => {});
     return () => { alive = false; };
   }, []);
-
-  const saveAiKey = async () => {
-    const key = aiKeyDraft.trim();
-    if (!key) return;
-    try {
-      setAiSettings(await api.settings.ai.setKey(key));
-      setAiKeyDraft("");
-      setEditingKey(false);
-      flash("API key saved", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not save the API key", "err");
-    }
-  };
-
-  const clearAiKey = async () => {
-    try {
-      setAiSettings(await api.settings.ai.clearKey());
-      flash("API key cleared", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not clear the API key", "err");
-    }
-  };
-
-  const saveAiModel = async (model: string) => {
-    try {
-      await update({ ai_model: model });
-    } catch (e: any) {
-      flash(e?.message || "Could not save the model", "err");
-    }
-  };
-
-  const saveAiEffort = async (effort: AiEffort) => {
-    try {
-      await update({ ai_effort: effort });
-    } catch (e: any) {
-      flash(e?.message || "Could not save the effort", "err");
-    }
-  };
 
   const saveCultsCredentials = async () => {
     const u = cultsUser.trim();
@@ -134,268 +615,124 @@ export default function AiIntegrationsTab() {
     }
   };
 
-  const fetchOrganizeModels = async (url: string) => {
-    const trimmed = url.trim();
-    if (!trimmed) return;
-    setOrganizeModelsLoading(true);
-    setOrganizeModelsError(null);
-    try {
-      const result = await api.settings.aiOrganize.getModels(trimmed);
-      setOrganizeModels(result.models);
-    } catch (e: any) {
-      setOrganizeModelsError(e?.message || "Could not reach endpoint");
-      setOrganizeModels([]);
-    } finally {
-      setOrganizeModelsLoading(false);
-    }
-  };
-
-  const saveOrganizeKey = async () => {
-    const key = organizeKeyDraft.trim();
-    if (!key) return;
-    try {
-      setOrganizeSettings(await api.settings.aiOrganize.setKey(key));
-      setOrganizeKeyDraft("");
-      setEditingOrganizeKey(false);
-      flash("API key saved", "ok");
-      // Re-fetch models — the key may have been required for auth.
-      await fetchOrganizeModels(settings.ai_organize_url);
-    } catch (e: any) {
-      flash(e?.message || "Could not save the organizer API key", "err");
-    }
-  };
-
-  const clearOrganizeKey = async () => {
-    try {
-      setOrganizeSettings(await api.settings.aiOrganize.clearKey());
-      flash("API key cleared", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not clear the organizer API key", "err");
-    }
-  };
-
   return (
     <div>
       <FlashBanner success={success} error={error} />
 
-      {/* Anthropic */}
+      {/* ── AI APIs ─────────────────────────────────────────────────────── */}
       <section className="mb-10">
         <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-          <Bot size={14} /> Anthropic API
+          <Bot size={14} /> AI APIs
         </h2>
         <p className="text-xs text-gray-600 mb-4">
-          Bring your own Anthropic API key to generate guide drafts. The key is stored encrypted
-          and never shown again — only that one is set.
+          Configure named AI API connections. Add as many as you need — different models, local
+          instances, or separate keys for different purposes. Each AI Function below then picks
+          which one to use.
         </p>
 
-        <label className="block text-xs text-gray-400 mb-1">API key</label>
-        {aiSettings?.key_set && !editingKey ? (
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
-              Key set <span className="text-gray-500">••••{aiSettings.key_hint?.replace(/^…/, "")}</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => { setEditingKey(true); setAiKeyDraft(""); }}
-              className="text-sm text-gray-300 hover:text-white border border-gray-700 rounded px-3 py-2"
-            >
-              Replace
-            </button>
-            <button
-              type="button"
-              onClick={clearAiKey}
-              className="text-sm text-rose-300 hover:text-rose-200 border border-gray-700 hover:border-rose-800 rounded px-3 py-2"
-            >
-              Clear
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 mb-4">
-            <input
-              type="password"
-              aria-label="Anthropic API key"
-              value={aiKeyDraft}
-              onChange={(e) => setAiKeyDraft(e.target.value)}
-              placeholder="sk-ant-…"
-              className="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+        <div className="flex flex-col gap-2 mb-3">
+          {configs.map((c) => (
+            <ConfigCard
+              key={c.id}
+              config={c}
+              onUpdated={(updated) => setConfigs((prev) => prev.map((x) => x.id === updated.id ? updated : x))}
+              onDeleted={(id) => setConfigs((prev) => prev.filter((x) => x.id !== id))}
+              flash={flash}
             />
-            <button
-              type="button"
-              onClick={saveAiKey}
-              disabled={!aiKeyDraft.trim()}
-              className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-2 disabled:opacity-50"
-            >
-              Save
-            </button>
-            {aiSettings?.key_set && (
-              <button
-                type="button"
-                onClick={() => { setEditingKey(false); setAiKeyDraft(""); }}
-                className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        )}
+          ))}
+        </div>
 
-        <div className="flex flex-wrap gap-4">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1" htmlFor="ai-model">Model</label>
-            <select
-              id="ai-model"
-              value={settings.ai_model || "claude-sonnet-4-6"}
-              onChange={(e) => saveAiModel(e.target.value)}
-              className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-            >
-              <option value="claude-opus-4-8">Opus 4.8 — most capable</option>
-              <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced (default)</option>
-              <option value="claude-haiku-4-5">Haiku 4.5 — fastest</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-400 mb-1" htmlFor="ai-effort">Effort</label>
-            <select
-              id="ai-effort"
-              value={settings.ai_effort}
-              onChange={(e) => saveAiEffort(e.target.value as AiEffort)}
-              className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-            >
-              <option value="low">Low — fastest (default)</option>
-              <option value="medium">Medium — more reasoning</option>
-              <option value="high">High — deepest reasoning</option>
-            </select>
-          </div>
+        {showAddForm ? (
+          <AddConfigCard
+            onCreated={(c) => {
+              setConfigs((prev) => [...prev, c]);
+              setShowAddForm(false);
+            }}
+            flash={flash}
+            onCancel={() => setShowAddForm(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowAddForm(true)}
+            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 border border-dashed border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2.5 w-full transition-colors"
+          >
+            <Plus size={14} /> Add API
+          </button>
+        )}
+      </section>
+
+      {/* ── AI Functions ────────────────────────────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+          <Wand2 size={14} /> AI Functions
+        </h2>
+
+        {/* Guide Drafts */}
+        <div className="mb-6 pb-6 border-b border-gray-800/60">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.ai_guides_enabled}
+              onChange={(e) => update({ ai_guides_enabled: e.target.checked }).catch(() =>
+                flash("Could not update setting", "err")
+              )}
+              className="accent-indigo-500 w-4 h-4"
+            />
+            <span className="text-sm text-gray-300">AI Guide Drafts</span>
+          </label>
+          <p className="text-xs text-gray-600 mt-1 ml-6">
+            Generate painting guide drafts with an AI. The draft is always reviewed before saving.
+          </p>
+          {settings.ai_guides_enabled && (
+            <ApiSelector
+              value={settings.ai_guides_api}
+              configs={configs}
+              onChange={(id) => update({ ai_guides_api: id }).catch(() => flash("Could not update setting", "err"))}
+            />
+          )}
+        </div>
+
+        {/* Naming & Organizing */}
+        <div>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.ai_organize_enabled}
+              onChange={(e) => update({ ai_organize_enabled: e.target.checked }).catch(() =>
+                flash("Could not update setting", "err")
+              )}
+              className="accent-indigo-500 w-4 h-4"
+            />
+            <span className="text-sm text-gray-300">AI Naming &amp; Organizing</span>
+          </label>
+          <p className="text-xs text-gray-600 mt-1 ml-6">
+            Automatically normalize part names, assign categories, and link presupported files on a per-model basis.
+          </p>
+          {settings.ai_organize_enabled && (
+            <ApiSelector
+              value={settings.ai_organize_api}
+              configs={configs}
+              onChange={(id) => update({ ai_organize_api: id }).catch(() => flash("Could not update setting", "err"))}
+            />
+          )}
         </div>
       </section>
 
-      {/* AI Naming & Organizing */}
-      <section className="mb-10">
+      {/* ── Metadata ────────────────────────────────────────────────────── */}
+      <div className="border-t border-gray-800 mt-2 mb-8 pt-8">
         <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-          <Wand2 size={14} /> AI Naming &amp; Organizing
+          <Link2 size={14} /> Metadata
         </h2>
-        <p className="text-xs text-gray-600 mb-4">
-          Connect any OpenAI-compatible endpoint (Ollama, OpenAI, etc.) to automatically
-          normalize part names, assign categories, and link presupported files on a per-model basis.
+        <p className="text-xs text-gray-600 mb-6">
+          Third-party integrations for enriching your library with creator details, metadata, and thumbnails.
         </p>
+      </div>
 
-        <label className="flex items-center gap-2 mb-4 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={settings.ai_organize_enabled}
-            onChange={(e) => update({ ai_organize_enabled: e.target.checked }).catch(() =>
-              flash("Could not update setting", "err")
-            )}
-            className="accent-indigo-500 w-4 h-4"
-          />
-          <span className="text-sm text-gray-300">Enable AI naming &amp; organizing</span>
-        </label>
-
-        {settings.ai_organize_enabled && (
-          <div className="flex flex-col gap-4 pl-6 border-l border-gray-800">
-            <div className="flex flex-wrap gap-4">
-              <div className="flex-1 min-w-48">
-                <label className="block text-xs text-gray-400 mb-1">Base URL</label>
-                <input
-                  type="text"
-                  value={settings.ai_organize_url}
-                  onChange={(e) => update({ ai_organize_url: e.target.value }).catch(() =>
-                    flash("Could not update URL", "err")
-                  )}
-                  onBlur={(e) => fetchOrganizeModels(e.target.value)}
-                  placeholder="http://localhost:11434"
-                  className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-                />
-                <p className="text-xs text-gray-600 mt-1">Ollama default: <code className="text-gray-500">http://localhost:11434</code></p>
-              </div>
-              <div className="flex-1 min-w-40">
-                <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1.5">
-                  Model
-                  {organizeModelsLoading && (
-                    <span className="text-gray-600 text-xs animate-pulse">fetching…</span>
-                  )}
-                </label>
-                {organizeModels.length > 0 ? (
-                  <select
-                    value={settings.ai_organize_model}
-                    onChange={(e) => update({ ai_organize_model: e.target.value }).catch(() =>
-                      flash("Could not update model", "err")
-                    )}
-                    className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-                  >
-                    <option value="">-- Select a model --</option>
-                    {organizeModels.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                    {settings.ai_organize_model && !organizeModels.includes(settings.ai_organize_model) && (
-                      <option value={settings.ai_organize_model}>{settings.ai_organize_model} (current)</option>
-                    )}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={settings.ai_organize_model}
-                    onChange={(e) => update({ ai_organize_model: e.target.value }).catch(() =>
-                      flash("Could not update model", "err")
-                    )}
-                    placeholder="llama3.2"
-                    className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-                  />
-                )}
-                {organizeModelsError && (
-                  <p className="text-xs text-rose-400 mt-1">{organizeModelsError}</p>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">API key <span className="text-gray-600">(optional — Ollama doesn't require one)</span></label>
-              {organizeSettings?.key_set && !editingOrganizeKey ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
-                    Key set <span className="text-gray-500">••••{organizeSettings.key_hint?.replace(/^…/, "")}</span>
-                  </span>
-                  <button type="button" onClick={() => { setEditingOrganizeKey(true); setOrganizeKeyDraft(""); }}
-                    className="text-sm text-gray-300 hover:text-white border border-gray-700 rounded px-3 py-2">
-                    Replace
-                  </button>
-                  <button type="button" onClick={clearOrganizeKey}
-                    className="text-sm text-rose-300 hover:text-rose-200 border border-gray-700 hover:border-rose-800 rounded px-3 py-2">
-                    Clear
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="password"
-                    aria-label="AI organizer API key"
-                    value={organizeKeyDraft}
-                    onChange={(e) => setOrganizeKeyDraft(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") saveOrganizeKey(); }}
-                    placeholder="sk-… or any string"
-                    className="flex-1 max-w-sm bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-                  />
-                  <button type="button" onClick={saveOrganizeKey} disabled={!organizeKeyDraft.trim()}
-                    className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-2 disabled:opacity-50">
-                    Save
-                  </button>
-                  {organizeSettings?.key_set && (
-                    <button type="button" onClick={() => { setEditingOrganizeKey(false); setOrganizeKeyDraft(""); }}
-                      className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2">
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* Cults3D */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-          <Link2 size={14} /> Cults3D
+      {/* ── Cults3D ─────────────────────────────────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1">
+          Cults3D
         </h2>
         <p className="text-xs text-gray-600 mb-4">
           Connect your Cults3D account to enrich your STL library with creator details,
@@ -409,68 +746,29 @@ export default function AiIntegrationsTab() {
             <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
               Connected as <span className="text-gray-400">{cultsSettings.hint}</span>
             </span>
-            <button
-              type="button"
-              onClick={() => { setEditingCults(true); setCultsUser(""); setCultsKey(""); }}
-              className="text-sm text-gray-300 hover:text-white border border-gray-700 rounded px-3 py-2"
-            >
-              Replace
-            </button>
-            <button
-              type="button"
-              onClick={clearCultsCredentials}
-              className="text-sm text-rose-300 hover:text-rose-200 border border-gray-700 hover:border-rose-800 rounded px-3 py-2"
-            >
-              Disconnect
-            </button>
+            <button type="button" onClick={() => { setEditingCults(true); setCultsUser(""); setCultsKey(""); }} className={BTN_GHOST}>Replace</button>
+            <button type="button" onClick={clearCultsCredentials} className={BTN_DANGER}>Disconnect</button>
           </div>
         ) : (
           <div className="flex flex-col gap-2 max-w-sm">
-            <input
-              type="text"
-              aria-label="Cults3D username"
-              value={cultsUser}
-              onChange={(e) => setCultsUser(e.target.value)}
-              placeholder="Username"
-              autoComplete="off"
-              className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-            />
-            <input
-              type="password"
-              aria-label="Cults3D API key"
-              value={cultsKey}
-              onChange={(e) => setCultsKey(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") saveCultsCredentials(); }}
-              placeholder="API key"
-              className="bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-            />
+            <input type="text" aria-label="Cults3D username" value={cultsUser} onChange={(e) => setCultsUser(e.target.value)}
+              placeholder="Username" autoComplete="off" className={INPUT} />
+            <input type="password" aria-label="Cults3D API key" value={cultsKey} onChange={(e) => setCultsKey(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveCultsCredentials(); }} placeholder="API key" className={INPUT} />
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={saveCultsCredentials}
-                disabled={!cultsUser.trim() || !cultsKey.trim()}
-                className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-2 disabled:opacity-50"
-              >
-                Save
-              </button>
+              <button type="button" onClick={saveCultsCredentials} disabled={!cultsUser.trim() || !cultsKey.trim()} className={BTN_PRIMARY}>Save</button>
               {cultsSettings?.credentials_set && (
-                <button
-                  type="button"
-                  onClick={() => { setEditingCults(false); setCultsUser(""); setCultsKey(""); }}
-                  className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2"
-                >
-                  Cancel
-                </button>
+                <button type="button" onClick={() => { setEditingCults(false); setCultsUser(""); setCultsKey(""); }} className={BTN_GHOST}>Cancel</button>
               )}
             </div>
           </div>
         )}
       </section>
 
-      {/* MyMiniFactory */}
-      <section className="mt-10">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-          <Boxes size={14} /> MyMiniFactory
+      {/* ── MyMiniFactory ───────────────────────────────────────────────── */}
+      <section>
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1">
+          MyMiniFactory
         </h2>
         <p className="text-xs text-gray-600 mb-4">
           Add a MyMiniFactory API key to enrich your STL library from their API — richer
@@ -484,48 +782,16 @@ export default function AiIntegrationsTab() {
             <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
               Key set <span className="text-gray-500">••••{mmfSettings.key_hint?.replace(/^…/, "")}</span>
             </span>
-            <button
-              type="button"
-              onClick={() => { setEditingMmf(true); setMmfKeyDraft(""); }}
-              className="text-sm text-gray-300 hover:text-white border border-gray-700 rounded px-3 py-2"
-            >
-              Replace
-            </button>
-            <button
-              type="button"
-              onClick={clearMmfKey}
-              className="text-sm text-rose-300 hover:text-rose-200 border border-gray-700 hover:border-rose-800 rounded px-3 py-2"
-            >
-              Clear
-            </button>
+            <button type="button" onClick={() => { setEditingMmf(true); setMmfKeyDraft(""); }} className={BTN_GHOST}>Replace</button>
+            <button type="button" onClick={clearMmfKey} className={BTN_DANGER}>Clear</button>
           </div>
         ) : (
           <div className="flex items-center gap-2 max-w-sm">
-            <input
-              type="password"
-              aria-label="MyMiniFactory API key"
-              value={mmfKeyDraft}
-              onChange={(e) => setMmfKeyDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") saveMmfKey(); }}
-              placeholder="API key"
-              className="flex-1 bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-            />
-            <button
-              type="button"
-              onClick={saveMmfKey}
-              disabled={!mmfKeyDraft.trim()}
-              className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-2 disabled:opacity-50"
-            >
-              Save
-            </button>
+            <input type="password" aria-label="MyMiniFactory API key" value={mmfKeyDraft} onChange={(e) => setMmfKeyDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveMmfKey(); }} placeholder="API key" className={`flex-1 ${INPUT}`} />
+            <button type="button" onClick={saveMmfKey} disabled={!mmfKeyDraft.trim()} className={BTN_PRIMARY}>Save</button>
             {mmfSettings?.key_set && (
-              <button
-                type="button"
-                onClick={() => { setEditingMmf(false); setMmfKeyDraft(""); }}
-                className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2"
-              >
-                Cancel
-              </button>
+              <button type="button" onClick={() => { setEditingMmf(false); setMmfKeyDraft(""); }} className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2">Cancel</button>
             )}
           </div>
         )}

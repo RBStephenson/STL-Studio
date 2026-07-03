@@ -64,6 +64,16 @@ vi.mock("../api/client", () => ({
         get: vi.fn().mockResolvedValue({ key_set: false, key_hint: null, enabled: false, url: "", model: "" }),
         setKey: vi.fn().mockResolvedValue({ key_set: true, key_hint: "…wxyz", enabled: false, url: "", model: "" }),
         clearKey: vi.fn().mockResolvedValue({ key_set: false, key_hint: null, enabled: false, url: "", model: "" }),
+        getModels: vi.fn().mockResolvedValue({ models: [] }),
+      },
+      aiApis: {
+        list: vi.fn().mockResolvedValue([]),
+        create: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+        setKey: vi.fn(),
+        clearKey: vi.fn(),
+        getModels: vi.fn().mockResolvedValue({ models: [] }),
       },
     },
   },
@@ -210,60 +220,6 @@ describe("Settings – Painting Guides toggle (#180)", () => {
   });
 });
 
-describe("Settings – AI generation section (#517)", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
-
-  it("saves a typed key and then shows the masked, key-set state", async () => {
-    const { api } = await import("../api/client");
-    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
-
-    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/ai & integrations/i);
-
-    const input = await screen.findByLabelText("Anthropic API key");
-    await userEvent.type(input, "sk-ant-secret-wxyz");
-    // Scope Save to the Anthropic key row — avoids ambiguity with Cults3D's Save.
-    const keyRow = input.closest("div") as HTMLElement;
-    await userEvent.click(within(keyRow).getByRole("button", { name: "Save" }));
-
-    expect(api.settings.ai.setKey).toHaveBeenCalledWith("sk-ant-secret-wxyz");
-    expect(await screen.findByText(/key set/i)).toBeInTheDocument();
-    expect(screen.getByText(/wxyz/)).toBeInTheDocument();
-  });
-
-  it("shows the key-set state on load and clears the key", async () => {
-    const { api } = await import("../api/client");
-    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
-    vi.mocked(api.settings.ai.get).mockResolvedValue({ key_set: true, key_hint: "…wxyz", model: "", effort: "low" });
-
-    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/ai & integrations/i);
-
-    expect(await screen.findByText(/key set/i)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
-
-    expect(api.settings.ai.clearKey).toHaveBeenCalled();
-  });
-
-  it("saves model and effort from the dropdowns (#517)", async () => {
-    const { api } = await import("../api/client");
-    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
-    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
-    // clearAllMocks resets call history but NOT implementations — a prior test
-    // left ai.get returning key_set:true, which hides the API-key input.
-    vi.mocked(api.settings.ai.get).mockResolvedValue({ key_set: false, key_hint: null, model: "", effort: "low" });
-
-    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/ai & integrations/i);
-
-    await screen.findByLabelText("Anthropic API key");
-    await userEvent.selectOptions(screen.getByLabelText("Model"), "claude-opus-4-8");
-    expect(api.settings.update).toHaveBeenCalledWith({ ai_model: "claude-opus-4-8" });
-
-    await userEvent.selectOptions(screen.getByLabelText("Effort"), "high");
-    expect(api.settings.update).toHaveBeenCalledWith({ ai_effort: "high" });
-  });
-});
 
 describe("Settings – Reload .env (#140)", () => {
   beforeEach(() => { vi.clearAllMocks(); });

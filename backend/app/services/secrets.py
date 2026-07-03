@@ -278,3 +278,55 @@ def organize_api_key_hint(db: Session) -> str | None:
         return None
     tail = key[-4:] if len(key) >= 4 else key
     return f"…{tail}"
+
+
+# --- Named AI API config keys ---------------------------------------------
+# Each config's encrypted key is stored in app_settings under a per-ID row
+# so deleting a config can cleanly remove its secret without affecting others.
+
+def _config_key_setting(config_id: int) -> str:
+    return f"ai_api_key_{config_id}_enc"
+
+
+def set_ai_api_config_key(db: Session, config_id: int, raw_key: str) -> None:
+    raw_key = raw_key.strip()
+    setting_key = _config_key_setting(config_id)
+    if not raw_key:
+        _clear_setting(db, setting_key)
+        return
+    token = _get_fernet().encrypt(raw_key.encode()).decode()
+    row = db.get(AppSetting, setting_key)
+    if row is None:
+        db.add(AppSetting(key=setting_key, value=token))
+    else:
+        row.value = token
+    db.commit()
+
+
+def get_ai_api_config_key(db: Session, config_id: int) -> str | None:
+    row = db.get(AppSetting, _config_key_setting(config_id))
+    if row is None or not isinstance(row.value, str):
+        return None
+    try:
+        return _get_fernet().decrypt(row.value.encode()).decode()
+    except InvalidToken:
+        return None
+
+
+def clear_ai_api_config_key(db: Session, config_id: int) -> None:
+    _clear_setting(db, _config_key_setting(config_id))
+
+
+def ai_api_config_key_hint(db: Session, config_id: int) -> str | None:
+    key = get_ai_api_config_key(db, config_id)
+    if not key:
+        return None
+    tail = key[-4:] if len(key) >= 4 else key
+    return f"…{tail}"
+
+
+def _clear_setting(db: Session, setting_key: str) -> None:
+    row = db.get(AppSetting, setting_key)
+    if row is not None:
+        db.delete(row)
+        db.commit()

@@ -294,6 +294,20 @@ export interface AppSettings {
   ai_organize_enabled: boolean;
   ai_organize_url: string;
   ai_organize_model: string;
+  ai_guides_enabled: boolean;
+  ai_guides_api: number | null;
+  ai_organize_api: number | null;
+}
+
+export interface AiApiConfig {
+  id: number;
+  name: string;
+  api_type: "anthropic" | "openai";
+  url: string | null;
+  model: string;
+  effort: string | null;
+  key_set: boolean;
+  key_hint: string | null;
 }
 
 export type AiEffort = "low" | "medium" | "high";
@@ -1394,6 +1408,33 @@ export const api = {
         const qs = url ? `?url=${encodeURIComponent(url)}` : "";
         return request<AiOrganizeModelsList>(`/settings/ai-organize/models${qs}`);
       },
+    },
+    aiApis: {
+      list: () => request<AiApiConfig[]>("/settings/ai-apis"),
+      create: (body: { name: string; api_type: string; url?: string | null; model?: string; effort?: string | null }) =>
+        request<AiApiConfig>("/settings/ai-apis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      update: (id: number, body: { name?: string; url?: string | null; model?: string; effort?: string | null }) =>
+        request<AiApiConfig>(`/settings/ai-apis/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      delete: (id: number) =>
+        request<void>(`/settings/ai-apis/${id}`, { method: "DELETE" }),
+      setKey: (id: number, key: string) =>
+        request<AiApiConfig>(`/settings/ai-apis/${id}/key`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }),
+        }),
+      clearKey: (id: number) =>
+        request<AiApiConfig>(`/settings/ai-apis/${id}/key`, { method: "DELETE" }),
+      getModels: (id: number) =>
+        request<AiOrganizeModelsList>(`/settings/ai-apis/${id}/models`),
     },
   },
   painting: {

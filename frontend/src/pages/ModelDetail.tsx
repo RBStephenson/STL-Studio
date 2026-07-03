@@ -4,6 +4,7 @@ import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Heart, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2, Wand2, Loader2 } from "lucide-react";
 import { api, ApiError, Model, ModelDetail as ModelDetailType, Collection, AiOrganizeSuggestionPreview } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
+import { PartTypeCombo } from "../components/PartTypeCombo";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
 import ImagePicker from "../components/ImagePicker";
@@ -1691,14 +1692,12 @@ export default function ModelDetail() {
 
                       {/* Category input (categories mode only) */}
                       {withCategory && (
-                        <input
-                          list="part-category-list"
+                        <PartTypeCombo
                           value={pt}
+                          options={PART_TYPE_SUGGESTIONS}
                           placeholder="Category…"
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => { const v = e.target.value; setPartTypes((prev) => ({ ...prev, [f.id]: toPascalCase(v) + (v.endsWith(" ") ? " " : "") })); }}
-                          onBlur={(e) => savePartType(f.id, e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                          onChange={(v) => setPartTypes((prev) => ({ ...prev, [f.id]: toPascalCase(v) + (v.endsWith(" ") ? " " : "") }))}
+                          onCommit={(v) => savePartType(f.id, v)}
                           className="w-28 shrink-0 bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-2 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none"
                         />
                       )}
@@ -1796,12 +1795,6 @@ export default function ModelDetail() {
 
               return (
                 <div className="flex flex-col gap-1 max-h-96 overflow-y-auto">
-                  {settings.part_categories_enabled && (
-                    <datalist id="part-category-list">
-                      {PART_TYPE_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
-                    </datalist>
-                  )}
-
                   {settings.part_categories_enabled ? (
                     <>
                       {groupedStlFiles.labeled.map(([cat, catFiles]) =>
@@ -1937,24 +1930,14 @@ export default function ModelDetail() {
               </td>
               {settings.part_categories_enabled && (
                 <td className="px-3 py-1.5">
-                  <select
+                  <PartTypeCombo
                     value={pt}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setPartTypes((prev) => ({ ...prev, [f.id]: v }));
-                      savePartType(f.id, v);
-                    }}
-                    className="w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-1.5 py-0.5 text-xs text-gray-300 focus:outline-none"
-                  >
-                    <option value="">—</option>
-                    {PART_TYPE_SUGGESTIONS.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                    {pt && !PART_TYPE_SUGGESTIONS.includes(pt) && (
-                      <option value={pt}>{pt}</option>
-                    )}
-                  </select>
+                    options={PART_TYPE_SUGGESTIONS}
+                    placeholder="Category…"
+                    onChange={(v) => setPartTypes((prev) => ({ ...prev, [f.id]: v }))}
+                    onCommit={(v) => savePartType(f.id, v)}
+                    className="w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-1.5 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none"
+                  />
                 </td>
               )}
               <td className="px-3 py-1.5 text-right">

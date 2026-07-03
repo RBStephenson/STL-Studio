@@ -22,6 +22,9 @@ const DEFAULTS: AppSettings = {
   ai_organize_enabled: false,
   ai_organize_url: "",
   ai_organize_model: "",
+  ai_guides_enabled: false,
+  ai_guides_api: null,
+  ai_organize_api: null,
 };
 
 interface AppSettingsContextValue {
