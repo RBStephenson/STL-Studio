@@ -439,7 +439,7 @@ def _move_non_stl_files(
                     new_images.append(str(dst))
                 else:
                     new_others.append(str(dst))
-            except Exception as e:
+            except OSError as e:
                 logger.warning("Could not move %r → %r: %s", src, dst, e)
 
     for m in models:
@@ -476,7 +476,7 @@ def _cleanup_non_stl_folders(old_to_new: dict[str, str], db: Session) -> None:
             old_resolved = os.path.realpath(old_folder)
             try:
                 shutil.rmtree(old_resolved)
-            except Exception as e:
+            except OSError as e:
                 logger.warning("Could not remove old pack folder %r: %s", old_resolved, e)
         except Exception:
             logger.exception("Non-STL cleanup failed for %r → %r", old_folder, new_folder)
@@ -572,7 +572,7 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
             old_resolved = os.path.realpath(old_folder)
             try:
                 shutil.rmtree(old_resolved)
-            except Exception as rmtree_err:
+            except OSError as rmtree_err:
                 logger.warning("Could not remove old pack folder %r: %s", old_resolved, rmtree_err)
         db.commit()
     except Exception:
@@ -589,19 +589,23 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
         except ValueError:
             continue
 
-    # Clean up any stale empty directories left in the source root.
+    # Clean up any stale empty directories left in the source root. This is
+    # best-effort work AFTER the move already succeeded and the response is built,
+    # so a containment/validation miss here must skip cleanup, never fail the
+    # request. The guards raise ValueError (internal control-flow, not a client
+    # 400) and any unexpected error is logged rather than silently swallowed.
     try:
         if not matched_root:
             raise ValueError("source not within a configured scan root")
         resolved_root = os.path.realpath(matched_root)
         rel_src = os.path.relpath(src, resolved_root)
         if rel_src == ".." or rel_src.startswith(".." + os.sep):
-            raise HTTPException(status_code=400, detail="source must be within a configured scan root")
+            raise ValueError("source must be within a configured scan root")
         safe_src = os.path.realpath(os.path.join(resolved_root, rel_src))
         if os.path.commonpath([safe_src, resolved_root]) != resolved_root:
-            raise HTTPException(status_code=400, detail="source must be within a configured scan root")
+            raise ValueError("source must be within a configured scan root")
         if not os.path.isdir(safe_src):
-            raise HTTPException(status_code=400, detail="source must be an existing directory")
+            raise ValueError("source is not an existing directory")
         for dirpath, _, filenames in os.walk(safe_src, topdown=False):
             if not filenames:
                 dirpath_resolved = os.path.realpath(dirpath)
@@ -615,8 +619,10 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
                     os.rmdir(dirpath_resolved)
                 except OSError:
                     pass
+    except ValueError as e:
+        logger.info("Skipped stale-dir cleanup after import: %s", e)
     except Exception:
-        pass
+        logger.exception("Stale-dir cleanup after import failed (non-fatal)")
 
     return ImportApplyResponse(
         manifest_id=result.manifest_id,
