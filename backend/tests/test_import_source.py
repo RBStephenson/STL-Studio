@@ -130,12 +130,11 @@ class TestScanFolder:
         pack = tmp_path / "PackA"
         pack.mkdir()
         with patch("app.routers.imports.scanner.get_status", return_value={"running": False}), \
-             patch("app.routers.imports.scanner.prepare_inbox_scan", return_value=True), \
-             patch("app.routers.imports.threading.Thread") as thread:
+             patch("app.routers.imports.scanner.start_inbox_scan", return_value=True) as start:
             r = client.post("/import/scan-folder", json={"path": str(pack)})
         assert r.status_code == 200
         assert r.json()["running"] is True
-        thread.assert_called_once()
+        start.assert_called_once()
 
     def test_busy_returns_409(self, client, db, tmp_path):
         _allow(db, tmp_path)

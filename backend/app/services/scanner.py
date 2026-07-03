@@ -33,6 +33,7 @@ from sqlalchemy import text as _sqltext, func, or_
 
 from app.database import SessionLocal
 from app.models import Creator, Model, STLFile, ScanRoot, ModelTag, CollectionModel, PackOverride
+from app.services.job_runner import JobHandle, JobState, runner
 from app.services import name_parser, layout, grouping
 from app.services.scan_rules import (
     IgnoreMatcher, load_ignore_matcher, load_tag_rules, load_parts_names,
@@ -58,17 +59,37 @@ SLICER_EXTENSIONS = {
     ".fhd",        # Formware
 }
 
-# The "one scan at a time" gate is now the app-wide library write lock
+# The "one scan at a time" gate is the app-wide library write lock
 # (services/write_lock.py), so a scan and a reorganize apply/undo are mutually
 # exclusive — a scan must not prune/insert rows under a move in flight (#324).
-_state_lock = threading.Lock()
 # Serializes DB-mutating work across the parallel creator workers. SQLite allows
 # only one writer; without this, workers holding an open write transaction during
 # slow rglob I/O block each other past busy_timeout -> "database is locked", which
 # aborts a creator's walk and silently drops its models.
 _db_lock = threading.Lock()
-_scan_state: dict = {"running": False, "message": "idle", "models_found": 0, "files_found": 0, "cancelled": False, "offline_roots": []}
-_cancel_requested = False
+
+# Scan status/cancel/progress live on the shared background-job runner
+# (services/job_runner.py, STUDIO-59), keyed "scan" — only one scan runs at a
+# time (held by the write lock), so a single key and a single active handle are
+# enough. The handle is stashed module-level so the deep, recursive walk helpers
+# can push progress and observe cancellation without threading it through every
+# call (same justification as the pack-overrides / ignore-matcher globals below).
+_SCAN_KEY = "scan"
+_active: JobHandle | None = None
+
+
+def _msg(message: str) -> None:
+    if _active is not None:
+        _active.update(message=message)
+
+
+def _bump(**deltas: int) -> None:
+    if _active is not None:
+        _active.increment(**deltas)
+
+
+def _cancelled() -> bool:
+    return _active is not None and _active.cancelled
 # Folders the user has explicitly split into per-child models (see PackOverride).
 # Loaded from the DB at the start of every scan; the walk treats these as
 # boundaries. Module-level because only one scan runs at a time (held by the
@@ -82,8 +103,22 @@ _ignore_matcher: IgnoreMatcher = IgnoreMatcher(())
 
 
 def get_status() -> dict:
-    with _state_lock:
-        return dict(_scan_state)
+    """Legacy scan-status shape kept as the public contract (ScanStatus + the
+    /scan/status route + tests): ``{running, message, models_found, files_found,
+    cancelled, offline_roots}``. Mapped out of the shared runner's uniform
+    ``{state, progress, message, error}`` payload."""
+    payload = runner.status(_SCAN_KEY)
+    prog = payload["progress"]
+    return {
+        "running": payload["state"] == JobState.RUNNING.value,
+        "message": payload["message"] or "idle",
+        "models_found": prog.get("models_found", 0),
+        "files_found": prog.get("files_found", 0),
+        # cancelled flips the moment the walk observes the request (progress flag),
+        # before the job reaches its terminal CANCELLED state during teardown.
+        "cancelled": payload["state"] == JobState.CANCELLED.value or prog.get("cancelled", False),
+        "offline_roots": prog.get("offline_roots", []),
+    }
 
 
 def _root_available(path: str) -> bool:
@@ -121,17 +156,35 @@ def _load_scan_rules(db: Session) -> None:
 
 
 def request_cancel():
-    global _cancel_requested
-    _cancel_requested = True
+    """Cooperatively cancel the running scan. The walk polls _cancelled() at safe
+    checkpoints; no-op if nothing is running."""
+    runner.cancel(_SCAN_KEY)
 
 
 def scan_all_roots(db: Session | None = None):
-    global _cancel_requested
+    """Full library scan. Synchronous — runs the job inline on the calling thread
+    so direct callers (tests) execute against a caller-owned session. Routers use
+    start_full_scan() to run it off the request path. The write lock is the
+    concurrency gate; a busy lock is a silent no-op (prior status untouched)."""
     if not write_lock.try_acquire_for_scan():
         return
-    _cancel_requested = False
-    with _state_lock:
-        _scan_state.update(running=True, message="starting", models_found=0, files_found=0, cancelled=False, offline_roots=[])
+    runner.run_inline(_SCAN_KEY, _full_scan, db=db)
+
+
+def start_full_scan() -> None:
+    """Launch a full scan off the request path via the shared runner. Silent
+    no-op if the write lock is already held (a scan/apply/undo is running)."""
+    if not write_lock.try_acquire_for_scan():
+        return
+    runner.start(_SCAN_KEY, _full_scan, single_flight=False)
+
+
+def _full_scan(job: JobHandle, db: Session | None = None):
+    # Assumes the write lock is already held (acquired by the sync wrapper or the
+    # launcher); released in the finally below.
+    global _active
+    _active = job
+    job.update(message="starting", models_found=0, files_found=0, cancelled=False, offline_roots=[])
     try:
         _db = db or SessionLocal()
         own_db = db is None
@@ -157,16 +210,14 @@ def scan_all_roots(db: Session | None = None):
             roots = _db.query(ScanRoot).filter(ScanRoot.enabled == True).all()
             root_paths = [r.path for r in roots]
             for root in roots:
-                if _cancel_requested:
-                    with _state_lock:
-                        _scan_state["message"] = "cancelled"
-                        _scan_state["cancelled"] = True
+                if _cancelled():
+                    job.update(state=JobState.CANCELLED, message="cancelled", cancelled=True)
                     break
                 _scan_root(root, _db)
                 root.last_scanned = utcnow()
                 _db.commit()
 
-            if not _cancel_requested:
+            if not _cancelled():
                 # Mount-detach guard: a root that has unmounted presents as a
                 # missing OR empty directory. Treat such roots as offline and
                 # prune nothing beneath them — otherwise one transient mount drop
@@ -180,8 +231,7 @@ def scan_all_roots(db: Session | None = None):
                         "Scan root(s) offline (missing or empty) — pruning skipped "
                         f"for everything beneath them to avoid data loss: {offline_paths}"
                     )
-                    with _state_lock:
-                        _scan_state["offline_roots"] = list(offline_paths)
+                    job.update(offline_roots=list(offline_paths))
 
                 removed = _prune_stale_models(_db, scan_start, available_paths)
                 removed += _prune_stale_paths(_db, available_paths)
@@ -195,25 +245,23 @@ def scan_all_roots(db: Session | None = None):
 
                 # Replace the in-progress "scanning <creator>" message with a
                 # summary the UI can show once the run finishes (#223).
-                with _state_lock:
-                    summary = (
-                        f"done — {_scan_state['models_found']} models, "
-                        f"{_scan_state['files_found']} files"
-                    )
-                    if removed:
-                        summary += f", {removed} removed"
-                    _scan_state["message"] = summary
+                prog = job.payload()["progress"]
+                summary = (
+                    f"done — {prog.get('models_found', 0)} models, "
+                    f"{prog.get('files_found', 0)} files"
+                )
+                if removed:
+                    summary += f", {removed} removed"
+                job.update(state=JobState.DONE, message=summary)
         finally:
             if own_db:
                 _db.close()
     except Exception as e:
         logger.exception(f"Scan failed: {e}")
-        with _state_lock:
-            _scan_state["message"] = f"error: {e}"
+        job.update(state=JobState.ERROR, message=f"error: {e}", error=str(e))
     finally:
-        with _state_lock:
-            _scan_state["running"] = False
         write_lock.release_scan()
+        _active = None
 
 
 def _cascade_delete_models(db: Session, ids: list[int], chunk: int = 500) -> None:
@@ -513,21 +561,31 @@ def _creator_dirs_for(creator: Creator, db: Session) -> list[tuple[Path, list[st
 
 def scan_creator(creator_id: int):
     """Rescan a single creator's folder(s) — a targeted alternative to a full scan.
-    Runs single-threaded (one creator) and forces a full reindex so newly added
-    or changed models under that creator are picked up."""
-    global _cancel_requested
+    Synchronous (see scan_all_roots); routers use start_creator_scan()."""
     if not write_lock.try_acquire_for_scan():
         return
-    _cancel_requested = False
-    with _state_lock:
-        _scan_state.update(running=True, message="starting", models_found=0, files_found=0, cancelled=False)
+    runner.run_inline(_SCAN_KEY, _creator_scan, creator_id=creator_id)
+
+
+def start_creator_scan(creator_id: int) -> None:
+    """Launch a single-creator rescan off the request path. Silent no-op if the
+    write lock is already held."""
+    if not write_lock.try_acquire_for_scan():
+        return
+    runner.start(_SCAN_KEY, _creator_scan, single_flight=False, creator_id=creator_id)
+
+
+def _creator_scan(job: JobHandle, creator_id: int):
+    # Assumes the write lock is already held; released in the finally below.
+    global _active
+    _active = job
+    job.update(message="starting", models_found=0, files_found=0, cancelled=False)
     try:
         db = SessionLocal()
         try:
             creator = db.get(Creator, creator_id)
             if not creator:
-                with _state_lock:
-                    _scan_state["message"] = "creator not found"
+                job.update(state=JobState.DONE, message="creator not found")
                 return
 
             _load_pack_overrides(db)
@@ -547,8 +605,7 @@ def scan_creator(creator_id: int):
             if not dirs:
                 dirs = _creator_dirs_by_name(creator.name, db)
             if not dirs:
-                with _state_lock:
-                    _scan_state["message"] = "no folders found for creator"
+                job.update(state=JobState.DONE, message="no folders found for creator")
                 return
 
             # Clear all STL rows for this creator's models before re-walking.
@@ -562,13 +619,10 @@ def scan_creator(creator_id: int):
             db.commit()
 
             for creator_dir, layout_tags, grp_by_char in dirs:
-                if _cancel_requested:
-                    with _state_lock:
-                        _scan_state["message"] = "cancelled"
-                        _scan_state["cancelled"] = True
+                if _cancelled():
+                    job.update(state=JobState.CANCELLED, message="cancelled", cancelled=True)
                     break
-                with _state_lock:
-                    _scan_state["message"] = f"scanning {creator_dir.name}"
+                _msg(f"scanning {creator_dir.name}")
                 _walk_for_models(
                     folder=creator_dir,
                     creator=creator,
@@ -581,26 +635,24 @@ def scan_creator(creator_id: int):
                     group_by_character=grp_by_char,
                 )
 
-            if not _cancel_requested:
+            if not _cancelled():
                 removed = _prune_phantoms(db, creator_id=creator_id)
-                with _state_lock:
-                    summary = (
-                        f"done — {_scan_state['models_found']} models, "
-                        f"{_scan_state['files_found']} files"
-                    )
-                    if removed:
-                        summary += f", {removed} removed"
-                    _scan_state["message"] = summary
+                prog = job.payload()["progress"]
+                summary = (
+                    f"done — {prog.get('models_found', 0)} models, "
+                    f"{prog.get('files_found', 0)} files"
+                )
+                if removed:
+                    summary += f", {removed} removed"
+                job.update(state=JobState.DONE, message=summary)
         finally:
             db.close()
     except Exception as e:
         logger.exception(f"Creator scan failed: {e}")
-        with _state_lock:
-            _scan_state["message"] = f"error: {e}"
+        job.update(state=JobState.ERROR, message=f"error: {e}", error=str(e))
     finally:
-        with _state_lock:
-            _scan_state["running"] = False
         write_lock.release_scan()
+        _active = None
 
 
 def split_pack(model_id: int) -> dict:
@@ -687,8 +739,7 @@ def _scan_root(root: ScanRoot, db: Session):
     root_path = Path(root.path)
     if not root_path.exists():
         logger.warning(f"Scan root not found: {root.path}")
-        with _state_lock:
-            _scan_state["message"] = f"path not found: {root.path}"
+        _msg(f"path not found: {root.path}")
         return
 
     # Resolve creator-level folders via the root's layout template. Each entry is
@@ -711,14 +762,13 @@ def _scan_root(root: ScanRoot, db: Session):
     db.commit()
 
     def _scan_one(creator_dir: Path, layout_tags: list[str]):
-        if _cancel_requested:
+        if _cancelled():
             return
         creator_id = creator_ids[str(creator_dir)]
         thread_db = SessionLocal()
         try:
             creator = thread_db.get(Creator, creator_id)
-            with _state_lock:
-                _scan_state["message"] = f"scanning {creator_dir.name}"
+            _msg(f"scanning {creator_dir.name}")
             _walk_for_models(
                 folder=creator_dir,
                 creator=creator,
@@ -798,10 +848,12 @@ def _walk_for_models(
     any_child_stls = _any_child_has_stls_cached(child_dirs, stl_cache)
     has_any_stls = has_direct_stls or any_child_stls
 
-    # Collect file names for signal detection
+    # Collect file names for signal detection. iterdir()/is_file() only raise
+    # OSError (permissions, vanished mount) — narrow so a real bug isn't masked as
+    # an empty folder.
     try:
         filenames = [f.name for f in folder.iterdir() if f.is_file()]
-    except Exception:
+    except OSError:
         filenames = []
 
     # --- Step 1: name-based product detection (folder + files + parents) ---
@@ -1028,8 +1080,7 @@ def _index_model(
         sync_model_tags(model, db)
         db.commit()
 
-    with _state_lock:
-        _scan_state["models_found"] += 1
+    _bump(models_found=1)
 
 
 # ---------------------------------------------------------------------------
@@ -1162,8 +1213,7 @@ def _index_stl_files(model: Model, folder: Path, db: Session):
             size_bytes=stl.stat().st_size,
         ))
         existing.add(path_str)  # prevent duplicates within the same session
-        with _state_lock:
-            _scan_state["files_found"] += 1
+        _bump(files_found=1)
 
 
 def _get_or_create_creator(name: str, db: Session) -> Creator:
@@ -1197,54 +1247,61 @@ def resolve_creator(name: str, db: Session) -> Creator:
 
 
 def prepare_inbox_scan() -> bool:
-    """Synchronously acquire write lock and mark scan state running.
+    """Synchronously acquire the library write lock for an inbox import.
 
-    Returns True if the lock was acquired and state set; False if the library is
-    busy. Call this in the request thread before starting the inbox daemon thread
-    so the HTTP response is authoritative: a 200 means the scan is actually
-    starting, not just queued behind a lock the thread might fail to acquire.
-    """
-    global _cancel_requested
-    if not write_lock.try_acquire_for_scan():
-        return False
-    _cancel_requested = False
-    with _state_lock:
-        _scan_state.update(running=True, message="importing", models_found=0, files_found=0, cancelled=False)
-    return True
+    Returns True if the lock was acquired, False if the library is busy. Called in
+    the request thread before launching the import so the HTTP response is
+    authoritative: a 200 means the import is actually starting, not queued behind a
+    lock the worker might fail to take. Progress state is set when the job launches
+    (start_inbox_scan)."""
+    return write_lock.try_acquire_for_scan()
 
 
 def abort_inbox_scan(message: str = "error: failed to start") -> None:
-    """Release the write lock and clear running state after prepare_inbox_scan()
-    succeeded but the worker thread failed to launch. Without this, a failed
-    thread.start() would leave the lock held and state stuck at running."""
-    with _state_lock:
-        _scan_state["running"] = False
-        _scan_state["message"] = message
+    """Release the write lock and drop the scan job after prepare_inbox_scan()
+    succeeded but launching the worker failed — otherwise the lock stays held and
+    a phantom running job lingers in the registry."""
+    runner.reset(_SCAN_KEY)
     write_lock.release_scan()
+
+
+def start_inbox_scan(path: str) -> bool:
+    """Launch an inbox import off the request path. Acquires the write lock
+    synchronously (authoritative 200) then runs the work on the shared runner.
+    Returns False if the library is busy. Used by both /scan/inbox and
+    /import/scan-folder."""
+    if not prepare_inbox_scan():
+        return False
+    try:
+        runner.start(_SCAN_KEY, _inbox_scan, single_flight=False, path=path)
+    except Exception:
+        abort_inbox_scan()
+        raise
+    return True
 
 
 def scan_inbox_folder(
     path: str, db: Session | None = None, _lock_already_held: bool = False
 ) -> None:
     """Index an arbitrary folder as inbox models without adding it as a scan root.
-
-    Approach B: each immediate subdirectory that contains STL files is treated
-    as a creator-level boundary (mirrors how a scan root walks creator folders).
-    If the inbox root itself has direct STL files (flat layout), a single
-    '_Inbox' creator is used instead. All indexed models get is_inbox=True.
-
-    Runs synchronously — callers launch this in a daemon thread.
-    Pass _lock_already_held=True when the caller has already acquired the write
-    lock via prepare_inbox_scan() to avoid a double-acquire.
-    """
-    global _cancel_requested
+    Synchronous — direct callers (tests) run it inline against a caller-owned
+    session; routers use start_inbox_scan(). Acquires the write lock unless the
+    caller already holds it (_lock_already_held)."""
     if not _lock_already_held:
         if not write_lock.try_acquire_for_scan():
             logger.warning("Inbox scan skipped: library write lock is held")
             return
-        _cancel_requested = False
-        with _state_lock:
-            _scan_state.update(running=True, message="importing", models_found=0, files_found=0, cancelled=False)
+    runner.run_inline(_SCAN_KEY, _inbox_scan, path=path, db=db)
+
+
+def _inbox_scan(job: JobHandle, path: str, db: Session | None = None) -> None:
+    """Inbox-import worker. Approach B: each immediate subdirectory that contains
+    STL files is a creator-level boundary (mirrors a scan root's creator walk); a
+    flat layout (STLs directly in the root) uses a single '_Inbox' creator. All
+    indexed models get is_inbox=True. Assumes the write lock is held; releases it."""
+    global _active
+    _active = job
+    job.update(message="importing", models_found=0, files_found=0, cancelled=False)
     try:
         own_db = db is None
         _db = db or SessionLocal()
@@ -1257,8 +1314,7 @@ def scan_inbox_folder(
                 # Flat layout: inbox root itself is the model (STLs directly inside)
                 creator = resolve_creator("_Inbox", _db)
                 _db.commit()
-                with _state_lock:
-                    _scan_state["message"] = "importing _Inbox"
+                _msg("importing _Inbox")
                 _index_model(
                     folder=inbox,
                     creator=creator,
@@ -1279,15 +1335,12 @@ def scan_inbox_folder(
                 _db.commit()
 
                 for child in child_dirs:
-                    if _cancel_requested:
-                        with _state_lock:
-                            _scan_state["message"] = "cancelled"
-                            _scan_state["cancelled"] = True
+                    if _cancelled():
+                        job.update(state=JobState.CANCELLED, message="cancelled", cancelled=True)
                         break
                     if str(child) not in creator_ids:
                         continue
-                    with _state_lock:
-                        _scan_state["message"] = f"importing {child.name}"
+                    _msg(f"importing {child.name}")
                     creator = _db.get(Creator, creator_ids[str(child)])
                     _walk_for_models(
                         folder=child,
@@ -1300,21 +1353,22 @@ def scan_inbox_folder(
                         is_inbox=True,
                     )
 
-            if not _cancel_requested:
+            if not _cancelled():
                 _prune_phantoms(_db)
-                with _state_lock:
-                    _scan_state["message"] = (
-                        f"done — {_scan_state['models_found']} models, "
-                        f"{_scan_state['files_found']} files"
-                    )
+                prog = job.payload()["progress"]
+                job.update(
+                    state=JobState.DONE,
+                    message=(
+                        f"done — {prog.get('models_found', 0)} models, "
+                        f"{prog.get('files_found', 0)} files"
+                    ),
+                )
         finally:
             if own_db:
                 _db.close()
     except Exception as e:
         logger.exception(f"Inbox scan failed: {e}")
-        with _state_lock:
-            _scan_state["message"] = f"error: {e}"
+        job.update(state=JobState.ERROR, message=f"error: {e}", error=str(e))
     finally:
-        with _state_lock:
-            _scan_state["running"] = False
         write_lock.release_scan()
+        _active = None

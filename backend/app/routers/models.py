@@ -672,7 +672,7 @@ def bulk_delete_models(body: BulkDeleteRequest, db: Session = Depends(get_db)):
                 if os.path.isdir(path):
                     shutil.rmtree(path)
                     folders_removed += 1
-            except Exception as exc:
+            except OSError as exc:
                 _log.warning("Could not delete folder %r: %s", path, exc)
 
     return BulkDeleteResponse(deleted=len(model_ids), folders_removed=folders_removed)
