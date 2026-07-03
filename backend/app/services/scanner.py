@@ -848,10 +848,12 @@ def _walk_for_models(
     any_child_stls = _any_child_has_stls_cached(child_dirs, stl_cache)
     has_any_stls = has_direct_stls or any_child_stls
 
-    # Collect file names for signal detection
+    # Collect file names for signal detection. iterdir()/is_file() only raise
+    # OSError (permissions, vanished mount) — narrow so a real bug isn't masked as
+    # an empty folder.
     try:
         filenames = [f.name for f in folder.iterdir() if f.is_file()]
-    except Exception:
+    except OSError:
         filenames = []
 
     # --- Step 1: name-based product detection (folder + files + parents) ---
