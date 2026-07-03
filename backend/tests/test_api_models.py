@@ -425,6 +425,29 @@ class TestGroupRepOverride:
         resp = client.patch("/models/999999/group-rep", json={"is_group_rep": True})
         assert resp.status_code == 404
 
+    def test_designating_rep_updates_durable_group_rep(self, client, db):
+        """STUDIO-7: rep resolution for durable groups reads
+        VariantGroup.rep_model_id, not the legacy is_group_rep flag (#678).
+        Designating a new rep via the group-rep button must flip the durable
+        field too, or Library/Prev-Next paging keep showing the old rep."""
+        from app.models import VariantGroup
+
+        creator = make_creator(db, "Creator")
+        v_other = make_model(db, creator, name="A_rep", character="Hero")
+        v_pick = make_model(db, creator, name="B_pick", character="Hero")
+        db.flush()
+        group = make_variant_group(db, creator, [v_other, v_pick], label="Hero", rep=v_other)
+        commit_all(db)
+        assert group.rep_model_id == v_other.id
+
+        resp = client.patch(f"/models/{v_pick.id}/group-rep", json={"is_group_rep": True})
+        assert resp.status_code == 200
+
+        db.expire_all()
+        assert db.get(VariantGroup, group.id).rep_model_id == v_pick.id
+        # Reflected everywhere rep resolution is authoritative, not just the flag.
+        assert client.get("/models?group_variants=true").json()["items"][0]["id"] == v_pick.id
+
 
 # ---------------------------------------------------------------------------
 # Stats endpoint

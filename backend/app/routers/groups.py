@@ -44,8 +44,19 @@ def set_group_rep(model_id: int, body: GroupRepUpdate, db: Session = Depends(get
             Model.id != model.id,
         ).update({Model.is_group_rep: False}, synchronize_session=False)
         model.is_group_rep = True
+        # Rep resolution for durable groups reads VariantGroup.rep_model_id, not
+        # this legacy flag (#678) — keep both in sync so the button's effect is
+        # visible everywhere the group is shown, not just this page (STUDIO-7).
+        if model.variant_group_id is not None:
+            group = db.get(VariantGroup, model.variant_group_id)
+            if group is not None:
+                group.rep_model_id = model.id
     else:
         model.is_group_rep = False
+        if model.variant_group_id is not None:
+            group = db.get(VariantGroup, model.variant_group_id)
+            if group is not None and group.rep_model_id == model.id:
+                group.rep_model_id = None
     model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "is_group_rep": model.is_group_rep}
