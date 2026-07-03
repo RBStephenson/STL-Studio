@@ -1343,6 +1343,10 @@ export default function ModelDetail() {
                   // than the (possibly stale) value from the variants fetch.
                   const vFavorite = isCurrent ? favorite : v.is_favorite;
                   const vQueued = (isCurrent ? printStatus : v.print_status) === "queued";
+                  // Include the current model's own nsfw flag so the whole
+                  // strip reads censored together, not just the flagged
+                  // variant (STUDIO-45).
+                  const vBlurred = (v.nsfw || nsfw) && !showNSFW;
                   return (
                     <Link
                       key={v.id}
@@ -1357,11 +1361,20 @@ export default function ModelDetail() {
                     >
                       <div className="aspect-square bg-gray-800">
                         {vThumb ? (
-                          <img src={vThumb} alt="" className="w-full h-full object-cover" />
+                          <img
+                            src={vThumb}
+                            alt=""
+                            className={`w-full h-full object-cover ${vBlurred ? "blur-lg" : ""}`}
+                          />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-gray-700">
                             <Package size={20} />
                           </div>
+                        )}
+                        {vBlurred && (
+                          <span className="absolute bottom-1 left-1 bg-black/70 rounded px-1 text-[8px] font-medium text-red-400 leading-tight">
+                            NSFW
+                          </span>
                         )}
                       </div>
                       {(vFavorite || vQueued) && (
