@@ -4,7 +4,7 @@
  * Library cards.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 
 const getMock = vi.fn();
@@ -125,7 +125,7 @@ describe("ModelDetail variant switcher NSFW blur (STUDIO-45)", () => {
   it("blurs every variant when the current model itself is NSFW, even SFW-tagged siblings", async () => {
     getMock.mockResolvedValue({ ...baseModel, nsfw: true });
     const { container } = renderDetail();
-    await waitFor(() => expect(container.querySelector('img[src="/hero-a.jpg"]')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector('img[src="/hero-a.jpg"].object-cover')).not.toBeNull());
     const img = container.querySelector('img[src="/hero-a.jpg"].object-cover') as HTMLImageElement;
     expect(img.className).toContain("blur-lg");
   });
