@@ -256,3 +256,18 @@ def test_reload_never_exposes_secrets(client, monkeypatch, restore_settings):
     r = client.post("/settings/reload")
     assert "super-secret-token" not in r.text
     assert "mmf_api_key" not in r.json()
+
+
+def test_reload_failure_does_not_leak_exception_details(client, monkeypatch, restore_settings):
+    """STUDIO-30: a malformed .env raises a pydantic ValidationError whose str()
+    can include internal field names/values — the client must get a generic
+    message, not the raw exception."""
+    def _boom(self):
+        raise ValueError("stl_drive_1: field required (type=value_error.missing)")
+
+    monkeypatch.setattr(type(live_settings), "reload", _boom)
+    r = client.post("/settings/reload")
+    assert r.status_code == 400
+    assert "stl_drive_1" not in r.text
+    assert "value_error.missing" not in r.text
+    assert r.json()["detail"] == "Could not reload settings: invalid configuration"
