@@ -9,6 +9,7 @@ Gumroad product pages are server-rendered and expose metadata in:
 import re
 import json
 import logging
+import httpx  # noqa: F401 — patched as `gumroad.httpx.AsyncClient` by the test suite
 from app.services.url_guard import guarded_async_client
 from bs4 import BeautifulSoup
 from typing import Optional

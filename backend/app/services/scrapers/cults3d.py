@@ -9,6 +9,7 @@ import base64
 import logging
 from typing import Optional
 
+import httpx  # noqa: F401 — patched as `cults3d.httpx.AsyncClient` by the test suite
 from app.services.url_guard import guarded_async_client
 
 from app.services.scrapers.base import ScrapedModel, SearchResult, MAX_REDIRECTS

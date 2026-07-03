@@ -17,6 +17,7 @@ register an app at MMF Settings -> Developer to obtain one.
 import re
 import json
 import logging
+import httpx  # noqa: F401 — patched as `mmf.httpx.AsyncClient` by the test suite
 from app.services.url_guard import guarded_async_client
 from bs4 import BeautifulSoup
 from typing import Optional
