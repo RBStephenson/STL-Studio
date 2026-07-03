@@ -288,8 +288,8 @@ def _llm_refine(
     try:
         body      = resp.json()
         raw_text: str = body["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError) as exc:
-        _log_step("llm_error", reason=f"bad shape: {exc}")
+    except (KeyError, IndexError):
+        _log_step("llm_error", reason="bad_shape")
         return []
 
     if raw_text.startswith("```"):
