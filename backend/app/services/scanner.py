@@ -209,11 +209,14 @@ def _full_scan(job: JobHandle, db: Session | None = None):
             scan_start = utcnow()
             roots = _db.query(ScanRoot).filter(ScanRoot.enabled == True).all()
             root_paths = [r.path for r in roots]
+            # Creators whose walk raised this run — their models were only partially
+            # (re)indexed, so they must be shielded from the stale prune (STUDIO-79).
+            failed_creator_ids: set[int] = set()
             for root in roots:
                 if _cancelled():
                     job.update(state=JobState.CANCELLED, message="cancelled", cancelled=True)
                     break
-                _scan_root(root, _db)
+                failed_creator_ids |= _scan_root(root, _db)
                 root.last_scanned = utcnow()
                 _db.commit()
 
@@ -233,7 +236,16 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                     )
                     job.update(offline_roots=list(offline_paths))
 
-                removed = _prune_stale_models(_db, scan_start, available_paths)
+                if failed_creator_ids:
+                    logger.warning(
+                        "Creator walk(s) failed this run — stale prune skipped for "
+                        f"their models to avoid data loss: creator_ids={sorted(failed_creator_ids)}"
+                    )
+
+                removed = _prune_stale_models(
+                    _db, scan_start, available_paths,
+                    protected_creator_ids=failed_creator_ids,
+                )
                 removed += _prune_stale_paths(_db, available_paths)
                 # Drop models that a newly-added ignore pattern now covers (#31).
                 removed += _prune_ignored(_db, available_paths)
@@ -388,7 +400,12 @@ def _prune_ignored(db: Session, root_paths: list[str]):
     return len(ignored_ids)
 
 
-def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]):
+def _prune_stale_models(
+    db: Session,
+    scan_start: datetime,
+    root_paths: list[str],
+    protected_creator_ids: set[int] | None = None,
+):
     """After a full scan, delete models under scanned roots that were not visited.
 
     Any model whose updated_at predates the scan start was not walked this run —
@@ -406,11 +423,17 @@ def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]
     updated_at (so it always predates scan_start), and deleting them would let a
     later scan resurrect the folder as a brand-new, non-excluded model.
 
+    Models under a creator whose walk FAILED this run (protected_creator_ids) are
+    also never pruned: their folders were only partially re-indexed, so a stale
+    updated_at reflects a transient error (SQLite lock, mount hiccup), not a deleted
+    folder — pruning them would silently wipe live data (STUDIO-79).
+
     Returns the number of models pruned (for the scan completion summary, #223).
     """
     if not root_paths:
         return 0
     roots_norm = [os.path.normcase(os.path.normpath(p)) for p in root_paths]
+    protected = protected_creator_ids or set()
 
     def _under_root(folder_path: str | None) -> bool:
         if not folder_path:
@@ -418,17 +441,20 @@ def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]
         n = os.path.normcase(os.path.normpath(folder_path))
         return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
-    # Fetch non-excluded candidates once (id + folder + timestamp), then derive
-    # both the under-root total and the stale subset in Python. Root membership
-    # still needs normpath comparison (see docstring re: LIKE metacharacters), so
-    # it can't move to SQL — but a single pass replaces the two overlapping
-    # full-table queries this ran before (#653).
+    # Fetch non-excluded candidates once (id + folder + timestamp + creator), then
+    # derive both the under-root total and the stale subset in Python. Root
+    # membership still needs normpath comparison (see docstring re: LIKE
+    # metacharacters), so it can't move to SQL — but a single pass replaces the two
+    # overlapping full-table queries this ran before (#653).
     rows = (
-        db.query(Model.id, Model.folder_path, Model.updated_at)
+        db.query(Model.id, Model.folder_path, Model.updated_at, Model.creator_id)
         .filter(Model.excluded == False, Model.folder_path != None)  # noqa: E711, E712
         .all()
     )
-    under = [r for r in rows if _under_root(r.folder_path)]
+    under = [
+        r for r in rows
+        if _under_root(r.folder_path) and r.creator_id not in protected
+    ]
     total = len(under)
     stale_ids = [
         r.id for r in under
@@ -729,12 +755,17 @@ def split_pack(model_id: int) -> dict:
         write_lock.release_scan()
 
 
-def _scan_root(root: ScanRoot, db: Session):
+def _scan_root(root: ScanRoot, db: Session) -> set[int]:
+    """Walk a scan root's creators in parallel. Returns the set of creator ids whose
+    walk did NOT complete cleanly (raised mid-walk). Those creators were only
+    partially indexed, so their models must be protected from the "not visited this
+    run" stale prune — otherwise a transient error (SQLite lock, mount hiccup) makes
+    unvisited-but-live models look deleted and cascades them away (STUDIO-79)."""
     root_path = Path(root.path)
     if not root_path.exists():
         logger.warning(f"Scan root not found: {root.path}")
         _msg(f"path not found: {root.path}")
-        return
+        return set()
 
     # Resolve creator-level folders via the root's layout template. Each entry is
     # (creator_dir, layout_tags) where layout_tags are the {tag} folder names from
@@ -754,6 +785,12 @@ def _scan_root(root: ScanRoot, db: Session):
         creator = _get_or_create_creator(creator_dir.name, db)
         creator_ids[str(creator_dir)] = creator.id
     db.commit()
+
+    # Creators whose walk raised — collected across worker threads so the caller can
+    # exclude them from the destructive stale prune (STUDIO-79). A plain set guarded
+    # by a lock; contention is negligible (only touched on the exception path).
+    failed_creator_ids: set[int] = set()
+    failed_lock = threading.Lock()
 
     def _scan_one(creator_dir: Path, layout_tags: list[str]):
         if _cancelled():
@@ -775,7 +812,12 @@ def _scan_root(root: ScanRoot, db: Session):
                 group_by_character=root.group_by_character,
             )
         except Exception:
+            # Swallow so one bad creator doesn't abort the whole scan, but RECORD it:
+            # a partially-walked creator's untouched models must not be pruned as
+            # stale this run (STUDIO-79).
             logger.exception(f"Error scanning creator: {creator_dir.name}")
+            with failed_lock:
+                failed_creator_ids.add(creator_id)
         finally:
             thread_db.close()
 
@@ -801,6 +843,8 @@ def _scan_root(root: ScanRoot, db: Session):
         group_db.commit()
     finally:
         group_db.close()
+
+    return failed_creator_ids
 
 
 def _walk_for_models(

@@ -693,6 +693,44 @@ class TestPruneStaleModels:
         assert "stale" not in names
         assert "fresh" in names
 
+    def test_protected_creator_models_are_never_pruned(self, db, tmp_path):
+        """A creator whose walk failed this run only partially re-indexed its models,
+        so an old updated_at reflects a transient error, not a deleted folder. Those
+        models must be exempt from the stale prune (STUDIO-79) — otherwise a lock or
+        mount hiccup silently wipes live data. Models under other creators still
+        prune normally."""
+        from datetime import timedelta
+        from app.utils import utcnow
+
+        root = str(tmp_path)
+        failed = make_creator(db, "FailedCreator")
+        ok = make_creator(db, "OkCreator")
+        old_ts = utcnow() - timedelta(hours=1)
+
+        # Both look "stale" (updated_at predates scan_start), but only OkCreator's
+        # walk completed cleanly this run.
+        protected = Model(name="protected", folder_path=str(tmp_path / "protected"),
+                          creator_id=failed.id, updated_at=old_ts)
+        prunable = Model(name="prunable", folder_path=str(tmp_path / "prunable"),
+                         creator_id=ok.id, updated_at=old_ts)
+        # Two fresh OkCreator models keep prunable at 1/3 of the eligible set, below
+        # the 50% safety cap (protected is excluded from the count entirely).
+        fresh1 = Model(name="fresh1", folder_path=str(tmp_path / "fresh1"),
+                       creator_id=ok.id, updated_at=utcnow())
+        fresh2 = Model(name="fresh2", folder_path=str(tmp_path / "fresh2"),
+                       creator_id=ok.id, updated_at=utcnow())
+        db.add_all([protected, prunable, fresh1, fresh2])
+        db.commit()
+
+        scan_start = utcnow() - timedelta(minutes=30)
+        scanner._prune_stale_models(
+            db, scan_start, [root], protected_creator_ids={failed.id}
+        )
+
+        names = {m.name for m in db.query(Model).all()}
+        assert "protected" in names     # walk failed → shielded despite stale ts
+        assert "prunable" not in names  # clean walk, not visited → pruned
+
     def test_safety_cap_skips_when_most_models_stale(self, db, tmp_path):
         """If >50% of models under the root were not visited, assume a failed scan
         and skip pruning."""
@@ -997,12 +1035,12 @@ class TestScanAllRootsMountGate:
         captured: dict = {}
 
         def _cap(key):
-            def _fn(_db, *args):
+            def _fn(_db, *args, **kwargs):
                 captured[key] = args[-1]
                 return 0
             return _fn
 
-        monkeypatch.setattr(scanner, "_scan_root", lambda *a, **k: None)
+        monkeypatch.setattr(scanner, "_scan_root", lambda *a, **k: set())
         monkeypatch.setattr(scanner, "_prune_stale_models", _cap("stale_models"))
         monkeypatch.setattr(scanner, "_prune_stale_paths", _cap("stale_paths"))
         monkeypatch.setattr(scanner, "_prune_ignored", _cap("ignored"))
@@ -1231,6 +1269,7 @@ class TestScanCompletionSummary:
             # Counters live on the active job handle now; _bump adds to the
             # zero-initialised progress the scan set at start.
             scanner._bump(models_found=models, files_found=files)
+            return set()
 
         monkeypatch.setattr(scanner, "_scan_root", fake_scan_root)
         monkeypatch.setattr(scanner, "_prune_stale_models", lambda *a, **k: removed)
