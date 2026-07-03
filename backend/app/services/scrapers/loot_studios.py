@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup
 from dataclasses import dataclass
 from typing import Optional
 
-from app.services.scrapers.base import ScrapedModel, SearchResult
+from app.services.scrapers.base import ScrapedModel, SearchResult, MAX_REDIRECTS
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ async def fetch_miniatures(bnd_id: str, client: httpx.AsyncClient) -> list[Bundl
 
 async def fetch(url: str) -> Optional[ScrapedModel]:
     """Fetch bundle-level metadata for a single Loot Studios bundle URL."""
-    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         try:
             r = await client.get(url)
             r.raise_for_status()
@@ -177,7 +177,7 @@ async def fetch_store_catalog() -> list[dict]:
 
 async def fetch_bundle_products(url: str) -> list[BundleMiniature]:
     """Fetch all individual miniatures from a bundle page (for storefront enrichment)."""
-    async with httpx.AsyncClient(timeout=30, headers=_HEADERS, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=30, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         try:
             r = await client.get(url)
             r.raise_for_status()

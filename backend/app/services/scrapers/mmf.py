@@ -21,7 +21,7 @@ import httpx
 from bs4 import BeautifulSoup
 from typing import Optional
 
-from app.services.scrapers.base import ScrapedModel, SearchResult
+from app.services.scrapers.base import ScrapedModel, SearchResult, MAX_REDIRECTS
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ async def fetch(url: str, api_key: Optional[str] = None) -> Optional[ScrapedMode
         timeout=20,
         headers=_HEADERS,
         follow_redirects=True,
+        max_redirects=MAX_REDIRECTS,
     ) as client:
         try:
             r = await client.get(url)
@@ -112,6 +113,7 @@ async def search(query: str, limit: int = 12, api_key: Optional[str] = None) -> 
         timeout=20,
         headers=_HEADERS,
         follow_redirects=True,
+        max_redirects=MAX_REDIRECTS,
     ) as client:
         try:
             r = await client.get(
@@ -159,7 +161,7 @@ async def search(query: str, limit: int = 12, api_key: Optional[str] = None) -> 
 async def _api_get(path: str, api_key: str, params: Optional[dict] = None) -> Optional[dict]:
     """GET an MMF API path with ?key= auth. Returns parsed JSON or None on error."""
     query = {"key": api_key, **(params or {})}
-    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         try:
             r = await client.get(f"{API_BASE}{path}", params=query)
             r.raise_for_status()
