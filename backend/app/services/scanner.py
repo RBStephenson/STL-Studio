@@ -988,10 +988,47 @@ def _index_model(
     with _db_lock:
         model = db.query(Model).filter(Model.folder_path == folder_path).first()
 
+        # Case-insensitive identity fallback (STUDIO-78). On a case-insensitive
+        # volume (Windows) a casing change to any ancestor folder — a scan root
+        # re-added at different case, or a creator/character folder renamed
+        # 'polyminds studios' → 'PolyMind Studios' — makes the exact match above
+        # miss. Left alone that orphans the existing row (is_new=True inserts a
+        # fresh one, then _prune_stale_models deletes the old), silently wiping
+        # all user metadata and emptying manual variant groups. Fall back to a
+        # normalized-path match, scoped to this creator, and adopt the new casing
+        # in place so identity — and everything hanging off it — survives.
+        # Only case-insensitive volumes can produce this miss, so skip the extra
+        # query entirely on case-sensitive filesystems (Linux servers/CI), where
+        # a differently-cased path is a genuinely different folder. The SQL
+        # lower()-match keeps this to a single narrow query per new model instead
+        # of scanning every model for the creator; the _normpath guard on the
+        # result rejects any ASCII-lower() false positive.
+        recased_from: str | None = None
+        if model is None and _normpath("A") == _normpath("a"):
+            target_norm = _normpath(folder_path)
+            candidates = (
+                db.query(Model)
+                .filter(Model.creator_id == creator.id,
+                        func.lower(Model.folder_path) == folder_path.lower())
+                .all()
+            )
+            for candidate in candidates:
+                if candidate.folder_path and _normpath(candidate.folder_path) == target_norm:
+                    model = candidate
+                    recased_from = candidate.folder_path
+                    break
+
         # User-excluded model: leave it hidden. Never re-index, re-tag, or reset
         # the flag, so a rescan never resurrects something the user removed.
         if model is not None and model.excluded:
             return
+
+        # Adopt the new casing on the reused row and its STL files (identity
+        # preserved above). Done after the excluded check so hidden models stay
+        # untouched; before file indexing so _index_stl_files matches by the
+        # refreshed paths instead of inserting duplicates.
+        if recased_from is not None and recased_from != folder_path:
+            _recase_model_paths(db, model, recased_from, folder_path)
 
         # Skip expensive file indexing when the folder hasn't changed since the
         # last scan. Metadata/tag updates still run so manual edits and parser
@@ -1086,6 +1123,28 @@ def _index_model(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _normpath(p: str) -> str:
+    """Normalize a filesystem path for identity comparison — case- and
+    separator-folded on the current platform (case-insensitive on Windows).
+    Mirrors the normalization the prune paths already use so lookup and prune
+    agree on model identity (STUDIO-78)."""
+    return os.path.normcase(os.path.normpath(p))
+
+
+def _recase_model_paths(db: Session, model: Model, old_folder_path: str, new_folder_path: str):
+    """Adopt a case-only folder rename on an existing model in place (STUDIO-78).
+
+    Updates the model's folder_path and re-cases the prefix of every child
+    STLFile.path so they line up with the new-cased folder on disk. The relative
+    suffix under the model folder is unchanged (only an ancestor's case differs),
+    so a straight prefix swap is exact and preserves STL-level metadata
+    (sup_of_id, part_name) that a delete-and-reindex would drop."""
+    model.folder_path = new_folder_path
+    for stl in db.query(STLFile).filter(STLFile.model_id == model.id).all():
+        if stl.path and stl.path.startswith(old_folder_path):
+            stl.path = new_folder_path + stl.path[len(old_folder_path):]
+
 
 def _merge_auto_tags(detected: list[str], layout_tags: list[str] | None) -> list[str]:
     """Combine detected auto-tags with layout-derived tags, lower-cased and

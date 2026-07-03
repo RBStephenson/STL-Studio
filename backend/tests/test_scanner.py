@@ -5,10 +5,11 @@ grouping — the subsystem that has historically harboured the subtlest bugs.
 Each test lays out a fake library under tmp_path, runs the real walk, and
 asserts what got indexed (and how it grouped).
 """
+import os
 import re
 from pathlib import Path
 
-from app.models import Creator, Model, STLFile
+from app.models import Creator, Model, STLFile, VariantGroup
 from app.services import scanner, name_parser
 from app.services.scan_rules import IgnoreMatcher
 from tests.conftest import make_creator
@@ -1390,3 +1391,71 @@ class TestStructuralLeafNaming:
         _walk(db, creator, creator_dir)
 
         assert "Dragon" in self._names(db, creator)  # display_name strips the "Bust" type token
+
+
+class TestCaseInsensitiveIdentity:
+    """STUDIO-78: a case-only path change (Windows rename of an ancestor folder)
+    must reuse the existing model in place, not orphan+recreate it — which would
+    wipe user metadata and empty manual variant groups.
+
+    _normpath is monkeypatched to a case-folding normalizer so the scenario is
+    deterministic on case-sensitive CI filesystems too; the real os.rename below
+    gives the walk a genuinely different-cased path to index."""
+
+    def _case_fold(self, monkeypatch):
+        monkeypatch.setattr(scanner, "_normpath", lambda p: os.path.normpath(p).lower())
+
+    def test_case_change_reuses_model_and_preserves_metadata(self, db, tmp_path, monkeypatch):
+        self._case_fold(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "polymind studios" / "Auron"
+        _stl(leaf, name="auron.stl")
+
+        _walk(db, creator, tmp_path / "polymind studios")
+        models = _models(db, creator)
+        assert len(models) == 1
+        model = models[0]
+        original_id = model.id
+
+        # User-owned metadata + a manual variant group.
+        group = VariantGroup(creator_id=creator.id, label="Auron", source="manual")
+        db.add(group)
+        db.flush()
+        model.variant_group_id = group.id
+        model.tags = ["favorite"]
+        model.notes = "hand-primed"
+        model.nsfw = True
+        db.commit()
+
+        # Rename the ancestor folder case-only (same folder to a case-insensitive OS).
+        os.rename(tmp_path / "polymind studios", tmp_path / "PolyMind Studios")
+
+        _walk(db, creator, tmp_path / "PolyMind Studios")
+
+        models = _models(db, creator)
+        assert len(models) == 1, "case change must not create a duplicate model"
+        reused = models[0]
+        assert reused.id == original_id, "same row reused in place"
+        assert reused.folder_path == str(tmp_path / "PolyMind Studios" / "Auron")
+        assert reused.variant_group_id == group.id, "manual group membership preserved"
+        assert reused.tags == ["favorite"]
+        assert reused.notes == "hand-primed"
+        assert reused.nsfw is True
+
+    def test_case_change_recases_stl_paths_without_duplicates(self, db, tmp_path, monkeypatch):
+        self._case_fold(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "creator root" / "Barbatos"
+        _stl(leaf, name="barbatos.stl")
+
+        _walk(db, creator, tmp_path / "creator root")
+        model = _models(db, creator)[0]
+        stls = db.query(STLFile).filter(STLFile.model_id == model.id).all()
+        assert len(stls) == 1
+
+        os.rename(tmp_path / "creator root", tmp_path / "Creator Root")
+        _walk(db, creator, tmp_path / "Creator Root")
+
+        stls = db.query(STLFile).filter(STLFile.model_id == model.id).all()
+        assert len(stls) == 1, "STL rows re-cased in place, not duplicated"
+        assert stls[0].path == str(tmp_path / "Creator Root" / "Barbatos" / "barbatos.stl")
