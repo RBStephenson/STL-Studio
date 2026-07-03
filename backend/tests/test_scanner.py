@@ -810,6 +810,34 @@ class TestPruneStaleModels:
         assert "stale" not in names         # true descendant, not visited → pruned
         assert "in_sibling" in names        # prefix-sharing sibling → never matched
 
+    def test_null_updated_at_is_not_pruned(self, db, tmp_path):
+        """A model with no updated_at timestamp is not "stale" — it must be left
+        alone. Pins the NULL-timestamp filter after the two prune queries were
+        collapsed into a single fetch + Python filter (#653)."""
+        from datetime import timedelta
+        from app.utils import utcnow
+
+        root = str(tmp_path)
+        creator = make_creator(db, "Creator")
+        scan_start = utcnow() - timedelta(minutes=30)
+
+        no_ts = Model(name="no_ts", folder_path=str(tmp_path / "no_ts"),
+                      creator_id=creator.id)
+        fresh = Model(name="fresh", folder_path=str(tmp_path / "fresh"),
+                      creator_id=creator.id, updated_at=utcnow())
+        db.add_all([no_ts, fresh])
+        db.commit()
+        # Column default=utcnow fills updated_at on INSERT; force a true NULL to
+        # exercise the "no timestamp" branch (explicit value overrides onupdate).
+        db.query(Model).filter(Model.name == "no_ts").update({Model.updated_at: None})
+        db.commit()
+
+        scanner._prune_stale_models(db, scan_start, [root])
+
+        names = {m.name for m in db.query(Model).all()}
+        assert "no_ts" in names          # NULL updated_at → not stale → preserved
+        assert "fresh" in names
+
     def test_wildcard_chars_in_root_path_match_literally(self, db, tmp_path):
         """Root/folder names routinely contain '_', a SQL LIKE wildcard. Matching
         must be literal so an unrelated path doesn't get pulled into the prune."""
