@@ -1417,6 +1417,34 @@ class TestManualGroupEndpoints:
         db.refresh(b)
         assert b.variant_group_id is None
 
+    def test_merge_repairs_dangling_rep_on_surviving_orphan_group(self, client, db):
+        """STUDIO-26: if the model an old group's rep_model_id points to is the
+        one that just got merged elsewhere, and the old group still has 2+
+        members left, it must not keep pointing at a model it no longer has."""
+        from app.models import VariantGroup
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A")
+        b = make_model(db, creator, name="B")
+        c = make_model(db, creator, name="C")
+        auto = VariantGroup(creator_id=creator.id, label="Auto", source="auto", rep_model_id=None)
+        db.add(auto); db.flush()
+        a.variant_group_id = auto.id
+        b.variant_group_id = auto.id
+        c.variant_group_id = auto.id
+        auto.rep_model_id = a.id  # rep is the model about to be merged away
+        d = make_model(db, creator, name="D")
+        commit_all(db)
+
+        # Merge a + d into a new group → auto group drops to [b, c] (still 2+,
+        # so it survives) but its rep_model_id still pointed at a.
+        resp = client.post("/models/groups/merge", json={"model_ids": [a.id, d.id]})
+        assert resp.status_code == 200
+
+        db.expire_all()
+        survivor = db.get(VariantGroup, auto.id)
+        assert survivor is not None
+        assert survivor.rep_model_id in {b.id, c.id}
+
     def test_merge_locked_from_rescan(self, client, db):
         from app.services import grouping
         from app.models import VariantGroup

@@ -124,7 +124,13 @@ def _mark_ungrouped(db: Session, model: Model) -> None:
 
 
 def _prune_empty_group(db: Session, group_id: int | None) -> None:
-    """Delete a group that has dropped below 2 members; clear the lone member."""
+    """Delete a group that has dropped below 2 members; clear the lone member.
+
+    A group that still has 2+ members survives, but its `rep_model_id` can be
+    left dangling — pointing at a model that just moved to a different group
+    (e.g. merge_group reassigning one member elsewhere) — since that write
+    happens on the *other* group, not this one. Repair it here so a stale rep
+    is never persisted (STUDIO-26)."""
     if group_id is None:
         return
     remaining = db.query(Model).filter(Model.variant_group_id == group_id).all()
@@ -135,6 +141,10 @@ def _prune_empty_group(db: Session, group_id: int | None) -> None:
         grp = db.get(VariantGroup, group_id)
         if grp is not None:
             db.delete(grp)
+    else:
+        grp = db.get(VariantGroup, group_id)
+        if grp is not None and grp.rep_model_id not in {m.id for m in remaining}:
+            grp.rep_model_id = remaining[0].id
 
 
 @router.post("/groups/merge", response_model=VariantGroupRead)
