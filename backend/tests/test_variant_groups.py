@@ -198,3 +198,33 @@ class TestSetGroupingStrategyScope:
 
         assert resp.status_code == 200
         assert creator_b.id not in regroups
+
+    def test_underscore_in_path_does_not_match_sibling(self, client, db):
+        """STUDIO-24: an unescaped `_` in the path is a SQL LIKE single-char
+        wildcard, so 'My_Stuff' would also match 'MyXStuff'. It must not."""
+        creator_a = make_creator(db, "CreatorZ")
+        creator_b = make_creator(db, "CreatorW")
+
+        self._make_model_at(db, creator_a, "/lib/My_Stuff/Product")
+        self._make_model_at(db, creator_b, "/lib/MyXStuff/Product")
+        db.commit()
+
+        regroups: list[int] = []
+
+        import app.services.grouping as grouping_mod
+        real_regroup = grouping_mod.regroup_creator
+
+        def tracking_regroup(db, creator_id):
+            regroups.append(creator_id)
+            real_regroup(db, creator_id)
+
+        with patch.object(grouping_mod, "regroup_creator", tracking_regroup):
+            resp = client.post(
+                "/models/grouping-strategy",
+                json={"path": "/lib/My_Stuff", "strategy": "off"},
+            )
+
+        assert resp.status_code == 200
+        assert regroups == [creator_a.id], (
+            f"Underscore wildcard leaked into sibling path; got {regroups}"
+        )

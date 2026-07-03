@@ -52,6 +52,19 @@ class TestListModels:
         assert data["total"] == 5
         assert len(data["items"]) == 3
 
+    def test_character_filter_underscore_not_wildcard(self, client, db):
+        """STUDIO-34: `_` in the character query param must be matched
+        literally, not as a SQL LIKE single-char wildcard."""
+        creator = make_creator(db)
+        make_model(db, creator, name="A", character="My_Guy")
+        make_model(db, creator, name="B", character="MyXGuy")
+        commit_all(db)
+
+        resp = client.get("/models?character=My_Guy")
+        assert resp.status_code == 200
+        names = {item["name"] for item in resp.json()["items"]}
+        assert names == {"A"}
+
     def test_search_by_name(self, client, db):
         creator = make_creator(db)
         make_model(db, creator, name="Undead Knight")

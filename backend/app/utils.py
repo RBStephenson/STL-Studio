@@ -1,6 +1,13 @@
 from datetime import datetime, timezone
 
 
+def like_escape(value: str) -> str:
+    """Escape SQL LIKE metacharacters (\\, %, _) so ``value`` is matched
+    literally. Callers must pass ``escape="\\\\"`` to ``.like()``/``.ilike()``.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def utcnow() -> datetime:
     """Current UTC time as a naive datetime.
 
