@@ -189,6 +189,12 @@ class JobRunner:
         with self._lock:
             return self._jobs.get(key)
 
+    def keys(self) -> list[str]:
+        """Snapshot of registered job keys. Lets a consumer that namespaces its
+        keys (e.g. ``draft:<id>``) reset just its own without touching others."""
+        with self._lock:
+            return list(self._jobs)
+
     def status(self, key: str) -> dict:
         """Uniform payload for ``key``, or an IDLE payload if it never ran."""
         handle = self.get(key)

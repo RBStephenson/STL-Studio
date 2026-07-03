@@ -21,13 +21,11 @@ from tests.test_painting_guides import mk_paint
 def _isolate(monkeypatch):
     monkeypatch.setenv("STL_SECRET_KEY", Fernet.generate_key().decode())
     secrets.reset_cache()
-    draft_jobs._jobs.clear()
-    draft_jobs._done_events.clear()
+    draft_jobs.reset()
     yield
     secrets.reset_cache()
     draft_jobs.reset_generator()
-    draft_jobs._jobs.clear()
-    draft_jobs._done_events.clear()
+    draft_jobs.reset()
 
 
 def _make_guide(client):
