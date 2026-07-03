@@ -160,12 +160,20 @@ def test_cancel_unknown_or_finished_job_returns_false(runner):
 # Concurrency — update() is atomic across threads
 # ---------------------------------------------------------------------------
 
-def test_concurrent_updates_do_not_lose_increments(runner):
+def test_increment_adds_to_missing_and_existing_counters(runner):
+    def body(job: JobHandle) -> None:
+        job.increment(a=1)
+        job.increment(a=2, b=5)
+
+    handle = runner.run_inline("k", body)
+    assert handle.payload()["progress"] == {"a": 3, "b": 5}
+
+
+def test_concurrent_increments_do_not_lose_updates(runner):
     def body(job: JobHandle) -> None:
         def bump() -> None:
             for _ in range(1000):
-                with job._lock:
-                    job.progress["n"] = job.progress.get("n", 0) + 1
+                job.increment(n=1)
 
         threads = [threading.Thread(target=bump) for _ in range(4)]
         for t in threads:
