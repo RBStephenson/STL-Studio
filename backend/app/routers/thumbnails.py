@@ -1,11 +1,11 @@
-"""Thumbnail and batch source-URL endpoints, split out of the models router
-(STUDIO-58). Paths are unchanged (prefix `/models`).
+"""Thumbnail endpoints, split out of the models router (STUDIO-58). Paths are
+unchanged (prefix `/models`).
 
 The `/group/...` batch routes are declared before the `/{model_id}/...` routes
 so the literal `group` segment isn't captured as a model_id (FastAPI matches in
 declaration order).
 """
-from urllib.parse import urlparse
+import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -13,15 +13,16 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Model
 from app.schemas import (
-    ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl, BatchSetSourceUrl,
+    ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl,
 )
 from app.services.thumbnails import (
     ThumbnailDownloadError, download_thumbnail, fetch_image_bytes, store_thumbnail,
 )
-from app.services.scrapers.base import detect_site
 from app.services import scanner
 from app.utils import utcnow
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -72,6 +73,7 @@ async def batch_thumbnail_from_url(body: BatchThumbnailFromUrl, db: Session = De
     except ThumbnailDownloadError as e:
         # Graceful degrade: store the bare URL on every member so the UI can try
         # to render it directly, even though the server-side download failed.
+        logger.info("Batch thumbnail fetch failed for %r: %s", body.url, e)
         for model in models:
             model.thumbnail_path = None
             model.thumbnail_url = body.url
@@ -122,6 +124,7 @@ async def set_thumbnail_from_url(
     try:
         path = await download_thumbnail(model_id, body.url)
     except ThumbnailDownloadError as e:
+        logger.info("Thumbnail fetch failed for model %s (%r): %s", model_id, body.url, e)
         model.thumbnail_path = None
         model.thumbnail_url = body.url
         model.updated_at = utcnow()
@@ -154,56 +157,3 @@ async def upload_thumbnail(
     model.thumbnail_url = None
     db.commit()
     return {"ok": True, "path": str(out)}
-
-
-def _host_label(url: str) -> str | None:
-    """Bare hostname (sans leading 'www.') for store URLs we don't scrape, so a
-    Patreon/Etsy/personal store page still records *some* source_site."""
-    host = (urlparse(url if "//" in url else f"https://{url}").hostname or "").lower()
-    return host[4:] if host.startswith("www.") else host or None
-
-
-@router.post("/group/source-url")
-def batch_set_source_url(body: BatchSetSourceUrl, db: Session = Depends(get_db)):
-    """Set one store-page URL on a selected set of variants (#500).
-
-    Selection-scoped and overwriting: writes `source_url`/`source_site` to
-    exactly the given ids, replacing any existing URL. Unlike the single-model
-    paths it does NOT call `propagate_source_url` — the user picked these
-    variants, so unselected siblings are deliberately left untouched.
-
-    `source_site` is derived from the URL: a known storefront key when the host
-    matches (`detect_site`), else the bare hostname so non-scraped stores still
-    carry a label. Unknown ids are skipped and reported. 409 if a scan is
-    running (it would overwrite fields on commit). Registered under `/group/`
-    so the literal segment isn't captured as a `{model_id}`."""
-    if scanner.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
-
-    if not body.model_ids:
-        raise HTTPException(status_code=400, detail="model_ids must not be empty.")
-
-    url = body.source_url.strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="source_url must not be empty.")
-    source_site = detect_site(url) or _host_label(url)
-    if not source_site:
-        raise HTTPException(status_code=400, detail="source_url must be a valid URL.")
-
-    requested = list(dict.fromkeys(body.model_ids))  # de-dupe, preserve order
-    models = db.query(Model).filter(Model.id.in_(requested)).all()
-    found = {m.id for m in models}
-
-    for model in models:
-        model.source_url = url
-        model.source_site = source_site
-        model.source_last_fetched = utcnow()
-        model.updated_at = utcnow()
-    db.commit()
-
-    return {
-        "ok": True,
-        "source_site": source_site,
-        "updated": [m.id for m in models],
-        "missing": [mid for mid in requested if mid not in found],
-    }

@@ -16,6 +16,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import Model as ModelDB, ScanRoot, STLFile
 from app.schemas import DownloadZipRequest
+from app.utils import like_escape
 
 logger = logging.getLogger(__name__)
 
@@ -479,7 +480,7 @@ def list_model_images(model_id: int, refresh: bool = False, db: Session = Depend
     boundary_prefix = str(boundary)
     other_model_folders = {
         p for (p,) in db.query(ModelDB.folder_path)
-        .filter(ModelDB.folder_path.like(f"{boundary_prefix}/%"),
+        .filter(ModelDB.folder_path.like(f"{like_escape(boundary_prefix)}/%", escape="\\"),
                 ModelDB.id != model.id)
         .all() if p
     }

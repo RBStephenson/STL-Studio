@@ -10,10 +10,15 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
+import logging
+
 import httpx
 from bs4 import BeautifulSoup
 
 from app.config import settings
+from app.services.url_guard import SSRFError, assert_public_url, guarded_async_client
+
+logger = logging.getLogger(__name__)
 
 _HEADERS = {
     "User-Agent": (
@@ -120,9 +125,17 @@ async def fetch_image_bytes(url: str, *, _follow_html: bool = True) -> tuple[str
     if scheme not in ("http", "https"):
         raise ThumbnailDownloadError("Only http(s) URLs are supported")
 
+    # SSRF barrier: reject any host resolving to a private/loopback/link-local
+    # address before we issue the request (#STUDIO-68). The guarded client below
+    # re-checks each redirect hop.
+    try:
+        assert_public_url(url)
+    except SSRFError as e:
+        raise ThumbnailDownloadError("That URL isn't allowed.") from e
+
     og_image_url: str | None = None
     try:
-        async with httpx.AsyncClient(
+        async with guarded_async_client(
             timeout=20, headers=_HEADERS, follow_redirects=True
         ) as client:
             async with client.stream("GET", url) as resp:
@@ -155,8 +168,15 @@ async def fetch_image_bytes(url: str, *, _follow_html: bool = True) -> tuple[str
                     return ext, data
     except ThumbnailDownloadError:
         raise
+    except SSRFError as e:
+        # A redirect hop pointed at a private address (caught by the client hook).
+        logger.warning("Thumbnail fetch blocked by SSRF guard for %r: %s", url, e)
+        raise ThumbnailDownloadError("That URL isn't allowed.") from e
     except httpx.HTTPError as e:
-        raise ThumbnailDownloadError(f"Could not fetch the image: {e}") from e
+        # Log the underlying error server-side; keep the raw text (which can carry
+        # internal host/URL detail) out of the user-facing message (#STUDIO-68).
+        logger.warning("Thumbnail fetch failed for %r: %s", url, e)
+        raise ThumbnailDownloadError("Could not fetch the image.") from e
 
     # HTML page → download the preview image it points to (no further following).
     return await fetch_image_bytes(og_image_url, _follow_html=False)

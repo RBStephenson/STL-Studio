@@ -9,9 +9,10 @@ import base64
 import logging
 from typing import Optional
 
-import httpx
+import httpx  # noqa: F401 — patched as `cults3d.httpx.AsyncClient` by the test suite
+from app.services.url_guard import guarded_async_client
 
-from app.services.scrapers.base import ScrapedModel, SearchResult
+from app.services.scrapers.base import ScrapedModel, SearchResult, MAX_REDIRECTS
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ async def _resolve_short_url(url: str) -> Optional[str]:
     if not _SHORT_RE.search(url):
         return None
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        async with guarded_async_client(timeout=20, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
             r = await client.get(url)
             canonical = str(r.url)
             return canonical if extract_id(canonical) else None
@@ -139,7 +140,7 @@ async def fetch(url: str) -> Optional[ScrapedModel]:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with guarded_async_client(timeout=20) as client:
             r = await client.post(
                 _GRAPHQL_URL,
                 headers=headers,
@@ -222,7 +223,7 @@ async def search(query: str, limit: int = 12) -> list[SearchResult]:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with guarded_async_client(timeout=20) as client:
             r = await client.post(
                 _GRAPHQL_URL,
                 headers=headers,

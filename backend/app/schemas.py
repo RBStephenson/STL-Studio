@@ -190,16 +190,6 @@ class BatchThumbnailFromUrl(BaseModel):
     url: str
 
 
-class BatchSetSourceUrl(BaseModel):
-    """Set one store-page URL on a selected set of variants (#500).
-
-    Selection-scoped and overwriting: the URL is written to exactly the given
-    ids (replacing any existing URL), with NO fill-empty propagation to
-    unselected siblings — distinct from the passive single-model path (#202)."""
-    model_ids: list[int]
-    source_url: str
-
-
 class GroupRepUpdate(BaseModel):
     """Designate (or clear) a model as its variant group's display rep (#193)."""
     is_group_rep: bool = True
@@ -425,7 +415,7 @@ class ImportApplyResponse(BaseModel):
 
 
 class DownloadZipRequest(BaseModel):
-    file_ids: list[int]
+    file_ids: list[int] = Field(..., max_length=500)
     zip_name: str = "kit-build"
 
     class Config:

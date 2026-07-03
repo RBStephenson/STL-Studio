@@ -1,7 +1,7 @@
 """Print-queue, print-status, rating, favorite and exclude endpoints, split out
 of the models router (STUDIO-58). Paths are unchanged (prefix `/models`)."""
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -122,10 +122,15 @@ def set_print_status(model_id: int, body: PrintStatusUpdate, db: Session = Depen
         # (favorites still float to the top at display time).
         if not was_queued:
             model.queued_at = utcnow()
-            max_pos = db.query(func.max(Model.queue_position)).filter(
-                Model.print_status == "queued"
-            ).scalar()
-            model.queue_position = (max_pos or 0) + 1
+            # Computed server-side in the UPDATE itself (not read-then-write in
+            # Python) so two concurrent requests can't both read the same max
+            # and collide on the same position (STUDIO-25).
+            next_pos = (
+                select(func.coalesce(func.max(Model.queue_position), 0) + 1)
+                .where(Model.print_status == "queued")
+                .scalar_subquery()
+            )
+            model.queue_position = next_pos
     elif body.status == "printed":
         model.queued_at = None
         model.queue_position = None

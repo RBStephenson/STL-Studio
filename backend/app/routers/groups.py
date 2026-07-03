@@ -15,7 +15,7 @@ from app.schemas import (
     VariantGroupRead, GroupingStrategyBody,
 )
 from app.services import scanner, grouping
-from app.utils import utcnow
+from app.utils import utcnow, like_escape
 
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -44,8 +44,19 @@ def set_group_rep(model_id: int, body: GroupRepUpdate, db: Session = Depends(get
             Model.id != model.id,
         ).update({Model.is_group_rep: False}, synchronize_session=False)
         model.is_group_rep = True
+        # Rep resolution for durable groups reads VariantGroup.rep_model_id, not
+        # this legacy flag (#678) — keep both in sync so the button's effect is
+        # visible everywhere the group is shown, not just this page (STUDIO-7).
+        if model.variant_group_id is not None:
+            group = db.get(VariantGroup, model.variant_group_id)
+            if group is not None:
+                group.rep_model_id = model.id
     else:
         model.is_group_rep = False
+        if model.variant_group_id is not None:
+            group = db.get(VariantGroup, model.variant_group_id)
+            if group is not None and group.rep_model_id == model.id:
+                group.rep_model_id = None
     model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "is_group_rep": model.is_group_rep}
@@ -113,7 +124,13 @@ def _mark_ungrouped(db: Session, model: Model) -> None:
 
 
 def _prune_empty_group(db: Session, group_id: int | None) -> None:
-    """Delete a group that has dropped below 2 members; clear the lone member."""
+    """Delete a group that has dropped below 2 members; clear the lone member.
+
+    A group that still has 2+ members survives, but its `rep_model_id` can be
+    left dangling — pointing at a model that just moved to a different group
+    (e.g. merge_group reassigning one member elsewhere) — since that write
+    happens on the *other* group, not this one. Repair it here so a stale rep
+    is never persisted (STUDIO-26)."""
     if group_id is None:
         return
     remaining = db.query(Model).filter(Model.variant_group_id == group_id).all()
@@ -124,6 +141,10 @@ def _prune_empty_group(db: Session, group_id: int | None) -> None:
         grp = db.get(VariantGroup, group_id)
         if grp is not None:
             db.delete(grp)
+    else:
+        grp = db.get(VariantGroup, group_id)
+        if grp is not None and grp.rep_model_id not in {m.id for m in remaining}:
+            grp.rep_model_id = remaining[0].id
 
 
 @router.post("/groups/merge", response_model=VariantGroupRead)
@@ -265,7 +286,7 @@ def set_grouping_strategy(body: GroupingStrategyBody, db: Session = Depends(get_
         .filter(
             Model.creator_id != None,  # noqa: E711
             (Model.folder_path == body.path)
-            | Model.folder_path.like(path_prefix + "%"),
+            | Model.folder_path.like(like_escape(path_prefix) + "%", escape="\\"),
         )
         .distinct()
         .all()

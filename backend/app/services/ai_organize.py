@@ -279,10 +279,10 @@ def _llm_refine(
             return []
 
     elapsed = time.monotonic() - t0
-    _log_step("llm_response", status=resp.status_code, elapsed_s=round(elapsed, 1))
+    _log_step("llm_response", elapsed_s=round(elapsed, 1))
 
     if not resp.is_success:
-        _log_step("llm_error", reason=f"HTTP {resp.status_code}")
+        _log_step("llm_error", reason="http_error")
         return []
 
     try:
@@ -301,7 +301,7 @@ def _llm_refine(
     try:
         data = json.loads(raw_text)
     except json.JSONDecodeError:
-        _log.warning("ai_organize llm returned non-JSON: %s", raw_text[:200])
+        _log.warning("ai_organize llm returned non-JSON response")
         return []
 
     suggestions = data.get("files", [])

@@ -30,7 +30,7 @@ from app.services.tag_sync import sync_model_tags
 from app.services import ai_organize
 from app.services.scanner import resolve_creator
 from app.config import settings
-from app.utils import utcnow
+from app.utils import utcnow, like_escape
 
 _log = logging.getLogger(__name__)
 
@@ -295,7 +295,7 @@ def list_models(
     )
     # character filter is list_models-only (not exposed via Library URL state)
     if character:
-        q = q.filter(Model.character.ilike(f"%{character}%"))
+        q = q.filter(Model.character.ilike(f"%{like_escape(character)}%", escape="\\"))
 
     # Variant grouping: collapse multi-variant characters to one representative card.
     # Non-reps are computed from the *filtered* set so a model that is the only match
