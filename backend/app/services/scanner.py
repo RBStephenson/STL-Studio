@@ -418,28 +418,22 @@ def _prune_stale_models(db: Session, scan_start: datetime, root_paths: list[str]
         n = os.path.normcase(os.path.normpath(folder_path))
         return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
-    # Load only non-excluded candidates with a stale timestamp — the common case
-    # (most models visited this scan) fetches nothing. Root membership still
-    # requires Python-side normpath comparison (see docstring re: LIKE metacharacters).
-    all_under_rows = (
-        db.query(Model.id, Model.folder_path)
+    # Fetch non-excluded candidates once (id + folder + timestamp), then derive
+    # both the under-root total and the stale subset in Python. Root membership
+    # still needs normpath comparison (see docstring re: LIKE metacharacters), so
+    # it can't move to SQL — but a single pass replaces the two overlapping
+    # full-table queries this ran before (#653).
+    rows = (
+        db.query(Model.id, Model.folder_path, Model.updated_at)
         .filter(Model.excluded == False, Model.folder_path != None)  # noqa: E711, E712
         .all()
     )
-    under_all = [r for r in all_under_rows if _under_root(r.folder_path)]
-    total = len(under_all)
-
-    stale_rows = (
-        db.query(Model.id, Model.folder_path)
-        .filter(
-            Model.excluded == False,  # noqa: E712
-            Model.folder_path != None,  # noqa: E711
-            Model.updated_at != None,  # noqa: E711
-            Model.updated_at < scan_start,
-        )
-        .all()
-    )
-    stale_ids = [r.id for r in stale_rows if _under_root(r.folder_path)]
+    under = [r for r in rows if _under_root(r.folder_path)]
+    total = len(under)
+    stale_ids = [
+        r.id for r in under
+        if r.updated_at is not None and r.updated_at < scan_start
+    ]
     if not stale_ids:
         return 0
     if _exceeds_prune_cap(len(stale_ids), total, "not visited this run"):
