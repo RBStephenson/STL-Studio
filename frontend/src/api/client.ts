@@ -1128,15 +1128,6 @@ export const api = {
           body: JSON.stringify({ model_ids: modelIds, url }),
         },
       ),
-    batchSetSourceUrl: (modelIds: number[], sourceUrl: string) =>
-      request<{ ok: boolean; source_site: string; updated: number[]; missing: number[] }>(
-        `/models/group/source-url`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model_ids: modelIds, source_url: sourceUrl }),
-        },
-      ),
     neighbors: (id: number, params: Record<string, string | number | boolean>) => {
       const qs = new URLSearchParams(
         Object.entries(params)
