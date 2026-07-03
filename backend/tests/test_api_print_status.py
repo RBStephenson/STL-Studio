@@ -1,5 +1,7 @@
 """Tests for the print-status lifecycle endpoint (#166)."""
+from sqlalchemy import func, select
 from tests.conftest import make_creator, make_model
+from app.models import Model
 
 
 def setup(db):
@@ -23,6 +25,34 @@ def test_set_status_to_queued(client, db):
     assert m.print_status == "queued"
     assert m.queued_at is not None
     assert m.queue_position is not None
+
+
+def test_concurrent_queue_position_assignment_does_not_collide(client, db):
+    """STUDIO-25: two rows queued in the same transaction (before either
+    commits) must not both compute the next position from the same stale
+    read — the server-side expression must resolve each row's UPDATE against
+    the other's in-transaction write, not a Python-side read-then-write."""
+    creator = make_creator(db)
+    m1 = make_model(db, creator, name="First")
+    m2 = make_model(db, creator, name="Second")
+    db.commit()
+
+    def _next_pos():
+        return (
+            select(func.coalesce(func.max(Model.queue_position), 0) + 1)
+            .where(Model.print_status == "queued")
+            .scalar_subquery()
+        )
+
+    m1.print_status = "queued"
+    m1.queue_position = _next_pos()
+    m2.print_status = "queued"
+    m2.queue_position = _next_pos()
+    db.flush()
+
+    db.refresh(m1)
+    db.refresh(m2)
+    assert {m1.queue_position, m2.queue_position} == {1, 2}
 
 
 def test_set_status_to_printing(client, db):
