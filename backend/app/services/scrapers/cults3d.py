@@ -9,7 +9,6 @@ import base64
 import logging
 from typing import Optional
 
-import httpx
 from app.services.url_guard import guarded_async_client
 
 from app.services.scrapers.base import ScrapedModel, SearchResult, MAX_REDIRECTS

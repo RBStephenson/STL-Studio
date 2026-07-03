@@ -9,7 +9,6 @@ Gumroad product pages are server-rendered and expose metadata in:
 import re
 import json
 import logging
-import httpx
 from app.services.url_guard import guarded_async_client
 from bs4 import BeautifulSoup
 from typing import Optional
