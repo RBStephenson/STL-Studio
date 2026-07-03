@@ -15,7 +15,7 @@ from app.schemas import (
     VariantGroupRead, GroupingStrategyBody,
 )
 from app.services import scanner, grouping
-from app.utils import utcnow
+from app.utils import utcnow, like_escape
 
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -265,7 +265,7 @@ def set_grouping_strategy(body: GroupingStrategyBody, db: Session = Depends(get_
         .filter(
             Model.creator_id != None,  # noqa: E711
             (Model.folder_path == body.path)
-            | Model.folder_path.like(path_prefix + "%"),
+            | Model.folder_path.like(like_escape(path_prefix) + "%", escape="\\"),
         )
         .distinct()
         .all()
