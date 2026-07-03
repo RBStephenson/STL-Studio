@@ -12,9 +12,10 @@ export default function Navbar() {
   const [reviewCount, setReviewCount] = useState<number | null>(null);
   const [queueCount, setQueueCount] = useState<number | null>(null);
 
-  // Refetch the badge counts on every route change and when the tab regains
-  // focus, so they don't go stale after a mutation elsewhere (e.g. an enrich
-  // that drops an item from the queue) — they're not fetched only once (#543).
+  // Refetch the badge counts on every route change, when the tab regains
+  // focus, and on a short poll, so they don't go stale after a same-page
+  // mutation elsewhere (e.g. a bulk-enrich flag or manual "flag for review"
+  // that never triggers a route change or window blur/refocus) (STUDIO-6).
   useEffect(() => {
     let alive = true;
     const refresh = () => {
@@ -26,7 +27,8 @@ export default function Navbar() {
     };
     refresh();
     window.addEventListener("focus", refresh);
-    return () => { alive = false; window.removeEventListener("focus", refresh); };
+    const poll = window.setInterval(refresh, 15000);
+    return () => { alive = false; window.removeEventListener("focus", refresh); window.clearInterval(poll); };
   }, [pathname]);
 
   const links = [
