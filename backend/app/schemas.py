@@ -586,6 +586,31 @@ class AiOrganizeResult(BaseModel):
     message: str = ""
 
 
+class AiOrganizeSuggestionPreview(BaseModel):
+    """Dry-run suggestion with enough context to populate the review modal."""
+    id: int
+    filename: str
+    part_type: Optional[str] = None
+    part_name: Optional[str] = None
+    sup_of_id: Optional[int] = None
+    sup_base_filename: Optional[str] = None
+
+
+class AiOrganizePreviewResult(BaseModel):
+    suggestions: list[AiOrganizeSuggestionPreview]
+
+
+class AiOrganizeApplyItem(BaseModel):
+    id: int
+    part_type: Optional[str] = None
+    part_name: Optional[str] = None
+    sup_of_id: Optional[int] = None
+
+
+class AiOrganizeApplyRequest(BaseModel):
+    items: list[AiOrganizeApplyItem]
+
+
 # --- Cults3D settings (#578) ----------------------------------------------
 
 class CultsSettingsRead(BaseModel):

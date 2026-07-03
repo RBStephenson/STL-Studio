@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, Fragment } from "react";
 import { GalleryRotator, GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Heart, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2, Wand2 } from "lucide-react";
-import { api, ApiError, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Heart, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2, Wand2, Loader2 } from "lucide-react";
+import { api, ApiError, Model, ModelDetail as ModelDetailType, Collection, AiOrganizeSuggestionPreview } from "../api/client";
+import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
 import ImagePicker from "../components/ImagePicker";
@@ -154,7 +155,7 @@ const PART_TYPE_SUGGESTIONS = [
   "Right Arm", "Left Arm", "Arms",
   "Right Leg", "Left Leg", "Legs",
   "Hands", "Feet", "Base",
-  "Weapon", "Shield", "Cloak", "Cape",
+  "Weapon", "Shield", "Armor", "Cloak", "Cape",
   "Hair", "Wings", "Tail", "Accessories",
 ];
 
@@ -307,10 +308,14 @@ export default function ModelDetail() {
   const [partNames, setPartNames] = useState<Record<number, string>>({});
   const [filesCollapsed, setFilesCollapsed] = useState<Set<string>>(new Set());
   const [hTableCollapsed, setHTableCollapsed] = useState<Set<string>>(new Set());
+  // null = full-width auto mode; set on first drag to measured pixel widths
+  const [hColWidths, setHColWidths] = useState<number[] | null>(null);
+  const hTableRef = useRef<HTMLTableElement>(null);
   const [linkingBaseId, setLinkingBaseId] = useState<number | null>(null);
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [aiOrganizing, setAiOrganizing] = useState(false);
+  const [aiOrganizeSuggestions, setAiOrganizeSuggestions] = useState<AiOrganizeSuggestionPreview[] | null>(null);
   const [copiedPath, setCopiedPath] = useState(false);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
@@ -440,8 +445,11 @@ export default function ModelDetail() {
     setAiOrganizing(true);
     try {
       const result = await api.models.aiOrganize(model.id);
-      toast(result.message || `Applied to ${result.applied.length} file(s).`, "success");
-      load();
+      if (!result.suggestions.length) {
+        toast("AI returned no suggestions for this model.", "error");
+        return;
+      }
+      setAiOrganizeSuggestions(result.suggestions);
     } catch (e: any) {
       toast(e?.message || "AI organize failed", "error");
     } finally {
@@ -1632,7 +1640,9 @@ export default function ModelDetail() {
                       disabled={aiOrganizing}
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-violet-950 border border-gray-700 hover:border-violet-600 disabled:opacity-40 text-xs text-gray-400 hover:text-violet-300 transition-colors"
                     >
-                      <Wand2 size={12} />
+                      {aiOrganizing
+                        ? <Loader2 size={12} className="animate-spin" />
+                        : <Wand2 size={12} />}
                       {aiOrganizing ? "Organizing…" : "AI Organize"}
                     </button>
                   )}
@@ -1927,16 +1937,24 @@ export default function ModelDetail() {
               </td>
               {settings.part_categories_enabled && (
                 <td className="px-3 py-1.5">
-                  <input
-                    list="part-category-list-h"
+                  <select
                     value={pt}
-                    placeholder="Category…"
                     onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => { const v = e.target.value; setPartTypes((prev) => ({ ...prev, [f.id]: toPascalCase(v) + (v.endsWith(" ") ? " " : "") })); }}
-                    onBlur={(e) => savePartType(f.id, e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                    className="w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-1.5 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none"
-                  />
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setPartTypes((prev) => ({ ...prev, [f.id]: v }));
+                      savePartType(f.id, v);
+                    }}
+                    className="w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-1.5 py-0.5 text-xs text-gray-300 focus:outline-none"
+                  >
+                    <option value="">—</option>
+                    {PART_TYPE_SUGGESTIONS.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                    {pt && !PART_TYPE_SUGGESTIONS.includes(pt) && (
+                      <option value={pt}>{pt}</option>
+                    )}
+                  </select>
                 </td>
               )}
               <td className="px-3 py-1.5 text-right">
@@ -2021,7 +2039,9 @@ export default function ModelDetail() {
                 <div className="flex gap-2">
                   {settings.ai_organize_enabled && (
                     <button onClick={runAiOrganize} disabled={aiOrganizing} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-violet-950 border border-gray-700 hover:border-violet-600 disabled:opacity-40 text-xs text-gray-400 hover:text-violet-300 transition-colors">
-                      <Wand2 size={12} />
+                      {aiOrganizing
+                        ? <Loader2 size={12} className="animate-spin" />
+                        : <Wand2 size={12} />}
                       {aiOrganizing ? "Organizing…" : "AI Organize"}
                     </button>
                   )}
@@ -2035,20 +2055,68 @@ export default function ModelDetail() {
                   </button>
                 </div>
               </div>
-              {settings.part_categories_enabled && (
-                <datalist id="part-category-list-h">
-                  {PART_TYPE_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
-                </datalist>
-              )}
               <div className="overflow-x-auto overflow-y-auto max-h-[520px] rounded-lg border border-gray-800">
-                <table className="w-full text-xs">
+                {(() => {
+                  const startColResize = (colIdx: number, e: React.MouseEvent) => {
+                    e.preventDefault();
+                    // On first drag, snapshot current column widths from the DOM
+                    let snapshot = hColWidths;
+                    if (!snapshot && hTableRef.current) {
+                      const ths = Array.from(hTableRef.current.querySelectorAll('thead tr th'));
+                      snapshot = ths.map((th) => (th as HTMLElement).offsetWidth);
+                      setHColWidths(snapshot);
+                    }
+                    if (!snapshot) return;
+                    const startX = e.clientX;
+                    const startW = snapshot[colIdx];
+                    const onMove = (ev: MouseEvent) => {
+                      setHColWidths(prev => {
+                        const base = prev ?? snapshot!;
+                        const next = [...base];
+                        next[colIdx] = Math.max(60, startW + ev.clientX - startX);
+                        return next;
+                      });
+                    };
+                    const onUp = () => {
+                      window.removeEventListener('mousemove', onMove);
+                      window.removeEventListener('mouseup', onUp);
+                      document.body.style.cursor = '';
+                      document.body.style.userSelect = '';
+                    };
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                    window.addEventListener('mousemove', onMove);
+                    window.addEventListener('mouseup', onUp);
+                  };
+                  const resizeHandle = (colIdx: number) => (
+                    <div
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize group/rh flex items-stretch"
+                      onMouseDown={(e) => startColResize(colIdx, e)}
+                    >
+                      <div className="w-px mx-auto bg-gray-700 group-hover/rh:bg-indigo-500 transition-colors" />
+                    </div>
+                  );
+                  const tableStyle = hColWidths
+                    ? { width: hColWidths.reduce((a, b) => a + b, 0), minWidth: hColWidths.reduce((a, b) => a + b, 0) }
+                    : undefined;
+                  return (
+                <table ref={hTableRef} className={`text-xs table-fixed${hColWidths ? '' : ' w-full'}`} style={tableStyle}>
+                  {hColWidths && (
+                  <colgroup>
+                    <col style={{ width: hColWidths[0] }} />
+                    <col style={{ width: hColWidths[1] }} />
+                    {settings.part_categories_enabled && <col style={{ width: hColWidths[2] }} />}
+                    <col style={{ width: hColWidths[3] }} />
+                    <col style={{ width: hColWidths[4] }} />
+                  </colgroup>
+                  )}
                   <thead className="sticky top-0 z-10">
                     <tr className="border-b border-gray-700 bg-gray-900">
-                      <th className="px-3 py-2 text-left text-gray-500 font-medium w-52">Name</th>
-                      <th className="px-3 py-2 text-left text-gray-500 font-medium">Filename</th>
-                      {settings.part_categories_enabled && <th className="px-3 py-2 text-left text-gray-500 font-medium w-36">Category</th>}
-                      <th className="px-3 py-2 text-right text-gray-500 font-medium w-20">Size</th>
-                      <th className="px-3 py-2 w-14"></th>
+                      <th className="px-3 py-2 text-left text-gray-500 font-medium relative select-none overflow-hidden">Name{resizeHandle(0)}</th>
+                      <th className="px-3 py-2 text-left text-gray-500 font-medium relative select-none overflow-hidden">Filename{resizeHandle(1)}</th>
+                      {settings.part_categories_enabled && <th className="px-3 py-2 text-left text-gray-500 font-medium relative select-none overflow-hidden">Category{resizeHandle(2)}</th>}
+                      <th className="px-3 py-2 text-right text-gray-500 font-medium relative select-none overflow-hidden">Size{resizeHandle(3)}</th>
+                      <th className="px-3 py-2"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800/60">
@@ -2075,6 +2143,8 @@ export default function ModelDetail() {
                     )}
                   </tbody>
                 </table>
+                  );
+                })()}
               </div>
             </div>
 
@@ -2107,6 +2177,16 @@ export default function ModelDetail() {
           modelName={model.title || model.name}
           files={model.stl_files.map((f) => ({ ...f, part_type: partTypes[f.id] || f.part_type }))}
           onClose={() => setShowKitBuilder(false)}
+        />
+      )}
+
+      {aiOrganizeSuggestions && (
+        <AiOrganizeReviewModal
+          modelId={model.id}
+          suggestions={aiOrganizeSuggestions}
+          stlFiles={model.stl_files}
+          onApplied={() => { setAiOrganizeSuggestions(null); load(); }}
+          onClose={() => setAiOrganizeSuggestions(null)}
         />
       )}
 

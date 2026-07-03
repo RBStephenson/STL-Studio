@@ -5,7 +5,8 @@ schemas.py is the whitelist of known keys and their defaults: GET overlays
 stored rows on it, and the PATCH schema (AppSettingsUpdate) rejects anything
 outside it, so unknown keys can never be written.
 """
-from fastapi import APIRouter, Depends, HTTPException
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.config import RESTART_REQUIRED_KEYS, settings
@@ -213,7 +214,7 @@ def _organize_settings(db: Session) -> AiOrganizeSettingsRead:
     return AiOrganizeSettingsRead(
         key_set=hint is not None,
         key_hint=hint,
-        enabled=enabled_row.value == "true" if enabled_row else False,
+        enabled=bool(enabled_row.value) if enabled_row else False,
         url=url_row.value if url_row else "",
         model=model_row.value if model_row else "",
     )
@@ -234,3 +235,42 @@ def set_organize_key(body: AiKeyUpdate, db: Session = Depends(get_db)):
 def clear_organize_key(db: Session = Depends(get_db)):
     secrets.clear_organize_api_key(db)
     return _organize_settings(db)
+
+
+@router.get("/ai-organize/models")
+def get_organize_models(url: str = Query(""), db: Session = Depends(get_db)):
+    """Proxy a /v1/models (or /api/tags) call to the configured AI endpoint.
+
+    Returns {"models": [...]} so the frontend can populate a dropdown without
+    making a cross-origin request from the browser.
+    """
+    if not url:
+        url_row = db.get(AppSetting, "ai_organize_url")
+        url = url_row.value if url_row else ""
+    if not url:
+        raise HTTPException(status_code=400, detail="No URL configured")
+
+    api_key = secrets.get_organize_api_key(db) or ""
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    import re
+    base = re.sub(r"(?i)(https?://)(?:localhost|127\.0\.0\.1)\b", r"\1host.docker.internal", url.rstrip("/"))
+    try:
+        r = httpx.get(f"{base}/v1/models", headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            models = sorted({m["id"] for m in data.get("data", []) if "id" in m})
+            if models:
+                return {"models": models}
+        # Ollama also exposes /api/tags which lists local models.
+        r2 = httpx.get(f"{base}/api/tags", headers=headers, timeout=10)
+        if r2.status_code == 200:
+            data2 = r2.json()
+            models = sorted({m["name"] for m in data2.get("models", []) if "name" in m})
+            return {"models": models}
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach AI endpoint: {exc}")
+
+    raise HTTPException(status_code=502, detail="No models returned from endpoint")

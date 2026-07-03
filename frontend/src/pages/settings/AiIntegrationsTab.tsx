@@ -29,6 +29,9 @@ export default function AiIntegrationsTab() {
   const [organizeSettings, setOrganizeSettings] = useState<AiOrganizeSettings | null>(null);
   const [organizeKeyDraft, setOrganizeKeyDraft] = useState("");
   const [editingOrganizeKey, setEditingOrganizeKey] = useState(false);
+  const [organizeModels, setOrganizeModels] = useState<string[]>([]);
+  const [organizeModelsLoading, setOrganizeModelsLoading] = useState(false);
+  const [organizeModelsError, setOrganizeModelsError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -131,6 +134,22 @@ export default function AiIntegrationsTab() {
     }
   };
 
+  const fetchOrganizeModels = async (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    setOrganizeModelsLoading(true);
+    setOrganizeModelsError(null);
+    try {
+      const result = await api.settings.aiOrganize.getModels(trimmed);
+      setOrganizeModels(result.models);
+    } catch (e: any) {
+      setOrganizeModelsError(e?.message || "Could not reach endpoint");
+      setOrganizeModels([]);
+    } finally {
+      setOrganizeModelsLoading(false);
+    }
+  };
+
   const saveOrganizeKey = async () => {
     const key = organizeKeyDraft.trim();
     if (!key) return;
@@ -139,6 +158,8 @@ export default function AiIntegrationsTab() {
       setOrganizeKeyDraft("");
       setEditingOrganizeKey(false);
       flash("API key saved", "ok");
+      // Re-fetch models — the key may have been required for auth.
+      await fetchOrganizeModels(settings.ai_organize_url);
     } catch (e: any) {
       flash(e?.message || "Could not save the organizer API key", "err");
     }
@@ -281,22 +302,49 @@ export default function AiIntegrationsTab() {
                   onChange={(e) => update({ ai_organize_url: e.target.value }).catch(() =>
                     flash("Could not update URL", "err")
                   )}
+                  onBlur={(e) => fetchOrganizeModels(e.target.value)}
                   placeholder="http://localhost:11434"
                   className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
                 />
                 <p className="text-xs text-gray-600 mt-1">Ollama default: <code className="text-gray-500">http://localhost:11434</code></p>
               </div>
               <div className="flex-1 min-w-40">
-                <label className="block text-xs text-gray-400 mb-1">Model</label>
-                <input
-                  type="text"
-                  value={settings.ai_organize_model}
-                  onChange={(e) => update({ ai_organize_model: e.target.value }).catch(() =>
-                    flash("Could not update model", "err")
+                <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1.5">
+                  Model
+                  {organizeModelsLoading && (
+                    <span className="text-gray-600 text-xs animate-pulse">fetching…</span>
                   )}
-                  placeholder="llama3.2"
-                  className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
-                />
+                </label>
+                {organizeModels.length > 0 ? (
+                  <select
+                    value={settings.ai_organize_model}
+                    onChange={(e) => update({ ai_organize_model: e.target.value }).catch(() =>
+                      flash("Could not update model", "err")
+                    )}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+                  >
+                    <option value="">-- Select a model --</option>
+                    {organizeModels.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                    {settings.ai_organize_model && !organizeModels.includes(settings.ai_organize_model) && (
+                      <option value={settings.ai_organize_model}>{settings.ai_organize_model} (current)</option>
+                    )}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={settings.ai_organize_model}
+                    onChange={(e) => update({ ai_organize_model: e.target.value }).catch(() =>
+                      flash("Could not update model", "err")
+                    )}
+                    placeholder="llama3.2"
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+                  />
+                )}
+                {organizeModelsError && (
+                  <p className="text-xs text-rose-400 mt-1">{organizeModelsError}</p>
+                )}
               </div>
             </div>
 

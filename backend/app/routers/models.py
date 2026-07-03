@@ -18,6 +18,8 @@ from app.schemas import (
     BatchSetSourceUrl, GroupRepUpdate, BulkDeleteRequest, BulkDeleteResponse,
     GroupMergeBody, GroupSplitBody, GroupPatchBody, VariantGroupRead, GroupingStrategyBody,
     AiOrganizeResult, AiOrganizeSuggestion,
+    AiOrganizeSuggestionPreview, AiOrganizePreviewResult,
+    AiOrganizeApplyItem, AiOrganizeApplyRequest,
 )
 
 _log = logging.getLogger(__name__)
@@ -590,75 +592,146 @@ def update_stl_file(file_id: int, body: STLFileUpdate, db: Session = Depends(get
     return {"ok": True}
 
 
-@router.post("/{model_id}/ai-organize", response_model=AiOrganizeResult)
-def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
-    """Call the configured AI organizer to normalize part names and link sup files."""
-    from app.models import STLFile, AppSetting
+def _load_organize_config(db):
+    """Read AI organizer settings from app_settings. Raises HTTPException on misconfiguration."""
+    from app.models import AppSetting
     from app.services import secrets as _secrets
 
+    enabled_row = db.get(AppSetting, "ai_organize_enabled")
+    if not enabled_row or not bool(enabled_row.value):
+        raise HTTPException(status_code=400, detail="AI organizer is not enabled")
+    url_row = db.get(AppSetting, "ai_organize_url")
+    model_row = db.get(AppSetting, "ai_organize_model")
+    return (
+        url_row.value if url_row else "",
+        model_row.value if model_row else "",
+        _secrets.get_organize_api_key(db) or "",
+    )
+
+
+def _normalize_type(suggested: str, existing: list[str]) -> str:
+    """Snap a suggested category to the closest existing one.
+
+    Handles case differences and singular/plural variants so the AI's "Accessory"
+    maps to an existing "Accessories" (and vice-versa) rather than creating a
+    duplicate category with a slightly different name.
+    """
+    if not existing:
+        return suggested
+    low = suggested.lower()
+    for cat in existing:
+        if cat.lower() == low:
+            return cat
+    for cat in existing:
+        cl = cat.lower()
+        if cl == low + "s" or cl == low + "es":
+            return cat
+        if low.endswith("y") and cl == low[:-1] + "ies":
+            return cat
+        if low == cl + "s" or low == cl + "es":
+            return cat
+        if cl.endswith("y") and low == cl[:-1] + "ies":
+            return cat
+    return suggested
+
+
+@router.post("/{model_id}/ai-organize", response_model=AiOrganizePreviewResult)
+def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
+    """Call the AI organizer and return suggestions without writing to the DB.
+
+    The client reviews, optionally edits, then calls /ai-organize/apply.
+    """
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     if not model.stl_files:
         raise HTTPException(status_code=400, detail="Model has no STL files to organize")
 
-    # Read organizer config from app_settings
-    enabled_row = db.get(AppSetting, "ai_organize_enabled")
-    if not enabled_row or enabled_row.value != "true":
-        raise HTTPException(status_code=400, detail="AI organizer is not enabled")
-
-    url_row = db.get(AppSetting, "ai_organize_url")
-    model_row = db.get(AppSetting, "ai_organize_model")
-    url = url_row.value if url_row else ""
-    org_model = model_row.value if model_row else ""
-    api_key = _secrets.get_organize_api_key(db) or ""
+    url, org_model, api_key = _load_organize_config(db)
 
     file_dicts = [
         {"id": f.id, "filename": f.filename, "part_type": f.part_type, "part_name": f.part_name}
         for f in model.stl_files
     ]
     by_filename = {f.filename: f.id for f in model.stl_files}
-    by_id = {f.id: f for f in model.stl_files}
+    by_id_filename = {f.id: f.filename for f in model.stl_files}
+
+    # Collect all category names already in the library so AI suggestions snap
+    # to existing names (e.g. "Accessory" → "Accessories").
+    existing_types: list[str] = [
+        row[0] for row in
+        db.query(STLFile.part_type).filter(STLFile.part_type.isnot(None)).distinct().all()
+    ]
 
     try:
-        suggestions = ai_organize.run(file_dicts, url, org_model, api_key)
+        raw = ai_organize.run(file_dicts, url, org_model, api_key)
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
-    applied: list[AiOrganizeSuggestion] = []
-    for s in suggestions:
+    for s in raw:
+        if s.get("part_type"):
+            s["part_type"] = _normalize_type(s["part_type"], existing_types)
+
+    previews: list[AiOrganizeSuggestionPreview] = []
+    for s in raw:
         file_id = s.get("id")
-        if not isinstance(file_id, int) or file_id not in by_id:
+        if not isinstance(file_id, int) or file_id not in by_id_filename:
             continue
-        f = by_id[file_id]
-
-        part_type = s.get("part_type")
-        part_name = s.get("part_name")
-        sup_base_filename = s.get("sup_base_filename")
-
-        if part_type is not None:
-            f.part_type = part_type.strip() or None
-        if part_name is not None:
-            f.part_name = part_name.strip() or None
-
+        sup_base_filename = s.get("sup_base_filename") or None
         resolved_sup_id: int | None = None
         if sup_base_filename:
-            base_id = by_filename.get(sup_base_filename)
-            if base_id and base_id != file_id:
-                f.sup_of_id = base_id
-                resolved_sup_id = base_id
-
-        applied.append(AiOrganizeSuggestion(
+            cand = by_filename.get(sup_base_filename)
+            if cand and cand != file_id:
+                resolved_sup_id = cand
+        previews.append(AiOrganizeSuggestionPreview(
             id=file_id,
+            filename=by_id_filename[file_id],
+            part_type=s.get("part_type") or None,
+            part_name=s.get("part_name") or None,
+            sup_of_id=resolved_sup_id,
+            sup_base_filename=sup_base_filename if resolved_sup_id else None,
+        ))
+
+    return AiOrganizePreviewResult(suggestions=previews)
+
+
+@router.post("/{model_id}/ai-organize/apply", response_model=AiOrganizeResult)
+def ai_organize_apply(model_id: int, body: AiOrganizeApplyRequest, db: Session = Depends(get_db)):
+    """Apply user-confirmed AI suggestions to the model's STL files."""
+    from app.models import STLFile
+
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    by_id = {f.id: f for f in model.stl_files}
+
+    applied: list[AiOrganizeSuggestion] = []
+    for item in body.items:
+        f = by_id.get(item.id)
+        if not f:
+            continue
+        if item.part_type is not None:
+            f.part_type = item.part_type.strip() or None
+        if item.part_name is not None:
+            f.part_name = item.part_name.strip() or None
+        if item.sup_of_id is not None:
+            target = by_id.get(item.sup_of_id)
+            if target and target.id != f.id:
+                f.sup_of_id = target.id
+        elif item.sup_of_id is None and "sup_of_id" in item.model_fields_set:
+            f.sup_of_id = None
+        applied.append(AiOrganizeSuggestion(
+            id=f.id,
             part_type=f.part_type,
             part_name=f.part_name,
-            sup_of_id=resolved_sup_id,
+            sup_of_id=f.sup_of_id,
         ))
 
     db.commit()
     return AiOrganizeResult(
         applied=applied,
-        message=f"Applied suggestions to {len(applied)} file(s).",
+        message=f"Applied changes to {len(applied)} file(s).",
     )
 
 

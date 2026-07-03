@@ -327,6 +327,23 @@ export interface AiOrganizeResult {
   message: string;
 }
 
+export interface AiOrganizeSuggestionPreview {
+  id: number;
+  filename: string;
+  part_type: string | null;
+  part_name: string | null;
+  sup_of_id: number | null;
+  sup_base_filename: string | null;
+}
+
+export interface AiOrganizePreviewResult {
+  suggestions: AiOrganizeSuggestionPreview[];
+}
+
+export interface AiOrganizeModelsList {
+  models: string[];
+}
+
 // Cults3D credential status (#578) — credentials are write-only.
 export interface CultsSettings {
   credentials_set: boolean;
@@ -1144,7 +1161,13 @@ export const api = {
         body: JSON.stringify(body),
       }),
     aiOrganize: (modelId: number) =>
-      request<AiOrganizeResult>(`/models/${modelId}/ai-organize`, { method: "POST" }),
+      request<AiOrganizePreviewResult>(`/models/${modelId}/ai-organize`, { method: "POST" }),
+    aiOrganizeApply: (modelId: number, items: AiOrganizeSuggestion[]) =>
+      request<AiOrganizeResult>(`/models/${modelId}/ai-organize/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      }),
     batchThumbnailFromUrl: (modelIds: number[], url: string) =>
       request<{ ok: boolean; downloaded: boolean; detail?: string; updated: number[]; missing: number[] }>(
         `/models/group/thumbnail/from-url`,
@@ -1367,6 +1390,10 @@ export const api = {
         }),
       clearKey: () =>
         request<AiOrganizeSettings>("/settings/ai-organize/key", { method: "DELETE" }),
+      getModels: (url?: string) => {
+        const qs = url ? `?url=${encodeURIComponent(url)}` : "";
+        return request<AiOrganizeModelsList>(`/settings/ai-organize/models${qs}`);
+      },
     },
   },
   painting: {
