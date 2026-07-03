@@ -153,6 +153,24 @@ class TestDownloadZip:
         resp = client.post("/files/download-zip", json={"file_ids": [99999], "zip_name": "Test"})
         assert resp.status_code == 404
 
+    def test_too_many_file_ids_rejected(self, client):
+        """STUDIO-32: an unbounded file_ids list lets a client force the server
+        to build an arbitrarily large ZIP."""
+        resp = client.post(
+            "/files/download-zip",
+            json={"file_ids": list(range(1, 502)), "zip_name": "Test"},
+        )
+        assert resp.status_code == 422
+
+    def test_exactly_500_file_ids_passes_validation(self, client):
+        """The limit is inclusive — 500 is still valid (it just 404s here since
+        none of these IDs exist, proving validation, not lookup, is the gate)."""
+        resp = client.post(
+            "/files/download-zip",
+            json={"file_ids": list(range(1, 501)), "zip_name": "Test"},
+        )
+        assert resp.status_code == 404
+
     def test_returns_zip_content_type(self, client, db, tmp_path, monkeypatch):
         import app.routers.files as files_module
         monkeypatch.setattr(files_module, "_allowed_roots", lambda: [tmp_path])

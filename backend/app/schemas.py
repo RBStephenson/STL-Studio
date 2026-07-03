@@ -425,7 +425,7 @@ class ImportApplyResponse(BaseModel):
 
 
 class DownloadZipRequest(BaseModel):
-    file_ids: list[int]
+    file_ids: list[int] = Field(..., max_length=500)
     zip_name: str = "kit-build"
 
     class Config:
