@@ -10,6 +10,7 @@ import re
 import json
 import logging
 import httpx
+from app.services.url_guard import guarded_async_client
 from bs4 import BeautifulSoup
 from typing import Optional
 
@@ -39,7 +40,7 @@ def extract_id(url: str) -> Optional[str]:
 
 async def fetch(url: str) -> Optional[ScrapedModel]:
     # Follow short-link redirects
-    async with httpx.AsyncClient(
+    async with guarded_async_client(
         timeout=20,
         headers=_HEADERS,
         follow_redirects=True,
@@ -165,7 +166,7 @@ async def search(query: str, limit: int = 12) -> list[SearchResult]:
     discover page. Results are limited and not great — URL-paste is
     the primary path for Gumroad.
     """
-    async with httpx.AsyncClient(
+    async with guarded_async_client(
         timeout=20,
         headers=_HEADERS,
         follow_redirects=True,

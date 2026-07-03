@@ -37,6 +37,15 @@ def mock_http(monkeypatch, handler):
         return _REAL_ASYNC_CLIENT(**kwargs)
 
     monkeypatch.setattr(thumbnails.httpx, "AsyncClient", factory)
+    # The SSRF guard (STUDIO-68) resolves the host before fetching; the fake
+    # test URLs have no DNS, so point the guard at a public IP. HTTP itself is
+    # mocked above, so no real request goes out.
+    import socket
+    from app.services import url_guard
+    monkeypatch.setattr(
+        url_guard.socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 0))],
+    )
 
 
 # ---------------------------------------------------------------------------

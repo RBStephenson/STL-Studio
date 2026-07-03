@@ -5,6 +5,8 @@ The `/group/...` batch routes are declared before the `/{model_id}/...` routes
 so the literal `group` segment isn't captured as a model_id (FastAPI matches in
 declaration order).
 """
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,8 @@ from app.services.thumbnails import (
 from app.services import scanner
 from app.utils import utcnow
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -69,6 +73,7 @@ async def batch_thumbnail_from_url(body: BatchThumbnailFromUrl, db: Session = De
     except ThumbnailDownloadError as e:
         # Graceful degrade: store the bare URL on every member so the UI can try
         # to render it directly, even though the server-side download failed.
+        logger.info("Batch thumbnail fetch failed for %r: %s", body.url, e)
         for model in models:
             model.thumbnail_path = None
             model.thumbnail_url = body.url
@@ -119,6 +124,7 @@ async def set_thumbnail_from_url(
     try:
         path = await download_thumbnail(model_id, body.url)
     except ThumbnailDownloadError as e:
+        logger.info("Thumbnail fetch failed for model %s (%r): %s", model_id, body.url, e)
         model.thumbnail_path = None
         model.thumbnail_url = body.url
         model.updated_at = utcnow()

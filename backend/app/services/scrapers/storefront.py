@@ -14,6 +14,7 @@ import json
 import logging
 import asyncio
 import httpx
+from app.services.url_guard import guarded_async_client
 from bs4 import BeautifulSoup
 from dataclasses import dataclass, field
 from typing import Optional
@@ -72,7 +73,7 @@ async def _scrape_mmf(url: str, api_key: Optional[str] = None) -> list[Storefron
     # Local import avoids a package-init import cycle (mmf imports storefront).
     from app.services.scrapers import mmf
 
-    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
+    async with guarded_async_client(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         try:
             r = await client.get(url)
             r.raise_for_status()
@@ -148,7 +149,7 @@ async def _scrape_gumroad(url: str) -> list[StorefrontProduct]:
     Scrape a Gumroad creator store.
     Works for https://creator.gumroad.com or https://gumroad.com/creator.
     """
-    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
+    async with guarded_async_client(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         try:
             r = await client.get(url.rstrip("/"))
             r.raise_for_status()
@@ -296,7 +297,7 @@ async def _scrape_cults(url: str) -> list[StorefrontProduct]:
     products: list[StorefrontProduct] = []
     page = 1
 
-    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
+    async with guarded_async_client(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         while True:
             await asyncio.sleep(0.5)  # polite
             try:
