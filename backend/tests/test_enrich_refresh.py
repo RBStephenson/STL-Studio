@@ -36,12 +36,9 @@ def _fixed_secret_key(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reset_refresh_state():
-    """The module-level status dict persists across tests otherwise."""
+    """The shared job registry persists the refresh job across tests otherwise."""
     yield
-    with enrich_refresh._state_lock:
-        enrich_refresh._refresh_state.update(
-            running=False, message="idle", candidates=0, refreshed=0, failed=0, errors=0,
-        )
+    enrich_refresh.runner.reset(enrich_refresh._JOB_KEY)
 
 
 _URL = "https://www.myminifactory.com/object/dragon-123"
