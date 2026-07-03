@@ -8,7 +8,6 @@ reserved word.
 import logging
 import os
 import shutil
-import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -32,6 +31,7 @@ from app.schemas import (
     SourceMappingRead, SourceMappingSet,
 )
 from app.services import reorganize_apply, scanner, write_lock
+from app.services.job_runner import runner
 from app.services.reorganize_apply import ApplyError
 from app.services.thumbnails import CONTENT_TYPE_EXT, IMAGE_EXTS
 
@@ -203,14 +203,17 @@ def scan_folder(body: InboxScanRequest, db: Session = Depends(get_db)):
             status_code=409,
             detail="Library is busy — reorganize in progress, try again shortly",
         )
+    # Launch the inbox scan on the shared job runner instead of a hand-rolled
+    # daemon thread (STUDIO-59). The write lock acquired above (prepare_inbox_scan)
+    # is the concurrency gate and the source of truth for progress via
+    # scanner.get_status(); this job just runs the work off the request path
+    # (single_flight=False — the write lock already prevents overlap).
     try:
-        thread = threading.Thread(
-            target=scanner.scan_inbox_folder,
-            args=(str(p),),
-            kwargs={"_lock_already_held": True},
-            daemon=True,
+        runner.start(
+            "inbox_scan",
+            lambda job: scanner.scan_inbox_folder(str(p), _lock_already_held=True),
+            single_flight=False,
         )
-        thread.start()
     except Exception as e:
         scanner.abort_inbox_scan()
         raise HTTPException(status_code=500, detail=f"Failed to start import: {e}")
