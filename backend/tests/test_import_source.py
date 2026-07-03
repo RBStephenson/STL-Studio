@@ -130,8 +130,7 @@ class TestScanFolder:
         pack = tmp_path / "PackA"
         pack.mkdir()
         with patch("app.routers.imports.scanner.get_status", return_value={"running": False}), \
-             patch("app.routers.imports.scanner.prepare_inbox_scan", return_value=True), \
-             patch("app.routers.imports.runner.start") as start:
+             patch("app.routers.imports.scanner.start_inbox_scan", return_value=True) as start:
             r = client.post("/import/scan-folder", json={"path": str(pack)})
         assert r.status_code == 200
         assert r.json()["running"] is True

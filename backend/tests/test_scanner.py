@@ -1199,8 +1199,9 @@ class TestScanCompletionSummary:
         db.commit()
 
         def fake_scan_root(root, _db):
-            scanner._scan_state["models_found"] = models
-            scanner._scan_state["files_found"] = files
+            # Counters live on the active job handle now; _bump adds to the
+            # zero-initialised progress the scan set at start.
+            scanner._bump(models_found=models, files_found=files)
 
         monkeypatch.setattr(scanner, "_scan_root", fake_scan_root)
         monkeypatch.setattr(scanner, "_prune_stale_models", lambda *a, **k: removed)

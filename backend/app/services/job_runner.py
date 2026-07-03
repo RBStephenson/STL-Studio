@@ -88,6 +88,17 @@ class JobHandle:
             if progress:
                 self.progress.update(progress)
 
+    def increment(self, **deltas: int) -> None:
+        """Atomically add to progress counters (missing keys start at 0).
+
+        For hot-path counters bumped concurrently from parallel worker threads
+        (e.g. the scanner's files_found across four creator workers) — a plain
+        ``update`` would read-modify-write outside the lock and lose increments.
+        """
+        with self._lock:
+            for name, delta in deltas.items():
+                self.progress[name] = self.progress.get(name, 0) + delta
+
     @property
     def cancelled(self) -> bool:
         """True once :meth:`JobRunner.cancel` was called for this job. Workers poll

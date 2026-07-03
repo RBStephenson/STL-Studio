@@ -3,7 +3,6 @@ import platform
 import string
 from pathlib import Path
 
-import threading
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -147,8 +146,7 @@ def start_scan(db: Session = Depends(get_db)):
     # Ensure scan roots exist in db from env config
     _sync_roots_from_config(db)
 
-    thread = threading.Thread(target=scanner.scan_all_roots, daemon=True)
-    thread.start()
+    scanner.start_full_scan()
 
     return ScanStatus(running=True, message="scan started")
 
@@ -164,10 +162,7 @@ def start_creator_scan(creator_id: int, db: Session = Depends(get_db)):
     if not creator:
         raise HTTPException(status_code=404, detail="Creator not found")
 
-    thread = threading.Thread(
-        target=scanner.scan_creator, args=(creator_id,), daemon=True
-    )
-    thread.start()
+    scanner.start_creator_scan(creator_id)
 
     return ScanStatus(running=True, message=f"scanning {creator.name}")
 
@@ -224,29 +219,19 @@ def start_inbox_scan(body: InboxScanRequest, db: Session = Depends(get_db)):
                 detail="Path overlaps with a configured scan root — use a regular scan or choose a path outside the library",
             )
 
-    # Acquire write lock synchronously so the HTTP response is authoritative:
-    # 200 means the scan is actually starting, not queued behind a lock the
-    # thread might silently fail to acquire.
-    if not scanner.prepare_inbox_scan():
+    # Launch off the request path via the shared runner. The write lock is taken
+    # synchronously inside start_inbox_scan so the 200 is authoritative: a busy
+    # library returns 409, and a launch failure releases the lock (never wedges
+    # the library at running-forever). The canonical, validated path is passed.
+    try:
+        started = scanner.start_inbox_scan(str(p))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start import: {e}")
+    if not started:
         raise HTTPException(
             status_code=409,
             detail="Library is busy — reorganize in progress, try again shortly",
         )
-
-    # Pass the canonical, validated path across the worker boundary (not the raw
-    # request value). If the thread fails to launch, release the lock and reset
-    # state so a failed start doesn't wedge the library at running-forever.
-    try:
-        thread = threading.Thread(
-            target=scanner.scan_inbox_folder,
-            args=(str(p),),
-            kwargs={"_lock_already_held": True},
-            daemon=True,
-        )
-        thread.start()
-    except Exception as e:
-        scanner.abort_inbox_scan()
-        raise HTTPException(status_code=500, detail=f"Failed to start import: {e}")
 
     return ScanStatus(running=True, message="importing")
 
