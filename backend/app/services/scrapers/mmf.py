@@ -17,7 +17,8 @@ register an app at MMF Settings -> Developer to obtain one.
 import re
 import json
 import logging
-import httpx
+import httpx  # noqa: F401 — patched as `mmf.httpx.AsyncClient` by the test suite
+from app.services.url_guard import guarded_async_client
 from bs4 import BeautifulSoup
 from typing import Optional
 
@@ -68,7 +69,7 @@ async def fetch(url: str, api_key: Optional[str] = None) -> Optional[ScrapedMode
                 return model
         logger.info(f"MMF API fetch miss for object {object_id}; falling back to scrape")
 
-    async with httpx.AsyncClient(
+    async with guarded_async_client(
         timeout=20,
         headers=_HEADERS,
         follow_redirects=True,
@@ -109,7 +110,7 @@ async def search(query: str, limit: int = 12, api_key: Optional[str] = None) -> 
             return results
         logger.info(f"MMF API search miss for {query!r}; falling back to scrape")
 
-    async with httpx.AsyncClient(
+    async with guarded_async_client(
         timeout=20,
         headers=_HEADERS,
         follow_redirects=True,
@@ -161,7 +162,7 @@ async def search(query: str, limit: int = 12, api_key: Optional[str] = None) -> 
 async def _api_get(path: str, api_key: str, params: Optional[dict] = None) -> Optional[dict]:
     """GET an MMF API path with ?key= auth. Returns parsed JSON or None on error."""
     query = {"key": api_key, **(params or {})}
-    async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
+    async with guarded_async_client(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         try:
             r = await client.get(f"{API_BASE}{path}", params=query)
             r.raise_for_status()
