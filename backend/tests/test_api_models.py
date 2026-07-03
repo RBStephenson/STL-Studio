@@ -425,6 +425,29 @@ class TestGroupRepOverride:
         resp = client.patch("/models/999999/group-rep", json={"is_group_rep": True})
         assert resp.status_code == 404
 
+    def test_designating_rep_updates_durable_group_rep(self, client, db):
+        """STUDIO-7: rep resolution for durable groups reads
+        VariantGroup.rep_model_id, not the legacy is_group_rep flag (#678).
+        Designating a new rep via the group-rep button must flip the durable
+        field too, or Library/Prev-Next paging keep showing the old rep."""
+        from app.models import VariantGroup
+
+        creator = make_creator(db, "Creator")
+        v_other = make_model(db, creator, name="A_rep", character="Hero")
+        v_pick = make_model(db, creator, name="B_pick", character="Hero")
+        db.flush()
+        group = make_variant_group(db, creator, [v_other, v_pick], label="Hero", rep=v_other)
+        commit_all(db)
+        assert group.rep_model_id == v_other.id
+
+        resp = client.patch(f"/models/{v_pick.id}/group-rep", json={"is_group_rep": True})
+        assert resp.status_code == 200
+
+        db.expire_all()
+        assert db.get(VariantGroup, group.id).rep_model_id == v_pick.id
+        # Reflected everywhere rep resolution is authoritative, not just the flag.
+        assert client.get("/models?group_variants=true").json()["items"][0]["id"] == v_pick.id
+
 
 # ---------------------------------------------------------------------------
 # Stats endpoint
@@ -1393,6 +1416,34 @@ class TestManualGroupEndpoints:
         assert db.get(VariantGroup, auto.id) is None
         db.refresh(b)
         assert b.variant_group_id is None
+
+    def test_merge_repairs_dangling_rep_on_surviving_orphan_group(self, client, db):
+        """STUDIO-26: if the model an old group's rep_model_id points to is the
+        one that just got merged elsewhere, and the old group still has 2+
+        members left, it must not keep pointing at a model it no longer has."""
+        from app.models import VariantGroup
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A")
+        b = make_model(db, creator, name="B")
+        c = make_model(db, creator, name="C")
+        auto = VariantGroup(creator_id=creator.id, label="Auto", source="auto", rep_model_id=None)
+        db.add(auto); db.flush()
+        a.variant_group_id = auto.id
+        b.variant_group_id = auto.id
+        c.variant_group_id = auto.id
+        auto.rep_model_id = a.id  # rep is the model about to be merged away
+        d = make_model(db, creator, name="D")
+        commit_all(db)
+
+        # Merge a + d into a new group → auto group drops to [b, c] (still 2+,
+        # so it survives) but its rep_model_id still pointed at a.
+        resp = client.post("/models/groups/merge", json={"model_ids": [a.id, d.id]})
+        assert resp.status_code == 200
+
+        db.expire_all()
+        survivor = db.get(VariantGroup, auto.id)
+        assert survivor is not None
+        assert survivor.rep_model_id in {b.id, c.id}
 
     def test_merge_locked_from_rescan(self, client, db):
         from app.services import grouping
