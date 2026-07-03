@@ -108,3 +108,23 @@ class TestImportApplyMove:
         assert m.is_inbox is False
         assert m.folder_path.startswith(str(lib.path).replace("\\", "/"))
         assert not os.path.exists(str(f))
+
+    def test_stale_source_dirs_cleaned_when_source_under_scan_root(self, client, db, tmp_path, write_mode):
+        """Source inside a configured scan root: the post-apply stale-dir cleanup
+        walk runs and removes the emptied pack folder. Regression guard for the
+        cleanup block whose broad ``except Exception: pass`` (which also swallowed
+        the internal HTTPExceptions) was replaced with typed guards + logging
+        (STUDIO-60) — a successful apply must still return 200 and prune the dir."""
+        root = _library(db, tmp_path / "root")
+        src = os.path.realpath(str(tmp_path / "root" / "incoming"))
+        db.add(ImportSourceMapping(source_path=src, library_id=root.id)); db.commit()
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+        pack = tmp_path / "root" / "incoming" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
+        _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+
+        r = client.post("/import/apply", json={"source": src})
+        assert r.status_code == 200, r.text
+        assert r.json()["moved_models"] == 1
+        # The emptied source pack dir is removed by the stale-dir cleanup walk.
+        assert not os.path.exists(str(pack))
