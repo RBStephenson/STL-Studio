@@ -13,7 +13,7 @@ import httpx
 from bs4 import BeautifulSoup
 from typing import Optional
 
-from app.services.scrapers.base import ScrapedModel, SearchResult
+from app.services.scrapers.base import ScrapedModel, SearchResult, MAX_REDIRECTS
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ async def fetch(url: str) -> Optional[ScrapedModel]:
         timeout=20,
         headers=_HEADERS,
         follow_redirects=True,
+        max_redirects=MAX_REDIRECTS,
     ) as client:
         try:
             r = await client.get(url)
@@ -168,6 +169,7 @@ async def search(query: str, limit: int = 12) -> list[SearchResult]:
         timeout=20,
         headers=_HEADERS,
         follow_redirects=True,
+        max_redirects=MAX_REDIRECTS,
     ) as client:
         try:
             r = await client.get(

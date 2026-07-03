@@ -6,6 +6,14 @@ from typing import Optional
 from urllib.parse import urlparse
 
 
+# Cap redirect chains on every outbound scraper request. Unbounded redirect
+# following (httpx default is 20) lets a malicious storefront response bounce us
+# through a long chain — or toward localhost / internal addresses — as an SSRF
+# vector (STUDIO-31). Five hops covers legitimate http→https / trailing-slash /
+# CDN redirects with margin; anything longer is aborted with TooManyRedirects.
+MAX_REDIRECTS = 5
+
+
 _SITE_DOMAINS = {
     "myminifactory.com": "myminifactory",
     "gumroad.com": "gumroad",
