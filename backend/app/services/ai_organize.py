@@ -267,7 +267,7 @@ def _llm_refine(
     try:
         resp = httpx.post(endpoint, json=payload, headers=headers, timeout=10)
     except httpx.RequestError as exc:
-        _log_step("llm_error", reason=str(exc))
+        _log_step("llm_error", reason=exc.__class__.__name__)
         return []
 
     if resp.status_code == 400 and "response_format" in resp.text:
@@ -275,7 +275,7 @@ def _llm_refine(
         try:
             resp = httpx.post(endpoint, json=payload, headers=headers, timeout=10)
         except httpx.RequestError as exc:
-            _log_step("llm_error", reason=str(exc))
+            _log_step("llm_error", reason=exc.__class__.__name__)
             return []
 
     elapsed = time.monotonic() - t0
@@ -300,7 +300,7 @@ def _llm_refine(
 
     try:
         data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
+    except json.JSONDecodeError:
         _log.warning("ai_organize llm returned non-JSON: %s", raw_text[:200])
         return []
 

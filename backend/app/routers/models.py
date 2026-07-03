@@ -22,7 +22,7 @@ from app.schemas import (
     ModelUpdate, STLFileUpdate, BulkDeleteRequest, BulkDeleteResponse,
     AiOrganizeResult, AiOrganizeSuggestion,
     AiOrganizeSuggestionPreview, AiOrganizePreviewResult,
-    AiOrganizeApplyItem, AiOrganizeApplyRequest,
+    AiOrganizeApplyRequest,
 )
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
 from app.services.variant_sync import propagate_source_url
