@@ -5,6 +5,8 @@ schemas.py is the whitelist of known keys and their defaults: GET overlays
 stored rows on it, and the PATCH schema (AppSettingsUpdate) rejects anything
 outside it, so unknown keys can never be written.
 """
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,8 @@ from app.schemas import (
     MmfSettingsRead,
 )
 from app.services import secrets
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -68,11 +72,14 @@ def reload_env_settings():
     """
     try:
         settings.reload()
-    except Exception as e:
+    except Exception:
         # A malformed .env (bad types, etc.) raises a pydantic ValidationError —
-        # report it cleanly instead of a generic 500, and leave the live config
-        # untouched (reload copies fields only after a fresh Settings() succeeds).
-        raise HTTPException(status_code=400, detail=f"Could not reload settings: {e}")
+        # leave the live config untouched (reload copies fields only after a
+        # fresh Settings() succeeds) and return a generic message; the raw
+        # exception can reveal internal config field names, so it's logged
+        # server-side only, not sent to the client (STUDIO-30).
+        _log.exception("Could not reload settings")
+        raise HTTPException(status_code=400, detail="Could not reload settings: invalid configuration")
     # The file-serving allowlist caches scan roots for a few seconds; drop it so
     # a newly-configured root is honored on the very next request, not after TTL.
     import app.routers.files as files_module
