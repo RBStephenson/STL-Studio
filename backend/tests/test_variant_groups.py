@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import patch
 
-from app.models import Creator, Model, VariantGroup
+from app.models import Model, VariantGroup
 from app.utils import utcnow
 from tests.conftest import make_creator, make_model
 

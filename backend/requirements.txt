@@ -1,4 +1,4 @@
-fastapi==0.136.3
+fastapi==0.139.0
 uvicorn[standard]==0.49.0
 sqlalchemy==2.0.51
 alembic==1.18.4
@@ -10,8 +10,8 @@ beautifulsoup4==4.15.0
 python-multipart==0.0.32
 nh3==0.3.6  # HTML sanitization for imported guide content (#440)
 watchdog==6.0.0
-apscheduler==3.11.2
-cryptography==44.0.0  # Fernet encryption-at-rest for the AI API key (#517)
+apscheduler==3.11.3
+cryptography==49.0.0  # Fernet encryption-at-rest for the AI API key (#517)
 
 # Painting module (#182). Color math + image handling are used from M1;
 # playwright's browser (Chromium) install is deferred to M3 — the pip
@@ -20,5 +20,5 @@ numpy==2.5.0
 scikit-image==0.26.0
 pillow==12.2.0
 playwright==1.60.0
-anthropic==0.109.2
-pypdf==5.1.0  # merge per-guide PDFs into a series bundle (#490)
+anthropic==0.116.0
+pypdf==6.13.3  # merge per-guide PDFs into a series bundle (#490)

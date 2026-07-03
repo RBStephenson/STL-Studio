@@ -3,16 +3,14 @@ Library-wide storefront refresh, run off the request path.
 
 An empty-scope POST /enrich/refresh used to re-fetch storefront detail for
 every enriched model synchronously on the request thread — minutes for a big
-library, HTTP timeout risk. This mirrors the background-job pattern already
-used for scans (services/scanner.py): a module-level status dict guarded by a
-lock, and a plain function the router runs in a daemon thread. The function is
+library, HTTP timeout risk. The work runs off the request path as a background
+job via the shared runner (services/job_runner.py, STUDIO-59). run_refresh is
 also safe to call directly (as the scanner tests do with scan_all_roots) for
-deterministic, non-threaded test coverage.
+deterministic, non-threaded test coverage — it runs the job inline in that case.
 """
 import asyncio
 import dataclasses
 import logging
-import threading
 from datetime import timedelta
 from typing import Optional
 
@@ -23,6 +21,7 @@ from app.database import SessionLocal
 from app.models import Model
 from app.services import scrapers
 from app.services import secrets as secrets_service
+from app.services.job_runner import JobHandle, JobState, runner
 from app.services.metadata_apply import apply_scraped_to_model
 from app.services.scrapers.base import ScrapedModel
 from app.utils import utcnow
@@ -33,16 +32,26 @@ logger = logging.getLogger(__name__)
 # Bound the parallelism so we don't hammer a source or serialize the whole batch.
 _FETCH_CONCURRENCY = 5
 
-_state_lock = threading.Lock()
-_refresh_state: dict = {
-    "running": False, "message": "idle",
-    "candidates": 0, "refreshed": 0, "failed": 0, "errors": 0,
-}
+# Registry key for the (singleton) library refresh job.
+_JOB_KEY = "enrich_refresh"
+
+# Counter keys carried in the job's progress dict.
+_COUNTERS = ("candidates", "refreshed", "failed", "errors")
 
 
 def get_status() -> dict:
-    with _state_lock:
-        return dict(_refresh_state)
+    """Legacy flat status shape kept as the public contract (router + frontend):
+    ``{running, message, candidates, refreshed, failed, errors}``. Mapped out of
+    the shared runner's uniform ``{state, progress, message, error}`` payload."""
+    payload = runner.status(_JOB_KEY)
+    progress = payload["progress"]
+    status = {
+        "running": payload["state"] == JobState.RUNNING.value,
+        "message": payload["message"] or "idle",
+    }
+    for key in _COUNTERS:
+        status[key] = progress.get(key, 0)
+    return status
 
 
 async def fetch_unique_deep(
@@ -138,36 +147,42 @@ def run_refresh(
     stale_days: Optional[int] = None,
     db: Optional[Session] = None,
 ) -> dict:
-    """Run a refresh to completion, updating the shared status as it goes.
+    """Run a refresh to completion, updating the shared job status as it goes.
 
     Blocking — callers that don't want to block the request thread run this in
     a background thread (see the /enrich/refresh route) the same way
     scan_all_roots is run from /scan/start. Pass ``db`` to run inline against a
     caller-owned session (tests); omitted, it opens and closes its own.
+
+    Runs as a single-key job on the shared runner (services/job_runner.py). The
+    runner records terminal DONE/ERROR state and the message-on-error; this body
+    only pushes the running message and progress counters.
     """
-    with _state_lock:
-        _refresh_state.update(
-            running=True, message="starting",
+    def _body(job: JobHandle) -> None:
+        job.update(
+            message="starting",
             candidates=0, refreshed=0, failed=0, errors=0,
         )
-
-    own_db = db is None
-    _db = db or SessionLocal()
-    try:
-        result = asyncio.run(_do_refresh(_db, creator_id, model_ids, stale_days))
-        with _state_lock:
-            _refresh_state.update(result)
-            _refresh_state["message"] = (
-                f"done — {result['refreshed']} refreshed, "
-                f"{result['failed']} failed, {result['errors']} errors"
+        own_db = db is None
+        _db = db or SessionLocal()
+        try:
+            result = asyncio.run(_do_refresh(_db, creator_id, model_ids, stale_days))
+            job.update(
+                state=JobState.DONE,
+                message=(
+                    f"done — {result['refreshed']} refreshed, "
+                    f"{result['failed']} failed, {result['errors']} errors"
+                ),
+                **result,
             )
-    except Exception as e:
-        logger.exception(f"Refresh failed: {e}")
-        with _state_lock:
-            _refresh_state["message"] = f"error: {e}"
-    finally:
-        with _state_lock:
-            _refresh_state["running"] = False
-        if own_db:
-            _db.close()
+        except Exception as e:
+            # Mirror the message the UI showed before the runner owned terminal
+            # state; re-raise so the runner records ERROR + the error string.
+            job.update(message=f"error: {e}")
+            raise
+        finally:
+            if own_db:
+                _db.close()
+
+    runner.run_inline(_JOB_KEY, _body)
     return get_status()

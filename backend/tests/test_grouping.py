@@ -1,6 +1,6 @@
 """Variant-grouping proposal engine (#615). Exercises the blended signals
 (file_hash / filename / name) and the manual-group lock."""
-from app.models import Model, STLFile, VariantGroup
+from app.models import VariantGroup
 from app.services import grouping
 from tests.conftest import make_creator, make_model, make_stl_file
 
@@ -149,7 +149,7 @@ class TestNoGroupRespected:
     def test_no_group_excludes_model_from_proposals(self, db):
         creator = make_creator(db)
         a = make_model(db, creator, name="Goblin Supported")
-        b = make_model(db, creator, name="Goblin Unsupported")
+        make_model(db, creator, name="Goblin Unsupported")
         db.flush()
         a.no_group = True  # e.g. the user split `a` out of a group.
         db.flush()

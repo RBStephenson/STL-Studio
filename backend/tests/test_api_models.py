@@ -4,7 +4,6 @@ Tests for the /models API endpoints.
 Covers: listing, search, variant grouping, variants endpoint,
         stats, bulk tag, model patch, STL file part_type.
 """
-import pytest
 from tests.conftest import make_creator, make_model, make_stl_file, make_variant_group
 from app.services.tag_sync import sync_model_tags
 
@@ -254,7 +253,7 @@ class TestVariantsEndpoint:
         make_model(db, creator, name="Full_cutted", character="Akuma")
         commit_all(db)
 
-        resp = client.get(f"/models/variants?creator_id=9999&character=Akuma")
+        resp = client.get("/models/variants?creator_id=9999&character=Akuma")
         assert resp.json()["total"] == 0
 
     def test_thumbnailed_models_sort_before_no_thumbnail(self, client, db):
@@ -816,7 +815,7 @@ class TestGetNeighbors:
     def test_grouped_variant_resolved_to_representative(self, client, db):
         creator = make_creator(db)
         # Two standalone models (no character) and a durable variant group (Rep + NonRep).
-        ace = make_model(db, creator, name="Ace")
+        make_model(db, creator, name="Ace")
         rep = make_model(db, creator, name="Rep", character="Hero")
         non_rep = make_model(db, creator, name="NonRep", character="Hero")
         zed = make_model(db, creator, name="Zed")

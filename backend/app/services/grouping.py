@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from sqlalchemy import func, and_
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import Model, STLFile, VariantGroup, GroupingStrategy

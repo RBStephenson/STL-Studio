@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.painting.models import (
     GuideMixComponent, GuidePhase, GuideStep, GuideSwatch, GuideTab, Paint,
 )
-from app.painting.schemas import GuideCreate, GuideUpdate, TabIn
+from app.painting.schemas import TabIn
 
 
 def collect_paint_ids(tabs: list[TabIn]) -> set[int]:

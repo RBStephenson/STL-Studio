@@ -1,0 +1,19 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+# Default rule set (E4/E7/E9 pycodestyle errors + F pyflakes), minus stylistic
+# rules the existing code deliberately violates. Each ignore is a ratchet
+# candidate — remove it and fix the fallout when touching the relevant files.
+ignore = [
+    "E402",  # module import not at top — routers lazy-import services on purpose
+    "E702",  # multiple statements on one line — pervasive in test setup blocks
+    "E711",  # `== None` — SQLAlchemy filter expressions require it
+    "E712",  # `== True/False` — same, SQLAlchemy column comparisons
+    "E731",  # lambda assignment
+    "E741",  # ambiguous variable names (l, I, O)
+]
+
+# `ruff format` is intentionally NOT enforced in CI yet: adopting it means a
+# ~138-file reformat commit, deferred until the open refactor branches land.

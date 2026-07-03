@@ -108,7 +108,7 @@ class TestIsInboxFilter:
         creator = make_creator(db)
         inbox_m = make_model(db, creator, name="Inbox Model")
         inbox_m.is_inbox = True
-        normal_m = make_model(db, creator, name="Normal Model")
+        make_model(db, creator, name="Normal Model")
         db.commit()
 
         r = client.get("/models?is_inbox=true")
@@ -121,7 +121,7 @@ class TestIsInboxFilter:
         creator = make_creator(db)
         inbox_m = make_model(db, creator, name="Inbox Model")
         inbox_m.is_inbox = True
-        normal_m = make_model(db, creator, name="Normal Model")
+        make_model(db, creator, name="Normal Model")
         db.commit()
 
         r = client.get("/models?is_inbox=false")
@@ -199,7 +199,7 @@ class TestScanInboxFolder:
             inbox = Path(tmpdir)
             (inbox / "thing.stl").write_text("solid t\nendsolid")
 
-            from app.services.scanner import scan_inbox_folder, _index_model, _has_stls
+            from app.services.scanner import scan_inbox_folder, _index_model
             from app.models import Creator as CreatorModel
             scan_inbox_folder(tmpdir, db=db)
 

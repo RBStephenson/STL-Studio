@@ -15,7 +15,7 @@ import pytest
 from PIL import Image
 
 from app.models import Model
-from app.painting.models import Guide, GuideReferenceImage
+from app.painting.models import Guide
 from app.painting.services import images
 
 

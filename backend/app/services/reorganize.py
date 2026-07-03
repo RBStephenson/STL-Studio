@@ -18,12 +18,10 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
-    Creator,
     ImportSourceMapping,
     Model,
     PackOverride,
     ScanRoot,
-    STLFile,
 )
 from app.services.path_sanitize import (
     path_over_length,

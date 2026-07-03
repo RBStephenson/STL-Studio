@@ -14,8 +14,8 @@ import os
 import pytest
 
 from app.config import settings
-from app.models import Model, PackOverride, STLFile
-from app.services import reorganize_apply, write_lock
+from app.models import PackOverride
+from app.services import write_lock
 from app.services.reorganize_apply import ApplyError, _safe_move, apply_manifest
 from tests.conftest import make_creator, make_model, make_stl_file
 
@@ -101,7 +101,7 @@ class TestInboxEndToEnd:
     inbox source on undo (restoring is_inbox)."""
 
     def test_inbox_preview_apply_undo(self, client, db, tmp_path, write_mode):
-        from app.models import Creator, ScanRoot
+        from app.models import ScanRoot
 
         # Managed library = the destination scan root.
         lib = tmp_path / "library"
