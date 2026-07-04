@@ -63,9 +63,10 @@ describe("Library drive-availability banner (#304)", () => {
       all_available: false,
     });
     renderLib();
-    await flush();
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/unavailable/i);
+    // findBy* retries until the drive-status query resolves and the banner
+    // renders — robust on slow CI where a fixed-time flush can race the query.
+    expect(await screen.findByRole("alert")).toHaveTextContent(/unavailable/i);
     expect(screen.getByText("/mnt/drive2")).toBeInTheDocument();
   });
 
