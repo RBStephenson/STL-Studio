@@ -18,6 +18,7 @@ import { queryKeys } from "../hooks/queries/keys";
 import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
 import { useModelGuideId } from "../hooks/queries/guides";
 import { useModelTags } from "./model-detail/hooks/useModelTags";
+import { usePartEditing } from "./model-detail/hooks/usePartEditing";
 import CollectionsSection from "./model-detail/CollectionsSection";
 import ImageColumn from "./model-detail/sections/ImageColumn";
 import StlFilesList from "./model-detail/sections/StlFilesList";
@@ -27,7 +28,6 @@ import StatsRow from "./model-detail/sections/StatsRow";
 import TagsPanel from "./model-detail/sections/TagsPanel";
 import {
   toPascalCase,
-  buildAlphaBand,
   parseLibraryOrigin,
   type ViewMode,
   type NavTarget,
@@ -102,10 +102,11 @@ export default function ModelDetail() {
     addTag, setUserTags, openTagEditor, doneEditing, toggleHidden,
     suppressAutoTag, restoreAutoTag,
   } = useModelTags(model, numericId);
-  const [partTypes, setPartTypes] = useState<Record<number, string>>({});
-  const [partNames, setPartNames] = useState<Record<number, string>>({});
-  const [filesCollapsed, setFilesCollapsed] = useState<Set<string>>(new Set());
-  const [linkingBaseId, setLinkingBaseId] = useState<number | null>(null);
+  const {
+    partTypes, setPartTypes, partNames, setPartNames,
+    filesCollapsed, setFilesCollapsed, linkingBaseId, setLinkingBaseId,
+    savePartType, savePartName, linkSup, unlinkSup,
+  } = usePartEditing(model, patchModel, selectedStlFileId);
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [aiOrganizing, setAiOrganizing] = useState(false);
@@ -195,12 +196,6 @@ export default function ModelDetail() {
       setRating(model.user_rating ?? null);
       setPrintStatus(model.print_status ?? "none");
       setPrintCount(model.print_count ?? 0);
-      const pts: Record<number, string> = {};
-      model.stl_files.forEach((f) => { if (f.part_type) pts[f.id] = toPascalCase(f.part_type); });
-      setPartTypes(pts);
-      const pns: Record<number, string> = {};
-      model.stl_files.forEach((f) => { if (f.part_name) pns[f.id] = f.part_name; });
-      setPartNames(pns);
     }
   }, [model]);
 
@@ -218,20 +213,6 @@ export default function ModelDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model?.thumbnail_path, model?.thumbnail_url, model?.updated_at]);
 
-  // When the viewer selects a file, uncollapse its section in the file list and scroll to it.
-  useEffect(() => {
-    if (!selectedStlFileId || !model) return;
-    const file = model.stl_files.find((f) => f.id === selectedStlFileId);
-    if (!file) return;
-    const sectionKey = settings.part_categories_enabled
-      ? (file.part_type ? toPascalCase(file.part_type) : "__uncategorized__")
-      : buildAlphaBand(file.filename[0]?.toUpperCase() ?? "");
-    setFilesCollapsed((prev) => { const n = new Set(prev); n.delete(sectionKey); return n; });
-    requestAnimationFrame(() => {
-      document.querySelector(`[data-file-row="${selectedStlFileId}"]`)
-        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    });
-  }, [selectedStlFileId]);
 
   // Reset UI-only state when navigating to a different model
   useEffect(() => {
@@ -382,105 +363,6 @@ export default function ModelDetail() {
       load();
     } catch (e: any) {
       toast(e?.message || "Couldn't clear the image — try again.", "error");
-    }
-  };
-
-  const savePartType = async (fileId: number, value: string) => {
-    const pt = toPascalCase(value);
-    // Always normalise the displayed value to Pascal case, even if no save is needed.
-    const thisFile = model?.stl_files.find((f) => f.id === fileId);
-    const saved = thisFile?.part_type ?? "";
-    setPartTypes((prevState) => ({ ...prevState, [fileId]: pt }));
-
-    // Find ALL linked files: sups of this file (if base) + base of this file (if sup) + sibling sups.
-    const linkedFiles: NonNullable<typeof model>["stl_files"] = [];
-    if (thisFile) {
-      const directSups = model?.stl_files.filter((f) => f.sup_of_id === fileId) ?? [];
-      linkedFiles.push(...directSups);
-      if (thisFile.sup_of_id != null) {
-        const base = model?.stl_files.find((f) => f.id === thisFile.sup_of_id);
-        if (base) {
-          linkedFiles.push(base);
-          const siblings = model?.stl_files.filter((f) => f.sup_of_id === base.id && f.id !== fileId) ?? [];
-          linkedFiles.push(...siblings);
-        }
-      }
-      // Filename fallback when no explicit sup_of_id relationship exists.
-      if (linkedFiles.length === 0) {
-        const counterpartName = /^Sup_/i.test(thisFile.filename)
-          ? thisFile.filename.replace(/^Sup_/i, "")
-          : `Sup_${thisFile.filename}`;
-        const counterpart = model?.stl_files.find((f) => f.filename === counterpartName) ?? null;
-        if (counterpart) linkedFiles.push(counterpart);
-      }
-    }
-
-    const linkedNeedingUpdate = linkedFiles.filter((p) => p.part_type !== (pt || null));
-    const thisNeedsUpdate = pt !== saved;
-    if (!thisNeedsUpdate && linkedNeedingUpdate.length === 0) return;
-
-    try {
-      if (thisNeedsUpdate) {
-        await api.models.updateSTLFile(fileId, { part_type: pt || null });
-        patchModel((prev) => ({
-          ...prev,
-          stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, part_type: pt || null } : f),
-        }));
-      }
-      for (const paired of linkedNeedingUpdate) {
-        setPartTypes((prevState) => ({ ...prevState, [paired.id]: pt }));
-        await api.models.updateSTLFile(paired.id, { part_type: pt || null });
-        patchModel((prev) => ({
-          ...prev,
-          stl_files: prev.stl_files.map((f) => f.id === paired.id ? { ...f, part_type: pt || null } : f),
-        }));
-      }
-    } catch {
-      setPartTypes((prevState) => ({ ...prevState, [fileId]: saved }));
-      toast("Couldn't save category — try again.", "error");
-    }
-  };
-
-  const patchStlFile = (fileId: number, patch: Partial<{ sup_of_id: number | null; part_type: string | null; part_name: string | null }>) =>
-    patchModel((prev) => ({
-      ...prev,
-      stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, ...patch } : f),
-    }));
-
-  const savePartName = async (fileId: number, value: string) => {
-    const trimmed = value.trim() || null;
-    try {
-      await api.models.updateSTLFile(fileId, { part_name: trimmed });
-      patchStlFile(fileId, { part_name: trimmed });
-    } catch {
-      toast("Couldn't save name — try again.", "error");
-    }
-  };
-
-  const linkSup = async (baseId: number, supId: number) => {
-    try {
-      await api.models.updateSTLFile(supId, { sup_of_id: baseId });
-      patchStlFile(supId, { sup_of_id: baseId });
-      // Sync the base file's category to the newly linked sup file so they
-      // appear in the same group and render as a hierarchy.
-      const basePt = partTypes[baseId] ?? model?.stl_files.find((f) => f.id === baseId)?.part_type ?? null;
-      if (basePt) {
-        const pt = toPascalCase(basePt);
-        await api.models.updateSTLFile(supId, { part_type: pt });
-        patchStlFile(supId, { part_type: pt });
-        setPartTypes((prev) => ({ ...prev, [supId]: pt }));
-      }
-    } catch {
-      toast("Couldn't link files — try again.", "error");
-    }
-  };
-
-  const unlinkSup = async (supId: number) => {
-    try {
-      await api.models.updateSTLFile(supId, { sup_of_id: null });
-      patchStlFile(supId, { sup_of_id: null });
-    } catch {
-      toast("Couldn't unlink file — try again.", "error");
     }
   };
 
