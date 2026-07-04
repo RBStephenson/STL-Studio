@@ -1,56 +1,118 @@
 /**
- * Electron main process — Phase 0 skeleton (STUDIO-70).
+ * Electron main process — Phase 1 (STUDIO-71).
  *
- * Boots a single BrowserWindow that loads a static placeholder page. There is
- * NO backend wiring yet: the Python sidecar spawn, health poll, and localhost
- * load arrive in Phase 1 (sidecar.ts). This file exists to prove the toolchain
- * — electron + electron-builder + tsc — builds and launches a window.
+ * Owns the Python backend as a sidecar child process: on startup it reaps any
+ * orphan from a crashed prior run, spawns the backend exe, polls `/api/health`
+ * until ready, then points the window at localhost. On quit it terminates the
+ * sidecar. A single-instance lock focuses the existing window on a second launch.
  *
- * Ref: docs/plans/528-pywebview-to-electron.md (Phase 0),
- *      docs/plans/528-phase0-electron-skeleton.md
+ * Port is FIXED at 8484 this phase; the backend gains `--port` in Phase 2, at
+ * which point the port here becomes an OS-assigned free port (see config.ts).
+ *
+ * Ref: docs/plans/528-pywebview-to-electron.md,
+ *      docs/plans/528-phase1-sidecar.md
  */
 import { join } from "node:path";
 
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
+
+import { BACKEND_PORT, LOCKFILE_NAME, baseUrl, resolveBackendExe } from "./config";
+import { runtimeDeps } from "./runtime";
+import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
+import type { SidecarDeps, SidecarProcess } from "./sidecar";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
 
-function createWindow(): void {
+// Repo root during dev: desktop/dist/main.js -> up two levels. Used only to
+// resolve the dev backend-exe fallback; packaged resolution arrives in Phase 3.
+const REPO_ROOT = join(__dirname, "..", "..");
+
+let mainWindow: BrowserWindow | null = null;
+let sidecar: SidecarProcess | null = null;
+let deps: SidecarDeps | null = null;
+
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     show: false,
     title: "STL Studio",
     webPreferences: {
-      // Phase 0 loads only a bundled static file. No preload/IPC surface is
-      // needed until the sidecar wiring lands, so keep the renderer locked down.
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-
-  // Defer the reveal until the page is painted to avoid a white flash.
   win.once("ready-to-show", () => win.show());
-  void win.loadFile(PLACEHOLDER_HTML);
+  return win;
 }
 
-app.whenReady().then(() => {
-  createWindow();
+/** Spawn the backend, wait for health, and load it — or show an error dialog and
+ *  fall back to the placeholder page so the window is never blank-and-silent. */
+async function bootBackendAndLoad(win: BrowserWindow): Promise<void> {
+  deps = runtimeDeps(app.getPath("userData"), LOCKFILE_NAME);
+  const exePath = resolveBackendExe(REPO_ROOT);
+  try {
+    const result = await startSidecar(deps, {
+      exePath,
+      // Phase 2: pass ["--port", String(port)] once the backend honours it.
+      args: [],
+      port: BACKEND_PORT,
+    });
+    sidecar = result.proc;
+    await win.loadURL(baseUrl(result.port));
+  } catch (err) {
+    const message =
+      err instanceof SidecarStartError
+        ? err.message
+        : `Unexpected error starting the backend: ${String(err)}`;
+    dialog.showErrorBox("STL Studio — backend failed to start", message);
+    await win.loadFile(PLACEHOLDER_HTML);
+  }
+}
 
-  // macOS convention: re-open a window when the dock icon is clicked and none
-  // are open. Harmless on Windows (v1's only target) and keeps the lifecycle
-  // idiomatic for later phases.
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+// Single-instance lock: a second launch hands focus to the running window
+// instead of spawning a rival backend on the same fixed port.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.focus();
     }
   });
-});
 
-// Quit when every window is closed, except on macOS where apps typically stay
-// resident until the user explicitly quits.
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
+  app.whenReady().then(async () => {
+    mainWindow = createWindow();
+    await bootBackendAndLoad(mainWindow);
+
+    app.on("activate", async () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        mainWindow = createWindow();
+        await bootBackendAndLoad(mainWindow);
+      }
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
+
+  // Terminate the sidecar before the process exits. `before-quit` covers the
+  // normal path; the kill is idempotent so a double-fire is harmless.
+  app.on("before-quit", async (event) => {
+    if (sidecar && deps) {
+      event.preventDefault();
+      const proc = sidecar;
+      const d = deps;
+      sidecar = null;
+      await stopSidecar(d, proc);
+      app.quit();
+    }
+  });
+}
