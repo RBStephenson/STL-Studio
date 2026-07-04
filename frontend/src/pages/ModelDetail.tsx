@@ -19,6 +19,7 @@ import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/
 import { useModelGuideId } from "../hooks/queries/guides";
 import { useModelTags } from "./model-detail/hooks/useModelTags";
 import { usePartEditing } from "./model-detail/hooks/usePartEditing";
+import { usePrintStatus } from "./model-detail/hooks/usePrintStatus";
 import CollectionsSection from "./model-detail/CollectionsSection";
 import ImageColumn from "./model-detail/sections/ImageColumn";
 import StlFilesList from "./model-detail/sections/StlFilesList";
@@ -95,8 +96,7 @@ export default function ModelDetail() {
   const [nsfw, setNsfw] = useState(false);
   const [favorite, setFavorite] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
-  const [printStatus, setPrintStatus] = useState<import("../api/client").PrintStatus>("none");
-  const [printCount, setPrintCount] = useState(0);
+  const { printStatus, printCount, cyclePrintStatus, clearPrintStatus } = usePrintStatus(model, numericId);
   const {
     tags, removedAutoTags, showHiddenTags, editingTags, tagSuggestions,
     addTag, setUserTags, openTagEditor, doneEditing, toggleHidden,
@@ -194,8 +194,6 @@ export default function ModelDetail() {
       setNsfw(model.nsfw);
       setFavorite(model.is_favorite);
       setRating(model.user_rating ?? null);
-      setPrintStatus(model.print_status ?? "none");
-      setPrintCount(model.print_count ?? 0);
     }
   }, [model]);
 
@@ -396,37 +394,6 @@ export default function ModelDetail() {
     } catch {
       setRating(prev);  // revert on failure
       toast("Couldn't update rating — try again.", "error");
-    }
-  };
-
-  const cyclePrintStatus = async () => {
-    const { PRINT_STATUS_CYCLE } = await import("../api/client");
-    const idx = PRINT_STATUS_CYCLE.indexOf(printStatus);
-    const next = PRINT_STATUS_CYCLE[(idx + 1) % PRINT_STATUS_CYCLE.length];
-    const prev = printStatus;
-    const prevCount = printCount;
-    setPrintStatus(next);
-    try {
-      const res = await api.models.setPrintStatus(Number(id), next);
-      setPrintCount(res.print_count);
-    } catch {
-      setPrintStatus(prev);
-      setPrintCount(prevCount);
-      toast("Couldn't update print status — try again.", "error");
-    }
-  };
-
-  const clearPrintStatus = async () => {
-    const prev = printStatus;
-    const prevCount = printCount;
-    setPrintStatus("none");
-    try {
-      const res = await api.models.setPrintStatus(Number(id), "none");
-      setPrintCount(res.print_count);
-    } catch {
-      setPrintStatus(prev);
-      setPrintCount(prevCount);
-      toast("Couldn't clear print status — try again.", "error");
     }
   };
 
