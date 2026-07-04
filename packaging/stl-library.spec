@@ -18,28 +18,14 @@ FRONTEND_DIST = ROOT / "frontend" / "dist"
 
 block_cipher = None
 
-# Desktop shell (#463): bundle pywebview + its platform backend when installed
-# (Windows). On Linux pywebview isn't installed, so this collects nothing and the
-# binary keeps the browser fallback — standalone.py imports `webview` lazily.
-webview_datas, webview_binaries, webview_hiddenimports = [], [], []
-try:
-    from PyInstaller.utils.hooks import collect_all
-
-    for _pkg in ("webview", "clr_loader", "pythonnet"):
-        try:
-            _d, _b, _h = collect_all(_pkg)
-            webview_datas += _d
-            webview_binaries += _b
-            webview_hiddenimports += _h
-        except Exception:
-            pass  # not installed on this platform — skip
-except Exception:
-    pass
+# Phase 2 (STUDIO-72): the desktop shell is now Electron, which owns the window
+# and spawns this exe as a headless sidecar. The old pywebview / clr_loader /
+# pythonnet bundling is gone, and the exe is built windowless (console=False).
 
 a = Analysis(
     [str(ROOT / "packaging" / "standalone.py")],
     pathex=[str(BACKEND)],
-    binaries=webview_binaries,
+    binaries=[],
     datas=[
         # Bundle the built React frontend
         (str(FRONTEND_DIST), "dist"),
@@ -48,7 +34,7 @@ a = Analysis(
         # Alembic migrations (ini + env + versions)
         (str(BACKEND / "alembic.ini"), "."),
         (str(BACKEND / "alembic"), "alembic"),
-    ] + webview_datas,
+    ],
     hiddenimports=[
         # uvicorn internals that PyInstaller misses
         "uvicorn.logging",
@@ -89,7 +75,7 @@ a = Analysis(
         "watchdog",
         "watchdog.observers",
         "watchdog.observers.polling",
-    ] + webview_hiddenimports,
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -116,7 +102,7 @@ exe = EXE(
     upx=False,           # UPX can trigger AV false-positives; keep off by default
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,        # Console window so users can see errors on first run
+    console=False,       # Windowless: Electron owns the UI; stdout/stderr are piped to the sidecar log
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
