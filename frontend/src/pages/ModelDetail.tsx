@@ -18,6 +18,9 @@ import { queryKeys } from "../hooks/queries/keys";
 import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
 import { useModelGuideId } from "../hooks/queries/guides";
 import { useModelTags } from "./model-detail/hooks/useModelTags";
+import { usePartEditing } from "./model-detail/hooks/usePartEditing";
+import { usePrintStatus } from "./model-detail/hooks/usePrintStatus";
+import { useGroupMerge } from "./model-detail/hooks/useGroupMerge";
 import CollectionsSection from "./model-detail/CollectionsSection";
 import ImageColumn from "./model-detail/sections/ImageColumn";
 import StlFilesList from "./model-detail/sections/StlFilesList";
@@ -27,7 +30,6 @@ import StatsRow from "./model-detail/sections/StatsRow";
 import TagsPanel from "./model-detail/sections/TagsPanel";
 import {
   toPascalCase,
-  buildAlphaBand,
   parseLibraryOrigin,
   type ViewMode,
   type NavTarget,
@@ -95,17 +97,17 @@ export default function ModelDetail() {
   const [nsfw, setNsfw] = useState(false);
   const [favorite, setFavorite] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
-  const [printStatus, setPrintStatus] = useState<import("../api/client").PrintStatus>("none");
-  const [printCount, setPrintCount] = useState(0);
+  const { printStatus, printCount, cyclePrintStatus, clearPrintStatus } = usePrintStatus(model, numericId);
   const {
     tags, removedAutoTags, showHiddenTags, editingTags, tagSuggestions,
     addTag, setUserTags, openTagEditor, doneEditing, toggleHidden,
     suppressAutoTag, restoreAutoTag,
   } = useModelTags(model, numericId);
-  const [partTypes, setPartTypes] = useState<Record<number, string>>({});
-  const [partNames, setPartNames] = useState<Record<number, string>>({});
-  const [filesCollapsed, setFilesCollapsed] = useState<Set<string>>(new Set());
-  const [linkingBaseId, setLinkingBaseId] = useState<number | null>(null);
+  const {
+    partTypes, setPartTypes, partNames, setPartNames,
+    filesCollapsed, setFilesCollapsed, linkingBaseId, setLinkingBaseId,
+    savePartType, savePartName, linkSup, unlinkSup,
+  } = usePartEditing(model, patchModel, selectedStlFileId);
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [aiOrganizing, setAiOrganizing] = useState(false);
@@ -113,10 +115,6 @@ export default function ModelDetail() {
   const [copiedPath, setCopiedPath] = useState(false);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
-  const [settingGroup, setSettingGroup] = useState(false);
-  const [groupInput, setGroupInput] = useState("");
-  const [savingGroup, setSavingGroup] = useState(false);
-  const [groupSuggestions, setGroupSuggestions] = useState<string[]>([]);
   // undefined = loading, null = boundary/unavailable, NavTarget = navigable.
   // Derived from the neighbors query: no origin → null (Prev/Next hidden);
   // in-flight → undefined (skeleton); resolved → target or boundary.
@@ -193,14 +191,6 @@ export default function ModelDetail() {
       setNsfw(model.nsfw);
       setFavorite(model.is_favorite);
       setRating(model.user_rating ?? null);
-      setPrintStatus(model.print_status ?? "none");
-      setPrintCount(model.print_count ?? 0);
-      const pts: Record<number, string> = {};
-      model.stl_files.forEach((f) => { if (f.part_type) pts[f.id] = toPascalCase(f.part_type); });
-      setPartTypes(pts);
-      const pns: Record<number, string> = {};
-      model.stl_files.forEach((f) => { if (f.part_name) pns[f.id] = f.part_name; });
-      setPartNames(pns);
     }
   }, [model]);
 
@@ -218,20 +208,6 @@ export default function ModelDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model?.thumbnail_path, model?.thumbnail_url, model?.updated_at]);
 
-  // When the viewer selects a file, uncollapse its section in the file list and scroll to it.
-  useEffect(() => {
-    if (!selectedStlFileId || !model) return;
-    const file = model.stl_files.find((f) => f.id === selectedStlFileId);
-    if (!file) return;
-    const sectionKey = settings.part_categories_enabled
-      ? (file.part_type ? toPascalCase(file.part_type) : "__uncategorized__")
-      : buildAlphaBand(file.filename[0]?.toUpperCase() ?? "");
-    setFilesCollapsed((prev) => { const n = new Set(prev); n.delete(sectionKey); return n; });
-    requestAnimationFrame(() => {
-      document.querySelector(`[data-file-row="${selectedStlFileId}"]`)
-        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    });
-  }, [selectedStlFileId]);
 
   // Reset UI-only state when navigating to a different model
   useEffect(() => {
@@ -240,7 +216,6 @@ export default function ModelDetail() {
     setShowImagePicker(false);
     setShowKitBuilder(false);
     setOpenFolderError(null);
-    setSettingGroup(false);
   }, [id]);
 
   const downloadAllFiles = async () => {
@@ -319,55 +294,6 @@ export default function ModelDetail() {
   // here (undesigned UX per the plan) — the picker only accepts an existing
   // group, resolved the same way VariantGroup.tsx's moveToGroup does: look up
   // any current member of that label and take its variant_group_id.
-  const openMergePicker = () => {
-    setGroupInput("");
-    setSettingGroup(true);
-    if (model?.creator_id) {
-      api.models.characters(model.creator_id).then(setGroupSuggestions).catch(() => {});
-    }
-  };
-
-  const mergeIntoGroup = async () => {
-    if (!model || savingGroup) return;
-    const trimmed = groupInput.trim();
-    if (!trimmed) return;
-    setSavingGroup(true);
-    try {
-      const { items } = await api.models.variants(model.creator_id!, trimmed);
-      const rep = items.find((m) => m.id !== model.id);
-      if (!rep?.variant_group_id) {
-        toast(`No existing group named "${trimmed}" — pick one from the list.`, "error");
-        return;
-      }
-      const label = rep.variant_group?.label || trimmed;
-      await api.models.mergeGroup([model.id], { groupId: rep.variant_group_id, label });
-      toast(`Merged into "${label}".`, "success");
-      setSettingGroup(false);
-      load();
-    } catch (e: any) {
-      toast(e?.message || "Couldn't merge into that group — try again.", "error");
-    } finally {
-      setSavingGroup(false);
-    }
-  };
-
-  const removeFromGroup = async () => {
-    if (!model || model.variant_group_id == null) return;
-    const ok = await confirm({
-      title: "Remove from this group?",
-      message: "This model will no longer be grouped with its variants. You can merge it into a group again anytime.",
-      confirmLabel: "Remove",
-    });
-    if (!ok) return;
-    try {
-      await api.models.splitGroup(model.variant_group_id, [model.id]);
-      toast("Removed from group.", "success");
-      load();
-    } catch (e: any) {
-      toast(e?.message || "Couldn't remove from group — try again.", "error");
-    }
-  };
-
   const clearImage = async () => {
     if (!model) return;
     const ok = await confirm({
@@ -382,105 +308,6 @@ export default function ModelDetail() {
       load();
     } catch (e: any) {
       toast(e?.message || "Couldn't clear the image — try again.", "error");
-    }
-  };
-
-  const savePartType = async (fileId: number, value: string) => {
-    const pt = toPascalCase(value);
-    // Always normalise the displayed value to Pascal case, even if no save is needed.
-    const thisFile = model?.stl_files.find((f) => f.id === fileId);
-    const saved = thisFile?.part_type ?? "";
-    setPartTypes((prevState) => ({ ...prevState, [fileId]: pt }));
-
-    // Find ALL linked files: sups of this file (if base) + base of this file (if sup) + sibling sups.
-    const linkedFiles: NonNullable<typeof model>["stl_files"] = [];
-    if (thisFile) {
-      const directSups = model?.stl_files.filter((f) => f.sup_of_id === fileId) ?? [];
-      linkedFiles.push(...directSups);
-      if (thisFile.sup_of_id != null) {
-        const base = model?.stl_files.find((f) => f.id === thisFile.sup_of_id);
-        if (base) {
-          linkedFiles.push(base);
-          const siblings = model?.stl_files.filter((f) => f.sup_of_id === base.id && f.id !== fileId) ?? [];
-          linkedFiles.push(...siblings);
-        }
-      }
-      // Filename fallback when no explicit sup_of_id relationship exists.
-      if (linkedFiles.length === 0) {
-        const counterpartName = /^Sup_/i.test(thisFile.filename)
-          ? thisFile.filename.replace(/^Sup_/i, "")
-          : `Sup_${thisFile.filename}`;
-        const counterpart = model?.stl_files.find((f) => f.filename === counterpartName) ?? null;
-        if (counterpart) linkedFiles.push(counterpart);
-      }
-    }
-
-    const linkedNeedingUpdate = linkedFiles.filter((p) => p.part_type !== (pt || null));
-    const thisNeedsUpdate = pt !== saved;
-    if (!thisNeedsUpdate && linkedNeedingUpdate.length === 0) return;
-
-    try {
-      if (thisNeedsUpdate) {
-        await api.models.updateSTLFile(fileId, { part_type: pt || null });
-        patchModel((prev) => ({
-          ...prev,
-          stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, part_type: pt || null } : f),
-        }));
-      }
-      for (const paired of linkedNeedingUpdate) {
-        setPartTypes((prevState) => ({ ...prevState, [paired.id]: pt }));
-        await api.models.updateSTLFile(paired.id, { part_type: pt || null });
-        patchModel((prev) => ({
-          ...prev,
-          stl_files: prev.stl_files.map((f) => f.id === paired.id ? { ...f, part_type: pt || null } : f),
-        }));
-      }
-    } catch {
-      setPartTypes((prevState) => ({ ...prevState, [fileId]: saved }));
-      toast("Couldn't save category — try again.", "error");
-    }
-  };
-
-  const patchStlFile = (fileId: number, patch: Partial<{ sup_of_id: number | null; part_type: string | null; part_name: string | null }>) =>
-    patchModel((prev) => ({
-      ...prev,
-      stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, ...patch } : f),
-    }));
-
-  const savePartName = async (fileId: number, value: string) => {
-    const trimmed = value.trim() || null;
-    try {
-      await api.models.updateSTLFile(fileId, { part_name: trimmed });
-      patchStlFile(fileId, { part_name: trimmed });
-    } catch {
-      toast("Couldn't save name — try again.", "error");
-    }
-  };
-
-  const linkSup = async (baseId: number, supId: number) => {
-    try {
-      await api.models.updateSTLFile(supId, { sup_of_id: baseId });
-      patchStlFile(supId, { sup_of_id: baseId });
-      // Sync the base file's category to the newly linked sup file so they
-      // appear in the same group and render as a hierarchy.
-      const basePt = partTypes[baseId] ?? model?.stl_files.find((f) => f.id === baseId)?.part_type ?? null;
-      if (basePt) {
-        const pt = toPascalCase(basePt);
-        await api.models.updateSTLFile(supId, { part_type: pt });
-        patchStlFile(supId, { part_type: pt });
-        setPartTypes((prev) => ({ ...prev, [supId]: pt }));
-      }
-    } catch {
-      toast("Couldn't link files — try again.", "error");
-    }
-  };
-
-  const unlinkSup = async (supId: number) => {
-    try {
-      await api.models.updateSTLFile(supId, { sup_of_id: null });
-      patchStlFile(supId, { sup_of_id: null });
-    } catch {
-      toast("Couldn't unlink file — try again.", "error");
     }
   };
 
@@ -517,37 +344,6 @@ export default function ModelDetail() {
     }
   };
 
-  const cyclePrintStatus = async () => {
-    const { PRINT_STATUS_CYCLE } = await import("../api/client");
-    const idx = PRINT_STATUS_CYCLE.indexOf(printStatus);
-    const next = PRINT_STATUS_CYCLE[(idx + 1) % PRINT_STATUS_CYCLE.length];
-    const prev = printStatus;
-    const prevCount = printCount;
-    setPrintStatus(next);
-    try {
-      const res = await api.models.setPrintStatus(Number(id), next);
-      setPrintCount(res.print_count);
-    } catch {
-      setPrintStatus(prev);
-      setPrintCount(prevCount);
-      toast("Couldn't update print status — try again.", "error");
-    }
-  };
-
-  const clearPrintStatus = async () => {
-    const prev = printStatus;
-    const prevCount = printCount;
-    setPrintStatus("none");
-    try {
-      const res = await api.models.setPrintStatus(Number(id), "none");
-      setPrintCount(res.print_count);
-    } catch {
-      setPrintStatus(prev);
-      setPrintCount(prevCount);
-      toast("Couldn't clear print status — try again.", "error");
-    }
-  };
-
   // Refetch this model in place (after an edit/capture/split-merge). Also
   // invalidates every variants query so the switcher's sibling thumbnails
   // refresh even though the (creator, character, group) key is unchanged.
@@ -557,6 +353,11 @@ export default function ModelDetail() {
     queryClient.invalidateQueries({ queryKey: queryKeys.models.variantsAll });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [numericId, queryClient]);
+
+  const {
+    settingGroup, groupInput, setGroupInput, savingGroup, groupSuggestions,
+    openMergePicker, cancelMerge, mergeIntoGroup, removeFromGroup,
+  } = useGroupMerge(model, numericId, load);
 
   if (loading) return <div className="p-8 text-gray-500 animate-pulse">Loading…</div>;
   if (loadError === "network") {
@@ -806,7 +607,7 @@ export default function ModelDetail() {
                 list="group-suggestions"
                 value={groupInput}
                 onChange={(e) => setGroupInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") mergeIntoGroup(); if (e.key === "Escape") setSettingGroup(false); }}
+                onKeyDown={(e) => { if (e.key === "Enter") mergeIntoGroup(); if (e.key === "Escape") cancelMerge(); }}
                 placeholder="Existing group name…"
                 className="flex-1 px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-sm text-gray-200 outline-none"
               />
@@ -821,7 +622,7 @@ export default function ModelDetail() {
                 {savingGroup ? "Merging…" : "Merge"}
               </button>
               <button
-                onClick={() => setSettingGroup(false)}
+                onClick={cancelMerge}
                 className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sm text-gray-400"
               >
                 Cancel
