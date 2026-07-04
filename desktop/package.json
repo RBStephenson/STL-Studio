@@ -1,0 +1,17 @@
+{
+  "name": "stl-studio-desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Electron desktop shell for STL Studio (replaces the pywebview standalone build).",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron .",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3"
+  }
+}
