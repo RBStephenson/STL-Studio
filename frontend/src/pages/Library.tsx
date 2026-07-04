@@ -27,6 +27,7 @@ import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import ShortcutsOverlay from "../components/ShortcutsOverlay";
 import FilterBar from "./library/FilterBar";
 import ModelGrid from "./library/ModelGrid";
+import PaginationBar from "./library/PaginationBar";
 import { errMsg } from "../utils/err";
 
 // Last applied Library filter querystring, remembered across navigation so that
@@ -38,38 +39,6 @@ const LIBRARY_QUERY_KEY = "library_query";
 // Stable empty set so the guide-ids fallback doesn't produce a new reference
 // each render (which would churn ModelCard memoization).
 const EMPTY_GUIDE_IDS: Set<number> = new Set();
-
-function PaginationBar({ page, totalPages, onPage, className = "mt-8" }: { page: number; totalPages: number; onPage: (p: number) => void; className?: string }) {
-  const [draft, setDraft] = useState(String(page));
-
-  useEffect(() => { setDraft(String(page)); }, [page]);
-
-  const btnCls = "px-3 py-1.5 rounded bg-gray-900 border border-gray-700 text-sm disabled:opacity-40 hover:border-gray-500 transition-colors";
-
-  function commit(raw: string) {
-    const n = parseInt(raw, 10);
-    if (!isNaN(n)) onPage(Math.min(totalPages, Math.max(1, n)));
-  }
-
-  return (
-    <div className={`flex items-center justify-center gap-2 ${className}`}>
-      <button onClick={() => onPage(page - 1)} disabled={page === 1} className={btnCls}>Prev</button>
-      <div className="flex items-center gap-1.5 text-sm text-gray-400">
-        <input
-          type="text"
-          inputMode="numeric"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => commit(draft)}
-          onKeyDown={(e) => { if (e.key === "Enter") { commit(draft); (e.target as HTMLInputElement).blur(); } }}
-          className="w-12 text-center rounded bg-gray-900 border border-gray-600 py-1 text-sm text-white focus:outline-none focus:border-indigo-500"
-        />
-        <span>/ {totalPages}</span>
-      </div>
-      <button onClick={() => onPage(page + 1)} disabled={page === totalPages} className={btnCls}>Next</button>
-    </div>
-  );
-}
 
 export default function Library() {
   const filters = useLibraryFilters();
