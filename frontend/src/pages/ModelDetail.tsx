@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, Fragment } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotator, GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Heart, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2 } from "lucide-react";
-import { api, ApiError, Model, ModelDetail as ModelDetailType, Collection } from "../api/client";
+import { api, ApiError, ModelDetail as ModelDetailType, Collection } from "../api/client";
 import FindOnWeb from "../components/FindOnWeb";
 const STLViewer = lazy(() => import("../components/STLViewer"));
 import ImagePicker from "../components/ImagePicker";
@@ -14,6 +15,9 @@ import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 import { useConfirm } from "../context/ConfirmContext";
+import { queryKeys } from "../hooks/queries/keys";
+import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
+import { useModelGuideId } from "../hooks/queries/guides";
 
 function CollectionsSection({ modelId, initialIds }: { modelId: number; initialIds: number[] }) {
   const { toast } = useToast();
@@ -274,17 +278,46 @@ export default function ModelDetail() {
   const { settings } = useAppSettings();
   const { toast } = useToast();
   const confirm = useConfirm();
-  // The painting guide for this model, if one exists (#263). null = none/unknown.
-  const [guideId, setGuideId] = useState<number | null>(null);
-  const [model, setModel] = useState<ModelDetailType | null>(null);
+  const queryClient = useQueryClient();
+  const numericId = id ? Number(id) : undefined;
+
+  // Server state via TanStack Query (STUDIO-61). The hooks own caching,
+  // staleness, and stale-response guarding; the api.models.* slice still does
+  // the fetching.
+  const modelQuery = useModel(numericId);
+  const model = modelQuery.data ?? null;
+  const loading = modelQuery.isPending && numericId != null;
   // null = no error; "notfound" = 404 (model gone); "network" = transient
   // fetch/5xx failure the user can retry.
-  const [loadError, setLoadError] = useState<"notfound" | "network" | null>(null);
-  const [variants, setVariants] = useState<Model[]>([]);
-  // Bumped on every load() so the variants effect refetches after in-place
-  // refreshes (e.g. thumbnail updates) that don't change creator/character.
-  const [variantVersion, setVariantVersion] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const loadError: "notfound" | "network" | null = modelQuery.error
+    ? modelQuery.error instanceof ApiError && modelQuery.error.status === 404
+      ? "notfound"
+      : "network"
+    : null;
+
+  const variantsQuery = useModelVariants(model);
+  const variants = variantsQuery.data ?? [];
+
+  // The painting guide for this model, if one exists (#263). null = none/unknown.
+  const guideQuery = useModelGuideId(numericId, settings.painting_guides_enabled);
+  const guideId = guideQuery.data ?? null;
+
+  const neighborsQuery = useModelNeighbors(numericId, navOrigin);
+
+  // Optimistically patch the cached model in place (e.g. an STL-file field
+  // edit), replacing the old setModel updater now that the model lives in the
+  // query cache.
+  const patchModel = useCallback(
+    (updater: (prev: ModelDetailType) => ModelDetailType) => {
+      if (numericId == null) return;
+      queryClient.setQueryData<ModelDetailType>(
+        queryKeys.models.detail(numericId),
+        (prev) => (prev ? updater(prev) : prev),
+      );
+    },
+    [numericId, queryClient],
+  );
+
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [galleryIdx, setGalleryIdx] = useState(0);
   const rotatorRef = useRef<GalleryRotatorHandle>(null);
@@ -317,10 +350,21 @@ export default function ModelDetail() {
   const [groupInput, setGroupInput] = useState("");
   const [savingGroup, setSavingGroup] = useState(false);
   const [groupSuggestions, setGroupSuggestions] = useState<string[]>([]);
-  // undefined = loading, null = boundary/unavailable, NavTarget = navigable
-  const [prevNav, setPrevNav] = useState<NavTarget | null | undefined>(undefined);
-  const [nextNav, setNextNav] = useState<NavTarget | null | undefined>(undefined);
-  const navFetchIdRef = useRef(0);
+  // undefined = loading, null = boundary/unavailable, NavTarget = navigable.
+  // Derived from the neighbors query: no origin → null (Prev/Next hidden);
+  // in-flight → undefined (skeleton); resolved → target or boundary.
+  const prevNav = useMemo<NavTarget | null | undefined>(() => {
+    if (!navOrigin) return null;
+    if (neighborsQuery.isPending) return undefined;
+    const pid = neighborsQuery.data?.prev_id ?? null;
+    return pid != null ? { id: pid, from: backTo } : null;
+  }, [navOrigin, neighborsQuery.isPending, neighborsQuery.data, backTo]);
+  const nextNav = useMemo<NavTarget | null | undefined>(() => {
+    if (!navOrigin) return null;
+    if (neighborsQuery.isPending) return undefined;
+    const nid = neighborsQuery.data?.next_id ?? null;
+    return nid != null ? { id: nid, from: backTo } : null;
+  }, [navOrigin, neighborsQuery.isPending, neighborsQuery.data, backTo]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
   // stl_files merged with live partTypes so STLViewer sees label changes immediately
@@ -394,6 +438,20 @@ export default function ModelDetail() {
       setPartNames(pns);
     }
   }, [model]);
+
+  // Reset the shown image to the thumbnail when the model loads or its thumbnail
+  // changes (capture/clear). Keyed on thumbnail identity — not the whole model —
+  // so an in-place refresh from an unrelated edit (e.g. saving a part category)
+  // doesn't clobber the thumbnail-strip image the user picked.
+  useEffect(() => {
+    if (!model) return;
+    setActiveImage(
+      model.thumbnail_path
+        ? api.fileUrl(model.thumbnail_path, model.updated_at)
+        : model.thumbnail_url ?? null,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model?.thumbnail_path, model?.thumbnail_url, model?.updated_at]);
 
   // When the viewer selects a file, uncollapse its section in the file list and scroll to it.
   useEffect(() => {
@@ -584,20 +642,18 @@ export default function ModelDetail() {
     try {
       if (thisNeedsUpdate) {
         await api.models.updateSTLFile(fileId, { part_type: pt || null });
-        setModel((prev) =>
-          prev
-            ? { ...prev, stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, part_type: pt || null } : f) }
-            : prev
-        );
+        patchModel((prev) => ({
+          ...prev,
+          stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, part_type: pt || null } : f),
+        }));
       }
       for (const paired of linkedNeedingUpdate) {
         setPartTypes((prevState) => ({ ...prevState, [paired.id]: pt }));
         await api.models.updateSTLFile(paired.id, { part_type: pt || null });
-        setModel((prev) =>
-          prev
-            ? { ...prev, stl_files: prev.stl_files.map((f) => f.id === paired.id ? { ...f, part_type: pt || null } : f) }
-            : prev
-        );
+        patchModel((prev) => ({
+          ...prev,
+          stl_files: prev.stl_files.map((f) => f.id === paired.id ? { ...f, part_type: pt || null } : f),
+        }));
       }
     } catch {
       setPartTypes((prevState) => ({ ...prevState, [fileId]: saved }));
@@ -606,9 +662,10 @@ export default function ModelDetail() {
   };
 
   const patchStlFile = (fileId: number, patch: Partial<{ sup_of_id: number | null; part_type: string | null; part_name: string | null }>) =>
-    setModel((prev) =>
-      prev ? { ...prev, stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, ...patch } : f) } : prev
-    );
+    patchModel((prev) => ({
+      ...prev,
+      stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, ...patch } : f),
+    }));
 
   const savePartName = async (fileId: number, value: string) => {
     const trimmed = value.trim() || null;
@@ -776,87 +833,15 @@ export default function ModelDetail() {
     }
   };
 
-  const loadIdRef = useRef(0);
+  // Refetch this model in place (after an edit/capture/split-merge). Also
+  // invalidates every variants query so the switcher's sibling thumbnails
+  // refresh even though the (creator, character, group) key is unchanged.
   const load = useCallback(() => {
-    if (!id) return;
-    const loadId = ++loadIdRef.current;
-    setLoadError(null);
-    api.models.get(Number(id)).then((m) => {
-      if (loadId !== loadIdRef.current) return; // stale — newer load in flight
-      setModel(m);
-      setVariantVersion((v) => v + 1);
-      const thumb = m.thumbnail_path
-        ? api.fileUrl(m.thumbnail_path, m.updated_at)
-        : m.thumbnail_url ?? null;
-      setActiveImage(thumb);
-      setLoading(false);
-    }).catch((err) => {
-      if (loadId !== loadIdRef.current) return;
-      // A 404 means the model is genuinely gone; anything else (network drop,
-      // 5xx) is transient and worth a retry rather than "not found".
-      setLoadError(err instanceof ApiError && err.status === 404 ? "notfound" : "network");
-      setLoading(false);
-    });
-  }, [id]);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Resolve whether this model has a painting guide (#263), gated on the module.
-  useEffect(() => {
-    if (!settings.painting_guides_enabled || !id) { setGuideId(null); return; }
-    let alive = true;
-    api.painting.guides.list({ model_id: Number(id), page_size: 1 })
-      .then((r) => { if (alive) setGuideId(r.items[0]?.id ?? null); })
-      .catch(() => { if (alive) setGuideId(null); });
-    return () => { alive = false; };
-  }, [id, settings.painting_guides_enabled]);
-
-  // Show the loading state when switching to a different model so the previous
-  // model's data (collections, tags, etc.) never bleeds into the new view while
-  // the fetch is in flight. Keyed on id only, so in-place refreshes that call
-  // load() directly (after edits) don't flash a full loading screen.
-  useEffect(() => { setLoading(true); }, [id]);
-
-  // Fetch sibling variants for the variant switcher. Keyed on the (creator,
-  // character, group) plus a version counter bumped by load(), so in-place
-  // refreshes (thumbnail capture/picker, metadata save) update the switcher
-  // thumbnails even though creator/character are unchanged. Passes
-  // variant_group_id (#678) so the durable group is authoritative — a lone
-  // scanner-attribute character match isn't enough to resolve siblings.
-  useEffect(() => {
-    if (model?.creator_id && (model.variant_group_id != null || model.character)) {
-      api.models
-        .variants(model.creator_id, model.character ?? "", model.variant_group_id)
-        .then((data) => setVariants(data.items))
-        .catch(() => setVariants([]));
-    } else {
-      setVariants([]);
-    }
-  }, [model?.creator_id, model?.character, model?.variant_group_id, variantVersion]);
-
-  useEffect(() => {
-    if (!navOrigin || !id) {
-      setPrevNav(null);
-      setNextNav(null);
-      return;
-    }
-    const currentId = Number(id);
-    const navId = ++navFetchIdRef.current;
-    setPrevNav(undefined);
-    setNextNav(undefined);
-
-    api.models.neighbors(currentId, navOrigin)
-      .then((data) => {
-        if (navId !== navFetchIdRef.current) return;
-        setPrevNav(data.prev_id != null ? { id: data.prev_id, from: backTo } : null);
-        setNextNav(data.next_id != null ? { id: data.next_id, from: backTo } : null);
-      })
-      .catch(() => {
-        if (navId !== navFetchIdRef.current) return;
-        setPrevNav(null);
-        setNextNav(null);
-      });
-  }, [id, backTo, navOrigin]);
+    if (numericId == null) return;
+    modelQuery.refetch();
+    queryClient.invalidateQueries({ queryKey: queryKeys.models.variantsAll });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numericId, queryClient]);
 
   if (loading) return <div className="p-8 text-gray-500 animate-pulse">Loading…</div>;
   if (loadError === "network") {

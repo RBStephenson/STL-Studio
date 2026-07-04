@@ -53,6 +53,7 @@ vi.mock("../components/KitBuilder", () => ({ default: () => null }));
 vi.mock("../components/StarRating", () => ({ default: () => null }));
 
 import ModelDetail from "./ModelDetail";
+import { QueryWrapper } from "../test/queryWrapper";
 
 const baseModel = {
   id: 5,
@@ -79,13 +80,15 @@ const baseModel = {
 /** Render ModelDetail for model id=5, optionally with a location.state.from */
 function renderDetail(from?: string) {
   return render(
+    <QueryWrapper>
     <MemoryRouter
       initialEntries={[{ pathname: "/models/5", state: from ? { from } : undefined }]}
     >
       <Routes>
         <Route path="/models/:id" element={<ModelDetail />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </QueryWrapper>,
   );
 }
 

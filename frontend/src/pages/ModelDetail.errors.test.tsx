@@ -48,6 +48,7 @@ vi.mock("../components/KitBuilder", () => ({ default: () => null }));
 vi.mock("../components/StarRating", () => ({ default: () => null }));
 
 import ModelDetail from "./ModelDetail";
+import { QueryWrapper } from "../test/queryWrapper";
 import { ApiError } from "../api/client";
 
 const baseModel = {
@@ -74,11 +75,13 @@ const baseModel = {
 
 const renderAt = () =>
   render(
+    <QueryWrapper>
     <MemoryRouter initialEntries={["/models/1"]}>
       <Routes>
         <Route path="/models/:id" element={<ModelDetail />} />
       </Routes>
     </MemoryRouter>
+    </QueryWrapper>
   );
 
 describe("ModelDetail error handling (#221)", () => {
