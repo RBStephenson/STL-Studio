@@ -3,6 +3,7 @@ import { render, screen, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Library from "./Library";
 import { mkSettings } from "../test/settings";
+import { QueryWrapper } from "../test/queryWrapper";
 
 const driveStatusMock = vi.fn();
 
@@ -39,12 +40,16 @@ vi.mock("../components/HelpLink", () => ({ default: () => null }));
 
 const renderLib = () =>
   render(
+    <QueryWrapper>
     <MemoryRouter initialEntries={["/"]}>
       <Library />
-    </MemoryRouter>,
+    </MemoryRouter>
+    </QueryWrapper>,
   );
 
-const flush = () => act(async () => { await Promise.resolve(); });
+// A macrotask tick — enough for the TanStack drive-status query to resolve
+// (a bare microtask flush settles before the query does).
+const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 describe("Library drive-availability banner (#304)", () => {
   beforeEach(() => {

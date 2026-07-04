@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { Search, SlidersHorizontal, AlertCircle, AlertTriangle, Tag, X, Bookmark, BookmarkPlus, Star, Printer, FolderPlus, ArrowRight, EyeOff, Package, GripVertical, Layers, Sparkles, Keyboard } from "lucide-react";
 import {
@@ -7,8 +8,13 @@ import {
   DragStartEvent, DragEndEvent, Announcements,
 } from "@dnd-kit/core";
 import { gridKeyboardCoordinates } from "../utils/gridKeyboardCoordinates";
-import { api, Model, Creator, ModelStats, Collection, FilterPreset, LibrarySort, PRINT_STATUS_LABELS } from "../api/client";
+import { api, Model, FilterPreset, LibrarySort, ModelList, PRINT_STATUS_LABELS } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
+import { queryKeys } from "../hooks/queries/keys";
+import { useLibraryModels, useCreators, useModelStats, useAllTags } from "../hooks/queries/models";
+import { useCollections } from "../hooks/queries/collections";
+import { useScanRootCount, useUnavailableRoots } from "../hooks/queries/scan";
+import { useGuideModelIds } from "../hooks/queries/guides";
 import ModelCard from "../components/ModelCard";
 import ScanButton from "../components/ScanButton";
 import BulkTagBar from "../components/BulkTagBar";
@@ -29,6 +35,10 @@ const SITES = ["thingiverse", "printables", "myminifactory", "cults3d", "gumroad
 // Back — resumes the prior filter set instead of dropping to the unfiltered view
 // (#288). "Clear all" removes this so an intentional reset stays reset.
 const LIBRARY_QUERY_KEY = "library_query";
+
+// Stable empty set so the guide-ids fallback doesn't produce a new reference
+// each render (which would churn ModelCard memoization).
+const EMPTY_GUIDE_IDS: Set<number> = new Set();
 
 // Compact tri-state toggle: "all" | "1" | "0"
 function TriToggle({ label, value, onChange }: {
@@ -239,13 +249,8 @@ export default function Library() {
     });
   };
 
-  const [models, setModels] = useState<Model[]>([]);
-  const [total, setTotal] = useState(0);
-  const [stats, setStats] = useState<ModelStats | null>(null);
-  const [creators, setCreators] = useState<Creator[]>([]);
-  const [allTags, setAllTags] = useState<{ tag: string; count: number }[]>([]);
+  const queryClient = useQueryClient();
   const [tagSearch, setTagSearch] = useState("");
-  const [loading, setLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(
     !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || nsfwParam || thumbParam)
   );
@@ -277,73 +282,67 @@ export default function Library() {
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
   const presetInputRef = useRef<HTMLInputElement>(null);
-  // null = unknown/loading; number = how many scan folders are configured
-  const [scanRootCount, setScanRootCount] = useState<number | null>(null);
-  const [collections, setCollections] = useState<Collection[]>([]);
-  // Configured roots that are currently unavailable (unmounted/disconnected drive).
-  const [unavailableRoots, setUnavailableRoots] = useState<string[]>([]);
-  // Model ids that have a painting guide → "Guide" badge (#263). Only fetched
-  // when the painting module is enabled.
-  const [guideModelIds, setGuideModelIds] = useState<Set<number>>(new Set());
 
   const scrollRestoredRef = useRef(false);
-  const fetchIdRef = useRef(0);
 
-  const fetchModels = useCallback(async () => {
-    const fetchId = ++fetchIdRef.current;
-    setLoading(true);
-    try {
-      // Variant grouping collapses non-representative variants. When filtering by
-      // favorites/queue/printed (which apply to individual variants), disable grouping
-      // so a flagged non-representative variant isn't hidden behind its group.
-      const groupVariants = !favParam && !printStatusParam && !excludedParam;
-      const params: Record<string, string | number | boolean> = { page, page_size: pageSize, group_variants: groupVariants };
-      if (search)      params.q             = search;
-      if (creatorId)   params.creator_id    = creatorId;
-      if (excludeCreatorId) params.exclude_creator_id = excludeCreatorId;
-      if (site)        params.source_site   = site;
-      if (activeTag)   params.tag           = activeTag;
-      if (excludeTag)  params.exclude_tag   = excludeTag;
-      if (needsReview) params.needs_review  = true;
-      if (nsfwParam)   params.nsfw          = nsfwParam === "1";
-      if (thumbParam)  params.has_thumbnail = thumbParam === "1";
-      if (favParam)    params.is_favorite   = true;
-      if (printStatusParam) params.print_status  = printStatusParam;
-      if (excludePrinted) params.exclude_printed = true;
-      if (excludedParam) params.excluded    = true;
-      if (inboxParam)   params.is_inbox   = true;
-      if (minRating)   params.min_rating   = minRating;
-      if (supportParam) params.support_status = supportParam;
-      if (slicerParam)  params.slicer       = slicerParam;
-      if (addedDays)   params.added_within_days = addedDays;
-      if (effectiveSort && effectiveSort !== "name") params.sort = effectiveSort;
-      const data = await api.models.list(params);
-      if (fetchId !== fetchIdRef.current) return; // stale response — a newer fetch is in flight
-      setModels(data.items);
-      setTotal(data.total);
-    } finally {
-      if (fetchId === fetchIdRef.current) setLoading(false);
-    }
-  }, [page, pageSize, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, printStatusParam, excludePrinted, excludedParam, inboxParam, minRating, supportParam, slicerParam, addedDays, effectiveSort]);
+  // Variant grouping collapses non-representative variants. When filtering by
+  // favorites/queue/printed (which apply to individual variants), disable grouping
+  // so a flagged non-representative variant isn't hidden behind its group.
+  const groupVariants = !favParam && !printStatusParam && !excludedParam;
 
-  useEffect(() => { fetchModels(); }, [fetchModels]);
-  useEffect(() => { api.scan.roots().then((r) => setScanRootCount(r.length)).catch(() => setScanRootCount(null)); }, []);
-  useEffect(() => {
-    api.files.driveStatus()
-      .then((s) => setUnavailableRoots(s.roots.filter((r) => r.enabled && !r.available).map((r) => r.path)))
-      .catch(() => setUnavailableRoots([]));
-  }, []);
-  useEffect(() => { api.models.creators().then(setCreators).catch(() => {}); }, []);
-  const refreshStats = useCallback(() => { api.models.stats().then(setStats).catch(() => {}); }, []);
-  useEffect(() => { refreshStats(); }, [refreshStats]);
-  useEffect(() => { api.models.tags().then(setAllTags).catch(() => {}); }, []);
-  useEffect(() => { api.collections.list().then(setCollections).catch(() => {}); }, []);
-  useEffect(() => {
-    if (!settings.painting_guides_enabled) { setGuideModelIds(new Set()); return; }
-    api.painting.guides.modelIds()
-      .then((r) => setGuideModelIds(new Set(r.model_ids)))
-      .catch(() => {});
-  }, [settings.painting_guides_enabled]);
+  // The full list-query param set, memoized so it doubles as a stable cache key.
+  const listParams = useMemo(() => {
+    const params: Record<string, string | number | boolean> = { page, page_size: pageSize, group_variants: groupVariants };
+    if (search)      params.q             = search;
+    if (creatorId)   params.creator_id    = creatorId;
+    if (excludeCreatorId) params.exclude_creator_id = excludeCreatorId;
+    if (site)        params.source_site   = site;
+    if (activeTag)   params.tag           = activeTag;
+    if (excludeTag)  params.exclude_tag   = excludeTag;
+    if (needsReview) params.needs_review  = true;
+    if (nsfwParam)   params.nsfw          = nsfwParam === "1";
+    if (thumbParam)  params.has_thumbnail = thumbParam === "1";
+    if (favParam)    params.is_favorite   = true;
+    if (printStatusParam) params.print_status  = printStatusParam;
+    if (excludePrinted) params.exclude_printed = true;
+    if (excludedParam) params.excluded    = true;
+    if (inboxParam)   params.is_inbox   = true;
+    if (minRating)   params.min_rating   = minRating;
+    if (supportParam) params.support_status = supportParam;
+    if (slicerParam)  params.slicer       = slicerParam;
+    if (addedDays)   params.added_within_days = addedDays;
+    if (effectiveSort && effectiveSort !== "name") params.sort = effectiveSort;
+    return params;
+  }, [page, pageSize, groupVariants, search, creatorId, excludeCreatorId, site, activeTag, excludeTag, needsReview, nsfwParam, thumbParam, favParam, printStatusParam, excludePrinted, excludedParam, inboxParam, minRating, supportParam, slicerParam, addedDays, effectiveSort]);
+
+  const modelsQuery = useLibraryModels(listParams);
+  // Memoized so the array ref is stable across renders — several callbacks/effects
+  // below depend on `models`, and a fresh `?? []` each render would churn them.
+  const models = useMemo(() => modelsQuery.data?.items ?? [], [modelsQuery.data]);
+  const total = modelsQuery.data?.total ?? 0;
+  const loading = modelsQuery.isPending;
+
+  const statsQuery = useModelStats();
+  const stats = statsQuery.data ?? null;
+  const creators = useCreators().data ?? [];
+  const allTags = useAllTags().data ?? [];
+  const collections = useCollections().data ?? [];
+  const scanRootCount = useScanRootCount().data ?? null;
+  const unavailableRoots = useUnavailableRoots().data ?? [];
+  // Model ids that have a painting guide → "Guide" badge (#263). Only fetched
+  // when the painting module is enabled.
+  const guideModelIds = useGuideModelIds(settings.painting_guides_enabled).data ?? EMPTY_GUIDE_IDS;
+
+  // Refetch the Library after a scan/merge/bulk op. Invalidates the whole models
+  // namespace (list + stats + creators + tags) since any of those can change.
+  const fetchModels = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.models.all });
+  }, [queryClient]);
+
+  // Refresh just the count chips after a per-card mutation.
+  const refreshStats = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.models.stats });
+  }, [queryClient]);
 
   // Restore scroll position when navigating back from a model detail page
   useEffect(() => {
@@ -437,10 +436,13 @@ export default function Library() {
   // After a model is excluded/restored, drop it from the current grid right away
   // and refresh the count chips (its own fetch keeps totals correct on next load).
   const handleRemoved = useCallback((id: number) => {
-    setModels((prev) => prev.filter((m) => m.id !== id));
-    setTotal((t) => Math.max(0, t - 1));
+    queryClient.setQueryData<ModelList>(queryKeys.models.list(listParams), (prev) =>
+      prev
+        ? { ...prev, items: prev.items.filter((m) => m.id !== id), total: Math.max(0, prev.total - 1) }
+        : prev,
+    );
     refreshStats();
-  }, [refreshStats]);
+  }, [queryClient, listParams, refreshStats]);
 
   // --- Keyboard navigation (#169) --------------------------------------------
   // WASD/arrows move a focus ring between cards, Enter opens, "/" focuses

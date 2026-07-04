@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Library from "./Library";
 import { mkSettings } from "../test/settings";
+import { QueryWrapper } from "../test/queryWrapper";
 
 // api.models.list is the call we assert against; everything else just needs to
 // resolve so the page's mount effects settle.
@@ -36,9 +37,11 @@ vi.mock("../components/HelpLink", () => ({ default: () => null }));
 
 const renderLibrary = () =>
   render(
+    <QueryWrapper>
     <MemoryRouter initialEntries={["/library"]}>
       <Library />
-    </MemoryRouter>,
+    </MemoryRouter>
+    </QueryWrapper>,
   );
 
 const flush = () => act(async () => { await Promise.resolve(); });
