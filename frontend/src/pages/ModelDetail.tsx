@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, Frag
 import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotator, GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Heart, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2, Wand2, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Wrench, FolderDown, Folder, Copy, Check, Printer, Split, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2, Wand2, Loader2 } from "lucide-react";
 import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizeSuggestionPreview } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
 import { PartTypeCombo } from "../components/PartTypeCombo";
@@ -12,7 +12,6 @@ import ImagePicker from "../components/ImagePicker";
 import MetadataEditor from "../components/MetadataEditor";
 import KitBuilder from "../components/KitBuilder";
 import StarRating from "../components/StarRating";
-import TagInput from "../components/TagInput";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
@@ -21,6 +20,9 @@ import { queryKeys } from "../hooks/queries/keys";
 import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
 import { useModelGuideId } from "../hooks/queries/guides";
 import CollectionsSection from "./model-detail/CollectionsSection";
+import VariantSwitcher from "./model-detail/sections/VariantSwitcher";
+import StatsRow from "./model-detail/sections/StatsRow";
+import TagsPanel from "./model-detail/sections/TagsPanel";
 import {
   PART_TYPE_SUGGESTIONS,
   toPascalCase,
@@ -1100,103 +1102,18 @@ export default function ModelDetail() {
 
           {/* Variant switcher — sibling variants of this character. Lets you pick
               the specific variant to print after flagging the model at the group. */}
-          {variants.length > 1 && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-gray-600 flex items-center gap-1.5">
-                <Layers size={12} className="text-indigo-400" />
-                {variants.length} variants of {model.variant_group?.label ?? model.character}
-              </p>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {variants.map((v) => {
-                  const vThumb = v.thumbnail_path
-                    ? api.fileUrl(v.thumbnail_path, v.updated_at)
-                    : v.thumbnail_url ?? null;
-                  const isCurrent = v.id === model.id;
-                  // For the current variant, reflect live local toggles rather
-                  // than the (possibly stale) value from the variants fetch.
-                  const vFavorite = isCurrent ? favorite : v.is_favorite;
-                  const vQueued = (isCurrent ? printStatus : v.print_status) === "queued";
-                  // Include the current model's own nsfw flag so the whole
-                  // strip reads censored together, not just the flagged
-                  // variant (STUDIO-45).
-                  const vBlurred = (v.nsfw || nsfw) && !showNSFW;
-                  return (
-                    <Link
-                      key={v.id}
-                      to={`/models/${v.id}`}
-                      state={{ from: backTo }}
-                      title={v.title || v.name}
-                      className={`relative shrink-0 w-20 rounded-lg overflow-hidden border-2 transition-colors ${
-                        isCurrent
-                          ? "border-indigo-500"
-                          : "border-gray-800 hover:border-gray-600"
-                      }`}
-                    >
-                      <div className="aspect-square bg-gray-800">
-                        {vThumb ? (
-                          <img
-                            src={vThumb}
-                            alt=""
-                            className={`w-full h-full object-cover ${vBlurred ? "blur-lg" : ""}`}
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-gray-700">
-                            <Package size={20} />
-                          </div>
-                        )}
-                        {vBlurred && (
-                          <span className="absolute bottom-1 left-1 bg-black/70 rounded px-1 text-[8px] font-medium text-red-400 leading-tight">
-                            NSFW
-                          </span>
-                        )}
-                      </div>
-                      {(vFavorite || vQueued) && (
-                        <div className="absolute top-1 right-1 flex gap-0.5">
-                          {vQueued && (
-                            <span className="bg-black/70 rounded p-0.5 text-sky-400">
-                              <Printer size={9} />
-                            </span>
-                          )}
-                          {vFavorite && (
-                            <span className="bg-black/70 rounded p-0.5 text-yellow-400">
-                              <Star size={9} fill="currentColor" />
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      <p className="px-1 py-0.5 text-[10px] leading-tight text-gray-400 truncate">
-                        {v.title || v.name}
-                      </p>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <VariantSwitcher
+            variants={variants}
+            model={model}
+            favorite={favorite}
+            printStatus={printStatus}
+            nsfw={nsfw}
+            showNSFW={showNSFW}
+            backTo={backTo}
+          />
 
           {/* Stats row */}
-          <div className="flex items-center gap-4 text-sm text-gray-400">
-            {model.like_count != null && (
-              <span title="Likes on the source site" className="flex items-center gap-1 text-yellow-400">
-                <Heart size={14} fill="currentColor" />
-                {model.like_count.toLocaleString()}
-              </span>
-            )}
-            {model.download_count != null && (
-              <span className="flex items-center gap-1">
-                <Download size={14} />
-                {model.download_count.toLocaleString()}
-              </span>
-            )}
-            {model.source_site && (
-              <span className="capitalize bg-gray-800 px-2 py-0.5 rounded text-xs">
-                {model.source_site}
-              </span>
-            )}
-            {model.license && (
-              <span className="bg-gray-800 px-2 py-0.5 rounded text-xs">{model.license}</span>
-            )}
-          </div>
+          <StatsRow model={model} />
 
           {model.source_url && (
             <a
@@ -1216,126 +1133,22 @@ export default function ModelDetail() {
             </p>
           )}
 
-          {/* User tags — chips browse by tag; inline editor adds/removes
-              without opening the full edit screen (#411) */}
-          {editingTags ? (
-            <div className="flex flex-col gap-1.5">
-              <TagInput
-                value={tags}
-                onChange={setUserTags}
-                suggestions={tagSuggestions}
-              />
-              <button
-                onClick={() => setEditingTags(false)}
-                className="text-xs text-gray-500 hover:text-gray-300 w-fit"
-              >
-                Done
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {tags.map((tag) => (
-                <Link
-                  key={tag}
-                  to={`/?tag=${encodeURIComponent(tag)}`}
-                  className="flex items-center gap-1 text-xs bg-gray-800 text-gray-400 hover:bg-indigo-950 hover:text-indigo-300 hover:border-indigo-700 border border-transparent px-2 py-1 rounded-full transition-colors"
-                >
-                  <Tag size={10} />
-                  {tag}
-                </Link>
-              ))}
-              <button
-                onClick={openTagEditor}
-                title="Add or remove tags"
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-indigo-300 border border-dashed border-gray-700 hover:border-indigo-700 px-2 py-1 rounded-full transition-colors"
-              >
-                <Plus size={10} />
-                {tags.length > 0 ? "Edit tags" : "Add tag"}
-              </button>
-            </div>
-          )}
-
-          {/* Auto-detected tags — click + to promote to a user tag, × to remove
-              (suppressed tags survive rescans), click label to browse */}
-          {(() => {
-            const visibleAutoTags = (model.auto_tags ?? []).filter(
-              (t) => !removedAutoTags.includes(t)
-            );
-            if (visibleAutoTags.length === 0) return null;
-            return (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs text-gray-600">Auto-detected · click + to add as tag · × to remove · click label to browse</p>
-              <div className="flex flex-wrap gap-1.5">
-                {visibleAutoTags.map((tag) => {
-                  const already = tags.includes(tag);
-                  return (
-                    <div key={tag} className="flex items-center rounded-full border overflow-hidden border-gray-700">
-                      <button
-                        onClick={() => addTag(tag)}
-                        disabled={already}
-                        title={already ? "Already a tag" : "Add as user tag"}
-                        className={`flex items-center px-1.5 py-0.5 text-xs border-r border-gray-700 transition-colors ${
-                          already
-                            ? "bg-indigo-900/30 text-indigo-500 cursor-default"
-                            : "bg-gray-800/60 text-gray-500 hover:bg-indigo-950 hover:text-indigo-400"
-                        }`}
-                      >
-                        {already ? <Tag size={9} /> : <Plus size={9} />}
-                      </button>
-                      <Link
-                        to={`/?tag=${encodeURIComponent(tag)}`}
-                        className="flex items-center px-2 py-0.5 text-xs bg-gray-800/60 text-gray-500 hover:bg-indigo-950 hover:text-indigo-300 transition-colors"
-                      >
-                        {tag}
-                      </Link>
-                      <button
-                        onClick={() => suppressAutoTag(tag)}
-                        title="Remove this auto-detected tag"
-                        className="flex items-center px-1.5 py-0.5 text-xs border-l border-gray-700 bg-gray-800/60 text-gray-600 hover:bg-rose-950 hover:text-rose-400 transition-colors"
-                      >
-                        <X size={9} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            );
-          })()}
-
-          {/* Hidden (suppressed) auto-tags — restore any that the scanner still
-              detects. Only shows tags currently in auto_tags so restoring is
-              guaranteed to bring the chip back. */}
-          {(() => {
-            const hidden = (model.auto_tags ?? []).filter((t) => removedAutoTags.includes(t));
-            if (hidden.length === 0) return null;
-            return (
-              <div className="flex flex-col gap-1.5">
-                <button
-                  onClick={() => setShowHiddenTags((s) => !s)}
-                  className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-400 transition-colors w-fit"
-                >
-                  {showHiddenTags ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                  {hidden.length} hidden auto-{hidden.length === 1 ? "tag" : "tags"}
-                </button>
-                {showHiddenTags && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {hidden.map((tag) => (
-                      <button
-                        key={tag}
-                        onClick={() => restoreAutoTag(tag)}
-                        title="Restore this auto-detected tag"
-                        className="flex items-center gap-1 rounded-full border border-gray-800 px-2 py-0.5 text-xs bg-gray-900/60 text-gray-600 line-through hover:no-underline hover:border-emerald-800 hover:bg-emerald-950 hover:text-emerald-400 transition-colors"
-                      >
-                        <Plus size={9} />
-                        {tag}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+          {/* User / auto-detected / hidden tags (#411) */}
+          <TagsPanel
+            tags={tags}
+            autoTags={model.auto_tags ?? []}
+            removedAutoTags={removedAutoTags}
+            editingTags={editingTags}
+            tagSuggestions={tagSuggestions}
+            showHiddenTags={showHiddenTags}
+            onSetUserTags={setUserTags}
+            onDoneEditing={() => setEditingTags(false)}
+            onOpenEditor={openTagEditor}
+            onAdd={addTag}
+            onSuppress={suppressAutoTag}
+            onRestore={restoreAutoTag}
+            onToggleHidden={() => setShowHiddenTags((s) => !s)}
+          />
 
           {/* Collections — always in right column */}
           <CollectionsSection key={model.id} modelId={model.id} initialIds={model.collection_ids} />
