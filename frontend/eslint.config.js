@@ -21,8 +21,10 @@ export default tseslint.config(
       // the STUDIO-61/63 refactors will remove — enable them after that lands.
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
-      // Ratchet: 36 existing `any`s (STUDIO-64). Warn now, error once cleared.
-      "@typescript-eslint/no-explicit-any": "warn",
+      // Ratchet locked (STUDIO-64): the original 36 `any`s were cleared during
+      // the STUDIO-59/61/63 refactors (+ #759), so this is now an error to keep
+      // the count at zero. Justified casts may use an inline eslint-disable.
+      "@typescript-eslint/no-explicit-any": "error",
       // Intentionally-unused args/vars are prefixed with _ by convention.
       "@typescript-eslint/no-unused-vars": [
         "error",
