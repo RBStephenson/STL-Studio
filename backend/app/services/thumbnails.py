@@ -16,6 +16,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.config import settings
+from app.services.path_guard import assert_within_roots
 from app.services.url_guard import SSRFError, assert_public_url, guarded_async_client
 
 logger = logging.getLogger(__name__)
@@ -221,9 +222,7 @@ def store_thumbnail(model_id: int, ext: str, data: bytes) -> Path:
         raise ValueError(f"Unsafe thumbnail extension: {ext!r}")
     out_dir = thumbnails_dir()
     out_dir_real = os.path.realpath(str(out_dir))
-    out_str = os.path.realpath(os.path.join(out_dir_real, f"{model_id}{ext}"))
-    if os.path.commonpath([out_str, out_dir_real]) != out_dir_real:
-        raise ValueError("Thumbnail path escaped directory")
+    out_str = assert_within_roots(os.path.join(out_dir_real, f"{model_id}{ext}"), [out_dir_real])
     out = Path(out_str)
     for stale in out_dir.glob(f"{model_id}.*"):
         if stale != out:
@@ -256,9 +255,7 @@ def store_collection_cover(collection_id: int, ext: str, data: bytes) -> Path:
         raise ValueError(f"Unsafe cover extension: {ext!r}")
     out_dir = collection_covers_dir()
     out_dir_real = os.path.realpath(str(out_dir))
-    out_str = os.path.realpath(os.path.join(out_dir_real, f"collection_{collection_id}{ext}"))
-    if os.path.commonpath([out_str, out_dir_real]) != out_dir_real:
-        raise ValueError("Cover path escaped directory")
+    out_str = assert_within_roots(os.path.join(out_dir_real, f"collection_{collection_id}{ext}"), [out_dir_real])
     out = Path(out_str)
     for stale in out_dir.glob(f"collection_{collection_id}.*"):
         if stale != out:

@@ -99,6 +99,30 @@ When adding a new endpoint, put the call in the relevant domain module and the
 types in `types.ts`. The barrel re-exports everything, so call sites don't need
 updating.
 
+## Backend architecture
+
+### Path-traversal sanitization
+
+Any endpoint that accepts a user-supplied file path **must** validate it through
+`app.services.path_guard` before touching the filesystem:
+
+```python
+from app.services.path_guard import assert_within_roots, is_within_roots
+
+# Raises ValueError if the path escapes every root — convert to HTTP 403:
+try:
+    real = assert_within_roots(user_path, allowed_roots)
+except ValueError:
+    raise HTTPException(status_code=403, detail="Path not allowed")
+
+# Boolean variant — useful inside loops or list comprehensions:
+safe_paths = [p for p in paths if is_within_roots(p, allowed_roots)]
+```
+
+Both functions call `os.path.realpath` (resolves symlinks and `..`) then
+`os.path.commonpath` for containment. Do **not** inline this pattern at new call
+sites — the centralized function is the CodeQL sanitizer target.
+
 ## Code Style
 
 - **Python**: standard PEP 8; type hints on public functions.

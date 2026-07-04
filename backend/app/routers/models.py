@@ -24,6 +24,7 @@ from app.schemas import (
     AiOrganizeSuggestionPreview, AiOrganizePreviewResult,
     AiOrganizeApplyRequest,
 )
+from app.services.path_guard import is_within_roots
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
 from app.services.variant_sync import propagate_source_url
 from app.services.tag_sync import sync_model_tags
@@ -635,18 +636,7 @@ def bulk_delete_models(body: BulkDeleteRequest, db: Session = Depends(get_db)):
     # Path guard: build allowed roots once, used only when delete_files=True.
     if body.delete_files and folder_paths:
         roots = [os.path.realpath(r.path) for r in db.query(ScanRoot).all()]
-
-        def _within_roots(p: str) -> bool:
-            real = os.path.realpath(p)
-            for root in roots:
-                try:
-                    if os.path.commonpath([real, root]) == root:
-                        return True
-                except ValueError:
-                    pass
-            return False
-
-        unsafe = [p for p in folder_paths if not _within_roots(p)]
+        unsafe = [p for p in folder_paths if not is_within_roots(p, roots)]
         if unsafe:
             raise HTTPException(
                 status_code=400,

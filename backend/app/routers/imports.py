@@ -31,6 +31,7 @@ from app.schemas import (
     SourceMappingRead, SourceMappingSet,
 )
 from app.services import reorganize_apply, scanner, write_lock
+from app.services.path_guard import assert_within_roots
 from app.services.reorganize_apply import ApplyError
 from app.services.thumbnails import CONTENT_TYPE_EXT, IMAGE_EXTS
 
@@ -95,18 +96,9 @@ def source_contents(source: str, db: Session = Depends(get_db)):
     if not source.strip():
         raise HTTPException(status_code=400, detail="source is required")
 
-    # Path-injection barrier (inline so CodeQL sees the guard at the sink):
-    # realpath + commonpath containment against the allowed roots.
-    real = os.path.realpath(source.strip())
-    contained = False
-    for base in _allowed_bases(db):
-        try:
-            if os.path.commonpath([real, base]) == base:
-                contained = True
-                break
-        except ValueError:
-            continue  # different drives (Windows)
-    if not contained:
+    try:
+        real = assert_within_roots(source.strip(), _allowed_bases(db))
+    except ValueError:
         raise HTTPException(status_code=403, detail="Path is outside the allowed folders")
 
     p = Path(real)
@@ -178,17 +170,9 @@ def scan_folder(body: InboxScanRequest, db: Session = Depends(get_db)):
     if not body.path.strip():
         raise HTTPException(status_code=400, detail="Path is required")
 
-    # Path-injection barrier (inline; see source_contents).
-    real = os.path.realpath(body.path.strip())
-    contained = False
-    for base in _allowed_bases(db):
-        try:
-            if os.path.commonpath([real, base]) == base:
-                contained = True
-                break
-        except ValueError:
-            continue
-    if not contained:
+    try:
+        real = assert_within_roots(body.path.strip(), _allowed_bases(db))
+    except ValueError:
         raise HTTPException(status_code=403, detail="Path is outside the allowed folders")
 
     p = Path(real)
@@ -348,22 +332,9 @@ def download_images(body: DownloadImagesRequest, db: Session = Depends(get_db)):
     if "\x00" in raw_pack_path:
         raise HTTPException(status_code=400, detail="pack_path is invalid")
 
-    pack_dir_str = os.path.realpath(os.path.expanduser(raw_pack_path))
-    if not os.path.isabs(pack_dir_str):
-        raise HTTPException(status_code=400, detail="pack_path must be an absolute path")
-
-    # Path guard: must be within a configured or bootstrap-allowed root.
-    contained = False
-    for base in _allowed_bases(db):
-        base_dir_str = os.path.realpath(os.path.expanduser(base))
-        try:
-            if os.path.commonpath([pack_dir_str, base_dir_str]) == base_dir_str:
-                contained = True
-                break
-        except ValueError:
-            continue
-
-    if not contained:
+    try:
+        pack_dir_str = assert_within_roots(os.path.expanduser(raw_pack_path), _allowed_bases(db))
+    except ValueError:
         raise HTTPException(status_code=403, detail="Path is outside the allowed folders")
 
     pack_dir = Path(pack_dir_str)
