@@ -224,11 +224,16 @@ standard suggestions (Body, Head, Arm, Base, Weapon, etc.), or type any
 custom category name. The dropdown appears automatically and can be dismissed
 with Escape; pressing Enter or clicking away commits the value.
 
-**Settings → Preferences → Horizontal parts layout** swaps the two-column
-model detail page for a full-width, scrollable files table below the main
-grid (with **Collections**, **Location**, and **Other Files** moved into the
-right column) — handy for models with a lot of parts. The part picker is
-hidden in this mode since the table serves the same purpose.
+**Settings → Preferences → Horizontal parts layout** (on by default) swaps the
+two-column model detail page for a full-width, scrollable files table below the
+main grid (with **Collections**, **Location**, and **Other Files** moved into the
+right column) — handy for models with a lot of parts. The part picker is hidden
+in this mode since the table serves the same purpose.
+
+**Settings → Preferences → Enable part categories** turns on the Category field
+on each file in the model detail view. Files group into collapsible sections and
+the 3D viewer organises its part picker by category — useful for complex
+multi-part kits.
 
 ## 3D viewer
 

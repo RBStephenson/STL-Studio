@@ -1,3 +1,4 @@
+import { Tag, LayoutPanelTop } from "lucide-react";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
@@ -68,6 +69,50 @@ export default function PreferencesTab() {
           <span className="text-xs text-gray-600">drives the Library's "recently added" filter</span>
         </div>
       </div>
+      {/* Part Categories */}
+      <section className="mt-8 pt-6 border-t border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <Tag size={14} /> Part Categories
+        </h2>
+        <label className="flex items-start gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={settings.part_categories_enabled}
+            onChange={() => update({ part_categories_enabled: !settings.part_categories_enabled })}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-gray-300">Enable part categories</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Adds a Category field to each file in the model detail view. Files group into
+              collapsible sections and the 3D viewer organises its part picker by category.
+              Useful for complex multi-part kits.
+            </p>
+          </div>
+        </label>
+      </section>
+
+      {/* Horizontal Parts Layout */}
+      <section className="mt-8 pt-6 border-t border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <LayoutPanelTop size={14} /> Parts Display
+        </h2>
+        <label className="flex items-start gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={settings.horizontal_parts_layout}
+            onChange={() => update({ horizontal_parts_layout: !settings.horizontal_parts_layout })}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-gray-300">Horizontal parts layout</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Displays the STL file list as a full-width table below the model images and info,
+              with an editable Name column. Collections and Location move below the two-column area.
+            </p>
+          </div>
+        </label>
+      </section>
     </div>
   );
 }

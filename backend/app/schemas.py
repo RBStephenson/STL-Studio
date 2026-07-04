@@ -474,7 +474,7 @@ class AppSettingsRead(BaseModel):
     # Group model files by user-assigned category in the file list and 3D viewer.
     part_categories_enabled: bool = False
     # Show STL files as a full-width horizontal table below the two-column layout.
-    horizontal_parts_layout: bool = False
+    horizontal_parts_layout: bool = True
     # AI naming & organizing — uses an OpenAI-compatible endpoint (e.g. Ollama).
     # The API key is NOT here; it's encrypted via /settings/ai-organize/key.
     ai_organize_enabled: bool = False
