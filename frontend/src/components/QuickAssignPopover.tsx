@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, Tag, Layers, Check, Loader2, ImageOff, Pencil, Ungroup } from "lucide-react";
 import { api, Collection } from "../api/client";
 import { useToast } from "../context/ToastContext";
+import { errMsg } from "../utils/err";
 
 interface TagSuggestion {
   tag: string;
@@ -83,8 +84,8 @@ export default function QuickAssignPopover({
       await api.models.setGroupingStrategy(groupFolder, next);
       setGroupStrategy(next);
       toast(next === "off" ? "Auto-grouping off for this folder." : "Auto-grouping restored.", "success");
-    } catch (e: any) {
-      toast(e?.message || "Couldn't update grouping — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't update grouping — try again.", "error");
     } finally {
       setSavingStrategy(false);
     }

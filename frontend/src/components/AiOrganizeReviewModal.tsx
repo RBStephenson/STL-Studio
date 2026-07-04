@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X, Wand2, Loader2 } from "lucide-react";
 import { api, AiOrganizeSuggestionPreview, STLFile } from "../api/client";
+import { errMsg } from "../utils/err";
 
 const PART_TYPE_OPTIONS = [
   "Head", "Body", "Arm", "Leg", "Hand", "Foot",
@@ -69,8 +70,8 @@ export default function AiOrganizeReviewModal({
     try {
       await api.models.aiOrganizeApply(modelId, selected);
       onApplied();
-    } catch (e: any) {
-      setError(e?.message || "Apply failed");
+    } catch (e) {
+      setError(errMsg(e) || "Apply failed");
       setApplying(false);
     }
   };

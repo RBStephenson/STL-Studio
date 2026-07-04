@@ -22,7 +22,7 @@ export default function FolderPicker({ onSelect, onClose, mode, initialPath }: P
       .then(setListing)
       .catch(() => setError("Can't open that folder (permission denied or unavailable)."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [mode]);
 
   useEffect(() => { browse(initialPath); }, [browse, initialPath]);
 

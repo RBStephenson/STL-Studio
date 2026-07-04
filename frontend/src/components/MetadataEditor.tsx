@@ -3,6 +3,7 @@ import { Save, X, Loader2, Download, CheckCircle, AlertCircle } from "lucide-rea
 import { api, ModelDetail, ScrapePreview } from "../api/client";
 import TagInput from "./TagInput";
 import { useToast } from "../context/ToastContext";
+import { errMsg } from "../utils/err";
 
 interface Props {
   model: ModelDetail;
@@ -65,8 +66,8 @@ export default function MetadataEditor({ model, currentTags, onSaved, onCancel }
       await api.models.update(model.id, form);
       toast("Saved", "success");
       onSaved();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errMsg(e) ?? null);
       toast("Couldn't save changes.", "error");
     } finally {
       setSaving(false);
@@ -81,8 +82,8 @@ export default function MetadataEditor({ model, currentTags, onSaved, onCancel }
     try {
       const preview = await api.scrape.fetchUrl(form.source_url);
       setScraped(preview);
-    } catch (e: any) {
-      setFetchError(e.message.includes("400") ? "URL not recognised — only Gumroad, Cults3D and MyMiniFactory are supported." : "Could not fetch metadata from that URL.");
+    } catch (e) {
+      setFetchError(errMsg(e)?.includes("400") ? "URL not recognised — only Gumroad, Cults3D and MyMiniFactory are supported." : "Could not fetch metadata from that URL.");
     } finally {
       setFetching(false);
     }

@@ -125,7 +125,7 @@ describe("ModelCard thumbnail cache-busting (#185)", () => {
     renderCard({
       thumbnail_path: "/data/thumbnails/7.png",
       updated_at: "2026-06-15T12:00:00",
-    } as any);
+    });
     const img = screen.getByRole("img");
     expect(img).toHaveAttribute(
       "src",
@@ -144,13 +144,13 @@ describe("ModelCard print-status cycle (#166)", () => {
   });
 
   it("shows queued color when print_status is queued", () => {
-    renderCard({ print_status: "queued" } as any);
+    renderCard({ print_status: "queued" });
     const btn = screen.getByRole("button", { name: /print status queued/i });
     expect(btn.className).toMatch(/sky/);
   });
 
   it("calls setPrintStatus with next cycle value on click", async () => {
-    renderCard({ print_status: "none" } as any);
+    renderCard({ print_status: "none" });
     const btn = screen.getByRole("button", { name: /print status none/i });
     fireEvent.click(btn);
     await waitFor(() =>
@@ -185,7 +185,7 @@ describe("ModelCard inline rename (#191)", () => {
   });
 
   it("renames a whole variant group on double-click + Enter", async () => {
-    renderCard({ variant_count: 3, character: "Akuma", title: null, variant_group_id: 42 } as any);
+    renderCard({ variant_count: 3, character: "Akuma", title: null, variant_group_id: 42 });
     fireEvent.doubleClick(screen.getByText("Akuma"));
     const input = screen.getByLabelText("Rename group") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Oni" } });
@@ -198,7 +198,7 @@ describe("ModelCard inline rename (#191)", () => {
   });
 
   it("refuses to rename a group with no durable group id and reverts the input", async () => {
-    renderCard({ variant_count: 3, character: "Akuma", title: null, variant_group_id: null } as any);
+    renderCard({ variant_count: 3, character: "Akuma", title: null, variant_group_id: null });
     fireEvent.doubleClick(screen.getByText("Akuma"));
     const input = screen.getByLabelText("Rename group") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Oni" } });
@@ -208,13 +208,13 @@ describe("ModelCard inline rename (#191)", () => {
   });
 
   it("shows enriched title instead of character slug for an enriched group", () => {
-    renderCard({ variant_count: 3, character: "1.Firestar-Regular-stls", title: "Firestar 3D printing model" } as any);
+    renderCard({ variant_count: 3, character: "1.Firestar-Regular-stls", title: "Firestar 3D printing model" });
     expect(screen.getByText("Firestar 3D printing model")).toBeInTheDocument();
     expect(screen.queryByText("1.Firestar-Regular-stls")).not.toBeInTheDocument();
   });
 
   it("falls back to character when group has no title", () => {
-    renderCard({ variant_count: 3, character: "Akuma", title: null } as any);
+    renderCard({ variant_count: 3, character: "Akuma", title: null });
     expect(screen.getByText("Akuma")).toBeInTheDocument();
   });
 
@@ -237,18 +237,18 @@ describe("ModelCard inline star rating (#167)", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it("reflects the model's user_rating", () => {
-    renderCard({ user_rating: 3 } as any);
+    renderCard({ user_rating: 3 });
     expect(screen.getByRole("radio", { name: "3 stars" })).toHaveAttribute("aria-checked", "true");
   });
 
   it("calls setRating when a star is clicked", async () => {
-    renderCard({ user_rating: null } as any);
+    renderCard({ user_rating: null });
     fireEvent.click(screen.getByRole("radio", { name: "4 stars" }));
     await waitFor(() => expect(vi.mocked(api.models.setRating)).toHaveBeenCalledWith(7, 4));
   });
 
   it("clears the rating when the active star is clicked again", async () => {
-    renderCard({ user_rating: 2 } as any);
+    renderCard({ user_rating: 2 });
     fireEvent.click(screen.getByRole("radio", { name: "2 stars" }));
     await waitFor(() => expect(vi.mocked(api.models.setRating)).toHaveBeenCalledWith(7, null));
   });

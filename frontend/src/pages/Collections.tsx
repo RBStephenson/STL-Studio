@@ -4,6 +4,7 @@ import { FolderOpen, Plus, Trash2, Pencil, Check, X, ImagePlus } from "lucide-re
 import { api, Collection } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import CollectionCoverPicker from "../components/CollectionCoverPicker";
+import { errMsg } from "../utils/err";
 
 function CollectionCard({
   col,
@@ -179,8 +180,8 @@ export default function Collections() {
       setCollections((prev) => prev.map((c) =>
         c.id === col.id ? { ...c, name: updated.name, description: updated.description } : c
       ));
-    } catch (e: any) {
-      const detail = e?.message ?? "";
+    } catch (e) {
+      const detail = errMsg(e) ?? "";
       toast(detail.includes("409") ? "That name is already taken." : "Couldn't save — try again.", "error");
     }
   };

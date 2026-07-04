@@ -2,6 +2,7 @@ import { Tag, LayoutPanelTop } from "lucide-react";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
+import { errMsg } from "../../utils/err";
 
 export default function PreferencesTab() {
   const { settings, update } = useAppSettings();
@@ -10,16 +11,16 @@ export default function PreferencesTab() {
   const setPageSize = async (n: number) => {
     try {
       await update({ library_page_size: n });
-    } catch (e: any) {
-      flash(e?.message || "Could not update setting", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not update setting", "err");
     }
   };
 
   const setRecentDays = async (n: number) => {
     try {
       await update({ recent_days: n });
-    } catch (e: any) {
-      flash(e?.message || "Could not update setting", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not update setting", "err");
     }
   };
 

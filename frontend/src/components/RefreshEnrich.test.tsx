@@ -33,7 +33,7 @@ function mock409() {
 /** Read the JSON body sent to the /enrich/refresh POST. */
 function lastPostBody(fetchMock: ReturnType<typeof vi.fn>) {
   const call = fetchMock.mock.calls.find(
-    (args: any[]) => args[0].includes("/enrich/refresh") && (args[1] as RequestInit | undefined)?.method === "POST"
+    (args: unknown[]) => (args[0] as string).includes("/enrich/refresh") && (args[1] as RequestInit | undefined)?.method === "POST"
   );
   return JSON.parse((call![1] as RequestInit).body as string);
 }

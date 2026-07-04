@@ -6,6 +6,7 @@ import {
 } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import HelpLink from "../components/HelpLink";
+import { errMsg } from "../utils/err";
 
 const PAGE_SIZE = 48;
 
@@ -183,8 +184,8 @@ export default function PaintShelfPage() {
       const diff = await api.painting.inventory.importPreview(file);
       setApplyRemoved(false);
       setPendingImport({ file, diff });
-    } catch (e: any) {
-      toast(e?.message || "Could not read the CSV.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Could not read the CSV.", "error");
     }
   };
 
@@ -200,8 +201,8 @@ export default function PaintShelfPage() {
       setPendingImport(null);
       loadBrands();
       fetchPaints();
-    } catch (e: any) {
-      toast(e?.message || "Import failed — nothing was changed.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Import failed — nothing was changed.", "error");
     } finally {
       setImporting(false);
     }
@@ -262,9 +263,9 @@ export default function PaintShelfPage() {
       }
       setFormMode("hidden");
       fetchPaints();
-    } catch (e: any) {
+    } catch (e) {
       // Validation errors (e.g. code-pattern 422s) surface inline in the form.
-      setFormError(e?.message || "Could not save the paint.");
+      setFormError(errMsg(e) || "Could not save the paint.");
     } finally {
       setBusy(false);
     }
@@ -276,8 +277,8 @@ export default function PaintShelfPage() {
       await api.painting.paints.delete(paint.id);
       toast("Paint deleted.", "success");
       fetchPaints();
-    } catch (e: any) {
-      toast(e?.message || "Could not delete the paint.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Could not delete the paint.", "error");
     }
   };
 
@@ -329,7 +330,7 @@ export default function PaintShelfPage() {
             <Upload size={15} /> Import CSV
           </button>
           <button
-            onClick={() => api.painting.inventory.exportCsv().catch((e) => toast(e?.message || "Export failed.", "error"))}
+            onClick={() => api.painting.inventory.exportCsv().catch((e) => toast(errMsg(e) || "Export failed.", "error"))}
             title="Download the shelf as a PaintRack-format CSV"
             className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
           >

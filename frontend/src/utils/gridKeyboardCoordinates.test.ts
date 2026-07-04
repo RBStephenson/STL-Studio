@@ -5,7 +5,8 @@ import { gridKeyboardCoordinates } from "./gridKeyboardCoordinates";
 // A 2x2 grid of 100x100 cards (10px gutter). Centers:
 //   1 (0,0)→(50,50)   2 (110,0)→(160,50)
 //   3 (0,110)→(50,160) 4 (110,110)→(160,160)
-const rects = new Map<string, any>([
+type Rect = { left: number; top: number; width: number; height: number; right: number; bottom: number };
+const rects = new Map<string, Rect>([
   ["1", { left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 }],
   ["2", { left: 110, top: 0, width: 100, height: 100, right: 210, bottom: 100 }],
   ["3", { left: 0, top: 110, width: 100, height: 100, right: 100, bottom: 210 }],
@@ -24,7 +25,7 @@ function args(activeId: string) {
         getEnabled: () => [...rects.keys()].map((id) => ({ id })),
       },
     },
-  } as any;
+  } as unknown as Parameters<typeof gridKeyboardCoordinates>[1];
 }
 
 function arrow(code: KeyboardCode) {

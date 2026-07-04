@@ -7,6 +7,7 @@ import { useState, useEffect } from "react";
 import { api, ModelDetail as ModelDetailType } from "../../../api/client";
 import { useToast } from "../../../context/ToastContext";
 import { useConfirm } from "../../../context/ConfirmContext";
+import { errMsg } from "../../../utils/err";
 
 export interface UseGroupMerge {
   settingGroup: boolean;
@@ -62,8 +63,8 @@ export function useGroupMerge(
       toast(`Merged into "${label}".`, "success");
       setSettingGroup(false);
       reload();
-    } catch (e: any) {
-      toast(e?.message || "Couldn't merge into that group — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't merge into that group — try again.", "error");
     } finally {
       setSavingGroup(false);
     }
@@ -81,8 +82,8 @@ export function useGroupMerge(
       await api.models.splitGroup(model.variant_group_id, [model.id]);
       toast("Removed from group.", "success");
       reload();
-    } catch (e: any) {
-      toast(e?.message || "Couldn't remove from group — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't remove from group — try again.", "error");
     }
   };
 

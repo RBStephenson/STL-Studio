@@ -4,6 +4,7 @@ import { useAppSettings } from "../../context/AppSettingsContext";
 import HelpLink from "../../components/HelpLink";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
+import { errMsg } from "../../utils/err";
 
 export default function ScanningTab() {
   const { settings, update } = useAppSettings();
@@ -21,16 +22,16 @@ export default function ScanningTab() {
     try {
       await update({ scan_ignore_patterns: [...current, pat] });
       setNewPattern("");
-    } catch (e: any) {
-      flash(e?.message || "Could not add ignore pattern", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not add ignore pattern", "err");
     }
   };
 
   const removeIgnorePattern = async (pat: string) => {
     try {
       await update({ scan_ignore_patterns: settings.scan_ignore_patterns.filter((p) => p !== pat) });
-    } catch (e: any) {
-      flash(e?.message || "Could not remove ignore pattern", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not remove ignore pattern", "err");
     }
   };
 
@@ -45,16 +46,16 @@ export default function ScanningTab() {
     try {
       await update({ scan_tag_rules: [...current, { keyword, tag }] });
       setNewKeyword(""); setNewTag("");
-    } catch (e: any) {
-      flash(e?.message || "Could not add tag rule", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not add tag rule", "err");
     }
   };
 
   const removeTagRule = async (keyword: string, tag: string) => {
     try {
       await update({ scan_tag_rules: settings.scan_tag_rules.filter((r) => !(r.keyword === keyword && r.tag === tag)) });
-    } catch (e: any) {
-      flash(e?.message || "Could not remove tag rule", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not remove tag rule", "err");
     }
   };
 
@@ -66,16 +67,16 @@ export default function ScanningTab() {
     try {
       await update({ scan_parts_names: [...current, name] });
       setNewPartsName("");
-    } catch (e: any) {
-      flash(e?.message || "Could not add parts name", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not add parts name", "err");
     }
   };
 
   const removePartsName = async (name: string) => {
     try {
       await update({ scan_parts_names: settings.scan_parts_names.filter((n) => n !== name) });
-    } catch (e: any) {
-      flash(e?.message || "Could not remove parts name", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not remove parts name", "err");
     }
   };
 

@@ -5,6 +5,7 @@ import { api, ScanRoot } from "../../api/client";
 import FolderPicker from "../../components/FolderPicker";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
+import { errMsg } from "../../utils/err";
 
 const LAYOUT_SAMPLES: Record<string, string> = {
   "{creator}": "Abe3D",
@@ -62,8 +63,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       setNewLayout("{creator}");
       onRootsChanged();
       flash("Drive added — run a scan to index it", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not add drive", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not add drive", "err");
     }
   };
 
@@ -77,8 +78,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       clearEdit();
       onRootsChanged();
       flash("Layout updated — rescan to apply it", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Invalid layout template — check the format", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Invalid layout template — check the format", "err");
     }
   };
 
@@ -92,8 +93,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       clearEdit();
       onRootsChanged();
       flash("Library name updated", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Couldn't update the library name", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Couldn't update the library name", "err");
     }
   };
 
@@ -102,8 +103,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       await api.scan.updateRoot(root.id, { is_writable: !root.is_writable });
       onRootsChanged();
       flash(root.is_writable ? "No longer an import destination" : "Marked as an import destination", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Couldn't update the library", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Couldn't update the library", "err");
     }
   };
 
@@ -117,8 +118,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           : "Grouping by character folder on — rescan to apply",
         "ok",
       );
-    } catch (e: any) {
-      flash(e?.message || "Couldn't update the library", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Couldn't update the library", "err");
     }
   };
 
@@ -128,8 +129,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       await api.scan.removeRoot(id);
       onRootsChanged();
       flash("Drive removed", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not remove drive", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not remove drive", "err");
     }
   };
 
@@ -142,8 +143,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
         ? ` (${res.restart_required.join(", ")} still need a restart)`
         : "";
       flash(`Settings reloaded from .env${restart}`, "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not reload settings", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not reload settings", "err");
     } finally {
       setReloadingEnv(false);
     }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { X, Check, ImageOff, Loader2, Link2, Trash2, FolderOpen, ArrowUp, Folder, HardDrive, Image, RefreshCw } from "lucide-react";
+import { errMsg } from "../utils/err";
 
 interface ImageEntry {
   path: string;
@@ -65,7 +66,7 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
     fetch(url)
       .then((r) => { if (!r.ok) throw new Error("Cannot open folder"); return r.json(); })
       .then(setBrowseListing)
-      .catch((e) => setBrowseError(e.message))
+      .catch((e) => setBrowseError(errMsg(e) ?? null))
       .finally(() => setBrowseLoading(false));
   }, []);
 
@@ -134,8 +135,8 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
         if (!r.ok) throw new Error("Could not update the thumbnail");
       }
       onApplied();
-    } catch (e: any) {
-      setApplyError(e.message);
+    } catch (e) {
+      setApplyError(errMsg(e) ?? null);
     } finally {
       setSaving(false);
     }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { RefreshCw, Loader2 } from "lucide-react";
 import { useToast } from "../context/ToastContext";
+import { errMsg } from "../utils/err";
 
 interface RefreshResult {
   candidates: number;
@@ -93,8 +94,8 @@ export default function RefreshEnrich({ creatorId, scopeLabel, compact, onDone }
         );
       }
       onDone?.(result);
-    } catch (e: any) {
-      toast(e.message ?? "Refresh failed", "error");
+    } catch (e) {
+      toast(errMsg(e) ?? "Refresh failed", "error");
     } finally {
       setRunning(false);
     }
