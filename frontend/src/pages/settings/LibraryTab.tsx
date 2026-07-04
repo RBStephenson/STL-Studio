@@ -5,7 +5,6 @@ import { api, ScanRoot } from "../../api/client";
 import FolderPicker from "../../components/FolderPicker";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
-import { useAppSettings } from "../../context/AppSettingsContext";
 
 const LAYOUT_SAMPLES: Record<string, string> = {
   "{creator}": "Abe3D",
@@ -46,7 +45,6 @@ interface Props {
 
 export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
   const { success, error, flash } = useSettingsFlash();
-  const { settings, update } = useAppSettings();
   const [newPath, setNewPath] = useState("");
   const [newLayout, setNewLayout] = useState("{creator}");
   const [layoutEdits, setLayoutEdits] = useState<Record<number, string>>({});
