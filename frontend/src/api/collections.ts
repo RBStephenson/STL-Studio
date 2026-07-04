@@ -19,7 +19,7 @@ export const collectionsApi = {
     const res = await fetch(`${BASE}/collections/${collectionId}/models/${modelId}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   },
-  update: (collectionId: number, body: { name?: string; description?: string }) =>
+  update: (collectionId: number, body: { name?: string; description?: string | null }) =>
     request<Collection>(`/collections/${collectionId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -34,4 +34,31 @@ export const collectionsApi = {
       return fetch(`${BASE}/collections/${collectionId}/models/${id}`, { method: "POST" });
     }));
   },
+  setCoverFromUrl: (collectionId: number, url: string) =>
+    request<Collection>(`/collections/${collectionId}/cover/from-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }),
+  setCoverFromModel: (collectionId: number, modelId: number) =>
+    request<Collection>(`/collections/${collectionId}/cover/from-model`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_id: modelId }),
+    }),
+  uploadCover: async (collectionId: number, file: File): Promise<Collection> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/collections/${collectionId}/cover/upload`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`${res.status} ${text}`);
+    }
+    return res.json();
+  },
+  clearCover: (collectionId: number) =>
+    request<Collection>(`/collections/${collectionId}/cover`, { method: "DELETE" }),
 };

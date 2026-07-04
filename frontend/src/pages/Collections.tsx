@@ -1,96 +1,159 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { FolderOpen, Plus, Trash2, Pencil, Check, X } from "lucide-react";
+import { FolderOpen, Plus, Trash2, Pencil, Check, X, ImagePlus } from "lucide-react";
 import { api, Collection } from "../api/client";
 import { useToast } from "../context/ToastContext";
+import CollectionCoverPicker from "../components/CollectionCoverPicker";
 
 function CollectionCard({
   col,
   onDelete,
   onRename,
+  onCoverUpdate,
 }: {
   col: Collection;
   onDelete: (e: React.MouseEvent, col: Collection) => void;
-  onRename: (col: Collection, newName: string) => Promise<void>;
+  onRename: (col: Collection, newName: string, description: string) => Promise<void>;
+  onCoverUpdate: (updated: Collection) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(col.name);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [draftName, setDraftName] = useState(col.name);
+  const [draftDesc, setDraftDesc] = useState(col.description ?? "");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  const coverUrl = col.cover_image_path
+    ? api.fileUrl(col.cover_image_path)
+    : null;
 
   const startRename = (e: React.MouseEvent) => {
     e.preventDefault();
-    setDraft(col.name);
+    setDraftName(col.name);
+    setDraftDesc(col.description ?? "");
     setRenaming(true);
-    setTimeout(() => inputRef.current?.select(), 0);
+    setTimeout(() => nameRef.current?.select(), 0);
   };
 
   const commit = async () => {
-    const trimmed = draft.trim();
-    if (!trimmed || trimmed === col.name) { setRenaming(false); return; }
-    await onRename(col, trimmed);
+    const trimmed = draftName.trim();
+    if (!trimmed) { setRenaming(false); return; }
+    await onRename(col, trimmed, draftDesc.trim());
     setRenaming(false);
   };
 
-  const cancel = () => { setDraft(col.name); setRenaming(false); };
+  const cancel = () => {
+    setDraftName(col.name);
+    setDraftDesc(col.description ?? "");
+    setRenaming(false);
+  };
 
   return (
-    <div className="relative group/card">
-      {renaming ? (
-        <div className="bg-gray-900 border border-indigo-500 rounded-lg p-4 flex flex-col gap-2">
-          <input
-            ref={inputRef}
-            autoFocus
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
-          />
-          <div className="flex gap-1.5">
+    <>
+      <div className="relative group/card">
+        {renaming ? (
+          <div className="bg-gray-900 border border-indigo-500 rounded-lg p-4 flex flex-col gap-2">
+            <input
+              ref={nameRef}
+              autoFocus
+              type="text"
+              placeholder="Name"
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
+              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+            />
+            <textarea
+              rows={5}
+              placeholder="Description (optional)"
+              value={draftDesc}
+              onChange={(e) => setDraftDesc(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") cancel(); }}
+              className="w-full resize-none bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 placeholder:text-gray-600 focus:outline-none focus:border-indigo-500"
+            />
+            <div className="flex gap-1.5">
+              <button
+                onClick={commit}
+                className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs text-white"
+              >
+                <Check size={11} /> Save
+              </button>
+              <button
+                onClick={cancel}
+                className="flex items-center gap-1 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs text-gray-400"
+              >
+                <X size={11} /> Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <Link
+            to={`/collections/${col.id}`}
+            className="relative bg-gray-900 border border-gray-800 rounded-lg overflow-hidden flex flex-col hover:border-indigo-500 transition-colors block aspect-[4/3]"
+          >
+            {/* Cover image or placeholder */}
+            {coverUrl ? (
+              <img
+                src={coverUrl}
+                alt={col.name}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-700">
+                <FolderOpen size={32} />
+              </div>
+            )}
+
+            {/* Solid footer — always opaque so text is legible over any cover image */}
+            <div className="absolute inset-x-0 bottom-0 px-3 py-2.5 bg-gray-900 border-t border-gray-800">
+              <p className="font-medium text-gray-100 text-sm leading-snug truncate">{col.name}</p>
+              {col.description && (
+                <p
+                  className="text-xs text-gray-400 truncate"
+                  title={col.description}
+                >
+                  {col.description}
+                </p>
+              )}
+              <p className="text-xs text-gray-500 mt-0.5">{col.model_count} model{col.model_count !== 1 ? "s" : ""}</p>
+            </div>
+          </Link>
+        )}
+
+        {!renaming && (
+          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover/card:opacity-100 transition-all">
             <button
-              onClick={commit}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs text-white"
+              onClick={(e) => { e.preventDefault(); setPickerOpen(true); }}
+              title="Set cover image"
+              className="p-1.5 rounded bg-gray-800/90 hover:bg-gray-700 text-gray-400 hover:text-gray-200 border border-transparent hover:border-gray-600"
             >
-              <Check size={11} /> Save
+              <ImagePlus size={13} />
             </button>
             <button
-              onClick={cancel}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs text-gray-400"
+              onClick={startRename}
+              title="Rename collection"
+              className="p-1.5 rounded bg-gray-800/90 hover:bg-gray-700 text-gray-600 hover:text-gray-300 border border-transparent hover:border-gray-600"
             >
-              <X size={11} /> Cancel
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={(e) => onDelete(e, col)}
+              title="Delete collection"
+              className="p-1.5 rounded bg-gray-800/90 hover:bg-red-950 text-gray-600 hover:text-red-400 border border-transparent hover:border-red-800"
+            >
+              <Trash2 size={13} />
             </button>
           </div>
-        </div>
-      ) : (
-        <Link
-          to={`/collections/${col.id}`}
-          className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex flex-col gap-1 hover:border-indigo-500 transition-colors block"
-        >
-          <p className="font-medium text-gray-100">{col.name}</p>
-          {col.description && <p className="text-xs text-gray-500">{col.description}</p>}
-          <p className="text-xs text-gray-600 mt-1">{col.model_count} model{col.model_count !== 1 ? "s" : ""}</p>
-        </Link>
-      )}
+        )}
+      </div>
 
-      {!renaming && (
-        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover/card:opacity-100 transition-all">
-          <button
-            onClick={startRename}
-            title="Rename collection"
-            className="p-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-600 hover:text-gray-300 border border-transparent hover:border-gray-600"
-          >
-            <Pencil size={13} />
-          </button>
-          <button
-            onClick={(e) => onDelete(e, col)}
-            title="Delete collection"
-            className="p-1.5 rounded bg-gray-800 hover:bg-red-950 text-gray-600 hover:text-red-400 border border-transparent hover:border-red-800"
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
+      {pickerOpen && (
+        <CollectionCoverPicker
+          collection={col}
+          onClose={() => setPickerOpen(false)}
+          onUpdate={(updated) => { onCoverUpdate(updated); setPickerOpen(false); }}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -110,13 +173,15 @@ export default function Collections() {
     setCreating(false);
   };
 
-  const renameCollection = async (col: Collection, newName: string) => {
+  const renameCollection = async (col: Collection, newName: string, description: string) => {
     try {
-      const updated = await api.collections.update(col.id, { name: newName });
-      setCollections((prev) => prev.map((c) => c.id === col.id ? { ...c, name: updated.name } : c));
+      const updated = await api.collections.update(col.id, { name: newName, description: description || null });
+      setCollections((prev) => prev.map((c) =>
+        c.id === col.id ? { ...c, name: updated.name, description: updated.description } : c
+      ));
     } catch (e: any) {
       const detail = e?.message ?? "";
-      toast(detail.includes("409") ? "That name is already taken." : "Couldn't rename — try again.", "error");
+      toast(detail.includes("409") ? "That name is already taken." : "Couldn't save — try again.", "error");
     }
   };
 
@@ -130,6 +195,10 @@ export default function Collections() {
     } catch {
       toast("Couldn't delete collection — try again.", "error");
     }
+  };
+
+  const updateCover = (updated: Collection) => {
+    setCollections((prev) => prev.map((c) => c.id === updated.id ? { ...c, cover_image_path: updated.cover_image_path } : c));
   };
 
   return (
@@ -181,6 +250,7 @@ export default function Collections() {
               col={col}
               onDelete={deleteCollection}
               onRename={renameCollection}
+              onCoverUpdate={updateCover}
             />
           ))}
         </div>
