@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Search, Link2, X, Check, ExternalLink, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { errMsg } from "../utils/err";
 
 interface ScrapePreview {
   title: string | null;
@@ -64,8 +65,8 @@ export default function FindOnWeb({ modelId, modelName, onApplied, onClose }: Pr
         throw new Error(e.detail ?? "Fetch failed");
       }
       setPreview(await r.json());
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errMsg(e) ?? null);
     } finally {
       setLoading(false);
     }
@@ -78,8 +79,8 @@ export default function FindOnWeb({ modelId, modelName, onApplied, onClose }: Pr
       const r = await fetch(`/api/scrape/search?site=${site}&q=${encodeURIComponent(searchQuery.trim())}`);
       if (!r.ok) throw new Error("Search failed");
       setSearchResults(await r.json());
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errMsg(e) ?? null);
     } finally {
       setLoading(false);
     }
@@ -92,8 +93,8 @@ export default function FindOnWeb({ modelId, modelName, onApplied, onClose }: Pr
       if (!r.ok) throw new Error("Could not fetch details");
       setPreview(await r.json());
       setTab("url");
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errMsg(e) ?? null);
     } finally {
       setLoading(false);
     }
@@ -110,8 +111,8 @@ export default function FindOnWeb({ modelId, modelName, onApplied, onClose }: Pr
       });
       if (!r.ok) throw new Error("Apply failed");
       onApplied();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errMsg(e) ?? null);
     } finally {
       setApplying(false);
     }

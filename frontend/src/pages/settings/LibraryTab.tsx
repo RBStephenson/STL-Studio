@@ -1,11 +1,11 @@
 import { useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { HardDrive, Plus, Trash2, FolderSearch, FolderTree, RefreshCw, Tag, LayoutPanelTop } from "lucide-react";
+import { HardDrive, Plus, Trash2, FolderSearch, FolderTree, RefreshCw } from "lucide-react";
 import { api, ScanRoot } from "../../api/client";
 import FolderPicker from "../../components/FolderPicker";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
-import { useAppSettings } from "../../context/AppSettingsContext";
+import { errMsg } from "../../utils/err";
 
 const LAYOUT_SAMPLES: Record<string, string> = {
   "{creator}": "Abe3D",
@@ -46,7 +46,6 @@ interface Props {
 
 export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
   const { success, error, flash } = useSettingsFlash();
-  const { settings, update } = useAppSettings();
   const [newPath, setNewPath] = useState("");
   const [newLayout, setNewLayout] = useState("{creator}");
   const [layoutEdits, setLayoutEdits] = useState<Record<number, string>>({});
@@ -64,8 +63,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       setNewLayout("{creator}");
       onRootsChanged();
       flash("Drive added — run a scan to index it", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not add drive", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not add drive", "err");
     }
   };
 
@@ -79,8 +78,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       clearEdit();
       onRootsChanged();
       flash("Layout updated — rescan to apply it", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Invalid layout template — check the format", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Invalid layout template — check the format", "err");
     }
   };
 
@@ -94,8 +93,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       clearEdit();
       onRootsChanged();
       flash("Library name updated", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Couldn't update the library name", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Couldn't update the library name", "err");
     }
   };
 
@@ -104,8 +103,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       await api.scan.updateRoot(root.id, { is_writable: !root.is_writable });
       onRootsChanged();
       flash(root.is_writable ? "No longer an import destination" : "Marked as an import destination", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Couldn't update the library", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Couldn't update the library", "err");
     }
   };
 
@@ -119,8 +118,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           : "Grouping by character folder on — rescan to apply",
         "ok",
       );
-    } catch (e: any) {
-      flash(e?.message || "Couldn't update the library", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Couldn't update the library", "err");
     }
   };
 
@@ -130,8 +129,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       await api.scan.removeRoot(id);
       onRootsChanged();
       flash("Drive removed", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not remove drive", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not remove drive", "err");
     }
   };
 
@@ -144,8 +143,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
         ? ` (${res.restart_required.join(", ")} still need a restart)`
         : "";
       flash(`Settings reloaded from .env${restart}`, "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not reload settings", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not reload settings", "err");
     } finally {
       setReloadingEnv(false);
     }
@@ -363,51 +362,6 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             </div>
           ))}
         </div>
-      </section>
-
-      {/* Part Categories */}
-      <section className="mb-8 pt-6 border-t border-gray-800">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-          <Tag size={14} /> Part Categories
-        </h2>
-        <label className="flex items-start gap-3 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={settings.part_categories_enabled}
-            onChange={() => update({ part_categories_enabled: !settings.part_categories_enabled })}
-            className="mt-0.5 accent-indigo-500"
-          />
-          <div>
-            <p className="text-sm text-gray-300">Enable part categories</p>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Adds a Category field to each file in the model detail view. Files group into
-              collapsible sections and the 3D viewer organises its part picker by category.
-              Useful for complex multi-part kits.
-            </p>
-          </div>
-        </label>
-      </section>
-
-      {/* Horizontal Parts Layout */}
-      <section className="mb-8 pt-6 border-t border-gray-800">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-          <LayoutPanelTop size={14} /> Parts Display
-        </h2>
-        <label className="flex items-start gap-3 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={settings.horizontal_parts_layout}
-            onChange={() => update({ horizontal_parts_layout: !settings.horizontal_parts_layout })}
-            className="mt-0.5 accent-indigo-500"
-          />
-          <div>
-            <p className="text-sm text-gray-300">Horizontal parts layout</p>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Displays the STL file list as a full-width table below the model images and info,
-              with an editable Name column. Collections and Location move below the two-column area.
-            </p>
-          </div>
-        </label>
       </section>
 
       {/* Library tools */}

@@ -3,6 +3,7 @@ import { Database, Download, Upload, Trash2, ShieldAlert, AlertCircle } from "lu
 import { api } from "../../api/client";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
+import { errMsg } from "../../utils/err";
 
 const ACK_PHRASE = "ACKNOWLEDGED";
 
@@ -53,8 +54,8 @@ export default function DataTab() {
         closeDanger();
         flash("Database restored — reloading…", "ok");
         setTimeout(() => window.location.reload(), 1200);
-      } catch (e: any) {
-        setDangerError(e.message || "Restore failed");
+      } catch (e) {
+        setDangerError(errMsg(e) || "Restore failed");
       } finally {
         setBusy(null);
       }
@@ -66,8 +67,8 @@ export default function DataTab() {
         closeDanger();
         flash("All data deleted — reloading…", "ok");
         setTimeout(() => window.location.reload(), 1200);
-      } catch (e: any) {
-        setDangerError(e.message || "Delete failed");
+      } catch (e) {
+        setDangerError(errMsg(e) || "Delete failed");
       } finally {
         setBusy(null);
       }

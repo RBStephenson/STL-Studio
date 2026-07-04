@@ -17,6 +17,7 @@ import { modelLinkTo } from "../utils/modelLink";
 import { measureGridColumns } from "../utils/libraryKeys";
 import { reorderedIds } from "../utils/reorderList";
 import { useLibraryKeyboard } from "../hooks/useLibraryKeyboard";
+import { errMsg } from "../utils/err";
 
 // Shared write paths for every group op (#678): move resolves (or creates) the
 // target durable group and merges ids into it; remove splits ids out of the
@@ -49,8 +50,8 @@ function GroupAction({ model, creatorId, moveToGroup, removeFromGroup, onRemoved
       await api.models.setGroupRep(model.id, true);
       toast("Group thumbnail updated.", "success");
       onRepChanged();
-    } catch (e: any) {
-      toast(e?.message || "Couldn't set the group thumbnail — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't set the group thumbnail — try again.", "error");
     } finally {
       setSettingRep(false);
     }
@@ -451,8 +452,8 @@ export default function VariantGroup() {
       const noun = ids.length === 1 ? "model" : "models";
       toast(`${ids.length} ${noun} moved to "${label}".`, "success");
       return true;
-    } catch (e: any) {
-      toast(e?.message || "Couldn't move to that group — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't move to that group — try again.", "error");
       return false;
     }
   }, [numCreatorId, toast]);
@@ -469,8 +470,8 @@ export default function VariantGroup() {
       const noun = ids.length === 1 ? "model" : "models";
       toast(`${ids.length} ${noun} removed from group.`, "success");
       return true;
-    } catch (e: any) {
-      toast(e?.message || "Couldn't remove from group — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't remove from group — try again.", "error");
       return false;
     }
   }, [groupId, toast]);
@@ -517,9 +518,9 @@ export default function VariantGroup() {
     setHasManualOrder(true);
     try {
       await api.models.reorderGroup(numCreatorId, decodedCharacter, order);
-    } catch (err: any) {
+    } catch (err) {
       setVariants(prev);   // roll back
-      toast(err?.message || "Couldn't save the order — try again.", "error");
+      toast(errMsg(err) || "Couldn't save the order — try again.", "error");
     }
   };
 
@@ -529,8 +530,8 @@ export default function VariantGroup() {
       setHasManualOrder(false);
       reloadVariants();
       toast("Order reset to default.", "success");
-    } catch (err: any) {
-      toast(err?.message || "Couldn't reset the order — try again.", "error");
+    } catch (err) {
+      toast(errMsg(err) || "Couldn't reset the order — try again.", "error");
     }
   };
 
@@ -562,8 +563,8 @@ export default function VariantGroup() {
       }
       const data = await api.models.variants(numCreatorId, decodedCharacter);
       setVariants(data.items);
-    } catch (e: any) {
-      toast(e?.message || "Couldn't set the group image — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't set the group image — try again.", "error");
     }
   };
 
@@ -583,8 +584,8 @@ export default function VariantGroup() {
       );
       const data = await api.models.variants(numCreatorId, decodedCharacter);
       setVariants(data.items);
-    } catch (e: any) {
-      toast(e?.message || "Couldn't set the store page — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't set the store page — try again.", "error");
     }
   };
 
@@ -617,8 +618,8 @@ export default function VariantGroup() {
         replace: true,
         state: { from },
       });
-    } catch (e: any) {
-      toast(e?.message || "Couldn't rename group — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't rename group — try again.", "error");
     }
   };
 

@@ -1,6 +1,7 @@
 import { Component, ReactNode, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
 import { TrackballControls, Environment } from "@react-three/drei";
+import type { TrackballControls as TrackballControlsImpl } from "three-stdlib";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { Box3, Vector3, Mesh, PerspectiveCamera, WebGLRenderer } from "three";
 import { Camera, ChevronDown, ChevronRight, Loader2, Maximize2, RotateCcw } from "lucide-react";
@@ -51,7 +52,7 @@ function STLMesh({ url }: { url: string }) {
     // the fit distance and silently block zoom-out. TrackballControls imposes no
     // polar limit, so the model rotates freely in every direction.
     if (controls) {
-      const c = controls as any;
+      const c = controls as { target?: { set?: (...a: number[]) => void }; minDistance?: number; maxDistance?: number; update?: () => void };
       c.target?.set?.(0, 0, 0);
       c.minDistance = dist * 0.1;
       c.maxDistance = dist * 25;
@@ -59,7 +60,7 @@ function STLMesh({ url }: { url: string }) {
     }
 
     invalidate();
-  }, [geometry, controls]);
+  }, [geometry, controls, camera, invalidate]);
 
   return (
     <mesh ref={meshRef} geometry={geometry} castShadow receiveShadow>
@@ -75,7 +76,7 @@ class LoaderErrorBoundary extends Component<
   { children: ReactNode; onError: (msg: string) => void },
   { hasError: boolean }
 > {
-  constructor(props: any) {
+  constructor(props: { children: ReactNode; onError: (msg: string) => void }) {
     super(props);
     this.state = { hasError: false };
   }
@@ -230,7 +231,7 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured,
   const [collapsed, setCollapsed] = useState<Set<string>>(
     () => new Set(categoryKeys.slice(1)),
   );
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<TrackballControlsImpl | null>(null);
   const glRef = useRef<WebGLRenderer | null>(null);
 
   // Sync from external selection (file list → viewer): update state, unfold category, scroll picker.
@@ -273,6 +274,9 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured,
           ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
       });
     }
+  // baseFiles/supMap are excluded: stlFiles is computed inline so they'd change
+  // every render, but this effect must only fire on external selection changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFileId]);
 
   const handleCapture = () => {

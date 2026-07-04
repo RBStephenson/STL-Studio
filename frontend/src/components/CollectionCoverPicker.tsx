@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, Link as LinkIcon, Upload, Images, Loader2, Trash2 } from "lucide-react";
 import { api, Collection, Model } from "../api/client";
+import { errMsg } from "../utils/err";
 
 type Tab = "url" | "upload" | "model";
 
@@ -35,8 +36,8 @@ export default function CollectionCoverPicker({ collection, onClose, onUpdate }:
       const updated = await fn();
       onUpdate(updated);
       onClose();
-    } catch (e: any) {
-      setErr(e?.message ?? "Something went wrong — try again.");
+    } catch (e) {
+      setErr(errMsg(e) ?? "Something went wrong — try again.");
     } finally {
       setBusy(false);
     }
