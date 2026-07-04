@@ -9,6 +9,8 @@ import { useSearchParams } from "react-router-dom";
 import { LibrarySort } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 
+export type LibraryFilters = ReturnType<typeof useLibraryFilters>;
+
 export function useLibraryFilters() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { settings, update: updateSettings } = useAppSettings();
