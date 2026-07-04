@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, Frag
 import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotator, GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Heart, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, FolderOpen, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2, Wand2, Loader2 } from "lucide-react";
-import { api, ApiError, ModelDetail as ModelDetailType, Collection, AiOrganizeSuggestionPreview } from "../api/client";
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Package, Star, Heart, Download, Tag, FileBox, Globe, Images, Box, ImagePlus, Pencil, Plus, Wrench, FolderDown, Folder, Copy, Check, Printer, Layers, Split, X, ZoomIn, Paintbrush, RefreshCw, ImageOff, Bookmark, BookmarkCheck, Link2, Unlink2, Wand2, Loader2 } from "lucide-react";
+import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizeSuggestionPreview } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
 import { PartTypeCombo } from "../components/PartTypeCombo";
 import FindOnWeb from "../components/FindOnWeb";
@@ -20,254 +20,18 @@ import { useConfirm } from "../context/ConfirmContext";
 import { queryKeys } from "../hooks/queries/keys";
 import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
 import { useModelGuideId } from "../hooks/queries/guides";
-
-function CollectionsSection({ modelId, initialIds }: { modelId: number; initialIds: number[] }) {
-  const { toast } = useToast();
-  const [collections, setCollections] = useState<Collection[]>([]);
-  const [memberIds, setMemberIds] = useState<Set<number>>(new Set(initialIds));
-  const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-
-  useEffect(() => {
-    api.collections.list().then(setCollections).catch(() => {});
-  }, []);
-
-  const toggle = async (col: Collection) => {
-    const isMember = memberIds.has(col.id);
-    setMemberIds((prev) => {
-      const next = new Set(prev);
-      isMember ? next.delete(col.id) : next.add(col.id);
-      return next;
-    });
-    try {
-      if (isMember) {
-        await api.collections.removeModel(col.id, modelId);
-      } else {
-        await api.collections.addModel(col.id, modelId);
-      }
-    } catch {
-      setMemberIds((prev) => {
-        const next = new Set(prev);
-        isMember ? next.add(col.id) : next.delete(col.id);
-        return next;
-      });
-      toast("Couldn't update collection — try again.", "error");
-    }
-  };
-
-  const createAndAdd = async () => {
-    if (!newName.trim()) return;
-    try {
-      const col = await api.collections.create(newName.trim());
-      await api.collections.addModel(col.id, modelId);
-      setCollections((prev) => [...prev, { ...col, model_count: 1 }]);
-      setMemberIds((prev) => new Set([...prev, col.id]));
-      setNewName("");
-      setCreating(false);
-    } catch {
-      toast("Couldn't create collection — try again.", "error");
-    }
-  };
-
-  const memberCollections = collections.filter((c) => memberIds.has(c.id));
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-          <FolderOpen size={14} />
-          Collections
-        </h3>
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="text-xs text-gray-500 hover:text-indigo-400 transition-colors"
-        >
-          {open ? "Done" : "Manage"}
-        </button>
-      </div>
-
-      {memberCollections.length === 0 && !open && (
-        <p className="text-xs text-gray-600">Not in any collections</p>
-      )}
-
-      {memberCollections.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {memberCollections.map((c) => (
-            <Link
-              key={c.id}
-              to={`/collections/${c.id}`}
-              className="text-xs bg-indigo-950 border border-indigo-800 text-indigo-300 hover:bg-indigo-900 px-2 py-0.5 rounded-full transition-colors"
-            >
-              {c.name}
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {open && (
-        <div className="flex flex-col gap-1 bg-gray-900 border border-gray-800 rounded-lg p-2">
-          {collections.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => toggle(c)}
-              className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800 text-sm text-left transition-colors"
-            >
-              <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
-                memberIds.has(c.id)
-                  ? "bg-indigo-600 border-indigo-500"
-                  : "border-gray-600"
-              }`}>
-                {memberIds.has(c.id) && <Check size={10} className="text-white" strokeWidth={3} />}
-              </span>
-              <span className="text-gray-200 truncate">{c.name}</span>
-              <span className="text-xs text-gray-600 ml-auto">{c.model_count}</span>
-            </button>
-          ))}
-          {collections.length === 0 && (
-            <p className="text-xs text-gray-600 px-2 py-1">No collections yet</p>
-          )}
-          {creating ? (
-            <div className="flex gap-1 mt-1 px-1">
-              <input
-                autoFocus
-                type="text"
-                placeholder="Collection name…"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && createAndAdd()}
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
-              />
-              <button onClick={createAndAdd} className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs">Create</button>
-              <button onClick={() => setCreating(false)} className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs text-gray-400">Cancel</button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setCreating(true)}
-              className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-gray-800 text-xs text-gray-500 hover:text-indigo-400 transition-colors mt-0.5"
-            >
-              <Plus size={12} /> New collection
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const PART_TYPE_SUGGESTIONS = [
-  "Head", "Torso", "Body",
-  "Right Arm", "Left Arm", "Arms",
-  "Right Leg", "Left Leg", "Legs",
-  "Hands", "Feet", "Base",
-  "Weapon", "Shield", "Armor", "Cloak", "Cape",
-  "Hair", "Wings", "Tail", "Accessories",
-];
-
-const toPascalCase = (s: string): string =>
-  s.trim().split(/\s+/).filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(" ");
-
-function autoPartName(filename: string): string {
-  return filename
-    .replace(/\.(stl|STL)$/, "")
-    .replace(/^Sup_/i, "")
-    .replace(/_/g, " ")
-    .trim();
-}
-
-const ALPHA_BANDS = [
-  ["A", "D"], ["E", "H"], ["I", "L"], ["M", "P"], ["Q", "T"], ["U", "Z"],
-] as const;
-
-function buildAlphaBand(first: string): string {
-  const u = first.toUpperCase();
-  if (/[0-9]/.test(u)) return "0–9";
-  for (const [start, end] of ALPHA_BANDS) {
-    if (u >= start && u <= end) return `${start}–${end}`;
-  }
-  return "#";
-}
-
-function groupAlphabetically<T extends { id: number; filename: string }>(files: T[]): Array<[string, T[]]> {
-  const order = [...ALPHA_BANDS.map(([s, e]) => `${s}–${e}`), "0–9", "#"];
-  const map = new Map<string, T[]>();
-  for (const f of files) {
-    const band = buildAlphaBand(f.filename[0] ?? "");
-    if (!map.has(band)) map.set(band, []);
-    map.get(band)!.push(f);
-  }
-  return [...map.entries()]
-    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
-}
-
-type FileEntry<T> = { file: T; depth: 0 | 1 };
-
-function buildFileHierarchy<T extends { id: number; filename: string; sup_of_id?: number | null }>(
-  files: T[]
-): FileEntry<T>[] {
-  const supIds = new Set(files.filter((f) => f.sup_of_id != null).map((f) => f.id));
-  const result: FileEntry<T>[] = [];
-  for (const f of files.filter((f) => !supIds.has(f.id)).sort((a, b) => a.filename.localeCompare(b.filename))) {
-    result.push({ file: f, depth: 0 });
-    const sups = files.filter((s) => s.sup_of_id === f.id).sort((a, b) => a.filename.localeCompare(b.filename));
-    for (const sup of sups) result.push({ file: sup, depth: 1 });
-  }
-  // Orphaned sup files (parent not in this group) fall through as top-level.
-  for (const f of files.filter((f) => supIds.has(f.id))) {
-    if (!result.find((r) => r.file.id === f.id)) result.push({ file: f, depth: 0 });
-  }
-  return result;
-}
-
-type ViewMode = "images" | "3d";
-
-type NavTarget = { id: number; from: string };
-
-// Parse a Library origin URL into the filter params needed for the neighbors
-// endpoint. Returns null when the origin isn't the Library grid (path "/") —
-// models reached from a variant group, collection, or deep link show no Prev/Next.
-function parseLibraryOrigin(from: string | undefined): Record<string, string | number | boolean> | null {
-  if (!from) return null;
-  const [path, search = ""] = from.split("?");
-  if (path !== "/") return null;
-  const sp = new URLSearchParams(search);
-  const params: Record<string, string | number | boolean> = {};
-  for (const key of ["q", "creator_id", "exclude_creator_id", "source_site", "tag", "exclude_tag"]) {
-    const val = sp.get(key);
-    if (val) params[key] = val;
-  }
-  if (sp.get("needs_review") === "1") params.needs_review = true;
-  // nsfw and has_thumbnail are tri-state: "1"=true, "0"=false, absent=no filter
-  for (const key of ["nsfw", "has_thumbnail"]) {
-    const val = sp.get(key);
-    if (val === "1") params[key] = true;
-    else if (val === "0") params[key] = false;
-  }
-  const fav = sp.get("is_favorite") === "1";
-  const printStatus = sp.get("print_status") ?? "";
-  const excludePrinted = sp.get("exclude_printed") === "1";
-  const excluded = sp.get("excluded") === "1";
-  const inbox = sp.get("is_inbox") === "1";
-  if (fav) params.is_favorite = true;
-  if (printStatus) params.print_status = printStatus;
-  if (excludePrinted) params.exclude_printed = true;
-  if (excluded) params.excluded = true;
-  if (inbox) params.is_inbox = true;
-  // "Recently added" view (#170): same window + newest-first order as the grid,
-  // so Prev/Next walks the list the user was looking at.
-  const addedDays = sp.get("added_days");
-  if (addedDays) {
-    params.added_within_days = addedDays;
-    params.sort = "added";
-  } else if (sp.get("sort")) {
-    // Chosen Library sort (#247): walk Prev/Next in the same order as the grid.
-    params.sort = sp.get("sort")!;
-  }
-  params.group_variants = !fav && !printStatus && !excluded;
-  return params;
-}
+import CollectionsSection from "./model-detail/CollectionsSection";
+import {
+  PART_TYPE_SUGGESTIONS,
+  toPascalCase,
+  autoPartName,
+  buildAlphaBand,
+  groupAlphabetically,
+  buildFileHierarchy,
+  parseLibraryOrigin,
+  type ViewMode,
+  type NavTarget,
+} from "./model-detail/utils";
 
 export default function ModelDetail() {
   const { id } = useParams<{ id: string }>();
