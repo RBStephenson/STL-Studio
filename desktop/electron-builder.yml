@@ -1,0 +1,19 @@
+# electron-builder configuration — STUB (Phase 0, STUDIO-70).
+#
+# Not exercised yet: packaging (NSIS target, extraResources sidecar, app icon,
+# product metadata) lands in Phase 3 (STUDIO-73). This stub records appId +
+# product name and the intended Windows target so the config file exists from
+# the start of the project. Do not treat this as a working build config.
+#
+# Ref: docs/plans/528-pywebview-to-electron.md (Phase 3)
+appId: com.stlstudio.desktop
+productName: STL Studio
+directories:
+  output: release
+  buildResources: resources
+files:
+  - dist/**/*
+  - index.html
+# Windows-only for v1 (unsigned, auto-update deferred). Fleshed out in Phase 3.
+win:
+  target: nsis
