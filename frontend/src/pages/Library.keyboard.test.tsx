@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import Library from "./Library";
 import { mkSettings } from "../test/settings";
+import { QueryWrapper } from "../test/queryWrapper";
 
 const listMock = vi.fn().mockResolvedValue({
   items: [
@@ -54,15 +55,19 @@ function LocationProbe() {
 
 const renderLibrary = () =>
   render(
+    <QueryWrapper>
     <MemoryRouter initialEntries={["/library"]}>
       <Routes>
         <Route path="/library" element={<><Library /><LocationProbe /></>} />
         <Route path="*" element={<LocationProbe />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </QueryWrapper>,
   );
 
-const flush = () => act(async () => { await Promise.resolve(); });
+// A macrotask tick — enough for the TanStack list query to resolve and the grid
+// to render its cards (a bare microtask flush settles before the query does).
+const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 const press = (key: string) => act(() => { fireEvent.keyDown(window, { key }); });
 
 describe("Library keyboard navigation (#169)", () => {
@@ -79,10 +84,10 @@ describe("Library keyboard navigation (#169)", () => {
 
   it("'d' moves the focus ring across cards and Enter opens the focused model", async () => {
     renderLibrary();
-    await flush();
 
-    // No card focused initially.
-    expect(screen.getByTestId("card-1").dataset.focused).toBe("0");
+    // Await the grid — findBy retries until the list query resolves, robust on
+    // slow CI where a fixed-time flush can race the query.
+    expect((await screen.findByTestId("card-1")).dataset.focused).toBe("0");
 
     press("d");           // first move → first card
     expect(screen.getByTestId("card-1").dataset.focused).toBe("1");
@@ -97,7 +102,7 @@ describe("Library keyboard navigation (#169)", () => {
 
   it("does not steal keys while typing in the search box", async () => {
     renderLibrary();
-    await flush();
+    await screen.findByTestId("card-1");
     const input = screen.getByPlaceholderText(/search models/i) as HTMLInputElement;
     input.focus();
     fireEvent.keyDown(input, { key: "d" });

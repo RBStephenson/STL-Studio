@@ -47,6 +47,7 @@ vi.mock("../components/KitBuilder", () => ({ default: () => null }));
 vi.mock("../components/StarRating", () => ({ default: () => null }));
 
 import ModelDetail from "./ModelDetail";
+import { QueryWrapper } from "../test/queryWrapper";
 
 const printedModel = {
   id: 1,
@@ -72,11 +73,13 @@ const printedModel = {
 
 const renderAt = () =>
   render(
+    <QueryWrapper>
     <MemoryRouter initialEntries={["/models/1"]}>
       <Routes>
         <Route path="/models/:id" element={<ModelDetail />} />
       </Routes>
     </MemoryRouter>
+    </QueryWrapper>
   );
 
 describe("ModelDetail clear print status (#379)", () => {

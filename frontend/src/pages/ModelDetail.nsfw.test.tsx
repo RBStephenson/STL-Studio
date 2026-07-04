@@ -50,6 +50,7 @@ vi.mock("../components/KitBuilder", () => ({ default: () => null }));
 vi.mock("../components/StarRating", () => ({ default: () => null }));
 
 import ModelDetail from "./ModelDetail";
+import { QueryWrapper } from "../test/queryWrapper";
 
 const baseModel = {
   id: 1,
@@ -76,11 +77,13 @@ const baseModel = {
 
 function renderDetail() {
   return render(
+    <QueryWrapper>
     <MemoryRouter initialEntries={[{ pathname: "/models/1" }]}>
       <Routes>
         <Route path="/models/:id" element={<ModelDetail />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </QueryWrapper>,
   );
 }
 
@@ -108,7 +111,10 @@ describe("ModelDetail variant switcher NSFW blur (STUDIO-45)", () => {
 
   it("does not blur an SFW variant's thumbnail", async () => {
     const { container } = renderDetail();
-    await waitFor(() => expect(container.querySelector('img[src="/hero-a.jpg"]')).not.toBeNull());
+    // Guard the exact `.object-cover` variant thumbnail the assertion reads —
+    // waiting on the bare `img[src]` selector could resolve on a sibling <img>
+    // a tick before the variant thumbnail mounts, leaving this query null (flake).
+    await waitFor(() => expect(container.querySelector('img[src="/hero-a.jpg"].object-cover')).not.toBeNull());
     const img = container.querySelector('img[src="/hero-a.jpg"].object-cover') as HTMLImageElement;
     expect(img.className).not.toContain("blur-lg");
   });
