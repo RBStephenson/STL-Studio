@@ -21,8 +21,27 @@ import httpx
 _log = logging.getLogger(__name__)
 
 
+_SENSITIVE_LOG_KEYS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "auth",
+    "token",
+    "password",
+    "secret",
+    "bearer",
+}
+
+
+def _sanitize_log_value(key: str, value: Any) -> Any:
+    key_l = key.lower()
+    if key_l in _SENSITIVE_LOG_KEYS or any(s in key_l for s in ("token", "secret", "password", "api_key", "apikey", "authorization")):
+        return "[REDACTED]"
+    return value
+
+
 def _log_step(step: str, **kw: Any) -> None:
-    parts = " ".join(f"{k}={v!r}" for k, v in kw.items())
+    parts = " ".join(f"{k}={_sanitize_log_value(k, v)!r}" for k, v in kw.items())
     _log.info("ai_organize %s %s", step, parts)
 
 
