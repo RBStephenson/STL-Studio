@@ -17,6 +17,7 @@ import { useConfirm } from "../context/ConfirmContext";
 import { queryKeys } from "../hooks/queries/keys";
 import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
 import { useModelGuideId } from "../hooks/queries/guides";
+import { useModelTags } from "./model-detail/hooks/useModelTags";
 import CollectionsSection from "./model-detail/CollectionsSection";
 import ImageColumn from "./model-detail/sections/ImageColumn";
 import StlFilesList from "./model-detail/sections/StlFilesList";
@@ -96,11 +97,11 @@ export default function ModelDetail() {
   const [rating, setRating] = useState<number | null>(null);
   const [printStatus, setPrintStatus] = useState<import("../api/client").PrintStatus>("none");
   const [printCount, setPrintCount] = useState(0);
-  const [tags, setTags] = useState<string[]>([]);
-  const [removedAutoTags, setRemovedAutoTags] = useState<string[]>([]);
-  const [showHiddenTags, setShowHiddenTags] = useState(false);
-  const [editingTags, setEditingTags] = useState(false);
-  const [tagSuggestions, setTagSuggestions] = useState<{ tag: string; count: number }[]>([]);
+  const {
+    tags, removedAutoTags, showHiddenTags, editingTags, tagSuggestions,
+    addTag, setUserTags, openTagEditor, doneEditing, toggleHidden,
+    suppressAutoTag, restoreAutoTag,
+  } = useModelTags(model, numericId);
   const [partTypes, setPartTypes] = useState<Record<number, string>>({});
   const [partNames, setPartNames] = useState<Record<number, string>>({});
   const [filesCollapsed, setFilesCollapsed] = useState<Set<string>>(new Set());
@@ -194,8 +195,6 @@ export default function ModelDetail() {
       setRating(model.user_rating ?? null);
       setPrintStatus(model.print_status ?? "none");
       setPrintCount(model.print_count ?? 0);
-      setTags(model.tags ?? []);
-      setRemovedAutoTags(model.removed_auto_tags ?? []);
       const pts: Record<number, string> = {};
       model.stl_files.forEach((f) => { if (f.part_type) pts[f.id] = toPascalCase(f.part_type); });
       setPartTypes(pts);
@@ -242,8 +241,6 @@ export default function ModelDetail() {
     setShowKitBuilder(false);
     setOpenFolderError(null);
     setSettingGroup(false);
-    setShowHiddenTags(false);
-    setEditingTags(false);
   }, [id]);
 
   const downloadAllFiles = async () => {
@@ -484,71 +481,6 @@ export default function ModelDetail() {
       patchStlFile(supId, { sup_of_id: null });
     } catch {
       toast("Couldn't unlink file — try again.", "error");
-    }
-  };
-
-  const addTag = async (tag: string) => {
-    if (tags.includes(tag)) return;
-    const prev = tags;
-    const next = [...tags, tag];
-    setTags(next);
-    try {
-      await api.models.update(Number(id), { tags: next });
-    } catch {
-      setTags(prev);  // revert on failure
-      toast("Couldn't add tag — try again.", "error");
-    }
-  };
-
-  // Replace the full user-tag set (inline editor add/remove). Optimistic with
-  // revert, mirroring addTag.
-  const setUserTags = async (next: string[]) => {
-    const prev = tags;
-    setTags(next);
-    try {
-      await api.models.update(Number(id), { tags: next });
-    } catch {
-      setTags(prev);  // revert on failure
-      toast("Couldn't update tags — try again.", "error");
-    }
-  };
-
-  // Open the inline tag editor, lazily loading tag suggestions on first use.
-  const openTagEditor = () => {
-    setEditingTags(true);
-    if (tagSuggestions.length === 0) {
-      api.models.tags().then(setTagSuggestions).catch(() => {});
-    }
-  };
-
-  // Suppress an auto-detected tag so it stops showing and survives rescans.
-  // If it was already promoted to a user tag, drop that too.
-  const suppressAutoTag = async (tag: string) => {
-    const prevRemoved = removedAutoTags;
-    const prevTags = tags;
-    const nextRemoved = removedAutoTags.includes(tag) ? removedAutoTags : [...removedAutoTags, tag];
-    const nextTags = tags.filter((t) => t !== tag);
-    setRemovedAutoTags(nextRemoved);
-    setTags(nextTags);
-    try {
-      await api.models.update(Number(id), { removed_auto_tags: nextRemoved, tags: nextTags });
-    } catch {
-      setRemovedAutoTags(prevRemoved);  // revert on failure
-      setTags(prevTags);
-      toast("Couldn't remove tag — try again.", "error");
-    }
-  };
-
-  // Un-suppress a previously removed auto-tag so it reappears as auto-detected.
-  const restoreAutoTag = async (tag: string) => {
-    const prevRemoved = removedAutoTags;
-    const nextRemoved = removedAutoTags.filter((t) => t !== tag);
-    setRemovedAutoTags(nextRemoved);
-    try {
-      await api.models.update(Number(id), { removed_auto_tags: nextRemoved });
-    } catch {
-      setRemovedAutoTags(prevRemoved);  // revert on failure
-      toast("Couldn't restore tag — try again.", "error");
     }
   };
 
@@ -952,12 +884,12 @@ export default function ModelDetail() {
             tagSuggestions={tagSuggestions}
             showHiddenTags={showHiddenTags}
             onSetUserTags={setUserTags}
-            onDoneEditing={() => setEditingTags(false)}
+            onDoneEditing={doneEditing}
             onOpenEditor={openTagEditor}
             onAdd={addTag}
             onSuppress={suppressAutoTag}
             onRestore={restoreAutoTag}
-            onToggleHidden={() => setShowHiddenTags((s) => !s)}
+            onToggleHidden={toggleHidden}
           />
 
           {/* Collections — always in right column */}
