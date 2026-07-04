@@ -1,11 +1,10 @@
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Star, Tag, FileBox, Globe, Pencil, Wrench, FolderDown, Folder, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw, Link2, Unlink2, Wand2, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw } from "lucide-react";
 import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizeSuggestionPreview } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
-import { PartTypeCombo } from "../components/PartTypeCombo";
 import FindOnWeb from "../components/FindOnWeb";
 import ImagePicker from "../components/ImagePicker";
 import MetadataEditor from "../components/MetadataEditor";
@@ -21,15 +20,13 @@ import { useModelGuideId } from "../hooks/queries/guides";
 import CollectionsSection from "./model-detail/CollectionsSection";
 import ImageColumn from "./model-detail/sections/ImageColumn";
 import StlFilesList from "./model-detail/sections/StlFilesList";
+import StlFilesTable from "./model-detail/sections/StlFilesTable";
 import VariantSwitcher from "./model-detail/sections/VariantSwitcher";
 import StatsRow from "./model-detail/sections/StatsRow";
 import TagsPanel from "./model-detail/sections/TagsPanel";
 import {
-  PART_TYPE_SUGGESTIONS,
   toPascalCase,
-  autoPartName,
   buildAlphaBand,
-  buildFileHierarchy,
   parseLibraryOrigin,
   type ViewMode,
   type NavTarget,
@@ -107,10 +104,6 @@ export default function ModelDetail() {
   const [partTypes, setPartTypes] = useState<Record<number, string>>({});
   const [partNames, setPartNames] = useState<Record<number, string>>({});
   const [filesCollapsed, setFilesCollapsed] = useState<Set<string>>(new Set());
-  const [hTableCollapsed, setHTableCollapsed] = useState<Set<string>>(new Set());
-  // null = full-width auto mode; set on first drag to measured pixel widths
-  const [hColWidths, setHColWidths] = useState<number[] | null>(null);
-  const hTableRef = useRef<HTMLTableElement>(null);
   const [linkingBaseId, setLinkingBaseId] = useState<number | null>(null);
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
@@ -1103,245 +1096,30 @@ export default function ModelDetail() {
       </div>
 
       {/* Full-width below-grid area: Collections, Location, STL files table, Other Files */}
-      {settings.horizontal_parts_layout && !editing && model && (() => {
-        const supFileIds = new Set(model.stl_files.filter((f) => f.sup_of_id != null).map((f) => f.id));
-        const colCount = settings.part_categories_enabled ? 5 : 4;
-        const renderHRow = (f: typeof model.stl_files[0], depth: 0 | 1) => {
-          const isSup = depth === 1;
-          const isBase = !isSup && !supFileIds.has(f.id);
-          const pt = partTypes[f.id] ?? "";
-          const pn = partNames[f.id] ?? "";
-          const isSelected = selectedStlFileId === f.id;
-          return (
-            <tr
-              key={f.id}
-              data-file-row={f.id}
-              onClick={() => { setSelectedStlFileId(f.id); setViewMode("3d"); }}
-              className={`cursor-pointer transition-colors ${isSelected ? "bg-indigo-950/40" : "hover:bg-gray-800/40"}`}
-            >
-              <td className="px-3 py-1.5">
-                <div className={`flex items-center gap-1 ${isSup ? "pl-4" : ""}`}>
-                  {isSup && <span className="text-gray-600 shrink-0 select-none text-[10px]">↳</span>}
-                  <input
-                    value={pn}
-                    placeholder={autoPartName(f.filename)}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => setPartNames((prev) => ({ ...prev, [f.id]: e.target.value }))}
-                    onBlur={(e) => { const v = e.target.value.trim(); if (v !== (f.part_name ?? "")) savePartName(f.id, v); }}
-                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                    className="w-full bg-transparent border border-transparent hover:border-gray-700 focus:border-indigo-500 rounded px-1.5 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:bg-gray-800 transition-colors"
-                  />
-                </div>
-              </td>
-              <td className="px-3 py-1.5">
-                <span className="text-gray-400 font-mono truncate" title={f.filename}>{f.filename}</span>
-              </td>
-              {settings.part_categories_enabled && (
-                <td className="px-3 py-1.5">
-                  <PartTypeCombo
-                    value={pt}
-                    options={PART_TYPE_SUGGESTIONS}
-                    placeholder="Category…"
-                    onChange={(v) => setPartTypes((prev) => ({ ...prev, [f.id]: v }))}
-                    onCommit={(v) => savePartType(f.id, v)}
-                    className="w-full bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-1.5 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none"
-                  />
-                </td>
-              )}
-              <td className="px-3 py-1.5 text-right">
-                {f.size_bytes ? (
-                  <a href={api.stlUrl(f.path)} download={f.filename} onClick={(e) => e.stopPropagation()} className="text-gray-600 hover:text-gray-400 tabular-nums transition-colors">
-                    {(f.size_bytes / 1024 / 1024).toFixed(1)} MB
-                  </a>
-                ) : null}
-              </td>
-              <td className="px-3 py-1.5">
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  {isSup ? (
-                    <button title="Remove link" onClick={() => unlinkSup(f.id)} className="text-gray-600 hover:text-rose-400 transition-colors">
-                      <Unlink2 size={14} />
-                    </button>
-                  ) : isBase ? (
-                    <button title="Link a sup" onClick={() => setLinkingBaseId(linkingBaseId === f.id ? null : f.id)} className={`transition-colors ${linkingBaseId === f.id ? "text-indigo-400" : "text-gray-600 hover:text-indigo-400"}`}>
-                      <Link2 size={14} />
-                    </button>
-                  ) : null}
-                  {isBase && linkingBaseId === f.id && (
-                    <select
-                      autoFocus
-                      defaultValue=""
-                      className="bg-gray-700 text-xs text-gray-300 rounded px-1.5 py-0.5 border border-gray-600 focus:outline-none focus:border-indigo-500"
-                      onChange={(e) => { if (e.target.value) { linkSup(f.id, parseInt(e.target.value)); setLinkingBaseId(null); } }}
-                      onBlur={() => setLinkingBaseId(null)}
-                    >
-                      <option value="" disabled>Link sup…</option>
-                      {model.stl_files
-                        .filter((sf) => sf.id !== f.id)
-                        .sort((a, b) => a.filename.localeCompare(b.filename))
-                        .map((sf) => {
-                          const alreadyHere = sf.sup_of_id === f.id;
-                          const linkedElsewhere = sf.sup_of_id != null && !alreadyHere;
-                          return (
-                            <option key={sf.id} value={sf.id} disabled={alreadyHere}>
-                              {sf.filename}{alreadyHere ? " ✓" : linkedElsewhere ? " (linked)" : ""}
-                            </option>
-                          );
-                        })}
-                    </select>
-                  )}
-                </div>
-              </td>
-            </tr>
-          );
-        };
-        const toggleHTable = (key: string) => setHTableCollapsed((prev) => {
-          const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n;
-        });
-        const renderHGroupHeader = (key: string, label: React.ReactNode, count: number) => {
-          const isCollapsed = hTableCollapsed.has(key);
-          return (
-            <tr
-              key={`hdr-${key}`}
-              className="cursor-pointer select-none bg-gray-800/70 hover:bg-gray-800 border-b border-gray-700/60"
-              onClick={() => toggleHTable(key)}
-            >
-              <td colSpan={colCount} className="px-3 py-1.5">
-                <div className="flex items-center justify-between">
-                  {label}
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-600 tabular-nums">{count}</span>
-                    {isCollapsed ? <ChevronRight size={11} className="text-gray-600" /> : <ChevronDown size={11} className="text-gray-600" />}
-                  </div>
-                </div>
-              </td>
-            </tr>
-          );
-        };
-        return (
-          <div className="flex flex-col gap-5 mt-4">
-
-            {/* STL Files — horizontal table */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <FileBox size={14} />
-                  Files ({model.stl_files.length})
-                </h3>
-                <div className="flex gap-2">
-                  {settings.ai_organize_enabled && (
-                    <button onClick={runAiOrganize} disabled={aiOrganizing} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-violet-950 border border-gray-700 hover:border-violet-600 disabled:opacity-40 text-xs text-gray-400 hover:text-violet-300 transition-colors">
-                      {aiOrganizing
-                        ? <Loader2 size={12} className="animate-spin" />
-                        : <Wand2 size={12} />}
-                      {aiOrganizing ? "Organizing…" : "AI Organize"}
-                    </button>
-                  )}
-                  <button onClick={downloadAllFiles} disabled={downloadingAll} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 disabled:opacity-40 text-xs text-gray-400 hover:text-gray-200 transition-colors">
-                    <FolderDown size={12} />
-                    {downloadingAll ? "Zipping…" : "Download all"}
-                  </button>
-                  <button onClick={() => setShowKitBuilder(true)} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-indigo-950 border border-gray-700 hover:border-indigo-600 text-xs text-gray-400 hover:text-indigo-300 transition-colors">
-                    <Wrench size={12} />
-                    Kit Builder
-                  </button>
-                </div>
-              </div>
-              <div className="overflow-x-auto overflow-y-auto max-h-[520px] rounded-lg border border-gray-800">
-                {(() => {
-                  const startColResize = (colIdx: number, e: React.MouseEvent) => {
-                    e.preventDefault();
-                    // On first drag, snapshot current column widths from the DOM
-                    let snapshot = hColWidths;
-                    if (!snapshot && hTableRef.current) {
-                      const ths = Array.from(hTableRef.current.querySelectorAll('thead tr th'));
-                      snapshot = ths.map((th) => (th as HTMLElement).offsetWidth);
-                      setHColWidths(snapshot);
-                    }
-                    if (!snapshot) return;
-                    const startX = e.clientX;
-                    const startW = snapshot[colIdx];
-                    const onMove = (ev: MouseEvent) => {
-                      setHColWidths(prev => {
-                        const base = prev ?? snapshot!;
-                        const next = [...base];
-                        next[colIdx] = Math.max(60, startW + ev.clientX - startX);
-                        return next;
-                      });
-                    };
-                    const onUp = () => {
-                      window.removeEventListener('mousemove', onMove);
-                      window.removeEventListener('mouseup', onUp);
-                      document.body.style.cursor = '';
-                      document.body.style.userSelect = '';
-                    };
-                    document.body.style.cursor = 'col-resize';
-                    document.body.style.userSelect = 'none';
-                    window.addEventListener('mousemove', onMove);
-                    window.addEventListener('mouseup', onUp);
-                  };
-                  const resizeHandle = (colIdx: number) => (
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize group/rh flex items-stretch"
-                      onMouseDown={(e) => startColResize(colIdx, e)}
-                    >
-                      <div className="w-px mx-auto bg-gray-700 group-hover/rh:bg-indigo-500 transition-colors" />
-                    </div>
-                  );
-                  const tableStyle = hColWidths
-                    ? { width: hColWidths.reduce((a, b) => a + b, 0), minWidth: hColWidths.reduce((a, b) => a + b, 0) }
-                    : undefined;
-                  return (
-                <table ref={hTableRef} className={`text-xs table-fixed${hColWidths ? '' : ' w-full'}`} style={tableStyle}>
-                  {hColWidths && (
-                  <colgroup>
-                    <col style={{ width: hColWidths[0] }} />
-                    <col style={{ width: hColWidths[1] }} />
-                    {settings.part_categories_enabled && <col style={{ width: hColWidths[2] }} />}
-                    <col style={{ width: hColWidths[3] }} />
-                    <col style={{ width: hColWidths[4] }} />
-                  </colgroup>
-                  )}
-                  <thead className="sticky top-0 z-10">
-                    <tr className="border-b border-gray-700 bg-gray-900">
-                      <th className="px-3 py-2 text-left text-gray-500 font-medium relative select-none overflow-hidden">Name{resizeHandle(0)}</th>
-                      <th className="px-3 py-2 text-left text-gray-500 font-medium relative select-none overflow-hidden">Filename{resizeHandle(1)}</th>
-                      {settings.part_categories_enabled && <th className="px-3 py-2 text-left text-gray-500 font-medium relative select-none overflow-hidden">Category{resizeHandle(2)}</th>}
-                      <th className="px-3 py-2 text-right text-gray-500 font-medium relative select-none overflow-hidden">Size{resizeHandle(3)}</th>
-                      <th className="px-3 py-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800/60">
-                    {settings.part_categories_enabled ? (
-                      <>
-                        {groupedStlFiles.labeled.map(([cat, catFiles]) => (
-                          <Fragment key={cat}>
-                            {renderHGroupHeader(cat, <span className="text-xs font-medium text-gray-400">{toPascalCase(cat)}</span>, catFiles.length)}
-                            {!hTableCollapsed.has(cat) && buildFileHierarchy(catFiles).map(({ file: f, depth }) => renderHRow(f, depth))}
-                          </Fragment>
-                        ))}
-                        {groupedStlFiles.unlabeled.length > 0 && (() => {
-                          const key = "__uncategorized__";
-                          return (
-                            <Fragment key={key}>
-                              {renderHGroupHeader(key, <span className="text-xs font-medium text-gray-500">Uncategorized · {groupedStlFiles.unlabeled.length} of {model.stl_files.length}</span>, groupedStlFiles.unlabeled.length)}
-                              {!hTableCollapsed.has(key) && buildFileHierarchy(groupedStlFiles.unlabeled).map(({ file: f, depth }) => renderHRow(f, depth))}
-                            </Fragment>
-                          );
-                        })()}
-                      </>
-                    ) : (
-                      buildFileHierarchy(model.stl_files).map(({ file: f, depth }) => renderHRow(f, depth))
-                    )}
-                  </tbody>
-                </table>
-                  );
-                })()}
-              </div>
-            </div>
-
-          </div>
-        );
-      })()}
+      {/* STL Files — horizontal table layout (full-width, below the grid) */}
+      <StlFilesTable
+        model={model}
+        editing={editing}
+        partTypes={partTypes}
+        setPartTypes={setPartTypes}
+        savePartType={savePartType}
+        partNames={partNames}
+        setPartNames={setPartNames}
+        savePartName={savePartName}
+        selectedStlFileId={selectedStlFileId}
+        setSelectedStlFileId={setSelectedStlFileId}
+        setViewMode={setViewMode}
+        linkingBaseId={linkingBaseId}
+        setLinkingBaseId={setLinkingBaseId}
+        linkSup={linkSup}
+        unlinkSup={unlinkSup}
+        groupedStlFiles={groupedStlFiles}
+        aiOrganizing={aiOrganizing}
+        runAiOrganize={runAiOrganize}
+        downloadingAll={downloadingAll}
+        downloadAllFiles={downloadAllFiles}
+        onOpenKitBuilder={() => setShowKitBuilder(true)}
+      />
 
       {showImagePicker && (
         <ImagePicker
