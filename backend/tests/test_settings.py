@@ -19,6 +19,12 @@ DEFAULTS = {
     "ai_effort": "low",
     "part_categories_enabled": False,
     "horizontal_parts_layout": False,
+    "ai_organize_enabled": False,
+    "ai_organize_url": "",
+    "ai_organize_model": "",
+    "ai_guides_enabled": False,
+    "ai_guides_api": None,
+    "ai_organize_api": None,
 }
 
 

@@ -78,6 +78,27 @@ Both suites run automatically via the pre-commit hook. To skip in an emergency:
 - [ ] No secrets, credentials, or local paths committed
 - [ ] PR description explains *why*, not just *what*
 
+## Frontend architecture
+
+**Server state** is managed with [TanStack Query](https://tanstack.com/query).
+Fetch logic lives in `frontend/src/hooks/queries/`; components use those hooks
+rather than calling `api.*` directly in effects.
+
+**API client** (`frontend/src/api/`) is split into per-domain modules:
+
+| Module | Covers |
+|--------|--------|
+| `models.ts` | Model CRUD, STL files, AI naming |
+| `settings.ts` | App settings, AI APIs, credentials |
+| `files.ts` | File serving, ZIP download |
+| `collections.ts`, `painting.ts`, etc. | Domain modules |
+| `types.ts` | All shared TypeScript interfaces |
+| `client.ts` | Barrel re-export — `import { api } from "../api/client"` still works |
+
+When adding a new endpoint, put the call in the relevant domain module and the
+types in `types.ts`. The barrel re-exports everything, so call sites don't need
+updating.
+
 ## Code Style
 
 - **Python**: standard PEP 8; type hints on public functions.

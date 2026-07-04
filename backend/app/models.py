@@ -300,6 +300,24 @@ class AppSetting(Base):
     value = Column(JSON, nullable=False)
 
 
+class AiApiConfig(Base):
+    """Named AI API endpoint configuration — one row per user-defined entry.
+
+    Multiple configs of the same type are allowed (e.g. two Ollama instances).
+    Encrypted API keys are stored separately in app_settings under the key
+    `ai_api_key_<id>_enc` to keep them out of this table's plaintext rows.
+    """
+    __tablename__ = "ai_api_configs"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    api_type = Column(String, nullable=False)  # "anthropic" | "openai"
+    url = Column(String, nullable=True)         # OpenAI-compatible base URL
+    model = Column(String, nullable=False, default="")
+    effort = Column(String, nullable=True)      # Anthropic only: "low"|"medium"|"high"
+    created_at = Column(DateTime, default=utcnow)
+
+
 class ReorganizeManifest(Base):
     """A persisted library-reorganize preview manifest (#323, Phase 1).
 

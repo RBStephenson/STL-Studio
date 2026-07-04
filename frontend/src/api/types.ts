@@ -224,6 +224,61 @@ export interface AppSettings {
   ai_effort: AiEffort;
   part_categories_enabled: boolean;
   horizontal_parts_layout: boolean;
+  ai_organize_enabled: boolean;
+  ai_organize_url: string;
+  ai_organize_model: string;
+  ai_guides_enabled: boolean;
+  ai_guides_api: number | null;
+  ai_organize_api: number | null;
+}
+
+export interface AiApiConfig {
+  id: number;
+  name: string;
+  api_type: "anthropic" | "openai";
+  url: string | null;
+  model: string;
+  effort: string | null;
+  key_set: boolean;
+  key_hint: string | null;
+}
+
+// AI organizer settings — OpenAI-compatible endpoint for part naming.
+export interface AiOrganizeSettings {
+  key_set: boolean;
+  key_hint: string | null;
+  enabled: boolean;
+  url: string;
+  model: string;
+}
+
+export interface AiOrganizeSuggestion {
+  id: number;
+  part_type: string | null;
+  part_name: string | null;
+  sup_of_id: number | null;
+}
+
+export interface AiOrganizeResult {
+  applied: AiOrganizeSuggestion[];
+  message: string;
+}
+
+export interface AiOrganizeSuggestionPreview {
+  id: number;
+  filename: string;
+  part_type: string | null;
+  part_name: string | null;
+  sup_of_id: number | null;
+  sup_base_filename: string | null;
+}
+
+export interface AiOrganizePreviewResult {
+  suggestions: AiOrganizeSuggestionPreview[];
+}
+
+export interface AiOrganizeModelsList {
+  models: string[];
 }
 
 export type AiEffort = "low" | "medium" | "high";

@@ -22,6 +22,12 @@ services:
       - STL_ROOTS=/mnt/drive1,/mnt/drive2
       - STL_DRIVE_1=${STL_DRIVE_1:-}
       - STL_DRIVE_2=${STL_DRIVE_2:-}
+      - PYTHONUNBUFFERED=1
+    # Allows the backend to reach services on the host (e.g. Ollama at localhost:11434).
+    # host-gateway resolves to the host's IP as seen from the container's network.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "ollama-host:host-gateway"
     restart: unless-stopped
 
   frontend:

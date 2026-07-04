@@ -475,6 +475,15 @@ class AppSettingsRead(BaseModel):
     part_categories_enabled: bool = False
     # Show STL files as a full-width horizontal table below the two-column layout.
     horizontal_parts_layout: bool = False
+    # AI naming & organizing — uses an OpenAI-compatible endpoint (e.g. Ollama).
+    # The API key is NOT here; it's encrypted via /settings/ai-organize/key.
+    ai_organize_enabled: bool = False
+    ai_organize_url: str = ""
+    ai_organize_model: str = ""
+    # Per-function AI API selection: ID of an AiApiConfig row (or None = unset).
+    ai_guides_enabled: bool = False
+    ai_guides_api: Optional[int] = None
+    ai_organize_api: Optional[int] = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -500,6 +509,12 @@ class AppSettingsUpdate(BaseModel):
     ai_effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     part_categories_enabled: Optional[bool] = None
     horizontal_parts_layout: Optional[bool] = None
+    ai_organize_enabled: Optional[bool] = None
+    ai_organize_url: Optional[str] = Field(None, max_length=500)
+    ai_organize_model: Optional[str] = Field(None, max_length=200)
+    ai_guides_enabled: Optional[bool] = None
+    ai_guides_api: Optional[int] = None
+    ai_organize_api: Optional[int] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
@@ -542,6 +557,38 @@ class AppSettingsUpdate(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+# --- Named AI API configs -------------------------------------------------
+
+class AiApiConfigRead(BaseModel):
+    """A named AI API endpoint configuration returned to the client.
+
+    Encrypted keys are never returned — only whether one is set and a hint.
+    """
+    id: int
+    name: str
+    api_type: str
+    url: Optional[str] = None
+    model: str
+    effort: Optional[str] = None
+    key_set: bool
+    key_hint: Optional[str] = None
+
+
+class AiApiConfigCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    api_type: str = Field(..., pattern="^(anthropic|openai)$")
+    url: Optional[str] = Field(None, max_length=500)
+    model: str = Field("", max_length=200)
+    effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+
+
+class AiApiConfigUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    url: Optional[str] = Field(None, max_length=500)
+    model: Optional[str] = Field(None, max_length=200)
+    effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+
+
 # --- AI settings (#517) ---------------------------------------------------
 
 class AiSettingsRead(BaseModel):
@@ -555,6 +602,52 @@ class AiSettingsRead(BaseModel):
 
 class AiKeyUpdate(BaseModel):
     key: str = Field(min_length=1, max_length=400)
+
+
+class AiOrganizeSettingsRead(BaseModel):
+    """Status of AI organize connection. Key is write-only."""
+    key_set: bool
+    key_hint: Optional[str] = None
+    enabled: bool = False
+    url: str = ""
+    model: str = ""
+
+
+class AiOrganizeSuggestion(BaseModel):
+    id: int
+    part_type: Optional[str] = None
+    part_name: Optional[str] = None
+    sup_of_id: Optional[int] = None
+
+
+class AiOrganizeResult(BaseModel):
+    applied: list[AiOrganizeSuggestion]
+    message: str = ""
+
+
+class AiOrganizeSuggestionPreview(BaseModel):
+    """Dry-run suggestion with enough context to populate the review modal."""
+    id: int
+    filename: str
+    part_type: Optional[str] = None
+    part_name: Optional[str] = None
+    sup_of_id: Optional[int] = None
+    sup_base_filename: Optional[str] = None
+
+
+class AiOrganizePreviewResult(BaseModel):
+    suggestions: list[AiOrganizeSuggestionPreview]
+
+
+class AiOrganizeApplyItem(BaseModel):
+    id: int
+    part_type: Optional[str] = None
+    part_name: Optional[str] = None
+    sup_of_id: Optional[int] = None
+
+
+class AiOrganizeApplyRequest(BaseModel):
+    items: list[AiOrganizeApplyItem]
 
 
 # --- Cults3D settings (#578) ----------------------------------------------

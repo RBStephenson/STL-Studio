@@ -13,7 +13,9 @@ import app.painting.models  # noqa: F401
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False preserves uvicorn's log handlers when this
+    # runs during app startup (fileConfig's default True wipes them out).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

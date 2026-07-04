@@ -17,6 +17,7 @@ A tour of every screen and what it does.
 - [Import folder](#import-folder)
 - [Creators & per-creator rescan](#creators--per-creator-rescan)
 - [Settings](#settings)
+- [AI & Integrations](#ai--integrations)
 - [Backup, restore & reset](#backup-restore--reset)
 - [NSFW toggle](#nsfw-toggle)
 
@@ -217,6 +218,11 @@ without hunting through the file list. Selecting a row in the file list and
 the corresponding button in the part picker stay in sync in both directions,
 auto-unfolding collapsed sections as needed. Changing a part's category
 applies to every file linked to it (the base file and all its sups).
+
+The **part type** field is a combobox: start typing to filter a list of
+standard suggestions (Body, Head, Arm, Base, Weapon, etc.), or type any
+custom category name. The dropdown appears automatically and can be dismissed
+with Escape; pressing Enter or clicking away commits the value.
 
 **Settings → Preferences → Horizontal parts layout** swaps the two-column
 model detail page for a full-width, scrollable files table below the main
@@ -594,6 +600,55 @@ top of the Library listing the affected paths, so an empty library reads as
 "drive unavailable" rather than "everything is gone".
 
 It's also home to **Scan Rules** and **Data Management** (see below).
+
+## AI & Integrations
+
+**Settings → AI & Integrations** has three sections.
+
+### AI APIs
+
+A list of named AI API connections. Add as many as you need — different
+models, local Ollama instances, or separate keys for different purposes. Each
+entry has:
+
+- **Name** — a human-readable label used to identify it in the AI Functions
+  selectors below (e.g. "Ollama Local", "Anthropic Creative").
+- **Type** — `Anthropic` or `OpenAI-compatible` (covers Ollama, LM Studio,
+  and any OpenAI-API-compatible endpoint).
+- **Model** — for Anthropic, a dropdown of supported Claude models; for
+  OpenAI-compatible, the app fetches the available model list from the base
+  URL automatically when you enter it.
+- **Effort** — (Anthropic only) controls reasoning depth: Low, Medium, or High.
+- **API key** — stored encrypted server-side. For Ollama and similar local
+  endpoints, a key is optional.
+
+You can add multiple entries of the same type — for example, two Anthropic
+entries using different models for different tasks, or both a local Ollama
+instance and a remote OpenAI-compatible endpoint.
+
+### AI Functions
+
+Controls which AI features are active and which named API each one uses.
+
+- **AI Guide Drafts** — when enabled, an AI generates a first-draft painting
+  guide for review before saving. Choose which configured API to use.
+- **AI Naming & Organizing** — when enabled, normalizes part names, assigns
+  categories, and links presupported files on a per-model basis. Choose which
+  configured API to use.
+
+### Metadata
+
+Third-party integrations that enrich your library with creator details,
+metadata, and thumbnails.
+
+- **Cults3D** — connect with a Cults3D username + API key. API access is
+  gated; request it in `#api-help` on the Cults3D Discord. Credentials are
+  stored encrypted.
+- **MyMiniFactory** — add a MyMiniFactory API key (register an app under
+  MyMiniFactory Settings → Developer). Stored encrypted.
+
+When configured, these APIs are used automatically during
+[web enrichment](#metadata-editing--web-enrichment).
 
 ## Scan rules
 

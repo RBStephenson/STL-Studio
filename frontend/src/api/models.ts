@@ -1,5 +1,8 @@
 import { request, BASE } from "./base";
 import type {
+  AiOrganizePreviewResult,
+  AiOrganizeResult,
+  AiOrganizeSuggestion,
   Creator,
   ModelDetail,
   ModelList,
@@ -183,6 +186,14 @@ export const modelsApi = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    }),
+  aiOrganize: (modelId: number) =>
+    request<AiOrganizePreviewResult>(`/models/${modelId}/ai-organize`, { method: "POST" }),
+  aiOrganizeApply: (modelId: number, items: AiOrganizeSuggestion[]) =>
+    request<AiOrganizeResult>(`/models/${modelId}/ai-organize/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
     }),
   batchThumbnailFromUrl: (modelIds: number[], url: string) =>
     request<{ ok: boolean; downloaded: boolean; detail?: string; updated: number[]; missing: number[] }>(

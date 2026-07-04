@@ -29,6 +29,21 @@ vi.mock("../../api/client", () => ({
         setKey: vi.fn().mockResolvedValue({ key_set: true, key_hint: "…wxyz" }),
         clearKey: vi.fn().mockResolvedValue({ key_set: false, key_hint: null }),
       },
+      aiOrganize: {
+        get: vi.fn().mockResolvedValue({ key_set: false, key_hint: null, enabled: false, url: "", model: "" }),
+        setKey: vi.fn().mockResolvedValue({ key_set: true, key_hint: "…wxyz", enabled: false, url: "", model: "" }),
+        clearKey: vi.fn().mockResolvedValue({ key_set: false, key_hint: null, enabled: false, url: "", model: "" }),
+        getModels: vi.fn().mockResolvedValue({ models: [] }),
+      },
+      aiApis: {
+        list: vi.fn().mockResolvedValue([]),
+        create: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+        setKey: vi.fn(),
+        clearKey: vi.fn(),
+        getModels: vi.fn().mockResolvedValue({ models: [] }),
+      },
     },
   },
 }));

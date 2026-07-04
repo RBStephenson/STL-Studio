@@ -1,5 +1,8 @@
 import { request } from "./base";
 import type {
+  AiApiConfig,
+  AiOrganizeModelsList,
+  AiOrganizeSettings,
   AiSettings,
   AppSettings,
   CultsSettings,
@@ -66,5 +69,47 @@ export const settingsApi = {
       }),
     clearKey: () =>
       request<MmfSettings>("/settings/mmf/key", { method: "DELETE" }),
+  },
+  aiOrganize: {
+    get: () => request<AiOrganizeSettings>("/settings/ai-organize"),
+    setKey: (key: string) =>
+      request<AiOrganizeSettings>("/settings/ai-organize/key", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      }),
+    clearKey: () =>
+      request<AiOrganizeSettings>("/settings/ai-organize/key", { method: "DELETE" }),
+    getModels: (url?: string) => {
+      const qs = url ? `?url=${encodeURIComponent(url)}` : "";
+      return request<AiOrganizeModelsList>(`/settings/ai-organize/models${qs}`);
+    },
+  },
+  aiApis: {
+    list: () => request<AiApiConfig[]>("/settings/ai-apis"),
+    create: (body: { name: string; api_type: string; url?: string | null; model?: string; effort?: string | null }) =>
+      request<AiApiConfig>("/settings/ai-apis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    update: (id: number, body: { name?: string; url?: string | null; model?: string; effort?: string | null }) =>
+      request<AiApiConfig>(`/settings/ai-apis/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    delete: (id: number) =>
+      request<void>(`/settings/ai-apis/${id}`, { method: "DELETE" }),
+    setKey: (id: number, key: string) =>
+      request<AiApiConfig>(`/settings/ai-apis/${id}/key`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      }),
+    clearKey: (id: number) =>
+      request<AiApiConfig>(`/settings/ai-apis/${id}/key`, { method: "DELETE" }),
+    getModels: (id: number) =>
+      request<AiOrganizeModelsList>(`/settings/ai-apis/${id}/models`),
   },
 };

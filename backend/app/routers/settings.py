@@ -7,14 +7,19 @@ outside it, so unknown keys can never be written.
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.config import RESTART_REQUIRED_KEYS, settings
 from app.database import get_db
-from app.models import AppSetting
+from app.models import AppSetting, AiApiConfig
 from app.schemas import (
+    AiApiConfigCreate,
+    AiApiConfigRead,
+    AiApiConfigUpdate,
     AiKeyUpdate,
+    AiOrganizeSettingsRead,
     AiSettingsRead,
     AppSettingsRead,
     AppSettingsUpdate,
@@ -205,3 +210,191 @@ def set_mmf_key(body: AiKeyUpdate, db: Session = Depends(get_db)):
 def clear_mmf_key(db: Session = Depends(get_db)):
     secrets.clear_mmf_api_key(db)
     return _mmf_settings(db)
+
+
+# --- AI Organizer settings ------------------------------------------------
+# OpenAI-compatible endpoint for part naming/normalization. The API key is
+# write-only (same Fernet pattern); url and model are stored in app_settings.
+
+def _organize_settings(db: Session) -> AiOrganizeSettingsRead:
+    hint = secrets.organize_api_key_hint(db)
+    enabled_row = db.get(AppSetting, "ai_organize_enabled")
+    url_row = db.get(AppSetting, "ai_organize_url")
+    model_row = db.get(AppSetting, "ai_organize_model")
+    return AiOrganizeSettingsRead(
+        key_set=hint is not None,
+        key_hint=hint,
+        enabled=bool(enabled_row.value) if enabled_row else False,
+        url=url_row.value if url_row else "",
+        model=model_row.value if model_row else "",
+    )
+
+
+@router.get("/ai-organize", response_model=AiOrganizeSettingsRead)
+def get_organize_settings(db: Session = Depends(get_db)):
+    return _organize_settings(db)
+
+
+@router.put("/ai-organize/key", response_model=AiOrganizeSettingsRead)
+def set_organize_key(body: AiKeyUpdate, db: Session = Depends(get_db)):
+    secrets.set_organize_api_key(db, body.key)
+    return _organize_settings(db)
+
+
+@router.delete("/ai-organize/key", response_model=AiOrganizeSettingsRead)
+def clear_organize_key(db: Session = Depends(get_db)):
+    secrets.clear_organize_api_key(db)
+    return _organize_settings(db)
+
+
+@router.get("/ai-organize/models")
+def get_organize_models(url: str = Query(""), db: Session = Depends(get_db)):
+    """Proxy a /v1/models (or /api/tags) call to the configured AI endpoint.
+
+    Returns {"models": [...]} so the frontend can populate a dropdown without
+    making a cross-origin request from the browser.
+    """
+    if not url:
+        url_row = db.get(AppSetting, "ai_organize_url")
+        url = url_row.value if url_row else ""
+    if not url:
+        raise HTTPException(status_code=400, detail="No URL configured")
+
+    api_key = secrets.get_organize_api_key(db) or ""
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    import re
+    base = re.sub(r"(?i)(https?://)(?:localhost|127\.0\.0\.1)\b", r"\1host.docker.internal", url.rstrip("/"))
+    try:
+        r = httpx.get(f"{base}/v1/models", headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            models = sorted({m["id"] for m in data.get("data", []) if "id" in m})
+            if models:
+                return {"models": models}
+        # Ollama also exposes /api/tags which lists local models.
+        r2 = httpx.get(f"{base}/api/tags", headers=headers, timeout=10)
+        if r2.status_code == 200:
+            data2 = r2.json()
+            models = sorted({m["name"] for m in data2.get("models", []) if "name" in m})
+            return {"models": models}
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach AI endpoint: {exc}")
+
+    raise HTTPException(status_code=502, detail="No models returned from endpoint")
+
+
+# --- Named AI API configs -------------------------------------------------
+
+def _config_to_read(db: Session, c: AiApiConfig) -> AiApiConfigRead:
+    hint = secrets.ai_api_config_key_hint(db, c.id)
+    return AiApiConfigRead(
+        id=c.id,
+        name=c.name,
+        api_type=c.api_type,
+        url=c.url,
+        model=c.model,
+        effort=c.effort,
+        key_set=hint is not None,
+        key_hint=hint,
+    )
+
+
+@router.get("/ai-apis", response_model=list[AiApiConfigRead])
+def list_ai_api_configs(db: Session = Depends(get_db)):
+    configs = db.query(AiApiConfig).order_by(AiApiConfig.created_at).all()
+    return [_config_to_read(db, c) for c in configs]
+
+
+@router.post("/ai-apis", response_model=AiApiConfigRead, status_code=201)
+def create_ai_api_config(body: AiApiConfigCreate, db: Session = Depends(get_db)):
+    from app.utils import utcnow as _now
+    c = AiApiConfig(
+        name=body.name,
+        api_type=body.api_type,
+        url=body.url,
+        model=body.model or "",
+        effort=body.effort,
+        created_at=_now(),
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return AiApiConfigRead(id=c.id, name=c.name, api_type=c.api_type, url=c.url,
+                           model=c.model, effort=c.effort, key_set=False, key_hint=None)
+
+
+@router.patch("/ai-apis/{config_id}", response_model=AiApiConfigRead)
+def update_ai_api_config(config_id: int, body: AiApiConfigUpdate, db: Session = Depends(get_db)):
+    c = db.get(AiApiConfig, config_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Config not found")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(c, field, value)
+    db.commit()
+    db.refresh(c)
+    return _config_to_read(db, c)
+
+
+@router.delete("/ai-apis/{config_id}", status_code=204)
+def delete_ai_api_config(config_id: int, db: Session = Depends(get_db)):
+    c = db.get(AiApiConfig, config_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Config not found")
+    secrets.clear_ai_api_config_key(db, config_id)
+    db.delete(c)
+    db.commit()
+
+
+@router.post("/ai-apis/{config_id}/key", response_model=AiApiConfigRead)
+def set_ai_api_config_key(config_id: int, body: AiKeyUpdate, db: Session = Depends(get_db)):
+    c = db.get(AiApiConfig, config_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Config not found")
+    secrets.set_ai_api_config_key(db, config_id, body.key)
+    return _config_to_read(db, c)
+
+
+@router.delete("/ai-apis/{config_id}/key", response_model=AiApiConfigRead)
+def clear_ai_api_config_key_route(config_id: int, db: Session = Depends(get_db)):
+    c = db.get(AiApiConfig, config_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Config not found")
+    secrets.clear_ai_api_config_key(db, config_id)
+    return _config_to_read(db, c)
+
+
+@router.get("/ai-apis/{config_id}/models")
+def get_ai_api_config_models(config_id: int, db: Session = Depends(get_db)):
+    """Proxy a /v1/models (or /api/tags) call for an OpenAI-compatible config."""
+    c = db.get(AiApiConfig, config_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Config not found")
+    if c.api_type != "openai" or not c.url:
+        return {"models": []}
+
+    api_key = secrets.get_ai_api_config_key(db, config_id) or ""
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    import re
+    base = re.sub(r"(?i)(https?://)(?:localhost|127\.0\.0\.1)\b", r"\1host.docker.internal", c.url.rstrip("/"))
+    try:
+        r = httpx.get(f"{base}/v1/models", headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            models = sorted({m["id"] for m in data.get("data", []) if "id" in m})
+            if models:
+                return {"models": models}
+        r2 = httpx.get(f"{base}/api/tags", headers=headers, timeout=10)
+        if r2.status_code == 200:
+            data2 = r2.json()
+            models = sorted({m["name"] for m in data2.get("models", []) if "name" in m})
+            return {"models": models}
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach AI endpoint: {exc}")
+
+    raise HTTPException(status_code=502, detail="No models returned from endpoint")
