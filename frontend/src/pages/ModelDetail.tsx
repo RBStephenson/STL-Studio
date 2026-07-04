@@ -20,6 +20,7 @@ import { useModelGuideId } from "../hooks/queries/guides";
 import { useModelTags } from "./model-detail/hooks/useModelTags";
 import { usePartEditing } from "./model-detail/hooks/usePartEditing";
 import { usePrintStatus } from "./model-detail/hooks/usePrintStatus";
+import { useGroupMerge } from "./model-detail/hooks/useGroupMerge";
 import CollectionsSection from "./model-detail/CollectionsSection";
 import ImageColumn from "./model-detail/sections/ImageColumn";
 import StlFilesList from "./model-detail/sections/StlFilesList";
@@ -114,10 +115,6 @@ export default function ModelDetail() {
   const [copiedPath, setCopiedPath] = useState(false);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
-  const [settingGroup, setSettingGroup] = useState(false);
-  const [groupInput, setGroupInput] = useState("");
-  const [savingGroup, setSavingGroup] = useState(false);
-  const [groupSuggestions, setGroupSuggestions] = useState<string[]>([]);
   // undefined = loading, null = boundary/unavailable, NavTarget = navigable.
   // Derived from the neighbors query: no origin → null (Prev/Next hidden);
   // in-flight → undefined (skeleton); resolved → target or boundary.
@@ -219,7 +216,6 @@ export default function ModelDetail() {
     setShowImagePicker(false);
     setShowKitBuilder(false);
     setOpenFolderError(null);
-    setSettingGroup(false);
   }, [id]);
 
   const downloadAllFiles = async () => {
@@ -298,55 +294,6 @@ export default function ModelDetail() {
   // here (undesigned UX per the plan) — the picker only accepts an existing
   // group, resolved the same way VariantGroup.tsx's moveToGroup does: look up
   // any current member of that label and take its variant_group_id.
-  const openMergePicker = () => {
-    setGroupInput("");
-    setSettingGroup(true);
-    if (model?.creator_id) {
-      api.models.characters(model.creator_id).then(setGroupSuggestions).catch(() => {});
-    }
-  };
-
-  const mergeIntoGroup = async () => {
-    if (!model || savingGroup) return;
-    const trimmed = groupInput.trim();
-    if (!trimmed) return;
-    setSavingGroup(true);
-    try {
-      const { items } = await api.models.variants(model.creator_id!, trimmed);
-      const rep = items.find((m) => m.id !== model.id);
-      if (!rep?.variant_group_id) {
-        toast(`No existing group named "${trimmed}" — pick one from the list.`, "error");
-        return;
-      }
-      const label = rep.variant_group?.label || trimmed;
-      await api.models.mergeGroup([model.id], { groupId: rep.variant_group_id, label });
-      toast(`Merged into "${label}".`, "success");
-      setSettingGroup(false);
-      load();
-    } catch (e: any) {
-      toast(e?.message || "Couldn't merge into that group — try again.", "error");
-    } finally {
-      setSavingGroup(false);
-    }
-  };
-
-  const removeFromGroup = async () => {
-    if (!model || model.variant_group_id == null) return;
-    const ok = await confirm({
-      title: "Remove from this group?",
-      message: "This model will no longer be grouped with its variants. You can merge it into a group again anytime.",
-      confirmLabel: "Remove",
-    });
-    if (!ok) return;
-    try {
-      await api.models.splitGroup(model.variant_group_id, [model.id]);
-      toast("Removed from group.", "success");
-      load();
-    } catch (e: any) {
-      toast(e?.message || "Couldn't remove from group — try again.", "error");
-    }
-  };
-
   const clearImage = async () => {
     if (!model) return;
     const ok = await confirm({
@@ -406,6 +353,11 @@ export default function ModelDetail() {
     queryClient.invalidateQueries({ queryKey: queryKeys.models.variantsAll });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [numericId, queryClient]);
+
+  const {
+    settingGroup, groupInput, setGroupInput, savingGroup, groupSuggestions,
+    openMergePicker, cancelMerge, mergeIntoGroup, removeFromGroup,
+  } = useGroupMerge(model, numericId, load);
 
   if (loading) return <div className="p-8 text-gray-500 animate-pulse">Loading…</div>;
   if (loadError === "network") {
@@ -655,7 +607,7 @@ export default function ModelDetail() {
                 list="group-suggestions"
                 value={groupInput}
                 onChange={(e) => setGroupInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") mergeIntoGroup(); if (e.key === "Escape") setSettingGroup(false); }}
+                onKeyDown={(e) => { if (e.key === "Enter") mergeIntoGroup(); if (e.key === "Escape") cancelMerge(); }}
                 placeholder="Existing group name…"
                 className="flex-1 px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-sm text-gray-200 outline-none"
               />
@@ -670,7 +622,7 @@ export default function ModelDetail() {
                 {savingGroup ? "Merging…" : "Merge"}
               </button>
               <button
-                onClick={() => setSettingGroup(false)}
+                onClick={cancelMerge}
                 className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sm text-gray-400"
               >
                 Cancel
