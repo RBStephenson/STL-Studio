@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 
-const update = vi.fn(async () => ({}));
+const update = vi.fn(async (..._args: unknown[]) => ({}));
 const tagsList = vi.fn(async () => [{ tag: "hero", count: 3 }]);
 const toast = vi.fn();
 
