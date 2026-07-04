@@ -4,6 +4,7 @@ import ThemeEditor from "../../components/guide/ThemeEditor";
 import { GuideTheme } from "../../api/client";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
+import { errMsg } from "../../utils/err";
 
 export default function PaintingTab() {
   const { settings, update } = useAppSettings();
@@ -14,16 +15,16 @@ export default function PaintingTab() {
     try {
       await update({ painting_guides_enabled: next });
       flash(next ? "Painting Guides enabled" : "Painting Guides disabled", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not update setting", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not update setting", "err");
     }
   };
 
   const saveThemeDefaults = async (theme: GuideTheme) => {
     try {
       await update({ guide_theme_defaults: theme });
-    } catch (e: any) {
-      flash(e?.message || "Could not save theme defaults", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not save theme defaults", "err");
     }
   };
 

@@ -28,6 +28,7 @@ import StlFilesTable from "./model-detail/sections/StlFilesTable";
 import VariantSwitcher from "./model-detail/sections/VariantSwitcher";
 import StatsRow from "./model-detail/sections/StatsRow";
 import TagsPanel from "./model-detail/sections/TagsPanel";
+import { errMsg } from "../utils/err";
 import {
   toPascalCase,
   parseLibraryOrigin,
@@ -39,7 +40,7 @@ export default function ModelDetail() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const rawFrom = (location.state as any)?.from as string | undefined;
+  const rawFrom = (location.state as { from?: string } | null)?.from;
   const backTo = rawFrom ?? "/";
   const navOrigin = useMemo(() => parseLibraryOrigin(rawFrom), [rawFrom]); // null = not from Library → hide Prev/Next
   const { showNSFW } = useNSFW();
@@ -240,8 +241,8 @@ export default function ModelDetail() {
         return;
       }
       setAiOrganizeSuggestions(result.suggestions);
-    } catch (e: any) {
-      toast(e?.message || "AI organize failed", "error");
+    } catch (e) {
+      toast(errMsg(e) || "AI organize failed", "error");
     } finally {
       setAiOrganizing(false);
     }
@@ -283,8 +284,8 @@ export default function ModelDetail() {
       const res = await api.models.splitPack(model.id);
       toast(`Split into ${res.created} models.`, "success");
       navigate(backTo);   // this model no longer exists
-    } catch (e: any) {
-      toast(e?.message || "Couldn't split this model — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't split this model — try again.", "error");
       setSplitting(false);
     }
   };
@@ -306,8 +307,8 @@ export default function ModelDetail() {
       await api.models.clearThumbnail(model.id);
       toast("Image cleared.", "success");
       load();
-    } catch (e: any) {
-      toast(e?.message || "Couldn't clear the image — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't clear the image — try again.", "error");
     }
   };
 

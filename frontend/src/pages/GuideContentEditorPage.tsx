@@ -46,8 +46,6 @@ export default function GuideContentEditorPage() {
       .catch((e) => { if (alive) setLoadError(e?.message || "Could not load this guide."); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-    // refreshValidation is stable for the lifetime of this page.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const save = async (tabs: TabInput[]) => {

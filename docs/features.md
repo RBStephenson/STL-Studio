@@ -224,11 +224,16 @@ standard suggestions (Body, Head, Arm, Base, Weapon, etc.), or type any
 custom category name. The dropdown appears automatically and can be dismissed
 with Escape; pressing Enter or clicking away commits the value.
 
-**Settings → Preferences → Horizontal parts layout** swaps the two-column
-model detail page for a full-width, scrollable files table below the main
-grid (with **Collections**, **Location**, and **Other Files** moved into the
-right column) — handy for models with a lot of parts. The part picker is
-hidden in this mode since the table serves the same purpose.
+**Settings → Preferences → Horizontal parts layout** (on by default) swaps the
+two-column model detail page for a full-width, scrollable files table below the
+main grid (with **Collections**, **Location**, and **Other Files** moved into the
+right column) — handy for models with a lot of parts. The part picker is hidden
+in this mode since the table serves the same purpose.
+
+**Settings → Preferences → Enable part categories** turns on the Category field
+on each file in the model detail view. Files group into collapsible sections and
+the 3D viewer organises its part picker by category — useful for complex
+multi-part kits.
 
 ## 3D viewer
 
@@ -318,12 +323,24 @@ creators. Use them for things like "Army project", "Current print queue", or
 
 ### Collections page (`/collections`)
 
+Each collection card displays its cover image (if set), name, a truncated
+description (hover for the full text), and model count.
+
 - **Create** a collection with the **New Collection** button.
-- **Rename** a collection — hover the card and click the pencil icon, then type
-  a new name and press Enter (or click **Save**).
+- **Edit name & description** — hover the card and click the pencil icon. The
+  form shows a name field and a scrollable multi-line description box; press
+  **Save** or click **Cancel**. Clearing the description removes it.
+- **Set a cover image** — hover the card and click the image icon. Three options
+  are available in the picker:
+  - **URL** — paste a direct image link. The image is fetched server-side, so
+    CDN hot-link blocking is not an issue.
+  - **Upload** — pick a PNG, JPEG, WebP, or GIF from your computer (max 15 MB).
+  - **From model** — a grid of the collection's models; click any thumbnail to
+    use it as the cover. Use **Remove cover** at the bottom of the picker to
+    clear a cover that's already set.
 - **Delete** a collection — hover the card and click the trash icon, then
   confirm. Deleting a collection does not delete any models; it only removes the
-  grouping.
+  grouping. The cover image file is also deleted.
 - Click a collection card to open its **detail view**.
 
 ### Collection detail view

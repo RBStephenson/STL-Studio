@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ModelStats } from "../api/client";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Navbar from "./Navbar";
@@ -67,13 +68,13 @@ describe("Navbar – badge counts stay fresh (#543)", () => {
 
   it("shows the queue count and refetches it on window focus", async () => {
     const { api } = await import("../api/client");
-    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 0, queued: 7 } as any);
+    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 0, queued: 7 } as ModelStats);
 
     renderNavbar();
     expect(await screen.findByText("7")).toBeInTheDocument();
 
     // An item leaves the queue elsewhere; on focus the badge refreshes.
-    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 0, queued: 6 } as any);
+    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 0, queued: 6 } as ModelStats);
     fireEvent(window, new Event("focus"));
     expect(await screen.findByText("6")).toBeInTheDocument();
   });
@@ -81,14 +82,14 @@ describe("Navbar – badge counts stay fresh (#543)", () => {
   it("refreshes the review badge on a short poll without a route change or focus (STUDIO-6)", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { api } = await import("../api/client");
-    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 2, queued: 0 } as any);
+    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 2, queued: 0 } as ModelStats);
 
     renderNavbar();
     expect(await screen.findByText("2")).toBeInTheDocument();
 
     // Something on the same page (e.g. bulk enrich) flags a new item for
     // review, with no route change and no window blur/refocus.
-    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 3, queued: 0 } as any);
+    vi.mocked(api.models.stats).mockResolvedValue({ needs_review: 3, queued: 0 } as ModelStats);
     await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
     expect(await screen.findByText("3")).toBeInTheDocument();
 

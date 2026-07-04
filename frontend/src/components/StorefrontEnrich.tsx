@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Search, Check, ChevronDown, ChevronUp, Loader2, Zap } from "lucide-react";
 import RefreshEnrich from "./RefreshEnrich";
+import { errMsg } from "../utils/err";
 
 interface Product {
   title: string;
@@ -173,8 +174,8 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
           .filter((m) => m.confidence !== "low")
           .map((m) => m.local_model_id)
       ));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errMsg(e) ?? null);
     } finally {
       setLoading(false);
     }
@@ -251,8 +252,8 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
       setDone(true);
       // A shallow fallback is worth seeing, so linger longer when some occurred.
       setTimeout(onDone, 2500);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(errMsg(e) ?? null);
     } finally {
       setApplying(false);
     }

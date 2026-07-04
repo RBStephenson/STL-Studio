@@ -16,6 +16,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import Model as ModelDB, ScanRoot, STLFile
 from app.schemas import DownloadZipRequest
+from app.services.path_guard import assert_within_roots, is_within_roots
 from app.utils import like_escape
 
 logger = logging.getLogger(__name__)
@@ -123,28 +124,16 @@ def _allowed_roots() -> list[Path]:
 
 
 def _is_safe_path(p: Path) -> bool:
-    resolved = p.resolve()
-    return any(
-        resolved.is_relative_to(root.resolve())
-        for root in _allowed_roots()
-    )
+    return is_within_roots(p, _allowed_roots())
 
 
 @router.get("/image")
 def serve_image(path: str, v: str | None = None):
     if Path(path).suffix.lower() not in ALLOWED_IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Not an image file")
-    # Path-injection barrier: realpath + commonpath containment, inline so CodeQL
-    # can verify the guard at the sink (opaque helper calls are not recognised).
-    real = os.path.realpath(path)
-    for _root in _allowed_roots():
-        _rs = os.path.realpath(str(_root))
-        try:
-            if os.path.commonpath([real, _rs]) == _rs:
-                break
-        except ValueError:
-            continue
-    else:
+    try:
+        real = assert_within_roots(path, _allowed_roots())
+    except ValueError:
         raise HTTPException(status_code=403, detail="Path not allowed")
     p = Path(real)
     if not p.exists():
@@ -178,15 +167,9 @@ def serve_stl(path: str, v: str | None = None):
 
     if Path(path).suffix.lower() not in ALLOWED_STL_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Not an STL/3MF/OBJ file")
-    real = os.path.realpath(path)
-    for _root in _allowed_roots():
-        _rs = os.path.realpath(str(_root))
-        try:
-            if os.path.commonpath([real, _rs]) == _rs:
-                break
-        except ValueError:
-            continue
-    else:
+    try:
+        real = assert_within_roots(path, _allowed_roots())
+    except ValueError:
         raise HTTPException(status_code=403, detail="Path not allowed")
     p = Path(real)
     if not p.exists():
@@ -211,18 +194,9 @@ def serve_document(path: str):
     if _ext in ALLOWED_STL_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Use /files/stl for STL files")
 
-    # other_files stores absolute paths, so this endpoint validates an absolute
-    # path the same way serve_image / serve_stl do: realpath + commonpath
-    # containment against the configured roots (the guard CodeQL recognises).
-    real = os.path.realpath(path)
-    for _root in _allowed_roots():
-        _rs = os.path.realpath(str(_root))
-        try:
-            if os.path.commonpath([real, _rs]) == _rs:
-                break
-        except ValueError:
-            continue
-    else:
+    try:
+        real = assert_within_roots(path, _allowed_roots())
+    except ValueError:
         raise HTTPException(status_code=403, detail="Path not allowed")
     resolved = Path(real)
     if not resolved.exists() or not resolved.is_file():
@@ -288,17 +262,9 @@ def download_zip(
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
             for f in files:
-                _real = os.path.realpath(f.path)
-                _ok = False
-                for _root in _allowed_roots():
-                    _rs = os.path.realpath(str(_root))
-                    try:
-                        if os.path.commonpath([_real, _rs]) == _rs:
-                            _ok = True
-                            break
-                    except ValueError:
-                        continue
-                if not _ok:
+                try:
+                    _real = assert_within_roots(f.path, _allowed_roots())
+                except ValueError:
                     continue
                 p = Path(_real)
                 if not p.exists():
@@ -339,15 +305,9 @@ def open_folder(path: str):
     POST, not GET: it has a side effect, and a GET could be triggered by a
     plain <img> tag on a malicious page (#213).
     """
-    real = os.path.realpath(path)
-    for _root in _allowed_roots():
-        _rs = os.path.realpath(str(_root))
-        try:
-            if os.path.commonpath([real, _rs]) == _rs:
-                break
-        except ValueError:
-            continue
-    else:
+    try:
+        real = assert_within_roots(path, _allowed_roots())
+    except ValueError:
         raise HTTPException(status_code=403, detail="Path not allowed")
     p = Path(real)
     if not p.exists():

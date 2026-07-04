@@ -16,6 +16,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.config import settings
+from app.services.path_guard import assert_within_roots
 from app.services.url_guard import SSRFError, assert_public_url, guarded_async_client
 
 logger = logging.getLogger(__name__)
@@ -221,9 +222,7 @@ def store_thumbnail(model_id: int, ext: str, data: bytes) -> Path:
         raise ValueError(f"Unsafe thumbnail extension: {ext!r}")
     out_dir = thumbnails_dir()
     out_dir_real = os.path.realpath(str(out_dir))
-    out_str = os.path.realpath(os.path.join(out_dir_real, f"{model_id}{ext}"))
-    if os.path.commonpath([out_str, out_dir_real]) != out_dir_real:
-        raise ValueError("Thumbnail path escaped directory")
+    out_str = assert_within_roots(os.path.join(out_dir_real, f"{model_id}{ext}"), [out_dir_real])
     out = Path(out_str)
     for stale in out_dir.glob(f"{model_id}.*"):
         if stale != out:
@@ -233,3 +232,46 @@ def store_thumbnail(model_id: int, ext: str, data: bytes) -> Path:
                 pass
     out.write_bytes(data)
     return out
+
+
+def collection_covers_dir() -> Path:
+    """Return (and create) the collection-cover directory next to the DB."""
+    db_url = settings.database_url
+    if "sqlite:///" in db_url:
+        db_file = Path(db_url.split("sqlite:///", 1)[1])
+    else:
+        db_file = Path(db_url.split("sqlite://", 1)[1])
+    if db_file.name == ":memory:":
+        d = Path(tempfile.gettempdir()) / "stl_inventory_collection_covers"
+    else:
+        d = db_file.parent / "collection_covers"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def store_collection_cover(collection_id: int, ext: str, data: bytes) -> Path:
+    """Write cover image bytes to the canonical per-collection file."""
+    if ext not in IMAGE_EXTS:
+        raise ValueError(f"Unsafe cover extension: {ext!r}")
+    out_dir = collection_covers_dir()
+    out_dir_real = os.path.realpath(str(out_dir))
+    out_str = assert_within_roots(os.path.join(out_dir_real, f"collection_{collection_id}{ext}"), [out_dir_real])
+    out = Path(out_str)
+    for stale in out_dir.glob(f"collection_{collection_id}.*"):
+        if stale != out:
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+    out.write_bytes(data)
+    return out
+
+
+def clear_collection_cover(collection_id: int) -> None:
+    """Delete any stored cover file for the given collection."""
+    out_dir = collection_covers_dir()
+    for f in out_dir.glob(f"collection_{collection_id}.*"):
+        try:
+            f.unlink()
+        except OSError:
+            pass

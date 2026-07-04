@@ -4,6 +4,7 @@ import { api, AiApiConfig, CultsSettings, MmfSettings } from "../../api/client";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
+import { errMsg } from "../../utils/err";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -259,8 +260,8 @@ function ConfigCard({
     try {
       const r = await api.settings.aiOrganize.getModels(url);
       setModelList(r.models);
-    } catch (e: any) {
-      setModelListError(e?.message || "Could not reach endpoint");
+    } catch (e) {
+      setModelListError(errMsg(e) || "Could not reach endpoint");
       setModelList([]);
     } finally {
       setModelListLoading(false);
@@ -283,8 +284,8 @@ function ConfigCard({
       onUpdated(updated);
       setExpanded(false);
       flash(`"${updated.name}" updated`, "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not save", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not save", "err");
     }
   };
 
@@ -297,8 +298,8 @@ function ConfigCard({
       setKeyDraft("");
       setEditingKey(false);
       flash("Key saved", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not save key", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not save key", "err");
     }
   };
 
@@ -308,8 +309,8 @@ function ConfigCard({
       setLocalConfig(updated);
       onUpdated(updated);
       flash("Key cleared", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not clear key", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not clear key", "err");
     }
   };
 
@@ -318,8 +319,8 @@ function ConfigCard({
       await api.settings.aiApis.delete(localConfig.id);
       onDeleted(localConfig.id);
       flash(`"${localConfig.name}" removed`, "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not delete", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not delete", "err");
     }
   };
 
@@ -423,8 +424,8 @@ function AddConfigCard({
     try {
       const r = await api.settings.aiOrganize.getModels(url);
       setModelList(r.models);
-    } catch (e: any) {
-      setModelListError(e?.message || "Could not reach endpoint");
+    } catch (e) {
+      setModelListError(errMsg(e) || "Could not reach endpoint");
       setModelList([]);
     } finally {
       setModelListLoading(false);
@@ -445,8 +446,8 @@ function AddConfigCard({
       setPendingConfig(created);
       flash(`"${created.name}" added — set a key if required`, "ok");
       onCreated(created);
-    } catch (e: any) {
-      flash(e?.message || "Could not create", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not create", "err");
     }
   };
 
@@ -458,8 +459,8 @@ function AddConfigCard({
       setKeyDraft("");
       setEditingKey(false);
       flash("Key saved", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not save key", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not save key", "err");
     }
   };
 
@@ -469,8 +470,8 @@ function AddConfigCard({
       const updated = await api.settings.aiApis.clearKey(pendingId);
       setPendingConfig(updated);
       flash("Key cleared", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not clear key", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not clear key", "err");
     }
   };
 
@@ -579,8 +580,8 @@ export default function AiIntegrationsTab() {
       setCultsKey("");
       setEditingCults(false);
       flash("Cults3D credentials saved", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not save Cults3D credentials", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not save Cults3D credentials", "err");
     }
   };
 
@@ -588,8 +589,8 @@ export default function AiIntegrationsTab() {
     try {
       setCultsSettings(await api.settings.cults.clearCredentials());
       flash("Cults3D credentials cleared", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not clear Cults3D credentials", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not clear Cults3D credentials", "err");
     }
   };
 
@@ -601,8 +602,8 @@ export default function AiIntegrationsTab() {
       setMmfKeyDraft("");
       setEditingMmf(false);
       flash("MyMiniFactory key saved", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not save the MyMiniFactory key", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not save the MyMiniFactory key", "err");
     }
   };
 
@@ -610,8 +611,8 @@ export default function AiIntegrationsTab() {
     try {
       setMmfSettings(await api.settings.mmf.clearKey());
       flash("MyMiniFactory key cleared", "ok");
-    } catch (e: any) {
-      flash(e?.message || "Could not clear the MyMiniFactory key", "err");
+    } catch (e) {
+      flash(errMsg(e) || "Could not clear the MyMiniFactory key", "err");
     }
   };
 

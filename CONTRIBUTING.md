@@ -17,7 +17,7 @@ npm install
 ```
 
 This installs [Husky](https://typicode.github.io/husky/) at the repo root and
-wires a pre-commit hook that runs the full test suite before every commit.
+wires a pre-commit hook that runs ESLint, Vitest, and pytest before every commit.
 
 **2. Build the backend image (required for the pytest hook to run)**
 
@@ -68,12 +68,17 @@ docker run --rm --workdir /app \
   sh -c "pip install -q pytest==9.0.3 pytest-cov==7.1.0 && pytest tests/ -q --tb=short"
 ```
 
-Both suites run automatically via the pre-commit hook. To skip in an emergency:
-`git commit --no-verify` (use sparingly).
+**ESLint (frontend)**
+
+```bash
+npm --prefix frontend run lint
+```
+
+All three checks run automatically via the pre-commit hook (ESLint → Vitest → pytest). To skip in an emergency: `git commit --no-verify` (use sparingly).
 
 ## Pull Request Checklist
 
-- [ ] Pre-commit hook passed (vitest + pytest both green)
+- [ ] Pre-commit hook passed (ESLint + Vitest + pytest all green)
 - [ ] New backend logic has corresponding tests
 - [ ] No secrets, credentials, or local paths committed
 - [ ] PR description explains *why*, not just *what*
@@ -99,12 +104,53 @@ When adding a new endpoint, put the call in the relevant domain module and the
 types in `types.ts`. The barrel re-exports everything, so call sites don't need
 updating.
 
+## Backend architecture
+
+### Path-traversal sanitization
+
+Any endpoint that accepts a user-supplied file path **must** validate it through
+`app.services.path_guard` before touching the filesystem:
+
+```python
+from app.services.path_guard import assert_within_roots, is_within_roots
+
+# Raises ValueError if the path escapes every root — convert to HTTP 403:
+try:
+    real = assert_within_roots(user_path, allowed_roots)
+except ValueError:
+    raise HTTPException(status_code=403, detail="Path not allowed")
+
+# Boolean variant — useful inside loops or list comprehensions:
+safe_paths = [p for p in paths if is_within_roots(p, allowed_roots)]
+```
+
+Both functions call `os.path.realpath` (resolves symlinks and `..`) then
+`os.path.commonpath` for containment. Do **not** inline this pattern at new call
+sites — the centralized function is the CodeQL sanitizer target.
+
 ## Code Style
 
 - **Python**: standard PEP 8; type hints on public functions.
-- **TypeScript**: strict mode; no `any` without a comment explaining why.
+- **TypeScript**: strict mode; no `any` — use typed casts or `unknown`.
 - Comments only when the *why* is non-obvious — well-named identifiers should
   speak for themselves.
+
+### Error handling in catch blocks
+
+TypeScript strict mode types `catch (e)` as `unknown` (not `any`), so
+`e?.message` won't compile. Use the `errMsg` helper from `utils/err.ts`:
+
+```typescript
+import { errMsg } from "../utils/err";
+
+try {
+  await doSomething();
+} catch (e) {
+  setError(errMsg(e) ?? null);  // returns string | undefined; ?? null if state is string | null
+}
+```
+
+Never annotate catch bindings with `: any` — `errMsg` handles the type narrowing.
 
 ## Licensing
 

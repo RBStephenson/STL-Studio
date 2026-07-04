@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { RefreshCw, Square } from "lucide-react";
 import { api, ScanStatus } from "../api/client";
 import { useToast } from "../context/ToastContext";
+import { errMsg } from "../utils/err";
 
 interface Props {
   onScanComplete?: () => void;
@@ -35,14 +36,14 @@ export default function ScanButton({ onScanComplete }: Props) {
       api.scan.status().then(setStatus).catch(() => {});
     }, 2000);
     return () => clearInterval(interval);
-  }, [status?.running, onScanComplete]);
+  }, [status?.running, status?.message, onScanComplete, toast]);
 
   const start = async () => {
     try {
       const s = await api.scan.start();
       setStatus(s);
-    } catch (e: any) {
-      toast(e?.message || "Couldn't start the scan — try again.", "error");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't start the scan — try again.", "error");
     }
   };
 

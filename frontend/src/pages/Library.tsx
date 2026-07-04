@@ -28,6 +28,7 @@ import { resolveDragIntent, resolveGroupMergePayload } from "../utils/dragGroup"
 import { useLibraryKeyboard } from "../hooks/useLibraryKeyboard";
 import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import ShortcutsOverlay from "../components/ShortcutsOverlay";
+import { errMsg } from "../utils/err";
 
 const SITES = ["thingiverse", "printables", "myminifactory", "cults3d", "gumroad", "thangs", "makerworld", "other"];
 
@@ -391,8 +392,8 @@ export default function Library() {
         const noun = ids.length === 1 ? "model" : "models";
         toast(`${ids.length} ${noun} merged into "${label}".`, "success");
         return true;
-      } catch (err: any) {
-        toast(err?.message || "Couldn't merge into this group - try again.", "error");
+      } catch (err) {
+        toast(errMsg(err) || "Couldn't merge into this group - try again.", "error");
         return false;
       }
     },
@@ -509,8 +510,8 @@ export default function Library() {
         clearSelection();
         fetchModels();
       }
-    } catch (err: any) {
-      toast(err?.message || "Couldn't merge these groups — try again.", "error");
+    } catch (err) {
+      toast(errMsg(err) || "Couldn't merge these groups — try again.", "error");
     } finally {
       setMerging(false);
     }

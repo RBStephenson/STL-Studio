@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -6,6 +7,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Collection, CollectionModel, Model
 from app.schemas import CollectionBase, CollectionRead, CollectionUpdate, ModelRead
+from app.services.thumbnails import (
+    ThumbnailDownloadError,
+    clear_collection_cover,
+    fetch_image_bytes,
+    store_collection_cover,
+)
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -100,6 +107,7 @@ def delete_collection(collection_id: int, db: Session = Depends(get_db)):
     db.query(CollectionModel).filter(
         CollectionModel.collection_id == collection_id
     ).delete(synchronize_session=False)
+    clear_collection_cover(collection_id)
     db.delete(col)
     db.commit()
 
@@ -113,3 +121,117 @@ def remove_model_from_collection(collection_id: int, model_id: int, db: Session 
     if link:
         db.delete(link)
         db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Collection cover image
+# ---------------------------------------------------------------------------
+
+class _CoverFromUrl(BaseModel):
+    url: str
+
+
+class _CoverFromModel(BaseModel):
+    model_id: int
+
+
+def _col_or_404(collection_id: int, db: Session) -> Collection:
+    col = db.query(Collection).filter(Collection.id == collection_id).first()
+    if not col:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return col
+
+
+def _read_response(col: Collection, db: Session) -> CollectionRead:
+    cnt = (
+        db.query(func.count(Model.id))
+        .join(CollectionModel, CollectionModel.model_id == Model.id)
+        .filter(CollectionModel.collection_id == col.id, Model.excluded == False)
+        .scalar() or 0
+    )
+    cr = CollectionRead.model_validate(col)
+    cr.model_count = cnt
+    return cr
+
+
+@router.post("/{collection_id}/cover/from-url", response_model=CollectionRead)
+async def set_cover_from_url(collection_id: int, body: _CoverFromUrl, db: Session = Depends(get_db)):
+    col = _col_or_404(collection_id, db)
+    try:
+        ext, data = await fetch_image_bytes(body.url)
+    except ThumbnailDownloadError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    path = store_collection_cover(collection_id, ext, data)
+    col.cover_image_path = str(path)
+    db.commit()
+    db.refresh(col)
+    return _read_response(col, db)
+
+
+@router.post("/{collection_id}/cover/upload", response_model=CollectionRead)
+async def upload_cover(
+    collection_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    col = _col_or_404(collection_id, db)
+    if file.content_type not in ("image/png", "image/jpeg", "image/webp", "image/gif"):
+        raise HTTPException(status_code=400, detail="Only PNG/JPEG/WebP/GIF images are accepted")
+    ext_map = {
+        "image/png": ".png", "image/jpeg": ".jpg",
+        "image/webp": ".webp", "image/gif": ".gif",
+    }
+    ext = ext_map[file.content_type]
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large (max 15 MB)")
+    path = store_collection_cover(collection_id, ext, data)
+    col.cover_image_path = str(path)
+    db.commit()
+    db.refresh(col)
+    return _read_response(col, db)
+
+
+@router.post("/{collection_id}/cover/from-model", response_model=CollectionRead)
+def set_cover_from_model(collection_id: int, body: _CoverFromModel, db: Session = Depends(get_db)):
+    col = _col_or_404(collection_id, db)
+    mdl = db.query(Model).filter(Model.id == body.model_id).first()
+    if not mdl:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    from pathlib import Path as _Path
+
+    # Priority: thumbnail_path → primary_image_path → first image_path
+    candidates: list[str] = []
+    if mdl.thumbnail_path:
+        candidates.append(mdl.thumbnail_path)
+    if mdl.primary_image_path:
+        candidates.append(mdl.primary_image_path)
+    if isinstance(mdl.image_paths, list):
+        candidates.extend(p for p in mdl.image_paths if isinstance(p, str))
+
+    src_path: _Path | None = None
+    for c in candidates:
+        p = _Path(c)
+        if p.exists() and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+            src_path = p
+            break
+
+    if src_path is None:
+        raise HTTPException(status_code=422, detail="That model has no usable local image")
+
+    path = store_collection_cover(collection_id, src_path.suffix.lower(), src_path.read_bytes())
+    col.cover_image_path = str(path)
+    db.commit()
+    db.refresh(col)
+    return _read_response(col, db)
+
+
+@router.delete("/{collection_id}/cover", response_model=CollectionRead)
+def clear_cover(collection_id: int, db: Session = Depends(get_db)):
+    col = _col_or_404(collection_id, db)
+    clear_collection_cover(collection_id)
+    col.cover_image_path = None
+    db.commit()
+    db.refresh(col)
+    return _read_response(col, db)

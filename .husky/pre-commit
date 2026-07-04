@@ -3,12 +3,18 @@ set -e
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-# ── Vitest ────────────────────────────────────────────────────────────────────
-echo "▶ vitest"
 if [ ! -d "${REPO_ROOT}/frontend/node_modules" ]; then
   echo "  Installing frontend deps…"
   npm --prefix "${REPO_ROOT}/frontend" install --silent
 fi
+
+# ── ESLint ───────────────────────────────────────────────────────────────────
+echo "▶ eslint"
+npm --prefix "${REPO_ROOT}/frontend" run lint
+echo "✔ eslint passed"
+
+# ── Vitest ────────────────────────────────────────────────────────────────────
+echo "▶ vitest"
 npm --prefix "${REPO_ROOT}/frontend" test
 echo "✔ vitest passed"
 
