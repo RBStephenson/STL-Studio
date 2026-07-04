@@ -22,16 +22,15 @@ and download the file for your operating system:
 
 ### 2. Run it
 
-Double-click (or run from a terminal). On **Windows** the app opens in its own
-desktop window. On **Linux** (and if anything goes wrong opening the window) it
-falls back to your default browser at **http://localhost:8484**. To always use
-the browser instead of a window, set `STL_NO_WINDOW=1` before launching.
+Run it from a terminal. The binary serves the app headlessly at
+**http://localhost:8484** — open that URL in your browser. Pass `--open-browser`
+to have it open the browser for you once it's ready, or `--port <n>` to listen on
+a different port.
 
-> **Windows desktop window:** the native window uses Microsoft **WebView2**,
-> which ships with Windows 11 and current Windows 10. On an older Windows
-> without it, the app falls back to your browser — or install the free
-> [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
-> to get the window.
+> **Desktop window:** the packaged desktop app (a proper installed window, no
+> terminal) is being reworked onto Electron and ships in a later release
+> ([#528](https://github.com/RBStephenson/STL-Inventory/issues/528)). Until then
+> the binary is a headless local server you open in your browser.
 
 > **macOS first run:** because the binary isn't notarized yet, macOS may block
 > it. Right-click the file → **Open** → **Open** to bypass Gatekeeper the first

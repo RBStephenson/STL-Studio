@@ -1,19 +1,26 @@
 """
-Standalone entry point for STL Studio.
+Headless entry point for STL Studio (Phase 2 — STUDIO-72).
 
-Serves the FastAPI backend + the pre-built Vite frontend in a single process.
-All API routes are mounted under /api to match the frontend's BASE = "/api".
-The SQLite database and config are stored in the platform-appropriate user data dir.
+Serves the FastAPI backend + the pre-built Vite frontend in a single process on
+127.0.0.1. All API routes are mounted under /api to match the frontend's
+BASE = "/api". The SQLite database and config live in the platform user-data dir.
 
-The app itself (routers, middleware, startup migrations) comes from
-app.main.create_app — the same factory the Docker deployment uses — so the
-standalone build cannot drift from it. This file only handles:
-  - pointing DATABASE_URL at the user data dir (before any app import),
-  - serving the bundled frontend as static files,
-  - showing the app in a native window via pywebview, falling back to the
-    default browser when no webview backend is available (#463).
+Under the Electron desktop shell (epic #528 / STUDIO-69) this runs as a windowless
+sidecar: Electron owns presentation, spawns this with `--port`, polls /api/health,
+and terminates it on quit. There is no native window here — the pywebview shell
+(and its clr_loader/pythonnet backend) was removed in Phase 2.
+
+The app itself comes from app.main.create_app — the same factory the Docker
+deployment uses — so the standalone build cannot drift from it. This file only:
+  - resolves the listen port (--port / STL_PORT / default 8484),
+  - points DATABASE_URL at the user-data dir (before any app import),
+  - serves the bundled frontend as static files,
+  - serves in the foreground and shuts down gracefully on SIGTERM,
+  - optionally opens the default browser (--open-browser) for dev source-runs.
 """
+import argparse
 import os
+import signal
 import socket
 import sys
 import threading
@@ -21,7 +28,11 @@ import time
 import webbrowser
 from pathlib import Path
 
-PORT = 8484
+# Default listen port when neither --port nor STL_PORT is given. Kept at 8484 for
+# backward compatibility and to match the Electron sidecar's fixed-port phase;
+# Electron passes an explicit --port once it picks a free port.
+DEFAULT_PORT = 8484
+HOST = "127.0.0.1"
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +66,44 @@ def _configure_env(data_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# CLI / port resolution
+# ---------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="stl-library",
+        description="Serve STL Studio headlessly on 127.0.0.1.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help=f"TCP port to listen on (default: $STL_PORT or {DEFAULT_PORT}).",
+    )
+    parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the default browser once the server is ready (dev source-runs).",
+    )
+    return parser
+
+
+def resolve_port(cli_port: int | None, env: dict | None = None) -> int:
+    """Resolve the listen port: explicit --port wins, then $STL_PORT, then the
+    default. Invalid values fall back to the default rather than crashing."""
+    if cli_port is not None:
+        return cli_port
+    env = os.environ if env is None else env
+    raw = env.get("STL_PORT")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return DEFAULT_PORT
+
+
+# ---------------------------------------------------------------------------
 # App + server
 # ---------------------------------------------------------------------------
 
@@ -78,95 +127,82 @@ def build_app():
     return app
 
 
+def _make_server(app, port: int):
+    """A uvicorn Server bound to the loopback interface. Split out so tests can
+    assert the bind config without starting the event loop."""
+    import uvicorn
+
+    return uvicorn.Server(
+        uvicorn.Config(app, host=HOST, port=port, log_level="warning")
+    )
+
+
+def _make_sigterm_handler(server):
+    """A signal handler that asks uvicorn to shut down gracefully. Named (not a
+    closure buried in _serve) so it can be unit-tested directly."""
+
+    def _handler(signum, frame):  # noqa: ARG001 - signal handler signature
+        server.should_exit = True
+
+    return _handler
+
+
+def install_sigterm(server) -> None:
+    """Route SIGTERM to a graceful uvicorn shutdown.
+
+    Electron terminates the sidecar with SIGTERM on POSIX; this flips
+    `should_exit` so in-flight requests drain instead of the process being cut
+    off. On Windows Electron uses `taskkill /F` (TerminateProcess), which is not
+    catchable — there graceful shutdown isn't possible and this is a no-op path.
+    """
+    signal.signal(signal.SIGTERM, _make_sigterm_handler(server))
+
+
 def _wait_for_server(port: int, timeout: float = 20.0) -> bool:
     """Block until the local server accepts connections, or timeout."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(0.5)
-            if sock.connect_ex(("127.0.0.1", port)) == 0:
+            if sock.connect_ex((HOST, port)) == 0:
                 return True
         time.sleep(0.2)
     return False
 
 
-def _serve_foreground(app) -> None:
-    """Run uvicorn on the main thread (browser/headless mode)."""
-    import uvicorn
-
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
-
-
-def _serve_background(app) -> None:
-    """Run uvicorn from a non-main thread (window mode). Signal handlers only work
-    on the main thread, so disable them — the webview owns process lifetime."""
-    import uvicorn
-
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="warning")
-    )
-    server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
-    server.run()
+def _open_browser_when_ready(url: str, port: int) -> None:
+    if _wait_for_server(port):
+        webbrowser.open(url)
 
 
 # ---------------------------------------------------------------------------
 # Launch
 # ---------------------------------------------------------------------------
 
-def should_use_window(env: dict | None = None, webview_available: bool = True) -> bool:
-    """Decide whether to open a native window (#463). A window is used unless the
-    user opted out with STL_NO_WINDOW=1 or no webview backend is importable."""
-    env = os.environ if env is None else env
-    if env.get("STL_NO_WINDOW") == "1":
-        return False
-    return webview_available
+def run(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    port = resolve_port(args.port)
 
-
-def _open_browser_when_ready(url: str) -> None:
-    if _wait_for_server(PORT):
-        webbrowser.open(url)
-
-
-def run() -> None:
     data_dir = _user_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
     _configure_env(data_dir)
 
-    url = f"http://localhost:{PORT}"
-    print(f"STL Studio running at {url}")
+    url = f"http://localhost:{port}"
+    print(f"STL Studio serving at {url}")
     print(f"Data stored in: {data_dir}")
 
-    webview = None
-    if should_use_window():
-        try:
-            import webview as _wv  # type: ignore
-            webview = _wv
-        except Exception:
-            webview = None  # no desktop extra installed — browser fallback
-
     app = build_app()
+    server = _make_server(app, port)
+    install_sigterm(server)
 
-    if webview is None:
-        # Browser mode (opt-out or no webview): serve in the foreground and pop
-        # the default browser once the server answers — the original behaviour.
-        threading.Thread(target=_open_browser_when_ready, args=(url,), daemon=True).start()
-        _serve_foreground(app)
-        return
+    if args.open_browser:
+        threading.Thread(
+            target=_open_browser_when_ready, args=(url, port), daemon=True
+        ).start()
 
-    # Native window: server on a daemon thread, webview owns the main thread.
-    threading.Thread(target=_serve_background, args=(app,), daemon=True).start()
-    if not _wait_for_server(PORT):
-        print("Server did not start in time; opening browser instead.")
-        webbrowser.open(url)
-        threading.Event().wait()
-        return
-    try:
-        webview.create_window("STL Studio", url, width=1400, height=900)
-        webview.start()
-    except Exception as exc:  # no usable GUI backend — degrade to the browser
-        print(f"Native window unavailable ({exc}); opening browser instead.")
-        webbrowser.open(url)
-        threading.Event().wait()
+    # Foreground serve on the main thread; uvicorn + our SIGTERM handler own
+    # process lifetime. Electron (or Ctrl-C) drives shutdown.
+    server.run()
 
 
 if __name__ == "__main__":
