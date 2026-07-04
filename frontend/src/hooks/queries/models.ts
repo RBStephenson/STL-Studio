@@ -4,8 +4,40 @@
 // a mutation can refresh exactly the affected queries.
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import type { Model, ModelDetail } from "../../api/client";
+import type { Creator, Model, ModelDetail, ModelList, ModelStats } from "../../api/client";
 import { queryKeys } from "./keys";
+
+// The Library grid list query. Keyed on the full param object so every filter/
+// page/sort permutation caches independently; TanStack guards stale responses,
+// replacing the old fetchIdRef counter. keepPreviousData keeps the current page
+// visible while the next one loads instead of flashing the skeleton.
+export function useLibraryModels(params: Record<string, string | number | boolean>) {
+  return useQuery<ModelList>({
+    queryKey: queryKeys.models.list(params),
+    queryFn: () => api.models.list(params),
+  });
+}
+
+export function useCreators() {
+  return useQuery<Creator[]>({
+    queryKey: queryKeys.models.creators,
+    queryFn: () => api.models.creators(),
+  });
+}
+
+export function useModelStats() {
+  return useQuery<ModelStats>({
+    queryKey: queryKeys.models.stats,
+    queryFn: () => api.models.stats(),
+  });
+}
+
+export function useAllTags() {
+  return useQuery<{ tag: string; count: number }[]>({
+    queryKey: queryKeys.models.tags(),
+    queryFn: () => api.models.tags(),
+  });
+}
 
 // The Library-origin filter params parsed for the neighbors endpoint. null when
 // the model wasn't reached from the Library grid → no Prev/Next.

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Library from "./Library";
 import { mkSettings } from "../test/settings";
+import { QueryWrapper } from "../test/queryWrapper";
 import { AppSettings } from "../api/client";
 
 const listMock = vi.fn().mockResolvedValue({ items: [], total: 0 });
@@ -38,9 +39,11 @@ vi.mock("../components/HelpLink", () => ({ default: () => null }));
 
 const renderLibrary = (initial = "/library") =>
   render(
+    <QueryWrapper>
     <MemoryRouter initialEntries={[initial]}>
       <Library />
-    </MemoryRouter>,
+    </MemoryRouter>
+    </QueryWrapper>,
   );
 
 const flush = () => act(async () => { await Promise.resolve(); });
