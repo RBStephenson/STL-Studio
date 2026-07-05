@@ -1,5 +1,5 @@
 # ---- build stage ----
-FROM node:22-alpine AS build
+FROM node:24.18.0-alpine AS build
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ COPY . .
 RUN npm run build
 
 # ---- serve stage ----
-FROM nginx:alpine
+FROM nginx:1.29.8-alpine
 
 # Serve the built SPA on :3000 with history-API fallback so client-side routes
 # (e.g. /painting/shelf) resolve to index.html instead of 404ing. The outer
