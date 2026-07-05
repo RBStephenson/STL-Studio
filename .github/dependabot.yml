@@ -28,3 +28,19 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+
+  # Docker base images (frontend build + serve stages)
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+
+  # Docker base image (backend)
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
