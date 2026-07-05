@@ -3,8 +3,9 @@
 These operate directly on the SQLite database file. Backup uses SQLite's online
 backup API to capture a consistent snapshot (folding in any WAL contents);
 restore swaps a validated upload in for the live file; reset wipes all data and
-recreates an empty schema. Restore and reset are refused while a scan is running
-to avoid corrupting an in-flight write.
+recreates an empty schema. Restore and reset run under the library write lock and
+are refused (409) while a scan, reorganize apply, or undo is in progress, to avoid
+corrupting an in-flight write or leaving on-disk files and DB rows diverged.
 """
 import os
 import shutil
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse
 from app.database import Base, engine
 from app.config import settings
 from app.services import scanner
+from app.services.write_lock import LibraryBusy, library_write
 
 router = APIRouter(prefix="/database", tags=["database"])
 
@@ -151,22 +153,31 @@ async def restore_database(file: UploadFile = File(...)):
         _safe_unlink(tmp)
         raise HTTPException(400, f"Invalid backup file: {e}")
 
-    # Snapshot the current library before we overwrite it, so a wrong-file restore
-    # is recoverable (#222). Done after validation passes (no point snapshotting
-    # for a restore we're about to reject).
-    snapshot = _snapshot_db("restore")
+    # The destructive swap runs under the library write lock (the same one
+    # reorganize apply/undo take), so we never replace the DB out from under an
+    # in-flight file-moving op — that would leave on-disk paths and DB rows
+    # diverged (STUDIO-82). Validation + the upload read above are lock-free
+    # (read-only, and the async read must not block while holding the lock).
+    try:
+        with library_write("database_restore"):
+            # Snapshot the current library before we overwrite it, so a
+            # wrong-file restore is recoverable (#222).
+            snapshot = _snapshot_db("restore")
 
-    # Drop pooled connections so the file isn't held open, then swap it in and
-    # clear the stale WAL/SHM sidecars that belonged to the old database.
-    engine.dispose()
-    for suffix in ("-wal", "-shm"):
-        _safe_unlink(Path(str(db_path) + suffix))
-    shutil.move(str(tmp), str(db_path))
+            # Drop pooled connections so the file isn't held open, then swap it in
+            # and clear the stale WAL/SHM sidecars that belonged to the old DB.
+            engine.dispose()
+            for suffix in ("-wal", "-shm"):
+                _safe_unlink(Path(str(db_path) + suffix))
+            shutil.move(str(tmp), str(db_path))
 
-    # Bring a possibly-older backup's schema up to date.
-    Base.metadata.create_all(bind=engine)
-    from app.main import _migrate_schema
-    _migrate_schema()
+            # Bring a possibly-older backup's schema up to date.
+            Base.metadata.create_all(bind=engine)
+            from app.main import _migrate_schema
+            _migrate_schema()
+    except LibraryBusy:
+        _safe_unlink(tmp)
+        raise HTTPException(409, "Library is busy — a scan, apply, or undo is in progress")
     return {"ok": True, "snapshot": str(snapshot) if snapshot else None}
 
 
@@ -174,12 +185,18 @@ async def restore_database(file: UploadFile = File(...)):
 def reset_database():
     """Delete all data and recreate an empty schema."""
     _require_idle()
-    # Snapshot before wiping so a mis-clicked reset is recoverable (#222).
-    snapshot = _snapshot_db("reset")
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    from app.main import _migrate_schema
-    _migrate_schema()
+    # Under the library write lock so a reset can't wipe the DB while a
+    # reorganize apply/undo is mid-move (STUDIO-82).
+    try:
+        with library_write("database_reset"):
+            # Snapshot before wiping so a mis-clicked reset is recoverable (#222).
+            snapshot = _snapshot_db("reset")
+            Base.metadata.drop_all(bind=engine)
+            Base.metadata.create_all(bind=engine)
+            from app.main import _migrate_schema
+            _migrate_schema()
+    except LibraryBusy:
+        raise HTTPException(409, "Library is busy — a scan, apply, or undo is in progress")
     return {"ok": True, "snapshot": str(snapshot) if snapshot else None}
 
 
