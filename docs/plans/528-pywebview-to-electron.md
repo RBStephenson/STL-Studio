@@ -101,15 +101,20 @@ runtime.ts) and passes `--port` to the sidecar instead of the fixed 8484, and `r
 resolves the sidecar from `process.resourcesPath` when packaged. Full installed E2E (real PyInstaller
 sidecar) is deferred to Phase 4 CI — the backend exe can't be built in the dev env here.
 
-**Phase 4 — CI wiring in [build.yml](../../.github/workflows/build.yml).**
+**Phase 4 — CI wiring in [build.yml](../../.github/workflows/build.yml).** ✅ Done (STUDIO-74).
 Windows job: build frontend → PyInstaller backend exe → `npm ci && npm run build` in `desktop/` →
 electron-builder → upload the NSIS installer as the release artifact. Retire the raw
 `stl-library.exe` Windows artifact (Linux job unchanged; still ships the loose binary + browser
-fallback).
+fallback). electron-builder runs before any rename so it finds the unlabelled `stl-library.exe`;
+packaged unsigned with `CSC_IDENTITY_AUTO_DISCOVERY=false`. This PR's own build-check exercises the
+new Windows path, giving the real installed-build validation deferred from Phase 3. The Windows
+download row in [getting-started.md](../../docs/getting-started.md) was corrected to the installer
+(fuller install-flow rewrite still lands in Phase 5).
 
 **Phase 5 — docs.**
 [docs/getting-started.md](../../docs/getting-started.md) + [ROADMAP.md](../../ROADMAP.md): install-via-installer
-instructions, close #528.
+instructions, close #528. Also fix the stale **macOS** download row in getting-started — it lists
+`stl-library-macos`, but the build matrix only ships windows + linux, so no such artifact exists.
 
 ## Deferred (explicit non-goals for v1)
 
