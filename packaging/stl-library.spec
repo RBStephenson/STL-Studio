@@ -79,7 +79,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "test", "unittest"],
+    # NOTE: do not exclude "unittest" — numpy.testing imports it at module load,
+    # and the painting colormatch path pulls in skimage -> scipy -> numpy, so a
+    # frozen build without unittest crashes at startup (STUDIO-100).
+    excludes=["tkinter", "test"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
