@@ -111,10 +111,11 @@ new Windows path, giving the real installed-build validation deferred from Phase
 download row in [getting-started.md](../../docs/getting-started.md) was corrected to the installer
 (fuller install-flow rewrite still lands in Phase 5).
 
-**Phase 5 — docs.**
+**Phase 5 — docs.** ✅ Done (STUDIO-75).
 [docs/getting-started.md](../../docs/getting-started.md) + [ROADMAP.md](../../ROADMAP.md): install-via-installer
-instructions, close #528. Also fix the stale **macOS** download row in getting-started — it lists
-`stl-library-macos`, but the build matrix only ships windows + linux, so no such artifact exists.
+instructions, close #528. Also fixed the stale **macOS** download row in getting-started — it listed
+`stl-library-macos`, but the build matrix only ships windows + linux, so no such artifact exists;
+macOS now points at Docker / source-run.
 
 ## Deferred (explicit non-goals for v1)
 

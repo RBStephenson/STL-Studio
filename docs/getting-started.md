@@ -17,8 +17,12 @@ and download the file for your operating system:
 | OS | File |
 |----|------|
 | Windows | `STL Studio Setup <version>.exe` (installer) |
-| macOS | `stl-library-macos` |
 | Linux | `stl-library-linux` |
+
+> **macOS:** there's no prebuilt macOS download yet — a signed/notarized build is
+> deferred ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17)). On a
+> Mac, run the [Docker](#docker-advanced) setup or launch from source
+> (`python packaging/standalone.py`).
 
 ### 2. Run it
 
@@ -27,19 +31,15 @@ It opens a real desktop window (no terminal, no console) — the Electron shell
 starts the local server for you and shows the app. It's unsigned for now, so
 Windows SmartScreen may warn on first run: **More info → Run anyway**.
 
-**macOS / Linux:** run the binary from a terminal. It serves the app headlessly
-at **http://localhost:8484** — open that URL in your browser. Pass `--open-browser`
+**Linux:** run the binary from a terminal. It serves the app headlessly at
+**http://localhost:8484** — open that URL in your browser. Pass `--open-browser`
 to have it open the browser for you once it's ready, or `--port <n>` to listen on
 a different port.
 
 > **Desktop window:** the Windows installer above is the Electron desktop app
-> ([#528](https://github.com/RBStephenson/STL-Inventory/issues/528)). macOS/Linux
-> still run the headless binary you open in your browser; a packaged window for
-> those platforms is future work.
-
-> **macOS first run:** because the binary isn't notarized yet, macOS may block
-> it. Right-click the file → **Open** → **Open** to bypass Gatekeeper the first
-> time. After that it launches normally.
+> ([#528](https://github.com/RBStephenson/STL-Inventory/issues/528)). Linux still
+> runs the headless binary you open in your browser; a packaged window there is
+> future work.
 
 ### 3. Tell it where your STLs are
 
