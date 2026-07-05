@@ -29,10 +29,13 @@ export const collectionsApi = {
     const res = await fetch(`${BASE}/collections/${collectionId}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   },
+  // Reuses addModel so each POST's res.ok is checked — a non-2xx rejects the
+  // whole call rather than silently reporting success (#STUDIO-91). Callers wrap
+  // this in try/catch and surface the failure.
   bulkAddModels: async (collectionId: number, modelIds: number[]) => {
-    await Promise.all(modelIds.map((id) => {
-      return fetch(`${BASE}/collections/${collectionId}/models/${id}`, { method: "POST" });
-    }));
+    await Promise.all(
+      modelIds.map((id) => collectionsApi.addModel(collectionId, id)),
+    );
   },
   setCoverFromUrl: (collectionId: number, url: string) =>
     request<Collection>(`/collections/${collectionId}/cover/from-url`, {
