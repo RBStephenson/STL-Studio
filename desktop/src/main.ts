@@ -20,7 +20,7 @@ import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
-const APP_ICON = join(__dirname, "..", "resources", "icon.ico");
+const APP_ICON = join(__dirname, "..", "resources", "stl_studio.ico");
 
 // Repo root during dev: desktop/dist/main.js -> up two levels. Used only to
 // resolve the dev backend-exe fallback; the packaged app resolves the sidecar

@@ -27,7 +27,7 @@ extraResources:
 
 win:
   target: nsis
-  icon: resources/icon.ico
+  icon: resources/stl_studio.ico
 
 nsis:
   oneClick: false
