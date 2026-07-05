@@ -3,7 +3,8 @@ name: Build and Publish Docker Images
 on:
   push:
     branches: [main]
-    tags: ['v*.*.*']
+  release:
+    types: [published]
   pull_request:
     branches: [main]
 
@@ -44,16 +45,18 @@ jobs:
         with:
           # metadata-action lowercases the name, which GHCR requires.
           images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.service }}
-          # Tag-driven releases: pushing a git tag v1.2.3 publishes :1.2.3, :1.2,
-          # :1 and :latest. Pushes to main publish :main (moving) and :sha-<hash>
-          # (pinned) rolling dev images — no semver tag, no :latest.
+          # Release-driven versions: publishing a GitHub Release for tag v1.2.3
+          # publishes :1.2.3, :1.2, :1 and :latest. Pushes to main publish :main
+          # (moving) and :sha-<hash> (pinned) rolling dev images — no version, no
+          # :latest. The semver values come from the release's git tag.
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
-          # :latest tracks the newest semver tag release, never a main push.
+          # :latest tracks the newest published release, never a main push. A
+          # pre-release (e.g. v1.2.3-rc1) is excluded from :latest by latest=auto.
           flavor: |
             latest=auto
 
