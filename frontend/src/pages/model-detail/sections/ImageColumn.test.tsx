@@ -8,7 +8,10 @@ vi.mock("../../../api/client", () => ({
   api: {
     fileUrl: (p: string) => p,
     stlUrl: (p: string) => p,
-    models: { update: vi.fn(async () => ({})) },
+    models: {
+      update: vi.fn(async () => ({})),
+      setThumbnail: vi.fn(async () => ({})),
+    },
   },
 }));
 vi.mock("../../../context/AppSettingsContext", () => ({
@@ -110,6 +113,37 @@ describe("ImageColumn", () => {
         primary_image_path: null,
       });
     });
+  });
+
+  it("sets the current local gallery image as the thumbnail", async () => {
+    const { api } = await import("../../../api/client");
+    const onReload = vi.fn();
+    renderCol({
+      model: { ...baseModel, thumbnail_path: "old.png", image_paths: ["a.png", "b.png"] } as ModelDetailType,
+      onReload,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Set thumbnail/ }));
+
+    await waitFor(() => {
+      expect(api.models.setThumbnail).toHaveBeenCalledWith(1, {
+        thumbnail_path: "a.png",
+        thumbnail_url: null,
+      });
+      expect(onReload).toHaveBeenCalled();
+    });
+  });
+
+  it("does not offer set thumbnail for remote gallery images", () => {
+    renderCol({
+      model: {
+        ...baseModel,
+        thumbnail_path: "old.png",
+        image_paths: ["https://cdn.example.test/a.png"],
+      } as ModelDetailType,
+    });
+
+    expect(screen.queryByRole("button", { name: /Set thumbnail/ })).not.toBeInTheDocument();
   });
 
   it("shows the NSFW overlay when flagged and NSFW is hidden", () => {
