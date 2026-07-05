@@ -289,6 +289,14 @@ assemble a complete build, then copy the file list or download the selection as
 a zip. Handy when a model ships multiple head or pose options and you want to
 commit to one combination.
 
+The Kit Builder uses a two-panel layout:
+
+- **Left panel** — the part selector. Files are grouped by label; click a part
+  to toggle it in your selection.
+- **Right panel** — a live 3D preview pane. Hover any part button to instantly
+  load it in the viewer without affecting your selection. The pane stays pinned
+  to the right side even as you scroll through a long parts list.
+
 To make this useful, label your parts first: on the model detail page, each STL
 file has a small **Label** input with common suggestions.
 

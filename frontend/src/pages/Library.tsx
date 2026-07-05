@@ -214,7 +214,7 @@ export default function Library() {
   const focusSearch = useCallback(() => {
     const el = searchInputRef.current;
     if (el) { el.focus(); el.select(); }
-  }, []);
+  }, [searchInputRef]);
 
   // A drag is in progress (pointer or keyboard). Tracked here (above the keyboard
   // hook) so grid WASD/arrow nav pauses while a card is picked up — otherwise the
