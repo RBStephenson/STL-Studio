@@ -46,7 +46,9 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
 
       - name: Install frontend deps
         working-directory: frontend
@@ -66,36 +68,73 @@ jobs:
         working-directory: backend
         run: pip install -r requirements.txt pyinstaller
 
-      # Phase 2 (STUDIO-72): the desktop shell moved to Electron; the backend exe
-      # is now a headless windowless sidecar, so there's no pywebview extra to
-      # install. Electron packaging of this exe lands in Phase 3.
+      # The backend exe is a headless windowless sidecar (Phase 2, STUDIO-72). On
+      # Windows it is wrapped by Electron below; on Linux it ships as-is with the
+      # browser fallback (#463). electron-builder expects the *unlabelled*
+      # dist-standalone/stl-library.exe, so packaging runs before any rename.
       - name: Build executable
         run: pyinstaller packaging/stl-library.spec --distpath dist-standalone
 
-      # ---- Rename artifact with platform label ----
-      - name: Rename artifact (Windows)
+      # ---- Windows: wrap the backend exe in the Electron NSIS installer ----
+      # (Phase 4, STUDIO-74). desktop/electron-builder.yml copies the sidecar from
+      # dist-standalone/ via extraResources and emits desktop/release/*.exe.
+      - name: Install desktop deps
         if: matrix.os == 'windows-latest'
-        run: mv dist-standalone/stl-library.exe dist-standalone/stl-library-${{ matrix.label }}.exe
+        working-directory: desktop
+        run: npm ci
 
-      - name: Rename artifact (Unix)
+      - name: Build desktop (tsc)
+        if: matrix.os == 'windows-latest'
+        working-directory: desktop
+        run: npm run build
+
+      - name: Package Electron installer (NSIS)
+        if: matrix.os == 'windows-latest'
+        working-directory: desktop
+        # Unsigned v1 build — disable cert auto-discovery so a bare runner with no
+        # signing identity doesn't fail the pack.
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npx --no-install electron-builder --win --publish never
+
+      # ---- Linux: label the loose binary (Windows retires its raw exe in favour
+      #      of the installer above) ----
+      - name: Rename artifact (Linux)
         if: matrix.os != 'windows-latest'
         run: mv dist-standalone/stl-library dist-standalone/stl-library-${{ matrix.label }}
 
       # ---- Upload to the DRAFT release (release.yml publishes it afterwards) OR
       #      keep as a CI artifact (build-check). Uploading to a draft keeps the
-      #      release mutable so all three platform jobs can attach their binary. ----
-      - name: Upload to draft release
-        if: ${{ inputs.release }}
+      #      release mutable so each platform job can attach its artifact. ----
+      # Windows ships the NSIS installer; Linux ships the loose binary.
+      - name: Upload to draft release (Windows installer)
+        if: ${{ inputs.release && matrix.os == 'windows-latest' }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
-          files: dist-standalone/stl-library-${{ matrix.label }}*
+          files: desktop/release/*.exe
           draft: true            # stay a draft; release.yml's publish job flips it
 
-      - name: Upload build artifact
-        if: ${{ !inputs.release }}
+      - name: Upload to draft release (Linux binary)
+        if: ${{ inputs.release && matrix.os != 'windows-latest' }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: dist-standalone/stl-library-${{ matrix.label }}
+          draft: true
+
+      - name: Upload build artifact (Windows installer)
+        if: ${{ !inputs.release && matrix.os == 'windows-latest' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: stl-studio-setup-${{ matrix.label }}
+          path: desktop/release/*.exe
+          retention-days: 7
+
+      - name: Upload build artifact (Linux binary)
+        if: ${{ !inputs.release && matrix.os != 'windows-latest' }}
         uses: actions/upload-artifact@v7
         with:
           name: stl-library-${{ matrix.label }}
-          path: dist-standalone/stl-library-${{ matrix.label }}*
+          path: dist-standalone/stl-library-${{ matrix.label }}
           retention-days: 7
