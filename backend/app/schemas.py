@@ -477,6 +477,10 @@ class AppSettingsRead(BaseModel):
     part_categories_enabled: bool = False
     # Show STL files as a full-width horizontal table below the two-column layout.
     horizontal_parts_layout: bool = True
+    # Model detail image gallery display and auto-rotation.
+    gallery_enabled: bool = True
+    gallery_auto_rotate: bool = True
+    gallery_rotation_seconds: int = 10
     # AI naming & organizing — uses an OpenAI-compatible endpoint (e.g. Ollama).
     # The API key is NOT here; it's encrypted via /settings/ai-organize/key.
     ai_organize_enabled: bool = False
@@ -511,6 +515,9 @@ class AppSettingsUpdate(BaseModel):
     ai_effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     part_categories_enabled: Optional[bool] = None
     horizontal_parts_layout: Optional[bool] = None
+    gallery_enabled: Optional[bool] = None
+    gallery_auto_rotate: Optional[bool] = None
+    gallery_rotation_seconds: Optional[int] = Field(None, ge=3, le=60)
     ai_organize_enabled: Optional[bool] = None
     ai_organize_url: Optional[str] = Field(None, max_length=500)
     ai_organize_model: Optional[str] = Field(None, max_length=200)

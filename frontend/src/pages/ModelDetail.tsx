@@ -56,6 +56,11 @@ export default function ModelDetail() {
   const modelQuery = useModel(numericId);
   const model = modelQuery.data ?? null;
   const loading = modelQuery.isPending && numericId != null;
+  const galleryEnabled = settings.gallery_enabled !== false;
+  const effectiveImagePaths = useMemo(
+    () => (galleryEnabled ? (model?.image_paths ?? []) : []),
+    [galleryEnabled, model?.image_paths],
+  );
   // null = no error; "notfound" = 404 (model gone); "network" = transient
   // fetch/5xx failure the user can retry.
   const loadError: "notfound" | "network" | null = modelQuery.error
@@ -166,16 +171,16 @@ export default function ModelDetail() {
     if (!lightboxOpen) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { setLightboxOpen(false); return; }
-      const hasGallery = (model?.image_paths ?? []).length > 0;
+      const hasGallery = effectiveImagePaths.length > 0;
       if (hasGallery) {
-        const total = model!.image_paths.length;
+        const total = effectiveImagePaths.length;
         if (e.key === "ArrowLeft" && galleryIdx > 0) rotatorRef.current?.goTo(galleryIdx - 1);
         if (e.key === "ArrowRight" && galleryIdx < total - 1) rotatorRef.current?.goTo(galleryIdx + 1);
       } else {
         if (!activeImage) return;
         const allImgs = [
           model?.thumbnail_path ? api.fileUrl(model.thumbnail_path, model.updated_at) : model?.thumbnail_url,
-          ...(model?.image_paths ?? []).map((p) => api.fileUrl(p)),
+          ...effectiveImagePaths.map((p) => api.fileUrl(p)),
         ].filter(Boolean) as string[];
         const idx = allImgs.indexOf(activeImage);
         if (e.key === "ArrowLeft" && idx > 0) setActiveImage(allImgs[idx - 1]);
@@ -184,7 +189,7 @@ export default function ModelDetail() {
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [lightboxOpen, activeImage, galleryIdx, model]);
+  }, [activeImage, effectiveImagePaths, galleryIdx, lightboxOpen, model]);
 
   // sync local state from loaded model
   useEffect(() => {
@@ -378,7 +383,7 @@ export default function ModelDetail() {
 
   const allImages = [
     model.thumbnail_path ? api.fileUrl(model.thumbnail_path, model.updated_at) : model.thumbnail_url,
-    ...model.image_paths.map((p) => api.fileUrl(p)),
+    ...effectiveImagePaths.map((p) => api.fileUrl(p)),
   ].filter(Boolean) as string[];
 
   const hasSTLs = model.stl_files.some((f) =>
@@ -894,9 +899,9 @@ export default function ModelDetail() {
       )}
 
       {lightboxOpen && (() => {
-        const hasGallery = model.image_paths.length > 0;
+        const hasGallery = effectiveImagePaths.length > 0;
         const lbImages = hasGallery
-          ? model.image_paths.map((p) => api.fileUrl(p))
+          ? effectiveImagePaths.map((p) => api.fileUrl(p))
           : allImages;
         const lbIdx = hasGallery ? galleryIdx : allImages.indexOf(activeImage ?? "");
         const lbSrc = lbImages[lbIdx] ?? null;

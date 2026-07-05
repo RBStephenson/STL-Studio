@@ -563,8 +563,22 @@ export interface GalleryRotatorHandle {
 
 export const GalleryRotator = forwardRef<
   GalleryRotatorHandle,
-  { paths: string[]; alt: string; blur: boolean; onIndexChange?: (idx: number) => void }
->(function GalleryRotatorInner({ paths, alt, blur, onIndexChange }, ref) {
+  {
+    paths: string[];
+    alt: string;
+    blur: boolean;
+    autoRotate?: boolean;
+    rotationMs?: number;
+    onIndexChange?: (idx: number) => void;
+  }
+>(function GalleryRotatorInner({
+  paths,
+  alt,
+  blur,
+  autoRotate = true,
+  rotationMs = 10000,
+  onIndexChange,
+}, ref) {
   const [broken, setBroken] = useState<Set<number>>(new Set());
   const [idx, setIdx] = useState(0);
   const [fade, setFade] = useState(true);
@@ -602,15 +616,19 @@ export const GalleryRotator = forwardRef<
   // Timer just advances by 1 — the broken-skip effect handles jumping over bad images.
   const resetTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
+    if (!autoRotate || paths.length <= 1) {
+      timerRef.current = null;
+      return;
+    }
     timerRef.current = setInterval(() => {
       setIdx((i) => (i + 1) % paths.length);
-    }, 10000);
-  }, [paths.length]);
+    }, rotationMs);
+  }, [autoRotate, paths.length, rotationMs]);
 
   useEffect(() => {
-    if (validCount > 1) resetTimer();
+    if (validCount > 1 && autoRotate) resetTimer();
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [validCount, resetTimer]);
+  }, [autoRotate, validCount, resetTimer]);
 
   // Auto-skip when the current image turns broken (onError fired or initial broken).
   useEffect(() => {

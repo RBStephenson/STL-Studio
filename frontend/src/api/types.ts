@@ -225,6 +225,9 @@ export interface AppSettings {
   ai_effort: AiEffort;
   part_categories_enabled: boolean;
   horizontal_parts_layout: boolean;
+  gallery_enabled: boolean;
+  gallery_auto_rotate: boolean;
+  gallery_rotation_seconds: number;
   ai_organize_enabled: boolean;
   ai_organize_url: string;
   ai_organize_model: string;
