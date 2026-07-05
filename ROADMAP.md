@@ -339,15 +339,18 @@ All AI capabilities are bring-your-own-API-key; no keys ship in the repo or buil
 
 ---
 
-## v1.0 — Desktop shell (final polish) 🗓 Planned
+## v1.0 — Desktop shell (final polish) 🚧 In progress
 
 The 1.0 release is the desktop-experience polish pass.
 
 | Issue | Item |
 |-------|------|
-| [#528](https://github.com/RBStephenson/STL-Inventory/issues/528) | **Desktop shell: pywebview → Electron** — kill the console window; ship a proper packaged desktop app |
+| [#528](https://github.com/RBStephenson/STL-Inventory/issues/528) | ✅ **Desktop shell: pywebview → Electron** — Windows ships a real NSIS-installed Electron app (Start-menu entry, app icon, no console window); the Python backend runs as a windowless sidecar on a dynamic port. Unsigned, auto-update deferred |
 
-macOS notarization ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17))
+Follow-ups deferred out of the v1 Electron scope: **code signing** (ships unsigned;
+SmartScreen warns on first run), **auto-update** (electron-updater feed), and
+**Linux/macOS Electron packaging** — Linux keeps the loose binary + browser
+fallback for now. macOS notarization ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17))
 sits in the backlog — deferred until there's appetite for the Apple Developer
 Program cost.
 
