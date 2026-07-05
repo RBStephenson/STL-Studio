@@ -175,12 +175,19 @@ def scan_all_roots(db: Session | None = None):
     runner.run_inline(_SCAN_KEY, _full_scan, db=db)
 
 
-def start_full_scan() -> None:
-    """Launch a full scan off the request path via the shared runner. Silent
-    no-op if the write lock is already held (a scan/apply/undo is running)."""
+def start_full_scan() -> bool:
+    """Launch a full scan off the request path via the shared runner. Returns
+    False if the library is busy (the write lock is held by a scan/apply/undo) so
+    the router can answer 409 instead of a misleading 200. A launch failure
+    releases the lock rather than wedging the library at running-forever."""
     if not write_lock.try_acquire_for_scan():
-        return
-    runner.start(_SCAN_KEY, _full_scan, single_flight=False)
+        return False
+    try:
+        runner.start(_SCAN_KEY, _full_scan, single_flight=False)
+    except Exception:
+        write_lock.release_scan()
+        raise
+    return True
 
 
 def _full_scan(job: JobHandle, db: Session | None = None):
@@ -591,12 +598,18 @@ def scan_creator(creator_id: int):
     runner.run_inline(_SCAN_KEY, _creator_scan, creator_id=creator_id)
 
 
-def start_creator_scan(creator_id: int) -> None:
-    """Launch a single-creator rescan off the request path. Silent no-op if the
-    write lock is already held."""
+def start_creator_scan(creator_id: int) -> bool:
+    """Launch a single-creator rescan off the request path. Returns False if the
+    library is busy (write lock held) so the router can answer 409 instead of a
+    misleading 200. A launch failure releases the lock rather than wedging it."""
     if not write_lock.try_acquire_for_scan():
-        return
-    runner.start(_SCAN_KEY, _creator_scan, single_flight=False, creator_id=creator_id)
+        return False
+    try:
+        runner.start(_SCAN_KEY, _creator_scan, single_flight=False, creator_id=creator_id)
+    except Exception:
+        write_lock.release_scan()
+        raise
+    return True
 
 
 def _creator_scan(job: JobHandle, creator_id: int):

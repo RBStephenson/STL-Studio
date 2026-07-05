@@ -186,3 +186,53 @@ class TestScanRoots:
         root_id = client.post("/scan/roots", json={"path": str(tmp_path)}).json()["id"]
         resp = client.patch(f"/scan/roots/{root_id}", json={"layout": "no-creator-here"})
         assert resp.status_code == 400
+
+
+class TestScanLaunchBusy:
+    """Scan-launch endpoints must report 409 when the library is busy rather than
+    a misleading 200 (STUDIO-83). The write lock — not just scanner status — is
+    the gate, so a reorganize apply/undo in progress also blocks a new scan."""
+
+    def _patch_idle(self, monkeypatch):
+        # Force the fast-path status check to "not running" so the test exercises
+        # the write-lock mapping, not the pre-check.
+        from app.routers import scan
+        monkeypatch.setattr(scan.scanner, "get_status", lambda: {"running": False})
+
+    def test_full_scan_busy_returns_409(self, client, monkeypatch):
+        from app.routers import scan
+        self._patch_idle(monkeypatch)
+        monkeypatch.setattr(scan.scanner, "start_full_scan", lambda: False)
+        r = client.post("/scan/start")
+        assert r.status_code == 409
+
+    def test_full_scan_launch_returns_200(self, client, monkeypatch):
+        from app.routers import scan
+        self._patch_idle(monkeypatch)
+        monkeypatch.setattr(scan.scanner, "start_full_scan", lambda: True)
+        r = client.post("/scan/start")
+        assert r.status_code == 200
+        assert r.json()["running"] is True
+
+    def test_creator_scan_busy_returns_409(self, client, db, monkeypatch):
+        from app.models import Creator
+        from app.routers import scan
+        self._patch_idle(monkeypatch)
+        creator = Creator(name="Busy Creator")
+        db.add(creator)
+        db.flush()
+        monkeypatch.setattr(scan.scanner, "start_creator_scan", lambda cid: False)
+        r = client.post(f"/scan/creator/{creator.id}")
+        assert r.status_code == 409
+
+    def test_creator_scan_launch_returns_200(self, client, db, monkeypatch):
+        from app.models import Creator
+        from app.routers import scan
+        self._patch_idle(monkeypatch)
+        creator = Creator(name="Ready Creator")
+        db.add(creator)
+        db.flush()
+        monkeypatch.setattr(scan.scanner, "start_creator_scan", lambda cid: True)
+        r = client.post(f"/scan/creator/{creator.id}")
+        assert r.status_code == 200
+        assert r.json()["running"] is True
