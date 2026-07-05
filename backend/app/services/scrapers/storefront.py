@@ -279,11 +279,126 @@ def _gumroad_inertia_page(html: str) -> Optional[dict]:
 _CULTS_CREATION_RE = re.compile(
     r"cults3d\.com/\w+/3d-(?:model|printing-file|modelling)/([\w/-]+)", re.I
 )
+_CULTS_USER_RE = re.compile(r"cults3d\.com/[^/]+/users/([^/?#]+)", re.I)
 
 _CULTS_MAX_PAGES = 50  # bound the ?page=N walk so a markup change can't loop forever (#218)
+_CULTS_API_PAGE_SIZE = 50
+
+_CULTS_STOREFRONT_QUERY = """
+query CreatorCreations($query: String!, $creatorNick: String!, $limit: Int!, $offset: Int!) {
+  creationsSearchBatch(
+    query: $query
+    creatorNick: $creatorNick
+    limit: $limit
+    offset: $offset
+  ) {
+    total
+    results {
+      name
+      slug
+      url
+      shortUrl
+      illustrationImageUrl
+      tags
+    }
+  }
+}
+"""
 
 
 async def _scrape_cults(url: str) -> list[StorefrontProduct]:
+    api_products = await _scrape_cults_api(url)
+    if api_products is not None:
+        return api_products
+    return await _scrape_cults_html(url)
+
+
+async def _scrape_cults_api(url: str) -> list[StorefrontProduct] | None:
+    """List a Cults3D creator's products through the official GraphQL API."""
+    from app.services.scrapers import cults3d
+
+    m = _CULTS_USER_RE.search(url)
+    if not m:
+        return None
+    creator_nick = m.group(1)
+
+    creds = cults3d._get_credentials()
+    if not creds:
+        logger.info("Cults3D API credentials not configured — storefront API skipped")
+        return None
+
+    username, api_key = creds
+    headers = {
+        "Authorization": cults3d._auth_header(username, api_key),
+        "Content-Type": "application/json",
+    }
+
+    products: list[StorefrontProduct] = []
+    seen: set[str] = set()
+    offset = 0
+
+    async with guarded_async_client(timeout=20) as client:
+        for _ in range(_CULTS_MAX_PAGES):
+            try:
+                r = await client.post(
+                    cults3d._GRAPHQL_URL,
+                    headers=headers,
+                    json={
+                        "query": _CULTS_STOREFRONT_QUERY,
+                        "variables": {
+                            "query": "",
+                            "creatorNick": creator_nick,
+                            "limit": _CULTS_API_PAGE_SIZE,
+                            "offset": offset,
+                        },
+                    },
+                )
+                r.raise_for_status()
+                data = r.json()
+            except Exception as e:
+                logger.error(f"Cults3D storefront API failed for {creator_nick!r}: {e}")
+                return None
+
+            errors = data.get("errors")
+            if errors:
+                logger.error(f"Cults3D storefront API errors for {creator_nick!r}: {errors}")
+                return None
+
+            batch = (data.get("data") or {}).get("creationsSearchBatch") or {}
+            results = batch.get("results") or []
+            for item in results:
+                title = (item.get("name") or "").strip()
+                product_url = item.get("url") or item.get("shortUrl") or ""
+                slug = item.get("slug") or extract_cults_slug(product_url)
+                if not title or not product_url or product_url in seen:
+                    continue
+                seen.add(product_url)
+                products.append(StorefrontProduct(
+                    title=title,
+                    source_url=product_url,
+                    source_site="cults3d",
+                    external_id=slug,
+                    thumbnail_url=item.get("illustrationImageUrl"),
+                    tags=item.get("tags") or [],
+                ))
+
+            if len(results) < _CULTS_API_PAGE_SIZE:
+                return products
+            offset += _CULTS_API_PAGE_SIZE
+
+    logger.warning(
+        f"Cults3D: stopping API storefront listing at page cap ({_CULTS_MAX_PAGES}) "
+        f"for {creator_nick!r}; found {len(products)} products."
+    )
+    return products
+
+
+def extract_cults_slug(url: str) -> Optional[str]:
+    m = _CULTS_CREATION_RE.search(url)
+    return m.group(1) if m else None
+
+
+async def _scrape_cults_html(url: str) -> list[StorefrontProduct]:
     """
     Scrape a Cults3D user creations page.
     Accepts any Cults3D profile URL — /3d-models, /creations, or bare profile.
@@ -334,12 +449,11 @@ async def _scrape_cults(url: str) -> list[StorefrontProduct]:
                 img_el = card.select_one("img[data-src], img[src]")
                 thumb = (img_el.get("data-src") or img_el.get("src")) if img_el else None
 
-                m = _CULTS_CREATION_RE.search(product_url)
                 products.append(StorefrontProduct(
                     title=title,
                     source_url=product_url,
                     source_site="cults3d",
-                    external_id=m.group(1) if m else None,
+                    external_id=extract_cults_slug(product_url),
                     thumbnail_url=thumb,
                 ))
 
