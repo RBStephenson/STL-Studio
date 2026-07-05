@@ -59,6 +59,8 @@ export default function ImageColumn({
 }: ImageColumnProps) {
   const { settings } = useAppSettings();
   const confirm = useConfirm();
+  const galleryHasThumbnail =
+    !!model.thumbnail_path && model.image_paths.some((path) => path === model.thumbnail_path);
 
   return (
     <div className="flex flex-col gap-3">
@@ -153,9 +155,15 @@ export default function ImageColumn({
                             message: "The image will be removed from this pack. The file remains on disk.",
                             confirmLabel: "Delete image",
                           });
-                          if (!ok) return;
+                          if (!ok || currentPath === null) return;
                           const newPaths = model.image_paths.filter((_, i) => i !== galleryIdx);
-                          await api.models.update(model.id, { image_paths: newPaths });
+                          const removed = model.removed_image_paths ?? [];
+                          const nextRemoved = removed.includes(currentPath) ? removed : [...removed, currentPath];
+                          await api.models.update(model.id, {
+                            image_paths: newPaths,
+                            removed_image_paths: nextRemoved,
+                            ...(model.primary_image_path === currentPath ? { primary_image_path: null } : {}),
+                          });
                           onReload();
                         }}
                         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-rose-900/70 text-gray-300 hover:text-white text-xs"
@@ -215,11 +223,12 @@ export default function ImageColumn({
             const thumbSrc = model.thumbnail_path
               ? api.fileUrl(model.thumbnail_path, model.updated_at)
               : model.thumbnail_url ?? null;
-            const totalItems = (thumbSrc ? 1 : 0) + model.image_paths.length;
+            const showSeparateThumb = !!thumbSrc && !galleryHasThumbnail;
+            const totalItems = (showSeparateThumb ? 1 : 0) + model.image_paths.length;
             if (totalItems <= 1) return null;
             return (
               <div className="flex gap-2 flex-wrap">
-                {thumbSrc && (
+                {showSeparateThumb && (
                   <button
                     onClick={() => onSetActiveImage(thumbSrc)}
                     className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${

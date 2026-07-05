@@ -46,6 +46,10 @@ logger = logging.getLogger(__name__)
 
 STL_EXTENSIONS = {".stl", ".3mf", ".obj"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+PREFERRED_IMAGE_DIRS = {
+    "renders", "render", "images", "image", "photos", "photo",
+    "preview", "previews", "pics", "pictures", "gallery",
+}
 # Slicer project/slice files — never index these, even if a future printable
 # extension overlaps (#206). NOTE: .3mf is deliberately NOT here — slicers save
 # projects as .3mf, but many designers also distribute printable geometry that
@@ -1141,10 +1145,23 @@ def _index_model(
                     model.needs_review = True
 
         if not folder_unchanged:
+            gallery_images = _collect_gallery_images(
+                folder,
+                boundary=creator_boundary or folder,
+                stl_cache=stl_cache,
+            )
+
             # Thumbnail: walk upward if not already set
             if not model.thumbnail_path:
-                _find_thumbnail(model, folder, boundary=creator_boundary or folder,
-                                stl_cache=stl_cache)
+                if gallery_images:
+                    model.thumbnail_path = str(gallery_images[0])
+
+            model.image_paths = _merge_scan_gallery_paths(
+                existing=model.image_paths or [],
+                discovered=[str(img) for img in gallery_images],
+                removed=model.removed_image_paths or [],
+                boundary=creator_boundary or folder,
+            )
 
             _index_stl_files(model, folder, db)
 
@@ -1211,6 +1228,128 @@ def _any_child_has_stls_cached(child_dirs: list[Path], cache: dict[str, bool]) -
         if cache[key]:
             return True
     return False
+
+
+def _path_identity(path: str) -> str:
+    if "://" in path:
+        return path
+    return _normpath(path)
+
+
+def _is_within_boundary(path: str, boundary: Path) -> bool:
+    if "://" in path:
+        return False
+    try:
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            return False
+        candidate_resolved = candidate.resolve(strict=False)
+        boundary_resolved = boundary.resolve(strict=False)
+        return os.path.commonpath([str(candidate_resolved), str(boundary_resolved)]) == str(boundary_resolved)
+    except (OSError, ValueError):
+        return False
+
+
+def _image_files_recursive(folder: Path) -> list[Path]:
+    try:
+        return [
+            img for img in sorted(folder.rglob("*"))
+            if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS
+        ]
+    except (OSError, PermissionError):
+        return []
+
+
+def _collect_gallery_images(leaf: Path, boundary: Path,
+                            stl_cache: dict[str, bool] | None = None) -> list[Path]:
+    """
+    Walk upward from leaf to creator boundary looking for gallery images.
+
+    Priority at each level:
+      1. Preferred image subdirs, recursively
+      2. Direct image files in the folder itself
+      3. Any other subdir that doesn't contain STLs
+    """
+    def _has_stls_cached(d: Path) -> bool:
+        key = str(d)
+        if stl_cache is not None:
+            if key not in stl_cache:
+                stl_cache[key] = _has_stls(d, recurse=True)
+            return stl_cache[key]
+        return _has_stls(d, recurse=True)
+
+    def images_at(folder: Path) -> list[Path]:
+        try:
+            children = list(folder.iterdir())
+        except (OSError, PermissionError):
+            return []
+        subdirs = [c for c in children if c.is_dir()]
+        found: list[Path] = []
+
+        for sub in sorted(subdirs):
+            if sub.name.lower() in PREFERRED_IMAGE_DIRS:
+                found.extend(_image_files_recursive(sub))
+
+        found.extend(
+            f for f in sorted(children)
+            if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+        )
+
+        for sub in sorted(subdirs):
+            if sub.name.lower() not in PREFERRED_IMAGE_DIRS and not _has_stls_cached(sub):
+                found.extend(_image_files_recursive(sub))
+
+        return found
+
+    images: list[Path] = []
+    seen: set[str] = set()
+    current = leaf
+    while True:
+        for img in images_at(current):
+            key = _normpath(str(img))
+            if key not in seen:
+                seen.add(key)
+                images.append(img)
+        if current == boundary or current.parent == current:
+            break
+        current = current.parent
+    return images
+
+
+def _merge_scan_gallery_paths(
+    existing: list,
+    discovered: list[str],
+    removed: list,
+    boundary: Path,
+) -> list[str]:
+    discovered_keys = {_path_identity(p) for p in discovered if isinstance(p, str) and p}
+    removed_keys = {
+        _path_identity(p) for p in removed
+        if isinstance(p, str) and p
+    }
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def add(path: str) -> None:
+        key = _path_identity(path)
+        if key in removed_keys or key in seen:
+            return
+        seen.add(key)
+        result.append(path)
+
+    for path in discovered:
+        if isinstance(path, str) and path:
+            add(path)
+
+    for path in existing:
+        if not isinstance(path, str) or not path:
+            continue
+        key = _path_identity(path)
+        if _is_within_boundary(path, boundary) and key not in discovered_keys:
+            continue
+        add(path)
+
+    return result
 
 
 def _find_thumbnail(model: Model, leaf: Path, boundary: Path,

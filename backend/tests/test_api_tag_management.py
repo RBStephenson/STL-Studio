@@ -249,6 +249,30 @@ class TestSuppressAutoTags:
         assert r.json()["removed_auto_tags"] == ["statue"]
 
 
+class TestRemovedImagePaths:
+    def test_patch_persists_removed_image_paths(self, client, db):
+        creator = make_creator(db)
+        m = make_model(db, creator)
+        db.commit()
+
+        r = client.patch(f"/models/{m.id}", json={"removed_image_paths": ["/tmp/a.png", "/tmp/a.png"]})
+        assert r.status_code == 200
+
+        db.expire_all()
+        db.refresh(m)
+        assert m.removed_image_paths == ["/tmp/a.png"]
+
+    def test_model_read_returns_removed_image_paths(self, client, db):
+        creator = make_creator(db)
+        m = make_model(db, creator)
+        m.removed_image_paths = ["/tmp/a.png"]
+        db.commit()
+
+        r = client.get(f"/models/{m.id}")
+        assert r.status_code == 200
+        assert r.json()["removed_image_paths"] == ["/tmp/a.png"]
+
+
 # ---------------------------------------------------------------------------
 # POST /models/bulk/tags — bulk_tag_models uses bulk_sync_model_tags (#654)
 # ---------------------------------------------------------------------------

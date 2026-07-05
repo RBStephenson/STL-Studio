@@ -173,6 +173,7 @@ class Model(Base):
     thumbnail_path = Column(String, nullable=True)   # local path
     thumbnail_url = Column(String, nullable=True)    # remote URL
     image_paths = Column(JSON, default=list)          # additional local images (gallery)
+    removed_image_paths = Column(JSON, default=list)  # gallery images the user suppressed; survives rescans
     other_files = Column(JSON, default=list)          # non-STL, non-image files (PDFs, TXTs, etc.)
     primary_image_path = Column(String, nullable=True)  # user-selected card image from image_paths
 

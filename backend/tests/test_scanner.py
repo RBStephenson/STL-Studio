@@ -97,6 +97,82 @@ class TestLeafDetection:
 
 
 # ---------------------------------------------------------------------------
+# Gallery images
+# ---------------------------------------------------------------------------
+
+class TestGalleryImages:
+    def test_scan_populates_gallery_and_thumbnail_from_images(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Knight"
+        _stl(model_dir / "STL")
+        _img(model_dir / "Images", "render.png")
+        _img(model_dir, "box.jpg")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        model = _models(db, creator)[0]
+        render = str(model_dir / "Images" / "render.png")
+        box = str(model_dir / "box.jpg")
+        assert model.thumbnail_path == render
+        assert model.image_paths == [render, box]
+
+    def test_scan_prefers_image_dirs_before_direct_images(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Knight"
+        _stl(model_dir)
+        _img(model_dir, "a-direct.jpg")
+        _img(model_dir / "Renders", "b-render.png")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        model = _models(db, creator)[0]
+        assert model.image_paths[0] == str(model_dir / "Renders" / "b-render.png")
+        assert model.image_paths[1] == str(model_dir / "a-direct.jpg")
+
+    def test_scan_does_not_readd_removed_gallery_images(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Knight"
+        _stl(model_dir)
+        removed = model_dir / "render.png"
+        kept = model_dir / "kept.png"
+        _img(model_dir, removed.name)
+        _img(model_dir, kept.name)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+        model = _models(db, creator)[0]
+        model.removed_image_paths = [str(removed)]
+        db.commit()
+
+        _walk(db, creator, creator_dir)
+        db.refresh(model)
+
+        assert str(removed) not in model.image_paths
+        assert str(kept) in model.image_paths
+
+    def test_scan_preserves_remote_and_user_added_gallery_paths(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Knight"
+        _stl(model_dir)
+        _img(model_dir, "render.png")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+        model = _models(db, creator)[0]
+        remote = "https://cdn.example.test/render.png"
+        outside = str(tmp_path / "manual.png")
+        model.image_paths = [remote, outside]
+        db.commit()
+
+        _walk(db, creator, creator_dir)
+        db.refresh(model)
+
+        assert model.image_paths == [str(model_dir / "render.png"), remote, outside]
+
+
+# ---------------------------------------------------------------------------
 # Configurable ignore patterns (#31, Phase 1)
 # ---------------------------------------------------------------------------
 
