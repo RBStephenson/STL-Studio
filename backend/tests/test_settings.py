@@ -19,6 +19,9 @@ DEFAULTS = {
     "ai_effort": "low",
     "part_categories_enabled": False,
     "horizontal_parts_layout": True,
+    "gallery_enabled": True,
+    "gallery_auto_rotate": True,
+    "gallery_rotation_seconds": 10,
     "ai_organize_enabled": False,
     "ai_organize_url": "",
     "ai_organize_model": "",
@@ -169,6 +172,28 @@ def test_library_sort_invalid_value_rejected(client):
     assert client.patch("/settings", json={"library_sort": "queue"}).status_code == 422
     assert client.patch("/settings", json={"library_sort": "bogus"}).status_code == 422
     assert client.get("/settings").json()["library_sort"] == "name"
+
+
+def test_gallery_preferences_round_trip(client):
+    r = client.patch(
+        "/settings",
+        json={
+            "gallery_enabled": False,
+            "gallery_auto_rotate": False,
+            "gallery_rotation_seconds": 20,
+        },
+    )
+    assert r.status_code == 200
+    settings = client.get("/settings").json()
+    assert settings["gallery_enabled"] is False
+    assert settings["gallery_auto_rotate"] is False
+    assert settings["gallery_rotation_seconds"] == 20
+
+
+def test_gallery_rotation_seconds_bounds_rejected(client):
+    assert client.patch("/settings", json={"gallery_rotation_seconds": 2}).status_code == 422
+    assert client.patch("/settings", json={"gallery_rotation_seconds": 61}).status_code == 422
+    assert client.get("/settings").json()["gallery_rotation_seconds"] == 10
 
 
 # --- Atomic single-preset endpoints (#287) ---

@@ -32,6 +32,9 @@ vi.mock("../api/client", () => ({
         library_page_size: 48,
         filter_presets: [],
         recent_days: 7,
+        gallery_enabled: true,
+        gallery_auto_rotate: true,
+        gallery_rotation_seconds: 10,
       }),
       update: vi.fn().mockResolvedValue({
         painting_guides_enabled: true,
@@ -39,6 +42,9 @@ vi.mock("../api/client", () => ({
         library_page_size: 48,
         filter_presets: [],
         recent_days: 7,
+        gallery_enabled: true,
+        gallery_auto_rotate: true,
+        gallery_rotation_seconds: 10,
       }),
       reloadEnv: vi.fn().mockResolvedValue({
         ok: true,
@@ -389,6 +395,45 @@ describe("Settings – Library page size (#32)", () => {
     await userEvent.click(await screen.findByRole("button", { name: "96" }));
 
     expect(api.settings.update).toHaveBeenCalledWith({ library_page_size: 96 });
+  });
+});
+
+describe("Settings - Image gallery preferences", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("toggles gallery display", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ gallery_enabled: true }));
+    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ gallery_enabled: false }));
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+    await goTab(/preferences/i);
+
+    await userEvent.click(await screen.findByRole("checkbox", { name: /enable image gallery/i }));
+
+    expect(api.settings.update).toHaveBeenCalledWith({ gallery_enabled: false });
+  });
+
+  it("saves the gallery interval and toggles auto-rotation", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(
+      mkSettings({ gallery_auto_rotate: true, gallery_rotation_seconds: 10 }),
+    );
+    vi.mocked(api.settings.update).mockResolvedValue(
+      mkSettings({ gallery_auto_rotate: true, gallery_rotation_seconds: 20 }),
+    );
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+    await goTab(/preferences/i);
+
+    await userEvent.click(screen.getByRole("button", { name: "20s" }));
+    expect(api.settings.update).toHaveBeenCalledWith({ gallery_rotation_seconds: 20 });
+
+    vi.mocked(api.settings.update).mockResolvedValue(
+      mkSettings({ gallery_auto_rotate: false, gallery_rotation_seconds: 20 }),
+    );
+    await userEvent.click(await screen.findByRole("checkbox", { name: /auto-rotate gallery images/i }));
+    expect(api.settings.update).toHaveBeenCalledWith({ gallery_auto_rotate: false });
   });
 });
 

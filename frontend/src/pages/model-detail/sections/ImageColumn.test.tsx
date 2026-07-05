@@ -1,8 +1,19 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { createRef } from "react";
 import type { GalleryRotatorHandle } from "../../../components/ModelCard";
+
+const mockState = vi.hoisted(() => ({
+  settings: {
+    part_categories_enabled: true,
+    horizontal_parts_layout: false,
+    gallery_enabled: true,
+    gallery_auto_rotate: true,
+    gallery_rotation_seconds: 10,
+  },
+  galleryProps: null as Record<string, unknown> | null,
+}));
 
 vi.mock("../../../api/client", () => ({
   api: {
@@ -15,11 +26,14 @@ vi.mock("../../../api/client", () => ({
   },
 }));
 vi.mock("../../../context/AppSettingsContext", () => ({
-  useAppSettings: () => ({ settings: { part_categories_enabled: true, horizontal_parts_layout: false } }),
+  useAppSettings: () => ({ settings: mockState.settings }),
 }));
 vi.mock("../../../context/ConfirmContext", () => ({ useConfirm: () => vi.fn(async () => true) }));
 vi.mock("../../../components/ModelCard", () => ({
-  GalleryRotator: () => <div data-testid="gallery-rotator" />,
+  GalleryRotator: (props: Record<string, unknown>) => {
+    mockState.galleryProps = props;
+    return <div data-testid="gallery-rotator" />;
+  },
 }));
 vi.mock("../../../components/STLViewer", () => ({ default: () => <div data-testid="stl-viewer" /> }));
 
@@ -69,6 +83,13 @@ const renderCol = (props: Partial<React.ComponentProps<typeof ImageColumn>> = {}
 };
 
 describe("ImageColumn", () => {
+  beforeEach(() => {
+    mockState.settings.gallery_enabled = true;
+    mockState.settings.gallery_auto_rotate = true;
+    mockState.settings.gallery_rotation_seconds = 10;
+    mockState.galleryProps = null;
+  });
+
   it("hides the view-mode toggle when there are no STL files", () => {
     renderCol({ hasSTLs: false });
     expect(screen.queryByRole("button", { name: /3D View/ })).not.toBeInTheDocument();
@@ -84,6 +105,23 @@ describe("ImageColumn", () => {
   it("renders the gallery rotator when the model has image paths", () => {
     renderCol({ model: { ...baseModel, image_paths: ["a.png", "b.png"] } as ModelDetailType });
     expect(screen.getByTestId("gallery-rotator")).toBeInTheDocument();
+  });
+
+  it("passes gallery rotation preferences to the rotator", () => {
+    mockState.settings.gallery_auto_rotate = false;
+    mockState.settings.gallery_rotation_seconds = 20;
+    renderCol({ model: { ...baseModel, image_paths: ["a.png", "b.png"] } as ModelDetailType });
+    expect(mockState.galleryProps).toMatchObject({ autoRotate: false, rotationMs: 20000 });
+  });
+
+  it("falls back to a static image when the gallery is disabled", () => {
+    mockState.settings.gallery_enabled = false;
+    renderCol({
+      model: { ...baseModel, image_paths: ["a.png", "b.png"] } as ModelDetailType,
+      activeImage: "thumb.png",
+    });
+    expect(screen.queryByTestId("gallery-rotator")).not.toBeInTheDocument();
+    expect(screen.getByRole("img")).toHaveAttribute("src", "thumb.png");
   });
 
   it("does not render a duplicate thumbnail strip item when the thumbnail is in the gallery", () => {

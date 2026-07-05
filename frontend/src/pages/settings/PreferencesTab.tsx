@@ -1,4 +1,4 @@
-import { Tag, LayoutPanelTop } from "lucide-react";
+import { Images, RotateCw, Tag, LayoutPanelTop } from "lucide-react";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
@@ -91,6 +91,70 @@ export default function PreferencesTab() {
             </p>
           </div>
         </label>
+      </section>
+
+      {/* Image Gallery */}
+      <section className="mt-8 pt-6 border-t border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <Images size={14} /> Image Gallery
+        </h2>
+        <div className="flex flex-col gap-4">
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.gallery_enabled}
+              onChange={() => update({ gallery_enabled: !settings.gallery_enabled })}
+              className="mt-0.5 accent-indigo-500"
+            />
+            <div>
+              <p className="text-sm text-gray-300">Enable image gallery</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Shows scanned image galleries on model detail pages. Turn this off to use only
+                the selected thumbnail image.
+              </p>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.gallery_auto_rotate}
+              disabled={!settings.gallery_enabled}
+              onChange={() => update({ gallery_auto_rotate: !settings.gallery_auto_rotate })}
+              className="mt-0.5 accent-indigo-500 disabled:opacity-40"
+            />
+            <div>
+              <p className="text-sm text-gray-300">Auto-rotate gallery images</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Automatically advances multi-image galleries in the model detail view.
+              </p>
+            </div>
+          </label>
+
+          <div className={`flex items-center gap-3 self-start ${
+            settings.gallery_enabled && settings.gallery_auto_rotate ? "" : "opacity-50"
+          }`}>
+            <span className="text-sm text-gray-300 flex items-center gap-1.5">
+              <RotateCw size={14} /> Rotation interval
+            </span>
+            <div className="flex rounded overflow-hidden border border-gray-700">
+              {[5, 10, 20, 30].map((n) => (
+                <button
+                  key={n}
+                  disabled={!settings.gallery_enabled || !settings.gallery_auto_rotate}
+                  onClick={() => update({ gallery_rotation_seconds: n })}
+                  className={`px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed ${
+                    settings.gallery_rotation_seconds === n
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-800 text-gray-400 hover:text-gray-200 disabled:hover:text-gray-400"
+                  }`}
+                >
+                  {n}s
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* Horizontal Parts Layout */}

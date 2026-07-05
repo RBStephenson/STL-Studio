@@ -59,8 +59,10 @@ export default function ImageColumn({
 }: ImageColumnProps) {
   const { settings } = useAppSettings();
   const confirm = useConfirm();
+  const galleryPaths = settings.gallery_enabled !== false ? model.image_paths : [];
+  const galleryRotationMs = Math.max(3, settings.gallery_rotation_seconds ?? 10) * 1000;
   const galleryHasThumbnail =
-    !!model.thumbnail_path && model.image_paths.some((path) => path === model.thumbnail_path);
+    !!model.thumbnail_path && galleryPaths.some((path) => path === model.thumbnail_path);
   const isRemoteImagePath = (path: string | null) => !!path && path.includes("://");
 
   return (
@@ -96,12 +98,14 @@ export default function ImageColumn({
       {viewMode === "images" && (
         <>
           <div className="aspect-square bg-gray-900 rounded-xl overflow-hidden border border-gray-800 relative group">
-            {model.image_paths.length > 0 ? (
+            {galleryPaths.length > 0 ? (
               <GalleryRotator
                 ref={rotatorRef}
-                paths={model.image_paths}
+                paths={galleryPaths}
                 alt={model.title ?? model.name}
                 blur={nsfw && !showNSFW}
+                autoRotate={settings.gallery_auto_rotate !== false}
+                rotationMs={galleryRotationMs}
                 onIndexChange={onGalleryIndexChange}
               />
             ) : activeImage ? (
@@ -130,7 +134,7 @@ export default function ImageColumn({
             )}
 
             {/* Zoom button */}
-            {(model.image_paths.length > 0 || activeImage) && (
+            {(galleryPaths.length > 0 || activeImage) && (
               <button
                 onClick={onOpenLightbox}
                 className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-gray-300 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
@@ -142,10 +146,10 @@ export default function ImageColumn({
 
             {/* Hover action bar */}
             <div className="absolute bottom-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              {model.image_paths.length > 0 ? (
+              {galleryPaths.length > 0 ? (
                 // Gallery mode: bookmark + delete
                 (() => {
-                  const currentPath = model.image_paths[galleryIdx] ?? null;
+                  const currentPath = galleryPaths[galleryIdx] ?? null;
                   const isPrimary = currentPath !== null && currentPath === model.primary_image_path;
                   const canSetThumbnail =
                     currentPath !== null && currentPath !== model.thumbnail_path && !isRemoteImagePath(currentPath);
@@ -159,7 +163,7 @@ export default function ImageColumn({
                             confirmLabel: "Delete image",
                           });
                           if (!ok || currentPath === null) return;
-                          const newPaths = model.image_paths.filter((_, i) => i !== galleryIdx);
+                          const newPaths = model.image_paths.filter((path) => path !== currentPath);
                           const removed = model.removed_image_paths ?? [];
                           const nextRemoved = removed.includes(currentPath) ? removed : [...removed, currentPath];
                           await api.models.update(model.id, {
@@ -242,7 +246,7 @@ export default function ImageColumn({
               ? api.fileUrl(model.thumbnail_path, model.updated_at)
               : model.thumbnail_url ?? null;
             const showSeparateThumb = !!thumbSrc && !galleryHasThumbnail;
-            const totalItems = (showSeparateThumb ? 1 : 0) + model.image_paths.length;
+            const totalItems = (showSeparateThumb ? 1 : 0) + galleryPaths.length;
             if (totalItems <= 1) return null;
             return (
               <div className="flex gap-2 flex-wrap">
@@ -250,7 +254,7 @@ export default function ImageColumn({
                   <button
                     onClick={() => onSetActiveImage(thumbSrc)}
                     className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
-                      model.image_paths.length === 0 && activeImage === thumbSrc
+                      galleryPaths.length === 0 && activeImage === thumbSrc
                         ? "border-indigo-500"
                         : "border-gray-800 hover:border-gray-600"
                     }`}
@@ -258,7 +262,7 @@ export default function ImageColumn({
                     <img src={thumbSrc} alt="" className="w-full h-full object-cover" />
                   </button>
                 )}
-                {model.image_paths.map((path, i) => (
+                {galleryPaths.map((path, i) => (
                   <button
                     key={i}
                     onClick={() => rotatorRef.current?.goTo(i)}
