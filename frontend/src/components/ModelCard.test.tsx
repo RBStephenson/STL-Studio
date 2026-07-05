@@ -132,6 +132,38 @@ describe("ModelCard thumbnail cache-busting (#185)", () => {
       "/api/files/image?path=%2Fdata%2Fthumbnails%2F7.png&v=2026-06-15T12%3A00%3A00"
     );
   });
+
+  it("uses the selected thumbnail before gallery images", () => {
+    renderCard({
+      thumbnail_path: "/data/thumbnails/7.png",
+      image_paths: ["/data/gallery/old.png"],
+      updated_at: "2026-06-15T12:00:00",
+    });
+    expect(screen.getByRole("img")).toHaveAttribute(
+      "src",
+      "/api/files/image?path=%2Fdata%2Fthumbnails%2F7.png&v=2026-06-15T12%3A00%3A00"
+    );
+  });
+
+  it("lets an explicit library image override the thumbnail", () => {
+    renderCard({
+      thumbnail_path: "/data/thumbnails/7.png",
+      primary_image_path: "/data/gallery/pick.png",
+      updated_at: "2026-06-15T12:00:00",
+    });
+    expect(screen.getByRole("img")).toHaveAttribute(
+      "src",
+      "/api/files/image?path=%2Fdata%2Fgallery%2Fpick.png"
+    );
+  });
+
+  it("falls back to the first gallery image when there is no thumbnail", () => {
+    renderCard({ image_paths: ["/data/gallery/old.png"] });
+    expect(screen.getByRole("img")).toHaveAttribute(
+      "src",
+      "/api/files/image?path=%2Fdata%2Fgallery%2Fold.png"
+    );
+  });
 });
 
 describe("ModelCard print-status cycle (#166)", () => {
