@@ -247,8 +247,8 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     ? api.fileUrl(model.thumbnail_path, model.updated_at)
     : model.thumbnail_url ?? null;
 
-  // Static card image: user-selected primary, else first gallery image, else nothing
-  // (falls through to thumbnail below).
+  // Static card image: explicit Library image, else selected thumbnail, else first gallery image.
+  // Gallery images remain a fallback, but shouldn't hide thumbnail changes.
   const cardImageUrl = (() => {
     if (imageCleared) return null;
     const gallery = model.image_paths ?? [];
@@ -257,6 +257,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     // local filesystem paths through the file endpoint.
     const resolve = (p: string) => (/^https?:\/\//i.test(p) ? p : api.fileUrl(p));
     if (model.primary_image_path) return resolve(model.primary_image_path);
+    if (thumbnail) return thumbnail;
     if (gallery.length > 0) return resolve(gallery[0]);
     return null;
   })();

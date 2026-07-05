@@ -870,6 +870,28 @@ class TestGetNeighbors:
 
 
 # ---------------------------------------------------------------------------
+# Thumbnail update
+# ---------------------------------------------------------------------------
+
+class TestThumbnailUpdate:
+    def test_patch_updates_timestamp_for_cache_busting(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="NoThumb")
+        db.commit()
+        before = model.updated_at
+
+        resp = client.patch(
+            f"/models/{model.id}/thumbnail",
+            json={"thumbnail_path": "/data/thumbnails/new.png", "thumbnail_url": None},
+        )
+
+        assert resp.status_code == 200
+        db.refresh(model)
+        assert model.thumbnail_path == "/data/thumbnails/new.png"
+        assert model.updated_at > before
+
+
+# ---------------------------------------------------------------------------
 # Thumbnail upload
 # ---------------------------------------------------------------------------
 
@@ -878,6 +900,7 @@ class TestThumbnailUpload:
         creator = make_creator(db)
         model = make_model(db, creator, name="NoThumb")
         db.commit()
+        before = model.updated_at
 
         png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16  # minimal fake PNG header
         resp = client.post(
@@ -891,6 +914,7 @@ class TestThumbnailUpload:
         assert model.thumbnail_path is not None
         assert model.thumbnail_path.endswith(".png")
         assert model.thumbnail_url is None
+        assert model.updated_at > before
 
     def test_upload_clears_existing_url(self, client, db):
         creator = make_creator(db)
