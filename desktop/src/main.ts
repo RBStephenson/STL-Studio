@@ -12,9 +12,15 @@
  */
 import { join } from "node:path";
 
-import { app, BrowserWindow, dialog } from "electron";
+import { Menu, app, BrowserWindow, dialog } from "electron";
+import type { WebContents } from "electron";
 
 import { LOCKFILE_NAME, baseUrl, resolveBackendExe } from "./config";
+import {
+  buildApplicationMenuTemplate,
+  buildContextMenuTemplate,
+} from "./menu";
+import type { NavTarget } from "./menu";
 import { findFreePort, runtimeDeps } from "./runtime";
 import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
@@ -31,6 +37,35 @@ let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarProcess | null = null;
 let deps: SidecarDeps | null = null;
 
+const IS_MAC = process.platform === "darwin";
+
+/** A NavTarget over a webContents' navigation history — drives both menus. */
+function navFor(wc: WebContents): NavTarget {
+  const history = wc.navigationHistory;
+  return {
+    canGoBack: () => history.canGoBack(),
+    canGoForward: () => history.canGoForward(),
+    goBack: () => history.goBack(),
+    goForward: () => history.goForward(),
+    reload: () => wc.reload(),
+  };
+}
+
+/** Install our custom application menu (no Edit menu). Navigation acts on the
+ *  focused window, so this is built once and never needs rebuilding. */
+function installApplicationMenu(): void {
+  const nav: NavTarget = {
+    canGoBack: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.canGoBack() ?? false,
+    canGoForward: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.canGoForward() ?? false,
+    goBack: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.goBack(),
+    goForward: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.goForward(),
+    reload: () => BrowserWindow.getFocusedWindow()?.webContents.reload(),
+  };
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(buildApplicationMenuTemplate(nav, { isMac: IS_MAC })),
+  );
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
@@ -44,6 +79,27 @@ function createWindow(): BrowserWindow {
     },
   });
   win.once("ready-to-show", () => win.show());
+
+  // Right-click context menu: Back/Forward/Reload + clipboard when relevant.
+  win.webContents.on("context-menu", (_event, params) => {
+    const template = buildContextMenuTemplate(navFor(win.webContents), {
+      isEditable: params.isEditable,
+      canCopy: params.editFlags.canCopy,
+      canPaste: params.editFlags.canPaste,
+    });
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+
+  // Mouse back/forward buttons.
+  win.on("app-command", (_event, command) => {
+    const history = win.webContents.navigationHistory;
+    if (command === "browser-backward" && history.canGoBack()) {
+      history.goBack();
+    } else if (command === "browser-forward" && history.canGoForward()) {
+      history.goForward();
+    }
+  });
+
   return win;
 }
 
@@ -91,6 +147,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    installApplicationMenu();
     mainWindow = createWindow();
     await bootBackendAndLoad(mainWindow);
 
