@@ -1602,3 +1602,21 @@ class TestCaseInsensitiveIdentity:
         stls = db.query(STLFile).filter(STLFile.model_id == model.id).all()
         assert len(stls) == 1, "STL rows re-cased in place, not duplicated"
         assert stls[0].path == str(tmp_path / "Creator Root" / "Barbatos" / "barbatos.stl")
+
+
+# ---------------------------------------------------------------------------
+# Busy-library launch gate (STUDIO-83)
+# ---------------------------------------------------------------------------
+
+def test_start_scans_return_false_when_write_lock_held():
+    """start_full_scan / start_creator_scan report False (not a silent no-op)
+    when the write lock is already held, so the router can answer 409 instead of
+    a misleading 200 (STUDIO-83)."""
+    from app.services import write_lock
+
+    assert write_lock.try_acquire_for_scan() is True
+    try:
+        assert scanner.start_full_scan() is False
+        assert scanner.start_creator_scan(1) is False
+    finally:
+        write_lock.release_scan()

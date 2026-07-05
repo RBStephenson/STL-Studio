@@ -146,7 +146,12 @@ def start_scan(db: Session = Depends(get_db)):
     # Ensure scan roots exist in db from env config
     _sync_roots_from_config(db)
 
-    scanner.start_full_scan()
+    # start_full_scan takes the write lock synchronously so the 200 is
+    # authoritative: a busy library (another scan, or a reorganize apply/undo
+    # that a bare status check wouldn't catch) returns 409 instead of a
+    # misleading "scan started".
+    if not scanner.start_full_scan():
+        raise HTTPException(status_code=409, detail="Library is busy — a scan or reorganize is in progress")
 
     return ScanStatus(running=True, message="scan started")
 
@@ -162,7 +167,8 @@ def start_creator_scan(creator_id: int, db: Session = Depends(get_db)):
     if not creator:
         raise HTTPException(status_code=404, detail="Creator not found")
 
-    scanner.start_creator_scan(creator_id)
+    if not scanner.start_creator_scan(creator_id):
+        raise HTTPException(status_code=409, detail="Library is busy — a scan or reorganize is in progress")
 
     return ScanStatus(running=True, message=f"scanning {creator.name}")
 
