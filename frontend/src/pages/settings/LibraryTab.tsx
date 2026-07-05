@@ -154,111 +154,6 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
     <div>
       <FlashBanner success={success} error={error} />
 
-      {/* Current roots */}
-      <section className="mb-8">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-          <HardDrive size={14} /> Scan Locations
-        </h2>
-        {loading ? (
-          <p className="text-sm text-gray-600">Loading…</p>
-        ) : roots.length === 0 ? (
-          <div className="bg-amber-950/40 border border-amber-800/60 rounded-lg px-4 py-3 text-sm text-amber-300">
-            No drives configured yet. Add a folder path below to get started.
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {roots.map((r) => {
-              const layoutVal = layoutEdits[r.id] ?? r.layout;
-              const preview = layoutPreview(layoutVal);
-              return (
-                <div key={r.id} className="flex flex-col gap-2 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <HardDrive size={15} className="text-indigo-400 shrink-0" />
-                    <span className="text-sm text-gray-200 flex-1 truncate font-mono">{r.path}</span>
-                    {r.last_scanned && (
-                      <span className="text-xs text-gray-600 shrink-0">
-                        Last scanned {new Date(r.last_scanned).toLocaleDateString()}
-                      </span>
-                    )}
-                    <button
-                      onClick={() => removeRoot(r.id, r.path)}
-                      className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
-                      title="Remove this drive"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2 pl-[27px]">
-                    <label className="text-xs text-gray-500 shrink-0">Layout</label>
-                    <input
-                      type="text"
-                      value={layoutVal}
-                      onChange={(e) => setLayoutEdits((m) => ({ ...m, [r.id]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      onBlur={() => saveLayout(r)}
-                      spellCheck={false}
-                      className="w-56 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-xs text-white focus:outline-none font-mono"
-                    />
-                    <span className={`text-xs truncate ${preview ? "text-gray-600" : "text-amber-400"}`}>
-                      {preview ?? "needs exactly one {creator}, last"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 pl-[27px]">
-                    <label className="text-xs text-gray-500 shrink-0">Library</label>
-                    <input
-                      type="text"
-                      value={nameEdits[r.id] ?? r.name ?? ""}
-                      onChange={(e) => setNameEdits((m) => ({ ...m, [r.id]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      onBlur={() => saveName(r)}
-                      placeholder={r.path.split(/[\\/]/).filter(Boolean).pop() || "name"}
-                      spellCheck={false}
-                      className="w-40 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-xs text-white focus:outline-none"
-                    />
-                    <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none ml-2">
-                      <input
-                        type="checkbox"
-                        checked={r.is_writable}
-                        onChange={() => toggleWritable(r)}
-                        className="accent-indigo-500"
-                      />
-                      Import destination
-                    </label>
-                    <label
-                      className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none ml-2"
-                      title="Treat every model inside a character folder as one variant group, instead of guessing groups from names. Rescan to apply."
-                    >
-                      <input
-                        type="checkbox"
-                        checked={r.group_by_character}
-                        onChange={() => toggleGroupByCharacter(r)}
-                        className="accent-indigo-500"
-                      />
-                      Group variants by character
-                    </label>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 mt-4">
-          <button
-            onClick={reloadEnv}
-            disabled={reloadingEnv}
-            title="Re-read scan roots and drive mappings from the .env file"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm disabled:opacity-50 transition-colors"
-          >
-            <RefreshCw size={14} className={reloadingEnv ? "animate-spin" : ""} />
-            Reload .env settings
-          </button>
-          <span className="text-xs text-gray-600">
-            Applies changes to scan roots and drive paths. Database location still needs a restart.
-          </span>
-        </div>
-      </section>
-
       {/* Add new root */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
@@ -361,6 +256,111 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Current roots */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <HardDrive size={14} /> Scan Locations
+        </h2>
+        {loading ? (
+          <p className="text-sm text-gray-600">Loading…</p>
+        ) : roots.length === 0 ? (
+          <div className="bg-amber-950/40 border border-amber-800/60 rounded-lg px-4 py-3 text-sm text-amber-300">
+            No drives configured yet. Add a folder path above to get started.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {roots.map((r) => {
+              const layoutVal = layoutEdits[r.id] ?? r.layout;
+              const preview = layoutPreview(layoutVal);
+              return (
+                <div key={r.id} className="flex flex-col gap-2 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <HardDrive size={15} className="text-indigo-400 shrink-0" />
+                    <span className="text-sm text-gray-200 flex-1 truncate font-mono">{r.path}</span>
+                    {r.last_scanned && (
+                      <span className="text-xs text-gray-600 shrink-0">
+                        Last scanned {new Date(r.last_scanned).toLocaleDateString()}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => removeRoot(r.id, r.path)}
+                      className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
+                      title="Remove this drive"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 pl-[27px]">
+                    <label className="text-xs text-gray-500 shrink-0">Layout</label>
+                    <input
+                      type="text"
+                      value={layoutVal}
+                      onChange={(e) => setLayoutEdits((m) => ({ ...m, [r.id]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      onBlur={() => saveLayout(r)}
+                      spellCheck={false}
+                      className="w-56 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-xs text-white focus:outline-none font-mono"
+                    />
+                    <span className={`text-xs truncate ${preview ? "text-gray-600" : "text-amber-400"}`}>
+                      {preview ?? "needs exactly one {creator}, last"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 pl-[27px]">
+                    <label className="text-xs text-gray-500 shrink-0">Library</label>
+                    <input
+                      type="text"
+                      value={nameEdits[r.id] ?? r.name ?? ""}
+                      onChange={(e) => setNameEdits((m) => ({ ...m, [r.id]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      onBlur={() => saveName(r)}
+                      placeholder={r.path.split(/[\\/]/).filter(Boolean).pop() || "name"}
+                      spellCheck={false}
+                      className="w-40 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                    />
+                    <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none ml-2">
+                      <input
+                        type="checkbox"
+                        checked={r.is_writable}
+                        onChange={() => toggleWritable(r)}
+                        className="accent-indigo-500"
+                      />
+                      Import destination
+                    </label>
+                    <label
+                      className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none ml-2"
+                      title="Treat every model inside a character folder as one variant group, instead of guessing groups from names. Rescan to apply."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={r.group_by_character}
+                        onChange={() => toggleGroupByCharacter(r)}
+                        className="accent-indigo-500"
+                      />
+                      Group variants by character
+                    </label>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 mt-4">
+          <button
+            onClick={reloadEnv}
+            disabled={reloadingEnv}
+            title="Re-read scan roots and drive mappings from the .env file"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw size={14} className={reloadingEnv ? "animate-spin" : ""} />
+            Reload .env settings
+          </button>
+          <span className="text-xs text-gray-600">
+            Applies changes to scan roots and drive paths. Database location still needs a restart.
+          </span>
         </div>
       </section>
 
