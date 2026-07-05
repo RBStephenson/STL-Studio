@@ -13,6 +13,37 @@ mounts are wired and how to add or change them.
 
 ---
 
+## Pre-built images
+
+Every release publishes backend and frontend images to the GitHub Container
+Registry (GHCR), so you don't have to build from source:
+
+- `ghcr.io/rbstephenson/stl-inventory-backend`
+- `ghcr.io/rbstephenson/stl-inventory-frontend`
+
+**Available tags**
+
+| Tag | Points at |
+|-----|-----------|
+| `latest` | the newest tagged release |
+| `1.2.3` / `1.2` / `1` | a specific release — pin `1.2.3` for reproducibility |
+| `main` | the latest commit on `main` (moving, may be unstable) |
+| `sha-<hash>` | one specific commit build |
+
+Pull them directly:
+
+```
+docker pull ghcr.io/rbstephenson/stl-inventory-backend:latest
+docker pull ghcr.io/rbstephenson/stl-inventory-frontend:latest
+```
+
+> The bundled `docker-compose.yml` builds the images from source
+> (`docker compose up --build`). To run the published images instead, add an
+> `image:` key to the `backend` and `frontend` services pointing at the tags
+> above.
+
+---
+
 ## How drive mounts are wired
 
 There are three things you need to set for Docker mode to see your library:

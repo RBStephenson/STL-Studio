@@ -73,6 +73,10 @@ Your library database is stored in your user data folder and survives app update
 > [docs/docker.md](docs/docker.md) — Docker can't be configured purely from the
 > Settings page the way the standalone app can.
 
+> **Prefer not to build?** Pre-built `backend` and `frontend` images are
+> published to GHCR on every release — see
+> [docs/docker.md → Pre-built images](docs/docker.md#pre-built-images).
+
 ## Disk Structure Expected
 
 ```
