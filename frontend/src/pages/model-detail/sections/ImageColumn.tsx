@@ -61,6 +61,7 @@ export default function ImageColumn({
   const confirm = useConfirm();
   const galleryHasThumbnail =
     !!model.thumbnail_path && model.image_paths.some((path) => path === model.thumbnail_path);
+  const isRemoteImagePath = (path: string | null) => !!path && path.includes("://");
 
   return (
     <div className="flex flex-col gap-3">
@@ -146,6 +147,8 @@ export default function ImageColumn({
                 (() => {
                   const currentPath = model.image_paths[galleryIdx] ?? null;
                   const isPrimary = currentPath !== null && currentPath === model.primary_image_path;
+                  const canSetThumbnail =
+                    currentPath !== null && currentPath !== model.thumbnail_path && !isRemoteImagePath(currentPath);
                   return (
                     <>
                       <button
@@ -170,6 +173,21 @@ export default function ImageColumn({
                       >
                         <ImageOff size={13} /> Delete image
                       </button>
+                      {canSetThumbnail && (
+                        <button
+                          onClick={async () => {
+                            await api.models.setThumbnail(model.id, {
+                              thumbnail_path: currentPath,
+                              thumbnail_url: null,
+                            });
+                            onReload();
+                          }}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-emerald-800/80 text-gray-300 hover:text-emerald-100 text-xs"
+                          title="Use as thumbnail"
+                        >
+                          <ImagePlus size={13} /> Set thumbnail
+                        </button>
+                      )}
                       {isPrimary ? (
                         <button
                           onClick={async () => {
