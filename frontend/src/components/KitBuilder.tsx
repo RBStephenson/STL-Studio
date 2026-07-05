@@ -1,7 +1,9 @@
-import { useState, useMemo } from "react";
-import { X, Copy, Check, Wrench, Download } from "lucide-react";
+import { lazy, Suspense, useState, useMemo } from "react";
+import { X, Copy, Check, Wrench, Download, Box } from "lucide-react";
 import { STLFile, api } from "../api/client";
 import HelpLink from "./HelpLink";
+
+const STLViewer = lazy(() => import("./STLViewer"));
 
 interface Props {
   modelName: string;
@@ -18,6 +20,10 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
   const [selection, setSelection] = useState<Record<string, number>>({});
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // previewFile: locked by click; hoveredFile: overrides while hovering
+  const [previewFile, setPreviewFile] = useState<STLFile | null>(null);
+  const [hoveredFile, setHoveredFile] = useState<STLFile | null>(null);
+  const displayedFile = hoveredFile ?? previewFile;
 
   // Group files by part_type; null → "Uncategorized"
   const groups = useMemo(() => {
@@ -37,11 +43,12 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
     return sorted;
   }, [files]);
 
-  const toggle = (partType: string, fileId: number) => {
+  const toggle = (partType: string, file: STLFile) => {
+    setPreviewFile(file);
     setSelection((prev) =>
-      prev[partType] === fileId
+      prev[partType] === file.id
         ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== partType))
-        : { ...prev, [partType]: fileId }
+        : { ...prev, [partType]: file.id }
     );
   };
 
@@ -85,43 +92,75 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
         </button>
       </div>
 
-      {/* Groups */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-        {[...groups.entries()].map(([key, groupFiles]) => {
-          const label = key === "__none__" ? "Uncategorized" : key.replace(/\b\w/g, (c) => c.toUpperCase());
-          return (
-            <div key={key}>
-              <div className="flex items-center gap-2 mb-2">
-                <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">{label}</h3>
-                <span className="text-xs text-gray-600">{groupFiles.length} file{groupFiles.length !== 1 ? "s" : ""}</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {groupFiles.map((f) => {
-                  const isSelected = selection[key] === f.id;
-                  return (
-                    <button
-                      key={f.id}
-                      onClick={() => toggle(key, f.id)}
-                      title={f.filename}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm transition-all ${
-                        isSelected
-                          ? "bg-indigo-600 border-indigo-500 text-white"
-                          : "bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200"
-                      }`}
-                    >
-                      {isSelected && <Check size={12} strokeWidth={3} />}
-                      {cleanName(f.filename)}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
+      {/* Body — left: scrollable part selector · right: sticky 3D viewer */}
+      <div className="flex flex-1 overflow-hidden">
 
-        {files.length === 0 && (
-          <p className="text-gray-600 text-sm py-8 text-center">No STL files found for this model.</p>
-        )}
+        {/* Part selector */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 border-r border-gray-800">
+          {[...groups.entries()].map(([key, groupFiles]) => {
+            const label = key === "__none__" ? "Uncategorized" : key.replace(/\b\w/g, (c) => c.toUpperCase());
+            return (
+              <div key={key}>
+                <div className="flex items-center gap-2 mb-2">
+                  <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">{label}</h3>
+                  <span className="text-xs text-gray-600">{groupFiles.length} file{groupFiles.length !== 1 ? "s" : ""}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {groupFiles.map((f) => {
+                    const isSelected = selection[key] === f.id;
+                    const isHovered = hoveredFile?.id === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => toggle(key, f)}
+                        onMouseEnter={() => setHoveredFile(f)}
+                        onMouseLeave={() => setHoveredFile(null)}
+                        title={f.filename}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm transition-all ${
+                          isSelected
+                            ? "bg-indigo-600 border-indigo-500 text-white"
+                            : isHovered
+                            ? "bg-gray-800 border-indigo-400/50 text-gray-200"
+                            : "bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                        }`}
+                      >
+                        {isSelected && <Check size={12} strokeWidth={3} />}
+                        {cleanName(f.filename)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          {files.length === 0 && (
+            <p className="text-gray-600 text-sm py-8 text-center">No STL files found for this model.</p>
+          )}
+        </div>
+
+        {/* 3D preview — always visible, never scrolls */}
+        <div className="w-[42%] flex flex-col shrink-0">
+          {displayedFile ? (
+            <Suspense fallback={
+              <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
+                Loading viewer…
+              </div>
+            }>
+              <STLViewer
+                key={displayedFile.id}
+                files={[displayedFile]}
+                getUrl={api.stlUrl}
+                hidePicker
+              />
+            </Suspense>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-gray-600">
+              <Box size={40} strokeWidth={1} />
+              <p className="text-sm">Click a part to preview it here</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Build summary — sticky footer */}
