@@ -67,6 +67,7 @@ export interface Model {
   thumbnail_path: string | null;
   thumbnail_url: string | null;
   image_paths: string[];
+  removed_image_paths: string[];
   other_files: string[];
   primary_image_path: string | null;
   rating: number | null;

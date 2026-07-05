@@ -86,10 +86,11 @@ class ModelRead(ModelBase):
     thumbnail_path: Optional[str] = None
     thumbnail_url: Optional[str] = None
     image_paths: list = Field(default_factory=list)
+    removed_image_paths: list = Field(default_factory=list)
     other_files: list = Field(default_factory=list)
     primary_image_path: Optional[str] = None
 
-    @field_validator("image_paths", "other_files", mode="before")
+    @field_validator("image_paths", "removed_image_paths", "other_files", mode="before")
     @classmethod
     def _coerce_list(cls, v: object) -> list:
         return v if isinstance(v, list) else []
@@ -171,6 +172,7 @@ class ModelUpdate(BaseModel):
     thumbnail_url: Optional[str] = None
     primary_image_path: Optional[str] = None
     image_paths: Optional[list] = None
+    removed_image_paths: Optional[list] = None
     creator_name: Optional[str] = None
 
 

@@ -680,6 +680,7 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
         "title", "description", "notes", "source_url", "source_site",
         "license", "category", "tags", "removed_auto_tags", "custom_attributes",
         "nsfw", "needs_review", "thumbnail_url", "primary_image_path", "image_paths",
+        "removed_image_paths",
     }
     # The metadata editor resubmits the whole form, so only treat thumbnail_url
     # as "changed" when it differs from what's stored. A new remote URL is
@@ -697,6 +698,8 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
         if key in allowed:
             if key in ("tags", "removed_auto_tags") and isinstance(value, list):
                 value = list(dict.fromkeys(t.strip().lower() for t in value if t.strip()))
+            elif key == "removed_image_paths" and isinstance(value, list):
+                value = list(dict.fromkeys(p for p in value if isinstance(p, str) and p))
             setattr(model, key, value)
 
     # If image_paths was updated and primary_image_path is no longer in the list, clear it.

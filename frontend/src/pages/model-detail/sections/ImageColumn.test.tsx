@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { createRef } from "react";
 import type { GalleryRotatorHandle } from "../../../components/ModelCard";
@@ -28,6 +28,7 @@ const baseModel = {
   name: "Hero",
   title: "Hero",
   image_paths: [],
+  removed_image_paths: [],
   thumbnail_path: null,
   thumbnail_url: null,
   primary_image_path: null,
@@ -80,6 +81,35 @@ describe("ImageColumn", () => {
   it("renders the gallery rotator when the model has image paths", () => {
     renderCol({ model: { ...baseModel, image_paths: ["a.png", "b.png"] } as ModelDetailType });
     expect(screen.getByTestId("gallery-rotator")).toBeInTheDocument();
+  });
+
+  it("does not render a duplicate thumbnail strip item when the thumbnail is in the gallery", () => {
+    const { container } = renderCol({
+      model: { ...baseModel, thumbnail_path: "a.png", image_paths: ["a.png", "b.png"] } as ModelDetailType,
+    });
+    expect(container.querySelectorAll('img[src="a.png"]')).toHaveLength(1);
+  });
+
+  it("persists deleted gallery images as removed image paths", async () => {
+    const { api } = await import("../../../api/client");
+    renderCol({
+      model: {
+        ...baseModel,
+        image_paths: ["a.png", "b.png"],
+        removed_image_paths: ["old.png"],
+        primary_image_path: "a.png",
+      } as ModelDetailType,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete image/ }));
+
+    await waitFor(() => {
+      expect(api.models.update).toHaveBeenCalledWith(1, {
+        image_paths: ["b.png"],
+        removed_image_paths: ["old.png", "a.png"],
+        primary_image_path: null,
+      });
+    });
   });
 
   it("shows the NSFW overlay when flagged and NSFW is hidden", () => {
