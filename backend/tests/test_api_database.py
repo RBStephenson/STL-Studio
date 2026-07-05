@@ -145,3 +145,41 @@ def test_reset_and_restore_snapshots_are_pruned_independently(file_db_client):
 
     # The restore snapshot is untouched by a reset.
     assert (backups / "pre_restore_20200101_000001.db").exists()
+
+
+# ---------------------------------------------------------------------------
+# Restore/reset honor the library write lock (STUDIO-82)
+# ---------------------------------------------------------------------------
+
+def test_reset_returns_409_when_library_busy(file_db_client):
+    """A reset must not wipe the DB while a reorganize apply/undo holds the write
+    lock — it returns 409 instead."""
+    from app.services import write_lock
+
+    client, db_path = file_db_client
+    with write_lock.library_write("apply"):
+        resp = client.post("/database/reset")
+    assert resp.status_code == 409
+    # Nothing was snapshotted or wiped.
+    assert not _backups_dir(db_path).exists() or not list(
+        _backups_dir(db_path).glob("pre_reset_*.db")
+    )
+
+
+def test_restore_returns_409_when_library_busy(file_db_client):
+    """A restore must not swap the DB file while the write lock is held; it is
+    rejected before taking a snapshot or touching the live file."""
+    from app.services import write_lock
+
+    client, db_path = file_db_client
+    backup_bytes = _make_backup_upload(client)  # backup is not gated
+
+    with write_lock.library_write("apply"):
+        resp = client.post(
+            "/database/restore",
+            files={"file": ("backup.db", io.BytesIO(backup_bytes), "application/octet-stream")},
+        )
+    assert resp.status_code == 409
+    assert not _backups_dir(db_path).exists() or not list(
+        _backups_dir(db_path).glob("pre_restore_*.db")
+    )
