@@ -9,10 +9,36 @@
  */
 import { execFile, spawn as nodeSpawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { join } from "node:path";
 
-import { SHUTDOWN_GRACE_MS } from "./config";
+import { BACKEND_HOST, SHUTDOWN_GRACE_MS } from "./config";
 import type { LockRecord, SidecarDeps, SidecarProcess } from "./sidecar";
+
+/**
+ * Ask the OS for a free TCP port on the loopback interface.
+ *
+ * Binds a throwaway server to port 0 (kernel picks a free port), reads the
+ * assigned port, then closes it and hands the number to the sidecar. There's an
+ * inherent TOCTOU gap — the port could be taken between close and the backend's
+ * bind — but on a single-user desktop that race is negligible, and the health
+ * poll surfaces a failed bind as a startup error rather than a silent hang.
+ */
+export function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once("error", reject);
+    srv.listen(0, BACKEND_HOST, () => {
+      const addr = srv.address();
+      if (addr === null || typeof addr === "string") {
+        srv.close(() => reject(new Error("could not determine a free port")));
+        return;
+      }
+      const { port } = addr;
+      srv.close(() => resolve(port));
+    });
+  });
+}
 
 /** GET `url`, resolving true only on a 2xx. Network errors resolve false so the
  *  health poll simply keeps trying rather than throwing. */
