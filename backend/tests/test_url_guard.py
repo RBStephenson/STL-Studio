@@ -125,6 +125,39 @@ def test_guarded_client_preserves_caller_request_hooks():
         anyio.run(client.aclose)
 
 
+def test_guarded_client_uses_system_trust_store_by_default(monkeypatch):
+    sentinel_context = object()
+    captured = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.event_hooks = kwargs["event_hooks"]
+
+    monkeypatch.setattr(url_guard, "_system_ssl_context", lambda: sentinel_context)
+    monkeypatch.setattr(url_guard.httpx, "AsyncClient", FakeAsyncClient)
+
+    client = guarded_async_client()
+
+    assert captured["verify"] is sentinel_context
+    assert url_guard._reject_private_requests in client.event_hooks["request"]
+
+
+def test_guarded_client_preserves_explicit_verify(monkeypatch):
+    captured = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(url_guard, "_system_ssl_context", lambda: object())
+    monkeypatch.setattr(url_guard.httpx, "AsyncClient", FakeAsyncClient)
+
+    guarded_async_client(verify=False)
+
+    assert captured["verify"] is False
+
+
 def test_ssrf_error_is_httpx_error():
     # So scrapers' `except httpx.HTTPError` catches a mid-request block.
     assert issubclass(SSRFError, httpx.HTTPError)

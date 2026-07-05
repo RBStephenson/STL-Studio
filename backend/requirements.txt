@@ -6,6 +6,7 @@ pydantic==2.13.4
 pydantic-settings==2.14.2
 aiofiles==24.1.0
 httpx==0.28.1
+truststore==0.10.4
 beautifulsoup4==4.15.0
 python-multipart==0.0.32
 nh3==0.3.6  # HTML sanitization for imported guide content (#440)
