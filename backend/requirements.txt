@@ -22,4 +22,4 @@ scikit-image==0.26.0
 pillow==12.2.0
 playwright==1.60.0
 anthropic==0.116.0
-pypdf==6.13.3  # merge per-guide PDFs into a series bundle (#490)
+pypdf==6.14.2  # merge per-guide PDFs into a series bundle (#490)
