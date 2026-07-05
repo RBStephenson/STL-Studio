@@ -26,7 +26,10 @@ import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
+const SPLASH_HTML = join(__dirname, "..", "splash.html");
 const APP_ICON = join(__dirname, "..", "resources", "stl_studio.ico");
+// Matches splash.html's background so there's no white flash before it paints.
+const WINDOW_BG = "#070b16";
 
 // Repo root during dev: desktop/dist/main.js -> up two levels. Used only to
 // resolve the dev backend-exe fallback; the packaged app resolves the sidecar
@@ -73,12 +76,16 @@ function createWindow(): BrowserWindow {
     show: false,
     title: "STL Studio",
     icon: APP_ICON,
+    backgroundColor: WINDOW_BG,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+  // Show the branded splash immediately (shown once it paints) so the app never
+  // looks hung while the backend boots; bootBackendAndLoad swaps to the app.
   win.once("ready-to-show", () => win.show());
+  void win.loadFile(SPLASH_HTML);
 
   // Right-click context menu: Back/Forward/Reload + clipboard when relevant.
   win.webContents.on("context-menu", (_event, params) => {
@@ -120,7 +127,10 @@ async function bootBackendAndLoad(win: BrowserWindow): Promise<void> {
       port,
     });
     sidecar = result.proc;
+    // Swap the splash for the app, then drop the splash from history so Back
+    // never returns to it.
     await win.loadURL(baseUrl(result.port));
+    win.webContents.navigationHistory.clear();
   } catch (err) {
     const message =
       err instanceof SidecarStartError
