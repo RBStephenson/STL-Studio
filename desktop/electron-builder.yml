@@ -18,6 +18,9 @@ directories:
 files:
   - dist/**/*
   - index.html
+  - splash.html
+  # Splash art (resources/splash.png) + app icon, referenced at runtime.
+  - resources/**/*
 
 # The PyInstaller backend, copied verbatim into the packaged app's resources/
 # dir (process.resourcesPath). resolveBackendExe() reads it there when packaged.
