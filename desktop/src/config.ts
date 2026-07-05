@@ -1,10 +1,9 @@
 /**
- * Sidecar/runtime configuration — Phase 1 (STUDIO-71).
+ * Sidecar/runtime configuration.
  *
- * PORT IS FIXED at 8484 this phase: the backend does not accept `--port` until
- * Phase 2 (STUDIO-72), so Phase 1 proves the spawn/health/lifecycle loop against
- * a fixed-port, hand-built backend exe. Everywhere the port is used is marked
- * `Phase 2:` so the dynamic free-port wiring has an obvious seam.
+ * The backend port is chosen dynamically at startup (an OS-assigned free port)
+ * and passed to the sidecar via `--port` and to `loadURL` — see `main.ts`. The
+ * constant below is only a last-resort fallback matching standalone.py's default.
  *
  * Ref: docs/plans/528-pywebview-to-electron.md,
  *      docs/plans/528-phase1-sidecar.md
@@ -13,8 +12,9 @@ import { join } from "node:path";
 
 export const BACKEND_HOST = "127.0.0.1";
 
-// Phase 2: replace with an OS-assigned free port chosen at startup and passed to
-// the sidecar via `--port`. Until then this must match standalone.py's PORT.
+/** Fallback port only. The live port is an OS-assigned free port picked at
+ *  startup (`findFreePort` in runtime.ts) and handed to the backend via `--port`;
+ *  this default matches standalone.py's `DEFAULT_PORT` for source/dev runs. */
 export const BACKEND_PORT = 8484;
 
 export const HEALTH_PATH = "/api/health";
@@ -39,22 +39,32 @@ export function healthUrl(port: number = BACKEND_PORT): string {
   return `${baseUrl(port)}${HEALTH_PATH}`;
 }
 
+/** Inputs for locating the backend exe: whether Electron is packaged, the
+ *  packaged `resources/` dir (`process.resourcesPath`), and the dev repo root. */
+export interface BackendExeLocation {
+  packaged: boolean;
+  resourcesPath: string;
+  repoRoot: string;
+}
+
 /**
  * Absolute path to the backend executable to spawn.
  *
- * Phase 1 runs against a *manually built* exe: set `STL_BACKEND_EXE` to point at
- * it (e.g. the PyInstaller output). Absent that, we fall back to the conventional
- * dev build location `dist-standalone/stl-library.exe` at the repo root.
- *
- * Phase 3 (packaging) resolves this from `process.resourcesPath` for the
- * installed app; that branch is intentionally not wired yet.
+ * Resolution order:
+ *   1. `STL_BACKEND_EXE` override — used by devs / CI to point at a hand-built exe.
+ *   2. Packaged: `<resourcesPath>/stl-library.exe`, where electron-builder's
+ *      `extraResources` copied the PyInstaller sidecar.
+ *   3. Dev (`electron .`): `<repoRoot>/dist-standalone/stl-library.exe`.
  */
-export function resolveBackendExe(repoRoot: string): string {
+export function resolveBackendExe(loc: BackendExeLocation): string {
   const override = process.env.STL_BACKEND_EXE;
   if (override && override.trim()) {
     return override.trim();
   }
   const exeName =
     process.platform === "win32" ? "stl-library.exe" : "stl-library";
-  return join(repoRoot, "dist-standalone", exeName);
+  if (loc.packaged) {
+    return join(loc.resourcesPath, exeName);
+  }
+  return join(loc.repoRoot, "dist-standalone", exeName);
 }
