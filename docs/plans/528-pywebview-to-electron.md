@@ -93,9 +93,13 @@ may go away entirely). Update [test_standalone_launch.py](../../backend/tests/te
 — `should_use_window` tests go; add tests for the headless serve path, port override, and SIGTERM
 handling.
 
-**Phase 3 — electron-builder packaging.**
+**Phase 3 — electron-builder packaging.** ✅ Done (STUDIO-73).
 `electron-builder.yml`: NSIS target, `extraResources` sidecar, app icon, product metadata. Produce
 an installed app with a Start-menu entry and no console window. Verify installed run end-to-end.
+Also closed the Phase-2 leftover: the Electron shell now picks a free port (`findFreePort` in
+runtime.ts) and passes `--port` to the sidecar instead of the fixed 8484, and `resolveBackendExe`
+resolves the sidecar from `process.resourcesPath` when packaged. Full installed E2E (real PyInstaller
+sidecar) is deferred to Phase 4 CI — the backend exe can't be built in the dev env here.
 
 **Phase 4 — CI wiring in [build.yml](../../.github/workflows/build.yml).**
 Windows job: build frontend → PyInstaller backend exe → `npm ci && npm run build` in `desktop/` →

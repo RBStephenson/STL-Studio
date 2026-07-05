@@ -1,13 +1,11 @@
 /**
- * Electron main process — Phase 1 (STUDIO-71).
+ * Electron main process.
  *
  * Owns the Python backend as a sidecar child process: on startup it reaps any
- * orphan from a crashed prior run, spawns the backend exe, polls `/api/health`
- * until ready, then points the window at localhost. On quit it terminates the
- * sidecar. A single-instance lock focuses the existing window on a second launch.
- *
- * Port is FIXED at 8484 this phase; the backend gains `--port` in Phase 2, at
- * which point the port here becomes an OS-assigned free port (see config.ts).
+ * orphan from a crashed prior run, picks a free port, spawns the backend exe with
+ * `--port`, polls `/api/health` until ready, then points the window at localhost.
+ * On quit it terminates the sidecar. A single-instance lock focuses the existing
+ * window on a second launch.
  *
  * Ref: docs/plans/528-pywebview-to-electron.md,
  *      docs/plans/528-phase1-sidecar.md
@@ -16,15 +14,17 @@ import { join } from "node:path";
 
 import { app, BrowserWindow, dialog } from "electron";
 
-import { BACKEND_PORT, LOCKFILE_NAME, baseUrl, resolveBackendExe } from "./config";
-import { runtimeDeps } from "./runtime";
+import { LOCKFILE_NAME, baseUrl, resolveBackendExe } from "./config";
+import { findFreePort, runtimeDeps } from "./runtime";
 import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
+const APP_ICON = join(__dirname, "..", "resources", "icon.ico");
 
 // Repo root during dev: desktop/dist/main.js -> up two levels. Used only to
-// resolve the dev backend-exe fallback; packaged resolution arrives in Phase 3.
+// resolve the dev backend-exe fallback; the packaged app resolves the sidecar
+// from process.resourcesPath instead.
 const REPO_ROOT = join(__dirname, "..", "..");
 
 let mainWindow: BrowserWindow | null = null;
@@ -37,6 +37,7 @@ function createWindow(): BrowserWindow {
     height: 800,
     show: false,
     title: "STL Studio",
+    icon: APP_ICON,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -50,13 +51,17 @@ function createWindow(): BrowserWindow {
  *  fall back to the placeholder page so the window is never blank-and-silent. */
 async function bootBackendAndLoad(win: BrowserWindow): Promise<void> {
   deps = runtimeDeps(app.getPath("userData"), LOCKFILE_NAME);
-  const exePath = resolveBackendExe(REPO_ROOT);
+  const exePath = resolveBackendExe({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    repoRoot: REPO_ROOT,
+  });
   try {
+    const port = await findFreePort();
     const result = await startSidecar(deps, {
       exePath,
-      // Phase 2: pass ["--port", String(port)] once the backend honours it.
-      args: [],
-      port: BACKEND_PORT,
+      args: ["--port", String(port)],
+      port,
     });
     sidecar = result.proc;
     await win.loadURL(baseUrl(result.port));
@@ -71,7 +76,7 @@ async function bootBackendAndLoad(win: BrowserWindow): Promise<void> {
 }
 
 // Single-instance lock: a second launch hands focus to the running window
-// instead of spawning a rival backend on the same fixed port.
+// instead of spawning a rival backend and a duplicate window.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();

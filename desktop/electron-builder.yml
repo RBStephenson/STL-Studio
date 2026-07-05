@@ -1,19 +1,38 @@
-# electron-builder configuration — STUB (Phase 0, STUDIO-70).
+# electron-builder configuration — Phase 3 (STUDIO-73).
 #
-# Not exercised yet: packaging (NSIS target, extraResources sidecar, app icon,
-# product metadata) lands in Phase 3 (STUDIO-73). This stub records appId +
-# product name and the intended Windows target so the config file exists from
-# the start of the project. Do not treat this as a working build config.
+# Produces a Windows NSIS installer that bundles the Electron shell plus the
+# PyInstaller backend as an extraResources sidecar. v1 scope: Windows only,
+# unsigned, auto-update deferred (see docs/plans/528-pywebview-to-electron.md).
 #
-# Ref: docs/plans/528-pywebview-to-electron.md (Phase 3)
+# The backend exe must be built first (pyinstaller packaging/stl-library.spec
+# --distpath dist-standalone) — CI chains this in Phase 4 (STUDIO-74).
 appId: com.stlstudio.desktop
 productName: STL Studio
+copyright: Copyright © STL Studio
+
 directories:
   output: release
   buildResources: resources
+
+# App code shipped inside the asar archive.
 files:
   - dist/**/*
   - index.html
-# Windows-only for v1 (unsigned, auto-update deferred). Fleshed out in Phase 3.
+
+# The PyInstaller backend, copied verbatim into the packaged app's resources/
+# dir (process.resourcesPath). resolveBackendExe() reads it there when packaged.
+extraResources:
+  - from: ../dist-standalone/stl-library.exe
+    to: stl-library.exe
+
 win:
   target: nsis
+  icon: resources/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: STL Studio
