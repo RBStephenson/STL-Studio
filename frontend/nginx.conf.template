@@ -1,0 +1,40 @@
+# Serves the built SPA and reverse-proxies /api → the backend. ${BACKEND_ORIGIN}
+# is substituted at container start by the nginx image's envsubst template
+# mechanism (/etc/nginx/templates/*.template -> /etc/nginx/conf.d/). Only real
+# env vars are substituted, so nginx runtime vars like $host / $uri survive.
+server {
+  listen 3000;
+
+  # Uploads (reference images, colour-match) are capped at 10 MB server-side;
+  # 50m is ample. DB restore is the exception and gets its own larger ceiling.
+  client_max_body_size 50m;
+
+  # DB restore uploads the whole SQLite file, which outgrows 50m on a mature
+  # library (STUDIO-77) — give this one backend-validated route 2g.
+  location = /api/database/restore {
+    client_max_body_size 2g;
+    proxy_pass ${BACKEND_ORIGIN}/database/restore;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+  }
+
+  # Strip the /api prefix — the backend mounts its routes at root (/settings,
+  # /scan/browse, …). The trailing slash on proxy_pass does the rewrite.
+  location /api/ {
+    proxy_pass ${BACKEND_ORIGIN}/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    # LLM calls can take minutes — raise the timeout for all API requests.
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+  }
+
+  # SPA with history-API fallback so client-side routes (e.g. /painting/shelf)
+  # resolve to index.html instead of 404ing.
+  location / {
+    root /usr/share/nginx/html;
+    try_files $uri $uri/ /index.html;
+  }
+}

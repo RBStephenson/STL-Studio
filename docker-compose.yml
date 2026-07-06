@@ -2,7 +2,8 @@ services:
   backend:
     build: ./backend
     # Bind published ports to loopback only — the API is unauthenticated and
-    # must not be reachable from the LAN. Use the proxy at http://localhost.
+    # must not be reachable from the LAN. Reach the app via the frontend at
+    # http://localhost, which serves the UI and proxies /api to this service.
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -30,24 +31,16 @@ services:
       - "ollama-host:host-gateway"
     restart: unless-stopped
 
+  # Serves the SPA and reverse-proxies /api to the backend, so it's the single
+  # entry point — no separate proxy container needed. Published on :80 so the
+  # app is at http://localhost. BACKEND_ORIGIN must match the backend service
+  # name/port on this network.
   frontend:
     build: ./frontend
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:80:3000"
     environment:
-      - VITE_API_URL=http://backend:8000
+      - BACKEND_ORIGIN=http://backend:8000
     depends_on:
       - backend
-    restart: unless-stopped
-
-  # nginx reverse proxy so frontend can call /api without CORS issues
-  proxy:
-    image: nginx:alpine
-    ports:
-      - "127.0.0.1:80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - backend
-      - frontend
     restart: unless-stopped

@@ -44,6 +44,68 @@ docker pull ghcr.io/rbstephenson/stl-inventory-frontend:latest
 
 ---
 
+## Networking: the frontend is the single entry point
+
+The **frontend** container serves the web UI **and** reverse-proxies `/api` to
+the backend. It is the only container you need to expose — you browse to it, and
+it forwards API calls internally. There is no separate proxy container.
+
+This works because the app calls the API at the relative path `/api`. The
+frontend's nginx routes `/api/*` to the backend and serves the single-page app
+for everything else.
+
+### `BACKEND_ORIGIN`
+
+The frontend finds the backend via the `BACKEND_ORIGIN` environment variable:
+
+| | |
+|---|---|
+| **Default** | `http://backend:8000` (matches the `backend` service in `docker-compose.yml`) |
+| **Override when** | your backend service/container has a different name, e.g. `BACKEND_ORIGIN=http://stl-inventory-backend:8000` |
+
+It must resolve on the Docker network the two containers share (a compose
+project puts them on one network automatically, so the service name works).
+
+> **`VITE_API_URL` does nothing.** It was only read by the old dev-server image.
+> The production image ignores it — remove it from your compose. Routing is
+> controlled entirely by `BACKEND_ORIGIN`.
+
+### Behind your own reverse proxy (Nginx Proxy Manager, Traefik, Caddy…)
+
+Point your proxy at the **frontend** container as a single upstream — do **not**
+try to split `/api` yourself, and do not expose the backend to your proxy. The
+frontend already handles the `/api` split internally.
+
+```yaml
+# Two containers; only the frontend is published. Your external proxy forwards
+# everything for the hostname to the frontend's published port.
+services:
+  stl-inventory-backend:
+    image: ghcr.io/rbstephenson/stl-inventory-backend:latest
+    environment:
+      - DATABASE_URL=sqlite:////data/stl_inventory.db
+      - STL_ROOTS=/mnt/drive1
+    volumes:
+      - /host/data:/data
+      - /host/library:/mnt/drive1
+
+  stl-inventory-frontend:
+    image: ghcr.io/rbstephenson/stl-inventory-frontend:latest
+    environment:
+      - BACKEND_ORIGIN=http://stl-inventory-backend:8000   # match the backend name
+    ports:
+      - "3000"          # publish/forward this to your reverse proxy
+    depends_on:
+      - stl-inventory-backend
+```
+
+A `405` when saving settings, or a folder browser that "can't open" anything,
+almost always means `/api` isn't reaching the backend — check that you're
+pointing at the **frontend** (not the backend) and that `BACKEND_ORIGIN` names
+your backend correctly.
+
+---
+
 ## How drive mounts are wired
 
 There are three things you need to set for Docker mode to see your library:
