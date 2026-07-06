@@ -517,7 +517,7 @@ export default function VariantGroup() {
     setVariants(order.map((id) => byId.get(id)!));   // optimistic
     setHasManualOrder(true);
     try {
-      await api.models.reorderGroup(numCreatorId, decodedCharacter, order);
+      await api.models.reorderGroup(numCreatorId, decodedCharacter, order, groupId);
     } catch (err) {
       setVariants(prev);   // roll back
       toast(errMsg(err) || "Couldn't save the order — try again.", "error");
@@ -526,7 +526,7 @@ export default function VariantGroup() {
 
   const resetOrder = async () => {
     try {
-      await api.models.reorderGroup(numCreatorId, decodedCharacter, []);
+      await api.models.reorderGroup(numCreatorId, decodedCharacter, [], groupId);
       setHasManualOrder(false);
       reloadVariants();
       toast("Order reset to default.", "success");
@@ -561,7 +561,7 @@ export default function VariantGroup() {
         const skipped = res.missing.length;
         toast(skipped > 0 ? `Image set on ${n} ${noun}; ${skipped} skipped.` : `Image set on ${n} ${noun}.`, "success");
       }
-      const data = await api.models.variants(numCreatorId, decodedCharacter);
+      const data = await api.models.variants(numCreatorId, decodedCharacter, groupId);
       setVariants(data.items);
     } catch (e) {
       toast(errMsg(e) || "Couldn't set the group image — try again.", "error");
@@ -582,7 +582,7 @@ export default function VariantGroup() {
         skipped > 0 ? `${res.message} (${skipped} skipped.)` : res.message,
         res.scraped ? "success" : "info",
       );
-      const data = await api.models.variants(numCreatorId, decodedCharacter);
+      const data = await api.models.variants(numCreatorId, decodedCharacter, groupId);
       setVariants(data.items);
     } catch (e) {
       toast(errMsg(e) || "Couldn't set the store page — try again.", "error");
