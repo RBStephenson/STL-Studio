@@ -158,6 +158,7 @@ describe("VariantGroup bulk management (#183)", () => {
     expect(toast).toHaveBeenCalledWith(expect.stringContaining("Image set on 1 model"), "success");
     // Refetched to cache-bust the grid thumbnails.
     expect(variantsMock).toHaveBeenCalledTimes(2);
+    expect(variantsMock).toHaveBeenLastCalledWith(3, "Rocky", 5);
   });
 
   it("warns when the server-side download fails (bare link stored)", async () => {
@@ -192,6 +193,7 @@ describe("VariantGroup bulk management (#183)", () => {
     expect(toast).toHaveBeenCalledWith(expect.stringContaining("Fetched and applied"), "success");
     // Refetched so the grid reflects the change.
     expect(variantsMock).toHaveBeenCalledTimes(2);
+    expect(variantsMock).toHaveBeenLastCalledWith(3, "Rocky", 5);
   });
 
   it("reports skipped models + info toast when the site can't be scraped (#545)", async () => {
@@ -241,8 +243,8 @@ describe("VariantGroup bulk management (#183)", () => {
 
     await act(async () => { fireEvent.click(screen.getByText("Reset order")); });
 
-    // Empty ids = reset the whole (creator, character) group.
-    expect(reorderGroup).toHaveBeenCalledWith(3, "Rocky", []);
+    // Empty ids = reset the durable group; creator/character are legacy fallback.
+    expect(reorderGroup).toHaveBeenCalledWith(3, "Rocky", [], 5);
     expect(toast).toHaveBeenCalledWith("Order reset to default.", "success");
     expect(variantsMock).toHaveBeenCalledTimes(2); // reloaded
   });
