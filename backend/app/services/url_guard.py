@@ -19,10 +19,12 @@ fully needs connection-level pinning; for a single-user desktop app the resolve
 -and-reject check removes the practical attack surface. Tracked for follow-up.
 """
 import ipaddress
+import ssl
 import socket
 from urllib.parse import urlparse
 
 import httpx
+import truststore
 
 
 class SSRFError(httpx.RequestError):
@@ -92,12 +94,22 @@ async def _reject_private_requests(request: httpx.Request) -> None:
     assert_public_url(str(request.url))
 
 
+def _system_ssl_context() -> ssl.SSLContext:
+    """Return an SSL context backed by the operating system certificate store."""
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
 def guarded_async_client(**kwargs) -> httpx.AsyncClient:
     """An ``httpx.AsyncClient`` that runs `assert_public_url` on every outgoing
     request (including redirect hops). Merges the SSRF hook with any request
-    hooks the caller passes so nothing is silently dropped."""
+    hooks the caller passes so nothing is silently dropped.
+
+    Uses the operating system trust store by default because desktop Windows
+    installs may trust certificates that certifi does not.
+    """
     hooks = dict(kwargs.pop("event_hooks", None) or {})
     request_hooks = list(hooks.get("request", []))
     request_hooks.append(_reject_private_requests)
     hooks["request"] = request_hooks
+    kwargs.setdefault("verify", _system_ssl_context())
     return httpx.AsyncClient(event_hooks=hooks, **kwargs)

@@ -38,6 +38,7 @@ def set_thumbnail(model_id: int, body: ThumbnailUpdate, db: Session = Depends(ge
         model.thumbnail_path = data["thumbnail_path"] or None
     if "thumbnail_url" in data:
         model.thumbnail_url = data["thumbnail_url"] or None
+    model.updated_at = utcnow()
     db.commit()
     return {"ok": True}
 
@@ -155,5 +156,6 @@ async def upload_thumbnail(
 
     model.thumbnail_path = str(out)
     model.thumbnail_url = None
+    model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "path": str(out)}

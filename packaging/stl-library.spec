@@ -67,6 +67,12 @@ a = Analysis(
         "httpx",
         "httpcore",
         "h11",
+        "truststore",
+        "truststore._api",
+        "truststore._macos",
+        "truststore._openssl",
+        "truststore._ssl_constants",
+        "truststore._windows",
         # Other deps
         "multipart",
         "python_multipart",

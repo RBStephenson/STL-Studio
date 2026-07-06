@@ -211,8 +211,9 @@ class QueueReorder(BaseModel):
 
 
 class GroupReorder(BaseModel):
-    creator_id: int
-    character: str
+    creator_id: Optional[int] = None
+    character: Optional[str] = None
+    group_id: Optional[int] = None
     # Member ids in the desired display order. Empty = reset (clear the whole
     # group's manual order, falling back to the heuristic). Ids not in the group
     # are ignored.
