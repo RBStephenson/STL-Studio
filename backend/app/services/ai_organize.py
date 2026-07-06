@@ -14,11 +14,38 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
 _log = logging.getLogger(__name__)
+
+# Fallback request timeout (seconds) when a caller doesn't specify one. The
+# real value normally comes from the assigned AiApiConfig.request_timeout.
+_DEFAULT_TIMEOUT = 10.0
+
+
+@dataclass
+class LlmOutcome:
+    """Result of the LLM refinement stage, so callers can tell what happened.
+
+    ``status`` is one of:
+      - "disabled":  no URL/model configured — heuristics only, by design.
+      - "skipped":   LLM configured but heuristics resolved everything.
+      - "ok":        LLM was called and returned suggestions.
+      - "error":     LLM was called but failed; ``detail`` explains why.
+    """
+    status: str = "disabled"
+    detail: str | None = None
+    suggestions: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class OrganizeResult:
+    """Merged suggestions plus the outcome of the optional LLM pass."""
+    suggestions: list[dict[str, Any]]
+    llm: LlmOutcome
 
 
 _SENSITIVE_LOG_KEYS = {
@@ -252,11 +279,14 @@ def _llm_refine(
     base_url: str,
     model: str,
     api_key: str,
-) -> list[dict[str, Any]]:
-    """Call the LLM and return a merged suggestion list.
+    timeout: float = _DEFAULT_TIMEOUT,
+) -> LlmOutcome:
+    """Call the LLM and return an :class:`LlmOutcome`.
 
-    On any error, logs and returns an empty list so the caller falls back to
-    the heuristic results.
+    On any failure the outcome carries ``status="error"`` and a human-readable
+    ``detail``, and the caller falls back to the heuristic results. Errors are
+    logged at WARNING (not INFO) with the endpoint and the underlying reason so
+    connection refusals, timeouts, and HTTP errors are distinguishable in logs.
     """
     import re as _re
     base_url = _re.sub(
@@ -280,36 +310,56 @@ def _llm_refine(
     }
 
     endpoint = f"{base_url}/v1/chat/completions"
-    _log_step("llm_request", endpoint=endpoint, model=model, file_count=len(files))
+    _log_step("llm_request", endpoint=endpoint, model=model,
+              file_count=len(files), timeout_s=timeout)
     t0 = time.monotonic()
 
+    def _request_error(exc: httpx.RequestError) -> LlmOutcome:
+        # str(exc) includes the target host/port and the OS-level reason
+        # (e.g. "Connection refused", "timed out"), which the class name alone
+        # discarded. A timeout is by far the most common remote-Ollama failure,
+        # so name it explicitly.
+        detail = f"{exc.__class__.__name__}: {exc}".strip().rstrip(":")
+        if isinstance(exc, httpx.TimeoutException):
+            detail = (
+                f"Timed out after {timeout:g}s calling {endpoint} — the model may "
+                f"be cold-starting; raise this API's timeout in Settings."
+            )
+        _log.warning("ai_organize llm_error endpoint=%r reason=%s", endpoint, detail)
+        return LlmOutcome(status="error", detail=detail)
+
     try:
-        resp = httpx.post(endpoint, json=payload, headers=headers, timeout=10)
+        resp = httpx.post(endpoint, json=payload, headers=headers, timeout=timeout)
     except httpx.RequestError as exc:
-        _log_step("llm_error", reason=exc.__class__.__name__)
-        return []
+        return _request_error(exc)
 
     if resp.status_code == 400 and "response_format" in resp.text:
         payload.pop("response_format", None)
         try:
-            resp = httpx.post(endpoint, json=payload, headers=headers, timeout=10)
+            resp = httpx.post(endpoint, json=payload, headers=headers, timeout=timeout)
         except httpx.RequestError as exc:
-            _log_step("llm_error", reason=exc.__class__.__name__)
-            return []
+            return _request_error(exc)
 
     elapsed = time.monotonic() - t0
-    _log_step("llm_response", elapsed_s=round(elapsed, 1))
+    _log_step("llm_response", elapsed_s=round(elapsed, 1), status=resp.status_code)
 
     if not resp.is_success:
-        _log_step("llm_error", reason="http_error")
-        return []
+        body_snippet = resp.text[:300].replace("\n", " ")
+        detail = f"HTTP {resp.status_code} from {endpoint}: {body_snippet}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
 
     try:
         body      = resp.json()
         raw_text: str = body["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError):
-        _log_step("llm_error", reason="bad_shape")
-        return []
+    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        detail = f"Unexpected response shape from {endpoint}: {exc.__class__.__name__}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    # Full model output — only emitted when LOG_LEVEL=DEBUG, so the INFO trace
+    # stays terse while the raw suggestions are available on demand.
+    _log.debug("ai_organize llm_raw_response %s", raw_text[:2000])
 
     if raw_text.startswith("```"):
         raw_text = raw_text.split("```", 2)[1]
@@ -320,12 +370,18 @@ def _llm_refine(
     try:
         data = json.loads(raw_text)
     except json.JSONDecodeError:
-        _log.warning("ai_organize llm returned non-JSON response")
-        return []
+        detail = f"LLM returned non-JSON content from {endpoint}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
 
     suggestions = data.get("files", [])
-    _log_step("llm_done", suggestions=len(suggestions) if isinstance(suggestions, list) else "bad")
-    return suggestions if isinstance(suggestions, list) else []
+    if not isinstance(suggestions, list):
+        _log.warning("ai_organize llm_error malformed 'files' field from %s", endpoint)
+        return LlmOutcome(status="error",
+                          detail=f"Malformed 'files' field in response from {endpoint}")
+
+    _log_step("llm_done", suggestions=len(suggestions))
+    return LlmOutcome(status="ok", suggestions=suggestions)
 
 
 # ---------------------------------------------------------------------------
@@ -340,15 +396,19 @@ def run(
     base_url: str,
     model: str,
     api_key: str = "",
-) -> list[dict[str, Any]]:
-    """Return a merged list of suggestions for the given files.
+    timeout: float = _DEFAULT_TIMEOUT,
+) -> OrganizeResult:
+    """Return merged suggestions plus the outcome of the optional LLM pass.
 
     Heuristics run first and are always returned immediately. The LLM is
     only called for files where heuristics could NOT determine a part_type
     (capped at _LLM_FILE_CAP), so the response time stays reasonable even
-    for models with hundreds of files.
+    for models with hundreds of files. The returned :class:`OrganizeResult`
+    reports whether the LLM ran, was skipped, was disabled, or errored so the
+    caller can surface that to the user instead of silently degrading.
     """
     _log_step("start", file_count=len(files), has_llm=bool(base_url and model))
+    outcome = LlmOutcome(status="disabled")
 
     # Stage 1: fast Python heuristics
     heuristic = heuristic_pass(files)
@@ -378,8 +438,8 @@ def run(
 
         if unresolved:
             _log_step("llm_batch", sending=len(unresolved), of=len(files))
-            llm_results = _llm_refine(unresolved, base_url, model, api_key)
-            for s in llm_results:
+            outcome = _llm_refine(unresolved, base_url, model, api_key, timeout=timeout)
+            for s in outcome.suggestions:
                 fid = s.get("id")
                 if not isinstance(fid, int):
                     continue
@@ -392,8 +452,9 @@ def run(
                     existing["sup_base_filename"] = s["sup_base_filename"]
                 merged[fid] = existing
         else:
+            outcome = LlmOutcome(status="skipped")
             _log_step("llm_skip", reason="no unresolved files after heuristics")
 
     result = list(merged.values())
-    _log_step("done", total_suggestions=len(result))
-    return result
+    _log_step("done", total_suggestions=len(result), llm_status=outcome.status)
+    return OrganizeResult(suggestions=result, llm=outcome)

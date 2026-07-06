@@ -474,19 +474,51 @@ def update_stl_file(file_id: int, body: STLFileUpdate, db: Session = Depends(get
 
 
 def _load_organize_config(db):
-    """Read AI organizer settings from app_settings. Raises HTTPException on misconfiguration."""
-    from app.models import AppSetting
+    """Resolve the AI organizer's endpoint. Raises HTTPException on misconfiguration.
+
+    Returns (url, model, api_key, timeout). The organizer is driven by a named
+    AiApiConfig assigned via the ``ai_organize_api`` setting (the "Use API"
+    selector in the UI). For backward compatibility with installs that predate
+    named configs, it falls back to the legacy ``ai_organize_url`` /
+    ``ai_organize_model`` app_settings when no config is assigned.
+    """
+    from app.models import AppSetting, AiApiConfig
     from app.services import secrets as _secrets
 
     enabled_row = db.get(AppSetting, "ai_organize_enabled")
     if not enabled_row or not bool(enabled_row.value):
         raise HTTPException(status_code=400, detail="AI organizer is not enabled")
+
+    # Preferred path: a named AiApiConfig assigned to the organize function.
+    api_row = db.get(AppSetting, "ai_organize_api")
+    config_id = api_row.value if api_row else None
+    if config_id:
+        cfg = db.get(AiApiConfig, int(config_id))
+        if not cfg:
+            raise HTTPException(
+                status_code=400,
+                detail="The AI API assigned to organizing no longer exists — reselect one in Settings.",
+            )
+        if cfg.api_type != "openai" or not cfg.url:
+            raise HTTPException(
+                status_code=400,
+                detail="AI organizing requires an OpenAI-compatible API (e.g. Ollama) with a URL set.",
+            )
+        return (
+            cfg.url,
+            cfg.model or "",
+            _secrets.get_ai_api_config_key(db, cfg.id) or "",
+            cfg.request_timeout,
+        )
+
+    # Legacy fallback: standalone ai_organize_* app_settings.
     url_row = db.get(AppSetting, "ai_organize_url")
     model_row = db.get(AppSetting, "ai_organize_model")
     return (
         url_row.value if url_row else "",
         model_row.value if model_row else "",
         _secrets.get_organize_api_key(db) or "",
+        10,
     )
 
 
@@ -528,7 +560,7 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     if not model.stl_files:
         raise HTTPException(status_code=400, detail="Model has no STL files to organize")
 
-    url, org_model, api_key = _load_organize_config(db)
+    url, org_model, api_key, timeout = _load_organize_config(db)
 
     file_dicts = [
         {"id": f.id, "filename": f.filename, "part_type": f.part_type, "part_name": f.part_name}
@@ -545,10 +577,11 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     ]
 
     try:
-        raw = ai_organize.run(file_dicts, url, org_model, api_key)
+        organize_result = ai_organize.run(file_dicts, url, org_model, api_key, timeout=timeout)
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
+    raw = organize_result.suggestions
     for s in raw:
         if s.get("part_type"):
             s["part_type"] = _normalize_type(s["part_type"], existing_types)
@@ -573,7 +606,11 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
             sup_base_filename=sup_base_filename if resolved_sup_id else None,
         ))
 
-    return AiOrganizePreviewResult(suggestions=previews)
+    return AiOrganizePreviewResult(
+        suggestions=previews,
+        llm_status=organize_result.llm.status,
+        llm_detail=organize_result.llm.detail,
+    )
 
 
 @router.post("/{model_id}/ai-organize/apply", response_model=AiOrganizeResult)

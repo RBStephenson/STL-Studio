@@ -322,12 +322,42 @@ def _run_migrations() -> None:
         logger.info("Alembic: schema up to date")
 
 
+def _apply_persisted_log_level():
+    """Apply a log level persisted via the Settings UI, overriding the env default.
+
+    Runs at startup once the DB is available so a level chosen in the UI
+    survives a restart. An invalid stored value is ignored (kept resilient —
+    the schema validates on write, so this only guards against manual edits).
+    """
+    import logging
+    from app.logging_config import apply_log_level
+    from app.models import AppSetting
+
+    db = SessionLocal()
+    try:
+        row = db.get(AppSetting, "log_level")
+        if row and row.value:
+            apply_log_level(row.value)
+    except ValueError:
+        logging.getLogger("app").warning(
+            "Ignoring invalid persisted log_level"
+        )
+    except Exception:
+        # Best-effort, mirroring the other startup helpers: a DB that isn't
+        # ready yet (e.g. under test harnesses) must not abort startup. The env
+        # LOG_LEVEL default already applied in configure_logging stays in force.
+        logging.getLogger("app").debug("Could not read persisted log_level", exc_info=True)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # One-time startup migrations / seeding, run before the app serves requests.
     _run_migrations()
     _backfill_missing_variant_groups()
     _seed_tag_index()
+    _apply_persisted_log_level()
     yield
 
 
@@ -396,6 +426,11 @@ def create_app(api_prefix: str = "") -> FastAPI:
     used by both the Docker deployment (no prefix; nginx adds /api) and the
     standalone binary (api_prefix="/api", frontend served from the same app).
     """
+    # Bootstrap logging from the env default (LOG_LEVEL). A level persisted in
+    # the DB via the Settings UI is applied later, in the lifespan startup, once
+    # the database is available (see _apply_persisted_log_level).
+    from app.logging_config import configure_logging
+    configure_logging(app_settings.log_level)
     app = FastAPI(title="STL Studio", version="0.1.0", lifespan=lifespan)
 
     app.middleware("http")(_block_cross_origin_writes)

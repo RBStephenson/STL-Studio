@@ -293,6 +293,28 @@ The new root is seeded automatically on next boot — no manual Settings step ne
 
 ---
 
+## Optional environment variables
+
+**`LOG_LEVEL`** (backend) sets the initial log verbosity — one of `DEBUG`,
+`INFO` (default), `WARNING`, `ERROR`, `CRITICAL`:
+
+```yaml
+services:
+  backend:
+    environment:
+      - LOG_LEVEL=INFO
+```
+
+You can also change the level live in the UI under **Settings → Preferences →
+Logging** — that value overrides `LOG_LEVEL` and persists across restarts. See
+[Logging](features.md#logging).
+
+Tail the backend's output with `docker compose logs -f backend`.
+`PYTHONUNBUFFERED=1` (already set in the shipped compose files) keeps log lines
+from being buffered.
+
+---
+
 ## See also
 
 - **[Getting Started → Docker](getting-started.md#docker-advanced)** — the quick

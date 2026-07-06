@@ -56,13 +56,19 @@ def get_settings(db: Session = Depends(get_db)):
 def update_settings(body: AppSettingsUpdate, db: Session = Depends(get_db)):
     # exclude_none: a null value means "leave unchanged", and must never be
     # stored into a typed setting.
-    for key, value in body.model_dump(exclude_unset=True, exclude_none=True).items():
+    updates = body.model_dump(exclude_unset=True, exclude_none=True)
+    for key, value in updates.items():
         row = db.get(AppSetting, key)
         if row is None:
             db.add(AppSetting(key=key, value=value))
         else:
             row.value = value
     db.commit()
+    # Apply a log-level change live so it takes effect without a restart. The
+    # schema already validated the value, so apply_log_level won't raise here.
+    if "log_level" in updates:
+        from app.logging_config import apply_log_level
+        apply_log_level(updates["log_level"])
     return _merged(db)
 
 
@@ -297,6 +303,7 @@ def _config_to_read(db: Session, c: AiApiConfig) -> AiApiConfigRead:
         url=c.url,
         model=c.model,
         effort=c.effort,
+        request_timeout=c.request_timeout,
         key_set=hint is not None,
         key_hint=hint,
     )
@@ -317,13 +324,15 @@ def create_ai_api_config(body: AiApiConfigCreate, db: Session = Depends(get_db))
         url=body.url,
         model=body.model or "",
         effort=body.effort,
+        request_timeout=body.request_timeout,
         created_at=_now(),
     )
     db.add(c)
     db.commit()
     db.refresh(c)
     return AiApiConfigRead(id=c.id, name=c.name, api_type=c.api_type, url=c.url,
-                           model=c.model, effort=c.effort, key_set=False, key_hint=None)
+                           model=c.model, effort=c.effort,
+                           request_timeout=c.request_timeout, key_set=False, key_hint=None)
 
 
 @router.patch("/ai-apis/{config_id}", response_model=AiApiConfigRead)
@@ -382,14 +391,15 @@ def get_ai_api_config_models(config_id: int, db: Session = Depends(get_db)):
 
     import re
     base = re.sub(r"(?i)(https?://)(?:localhost|127\.0\.0\.1)\b", r"\1host.docker.internal", c.url.rstrip("/"))
+    timeout = c.request_timeout
     try:
-        r = httpx.get(f"{base}/v1/models", headers=headers, timeout=10)
+        r = httpx.get(f"{base}/v1/models", headers=headers, timeout=timeout)
         if r.status_code == 200:
             data = r.json()
             models = sorted({m["id"] for m in data.get("data", []) if "id" in m})
             if models:
                 return {"models": models}
-        r2 = httpx.get(f"{base}/api/tags", headers=headers, timeout=10)
+        r2 = httpx.get(f"{base}/api/tags", headers=headers, timeout=timeout)
         if r2.status_code == 200:
             data2 = r2.json()
             models = sorted({m["name"] for m in data2.get("models", []) if "name" in m})

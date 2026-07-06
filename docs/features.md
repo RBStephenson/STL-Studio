@@ -18,6 +18,7 @@ A tour of every screen and what it does.
 - [Creators & per-creator rescan](#creators--per-creator-rescan)
 - [Settings](#settings)
 - [AI & Integrations](#ai--integrations)
+- [Logging](#logging)
 - [Backup, restore & reset](#backup-restore--reset)
 - [NSFW toggle](#nsfw-toggle)
 
@@ -644,6 +645,12 @@ entry has:
   OpenAI-compatible, the app fetches the available model list from the base
   URL automatically when you enter it.
 - **Effort** — (Anthropic only) controls reasoning depth: Low, Medium, or High.
+- **Timeout** — how long (in seconds) to wait for a response from this
+  endpoint before giving up. Defaults to **10s**, which suits a local Ollama.
+  A **remote** Ollama loading a model for the first time (a "cold start") can
+  take 30–90s or more, so raise this for remote endpoints — e.g. `60`. The
+  setting is per-connection, so a fast local API and a slow remote one can each
+  have their own value.
 - **API key** — stored encrypted server-side. For Ollama and similar local
   endpoints, a key is optional.
 
@@ -659,7 +666,16 @@ Controls which AI features are active and which named API each one uses.
   guide for review before saving. Choose which configured API to use.
 - **AI Naming & Organizing** — when enabled, normalizes part names, assigns
   categories, and links presupported files on a per-model basis. Choose which
-  configured API to use.
+  configured API to use. Fast built-in heuristics run first and handle
+  well-named files on their own; the AI is only called for files the heuristics
+  can't classify, so a model whose parts are already clearly named may not need
+  the AI at all. If the AI call fails (e.g. the endpoint is unreachable or times
+  out), the review still opens with the heuristic suggestions and a message
+  explaining what went wrong — see [Logging](#logging) to inspect the details.
+
+> **Requires an OpenAI-compatible API** (e.g. Ollama). Assign one under
+> **AI APIs**, then select it here. If a remote endpoint is slow to respond,
+> raise that connection's **Timeout** (see AI APIs above).
 
 ### Metadata
 
@@ -674,6 +690,31 @@ metadata, and thumbnails.
 
 When configured, these APIs are used automatically during
 [web enrichment](#metadata-editing--web-enrichment).
+
+## Logging
+
+**Settings → Preferences → Logging** sets how much the backend writes to its
+output. Pick one of the five standard levels — `DEBUG`, `INFO` (the default),
+`WARNING`, `ERROR`, `CRITICAL`. The change **takes effect immediately, without a
+restart**, and persists across restarts.
+
+- `INFO` — normal operation. Includes a one-line-per-step trace of AI calls
+  (endpoint, model, timeout, elapsed time, HTTP status, outcome).
+- `DEBUG` — everything in `INFO` plus verbose detail, including the raw response
+  body returned by the AI endpoint. Useful when diagnosing why an AI call
+  behaves unexpectedly.
+- `WARNING` and above — quieter; only problems (failed/timed-out AI calls, etc.)
+  are logged.
+
+**Viewing the logs** depends on how you run the app. Under Docker:
+
+```bash
+docker compose logs -f backend
+```
+
+The initial level can also be set at startup with the `LOG_LEVEL` environment
+variable (see [Docker configuration](docker.md)); a value chosen in the UI
+overrides it and is what survives restarts.
 
 ## Scan rules
 

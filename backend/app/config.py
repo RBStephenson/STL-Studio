@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # this stays off unless a writable standalone deployment sets it.
     reorganize_write_enabled: bool = False
 
+    # Root log level for the application's own loggers (the `app.*` hierarchy).
+    # Uvicorn only configures its own loggers, leaving `app.*` at the default
+    # WARNING with no handler — so INFO-level diagnostics (e.g. the AI organizer
+    # request/response trace) were silently dropped. Set via LOG_LEVEL.
+    log_level: str = "INFO"
+
     @property
     def stl_root_list(self) -> list[str]:
         return [r.strip() for r in self.stl_roots.split(",") if r.strip()]
