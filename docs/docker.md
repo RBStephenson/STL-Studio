@@ -15,8 +15,9 @@ mounts are wired and how to add or change them.
 
 ## Pre-built images
 
-Every release publishes backend and frontend images to the GitHub Container
-Registry (GHCR), so you don't have to build from source:
+Every successful `main` build and every release publishes backend and frontend
+images to the GitHub Container Registry (GHCR), so you don't have to build from
+source:
 
 - `ghcr.io/rbstephenson/stl-inventory-backend`
 - `ghcr.io/rbstephenson/stl-inventory-frontend`
@@ -25,7 +26,7 @@ Registry (GHCR), so you don't have to build from source:
 
 | Tag | Points at |
 |-----|-----------|
-| `latest` | the newest tagged release |
+| `latest` | the newest successful `main` build (moving, may be unstable) |
 | `1.2.3` / `1.2` / `1` | a specific release — pin `1.2.3` for reproducibility |
 | `main` | the latest commit on `main` (moving, may be unstable) |
 | `sha-<hash>` | one specific commit build |

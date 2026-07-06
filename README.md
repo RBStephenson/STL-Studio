@@ -33,6 +33,9 @@ Local web app for cataloguing, browsing, and managing an STL file library.
    - **Windows**: `stl-library-windows.exe`
    - **Linux**: `stl-library-linux`
 
+   For testing the newest successful `main` build before a versioned release,
+   use the rolling `Main Build` prerelease on the same Releases page.
+
 2. Run the file. Your browser will open automatically to `http://localhost:8484`.
 
 3. Go to **Settings** and add the folder paths where your STL files live.
@@ -74,7 +77,7 @@ Your library database is stored in your user data folder and survives app update
 > Settings page the way the standalone app can.
 
 > **Prefer not to build?** Pre-built `backend` and `frontend` images are
-> published to GHCR on every release — see
+> published to GHCR on every successful `main` build and every release — see
 > [docs/docker.md → Pre-built images](docs/docker.md#pre-built-images).
 
 ## Disk Structure Expected
