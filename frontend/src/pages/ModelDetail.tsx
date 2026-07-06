@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw } from "lucide-react";
-import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizeSuggestionPreview } from "../api/client";
+import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
 import FindOnWeb from "../components/FindOnWeb";
 import ImagePicker from "../components/ImagePicker";
@@ -117,7 +117,7 @@ export default function ModelDetail() {
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [aiOrganizing, setAiOrganizing] = useState(false);
-  const [aiOrganizeSuggestions, setAiOrganizeSuggestions] = useState<AiOrganizeSuggestionPreview[] | null>(null);
+  const [aiOrganizeResult, setAiOrganizeResult] = useState<AiOrganizePreviewResult | null>(null);
   const [copiedPath, setCopiedPath] = useState(false);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
@@ -240,12 +240,12 @@ export default function ModelDetail() {
     if (!model || aiOrganizing) return;
     setAiOrganizing(true);
     try {
-      const result = await api.models.aiOrganize(model.id);
-      if (!result.suggestions.length) {
-        toast("AI returned no suggestions for this model.", "error");
-        return;
-      }
-      setAiOrganizeSuggestions(result.suggestions);
+      // Always open the modal so the user sees WHY, whether that's a review
+      // table (llm_status "ok") or a clear explanation (disabled/skipped/
+      // error) — AI Organize never silently substitutes heuristics for a
+      // real AI result (#821), so an empty response is still feedback worth
+      // surfacing, not a value to swallow into a toast.
+      setAiOrganizeResult(await api.models.aiOrganize(model.id));
     } catch (e) {
       toast(errMsg(e) || "AI organize failed", "error");
     } finally {
@@ -888,13 +888,13 @@ export default function ModelDetail() {
         />
       )}
 
-      {aiOrganizeSuggestions && (
+      {aiOrganizeResult && (
         <AiOrganizeReviewModal
           modelId={model.id}
-          suggestions={aiOrganizeSuggestions}
+          result={aiOrganizeResult}
           stlFiles={model.stl_files}
-          onApplied={() => { setAiOrganizeSuggestions(null); load(); }}
-          onClose={() => setAiOrganizeSuggestions(null)}
+          onApplied={() => { setAiOrganizeResult(null); load(); }}
+          onClose={() => setAiOrganizeResult(null)}
         />
       )}
 

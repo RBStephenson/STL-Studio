@@ -2,23 +2,37 @@
 
 Secrets (currently just the AI provider API key) are kept out of the plaintext
 `app_settings` whitelist. The ciphertext lives in its own `app_settings` row; the
-Fernet key it's encrypted with lives *outside* the database — in `STL_SECRET_KEY`
-if set, otherwise a generated `.secret_key` file in the database's data dir. So a
-leaked DB / backup alone doesn't expose the key.
+Fernet key it's encrypted with is resolved as follows — and is NEVER written to
+a file, in any environment, for any reason (a prior version wrote a generated
+key to a `.secret_key` file, which once leaked into version control):
 
-If the key material is ever lost, the stored ciphertext can't be decrypted; that
-is treated as "no key set" and the user simply re-enters it.
+  1. `STL_SECRET_KEY` env var, if set — explicit operator configuration. This
+     is the only way secrets survive a process restart; set it in production.
+  2. If the configured database is the ephemeral in-memory SQLite instance the
+     test suite uses (and only then — no real deployment ever points
+     DATABASE_URL at `sqlite:///:memory:`), an ephemeral key is generated once
+     and stored as an ordinary `app_settings` row in that same self-destructing
+     database. This keeps tests deterministic without ever touching disk.
+  3. Otherwise, an ephemeral key is generated in memory for the life of the
+     process. Nothing is persisted anywhere: without STL_SECRET_KEY set,
+     secrets encrypted now will not be decryptable after a restart.
+
+If the key material is ever lost or wrong (cases 2/3 above, or STL_SECRET_KEY
+changing), decryption fails; that is treated as "no key set" and the user
+simply re-enters it.
 """
 from __future__ import annotations
 
+import logging
 import os
-from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import AppSetting
+
+_log = logging.getLogger(__name__)
 
 # app_settings row holding the encrypted API key (NOT in the AppSettingsRead
 # whitelist, so the plain settings GET never echoes it).
@@ -29,52 +43,53 @@ CULTS3D_USERNAME_KEY = "cults3d_username"
 CULTS3D_API_KEY_ENC = "cults3d_api_key_enc"
 
 _SECRET_KEY_ENV = "STL_SECRET_KEY"
-_SECRET_KEY_FILENAME = ".secret_key"
+
+# Reserved app_settings key for the ephemeral test-only Fernet key (case 2
+# above). Never read/written outside the in-memory test database, and never
+# part of any public schema.
+_EPHEMERAL_DB_KEY_SETTING = "_ephemeral_secret_key"
 
 _fernet: Fernet | None = None
 
 
-def _data_dir() -> Path:
-    """Directory beside the SQLite database file (where the key file lives).
+def _is_ephemeral_database() -> bool:
+    """True only for the in-memory SQLite URL the test suite uses.
 
-    Falls back to the current working directory for non-SQLite / in-memory URLs
-    (e.g. the test engine), which is fine — tests set STL_SECRET_KEY or accept an
-    ephemeral generated key.
+    No real deployment (the Docker `/data/...` volume or a standalone file
+    path) ever sets DATABASE_URL to this value, so this can't misfire outside
+    tests — it's a safe signal that we're in a throwaway, per-test database.
     """
-    url = settings.database_url
-    prefix = "sqlite:///"
-    if url.startswith(prefix):
-        # sqlite:////data/x.db -> /data/x.db ; sqlite:///./x.db -> ./x.db
-        db_path = url[len(prefix) - 1:] if url.startswith("sqlite:////") else url[len(prefix):]
-        parent = Path(db_path).resolve().parent
-        if parent.exists():
-            return parent
-    return Path.cwd()
+    return settings.database_url == "sqlite:///:memory:"
 
 
-def _load_or_create_key() -> bytes:
+def _load_or_create_key(db: Session | None = None) -> bytes:
+    """Resolve the Fernet key material. Never written to a file — see the
+    module docstring for the full precedence and rationale."""
     env_key = os.environ.get(_SECRET_KEY_ENV)
     if env_key:
         return env_key.encode()
 
-    key_path = _data_dir() / _SECRET_KEY_FILENAME
-    if key_path.exists():
-        return key_path.read_bytes()
+    if db is not None and _is_ephemeral_database():
+        row = db.get(AppSetting, _EPHEMERAL_DB_KEY_SETTING)
+        if row is not None and isinstance(row.value, str):
+            return row.value.encode()
+        key = Fernet.generate_key()
+        db.add(AppSetting(key=_EPHEMERAL_DB_KEY_SETTING, value=key.decode()))
+        db.commit()
+        return key
 
-    key = Fernet.generate_key()
-    key_path.write_bytes(key)
-    # Best-effort lock-down; no-op / ignored on platforms without POSIX perms.
-    try:
-        os.chmod(key_path, 0o600)
-    except OSError:
-        pass
-    return key
+    _log.warning(
+        "STL_SECRET_KEY is not set — using an ephemeral in-memory encryption "
+        "key for this process. Secrets encrypted now will NOT be decryptable "
+        "after a restart. Set STL_SECRET_KEY to persist them."
+    )
+    return Fernet.generate_key()
 
 
-def _get_fernet() -> Fernet:
+def _get_fernet(db: Session | None = None) -> Fernet:
     global _fernet
     if _fernet is None:
-        _fernet = Fernet(_load_or_create_key())
+        _fernet = Fernet(_load_or_create_key(db))
     return _fernet
 
 
@@ -90,7 +105,7 @@ def set_ai_api_key(db: Session, raw_key: str) -> None:
     if not raw_key:
         clear_ai_api_key(db)
         return
-    token = _get_fernet().encrypt(raw_key.encode()).decode()
+    token = _get_fernet(db).encrypt(raw_key.encode()).decode()
     row = db.get(AppSetting, AI_API_KEY_ENC)
     if row is None:
         db.add(AppSetting(key=AI_API_KEY_ENC, value=token))
@@ -105,7 +120,7 @@ def get_ai_api_key(db: Session) -> str | None:
     if row is None or not isinstance(row.value, str):
         return None
     try:
-        return _get_fernet().decrypt(row.value.encode()).decode()
+        return _get_fernet(db).decrypt(row.value.encode()).decode()
     except InvalidToken:
         # Key material changed/lost — treat as "no key set".
         return None
@@ -141,7 +156,7 @@ def set_cults_credentials(db: Session, username: str, api_key: str) -> None:
         clear_cults_credentials(db)
         return
     blob = f"{username}\x00{api_key}"
-    token = _get_fernet().encrypt(blob.encode()).decode()
+    token = _get_fernet(db).encrypt(blob.encode()).decode()
     row = db.get(AppSetting, CULTS_CREDS_ENC)
     if row is None:
         db.add(AppSetting(key=CULTS_CREDS_ENC, value=token))
@@ -156,7 +171,7 @@ def get_cults_credentials(db: Session) -> tuple[str, str] | None:
     if row is None or not isinstance(row.value, str):
         return None
     try:
-        blob = _get_fernet().decrypt(row.value.encode()).decode()
+        blob = _get_fernet(db).decrypt(row.value.encode()).decode()
         username, api_key = blob.split("\x00", 1)
         return username, api_key
     except (InvalidToken, ValueError):
@@ -192,7 +207,7 @@ def set_mmf_api_key(db: Session, raw_key: str) -> None:
     if not raw_key:
         clear_mmf_api_key(db)
         return
-    token = _get_fernet().encrypt(raw_key.encode()).decode()
+    token = _get_fernet(db).encrypt(raw_key.encode()).decode()
     row = db.get(AppSetting, MMF_API_KEY_ENC)
     if row is None:
         db.add(AppSetting(key=MMF_API_KEY_ENC, value=token))
@@ -207,7 +222,7 @@ def get_mmf_api_key(db: Session) -> str | None:
     if row is None or not isinstance(row.value, str):
         return None
     try:
-        return _get_fernet().decrypt(row.value.encode()).decode()
+        return _get_fernet(db).decrypt(row.value.encode()).decode()
     except InvalidToken:
         return None
 
@@ -246,7 +261,7 @@ def set_organize_api_key(db: Session, raw_key: str) -> None:
     if not raw_key:
         clear_organize_api_key(db)
         return
-    token = _get_fernet().encrypt(raw_key.encode()).decode()
+    token = _get_fernet(db).encrypt(raw_key.encode()).decode()
     row = db.get(AppSetting, ORGANIZE_API_KEY_ENC)
     if row is None:
         db.add(AppSetting(key=ORGANIZE_API_KEY_ENC, value=token))
@@ -260,7 +275,7 @@ def get_organize_api_key(db: Session) -> str | None:
     if row is None or not isinstance(row.value, str):
         return None
     try:
-        return _get_fernet().decrypt(row.value.encode()).decode()
+        return _get_fernet(db).decrypt(row.value.encode()).decode()
     except InvalidToken:
         return None
 
@@ -294,7 +309,7 @@ def set_ai_api_config_key(db: Session, config_id: int, raw_key: str) -> None:
     if not raw_key:
         _clear_setting(db, setting_key)
         return
-    token = _get_fernet().encrypt(raw_key.encode()).decode()
+    token = _get_fernet(db).encrypt(raw_key.encode()).decode()
     row = db.get(AppSetting, setting_key)
     if row is None:
         db.add(AppSetting(key=setting_key, value=token))
@@ -308,7 +323,7 @@ def get_ai_api_config_key(db: Session, config_id: int) -> str | None:
     if row is None or not isinstance(row.value, str):
         return None
     try:
-        return _get_fernet().decrypt(row.value.encode()).decode()
+        return _get_fernet(db).decrypt(row.value.encode()).decode()
     except InvalidToken:
         return None
 

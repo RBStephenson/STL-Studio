@@ -309,6 +309,28 @@ You can also change the level live in the UI under **Settings → Preferences �
 Logging** — that value overrides `LOG_LEVEL` and persists across restarts. See
 [Logging](features.md#logging).
 
+**`STL_SECRET_KEY`** (backend) is the encryption key for API keys/credentials
+stored via Settings (AI, Cults3D, MyMiniFactory). It is **never written to a
+file** by the app — if unset, a key is generated in memory for that process's
+lifetime only, so anything encrypted won't survive a restart (you'd just
+re-enter it). Set a stable value to persist secrets across restarts/upgrades:
+
+```yaml
+services:
+  backend:
+    environment:
+      - STL_SECRET_KEY=your-generated-key-here
+```
+
+Generate one with:
+
+```bash
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Keep this value secret and back it up — if it's lost, previously stored keys
+become undecryptable and must be re-entered.
+
 Tail the backend's output with `docker compose logs -f backend`.
 `PYTHONUNBUFFERED=1` (already set in the shipped compose files) keeps log lines
 from being buffered.

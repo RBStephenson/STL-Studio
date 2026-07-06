@@ -570,11 +570,26 @@ def _normalize_type(suggested: str, existing: list[str]) -> str:
     return suggested
 
 
+# User-facing copy for LLM outcomes that aren't a technical error (which
+# already carries its own detail). AI Organize is success-via-API-or-nothing
+# (#821): heuristic-derived suggestions are never presented as if the AI
+# produced them, so every non-"ok" status returns zero suggestions and one of
+# these explanations instead.
+_LLM_STATUS_MESSAGES = {
+    "disabled": "AI Organize has no API configured. Assign one under Settings → AI & Integrations.",
+    "skipped": "The AI wasn't called — every file was already resolved by naming rules, so there was nothing for it to refine.",
+}
+
+
 @router.post("/{model_id}/ai-organize", response_model=AiOrganizePreviewResult)
 def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     """Call the AI organizer and return suggestions without writing to the DB.
 
-    The client reviews, optionally edits, then calls /ai-organize/apply.
+    Suggestions are only returned when the AI call actually succeeded
+    (``llm_status == "ok"``) — heuristic-only results are never silently
+    substituted, so the client can trust that a non-empty response means the
+    AI genuinely ran (#821). The client reviews, optionally edits, then calls
+    /ai-organize/apply.
     """
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
@@ -605,6 +620,14 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
         )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+    llm = organize_result.llm
+    if llm.status != "ok":
+        return AiOrganizePreviewResult(
+            suggestions=[],
+            llm_status=llm.status,
+            llm_detail=llm.detail or _LLM_STATUS_MESSAGES.get(llm.status),
+        )
 
     raw = organize_result.suggestions
     for s in raw:
