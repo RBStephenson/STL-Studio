@@ -33,6 +33,24 @@ _ANTHROPIC_MAX_TOKENS = 4096
 _EFFORT_THINKING_BUDGET = {"low": 0, "medium": 4096, "high": 10000}
 
 
+# Matches the ``scheme://userinfo@`` prefix of a URL anywhere in a string, so we
+# can scrub credentials both from bare endpoint URLs and from URLs echoed inside
+# exception messages / response bodies.
+_URL_CRED_RE = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*://)[^/@\s]*@")
+
+
+def _redact_url(text: str) -> str:
+    """Strip any userinfo (``user:password@``) from URLs within ``text``.
+
+    A user could configure an endpoint like ``https://user:secret@host:11434``;
+    we log the endpoint in the request trace and error details, so drop the
+    credential component before it reaches a log or the surfaced error message.
+    Works on a bare URL or a URL embedded in a larger string (e.g. an httpx
+    exception message).
+    """
+    return _URL_CRED_RE.sub(lambda m: m.group("scheme"), text)
+
+
 @dataclass
 class LlmOutcome:
     """Result of the LLM refinement stage, so callers can tell what happened.
@@ -409,7 +427,9 @@ def _llm_refine_openai(
     }
 
     endpoint = f"{base_url}/v1/chat/completions"
-    _log_step("llm_request", endpoint=endpoint, model=model,
+    # Credential-safe form for logs and surfaced error messages.
+    log_endpoint = _redact_url(endpoint)
+    _log_step("llm_request", endpoint=log_endpoint, model=model,
               file_count=len(files), timeout_s=timeout)
     t0 = time.monotonic()
 
@@ -417,14 +437,15 @@ def _llm_refine_openai(
         # str(exc) includes the target host/port and the OS-level reason
         # (e.g. "Connection refused", "timed out"), which the class name alone
         # discarded. A timeout is by far the most common remote-Ollama failure,
-        # so name it explicitly.
-        detail = f"{exc.__class__.__name__}: {exc}".strip().rstrip(":")
+        # so name it explicitly. Redact the exception text too: httpx errors
+        # echo the request URL, which may carry userinfo credentials.
+        detail = _redact_url(f"{exc.__class__.__name__}: {exc}".strip().rstrip(":"))
         if isinstance(exc, httpx.TimeoutException):
             detail = (
-                f"Timed out after {timeout:g}s calling {endpoint} — the model may "
+                f"Timed out after {timeout:g}s calling {log_endpoint} — the model may "
                 f"be cold-starting; raise this API's timeout in Settings."
             )
-        _log.warning("ai_organize llm_error endpoint=%r reason=%s", endpoint, detail)
+        _log.warning("ai_organize llm_error endpoint=%r reason=%s", log_endpoint, detail)
         return LlmOutcome(status="error", detail=detail)
 
     try:
@@ -444,7 +465,7 @@ def _llm_refine_openai(
 
     if not resp.is_success:
         body_snippet = resp.text[:300].replace("\n", " ")
-        detail = f"HTTP {resp.status_code} from {endpoint}: {body_snippet}"
+        detail = f"HTTP {resp.status_code} from {log_endpoint}: {body_snippet}"
         _log.warning("ai_organize llm_error %s", detail)
         return LlmOutcome(status="error", detail=detail)
 
@@ -452,11 +473,11 @@ def _llm_refine_openai(
         body      = resp.json()
         raw_text: str = body["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
-        detail = f"Unexpected response shape from {endpoint}: {exc.__class__.__name__}"
+        detail = f"Unexpected response shape from {log_endpoint}: {exc.__class__.__name__}"
         _log.warning("ai_organize llm_error %s", detail)
         return LlmOutcome(status="error", detail=detail)
 
-    return _parse_suggestions(raw_text, endpoint)
+    return _parse_suggestions(raw_text, log_endpoint)
 
 
 # ---------------------------------------------------------------------------

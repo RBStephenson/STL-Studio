@@ -37,6 +37,25 @@ def _fake_anthropic(text: str, captured: dict | None = None):
 _UNRESOLVED = [{"id": 1, "filename": "mystery_blob.stl", "part_type": None, "part_name": None}]
 
 
+def test_redact_url_strips_credentials():
+    assert ai._redact_url("https://user:secret@host:11434/v1") == "https://host:11434/v1"
+    assert ai._redact_url("http://ollama:11434/v1/chat") == "http://ollama:11434/v1/chat"
+    # userinfo without an explicit port
+    assert ai._redact_url("https://bob:pw@example.com/api") == "https://example.com/api"
+
+
+def test_openai_timeout_detail_never_leaks_url_credentials(monkeypatch):
+    import httpx
+
+    def _boom(*a, **k):
+        raise httpx.ConnectError("failed connecting to https://user:secret@host:11434")
+
+    monkeypatch.setattr(ai.httpx, "post", _boom)
+    res = ai.run(_UNRESOLVED, "https://user:secret@host:11434", "llama3", "", api_type="openai")
+    assert res.llm.status == "error"
+    assert "secret" not in (res.llm.detail or "")
+
+
 def test_anthropic_path_refines_via_sdk(monkeypatch):
     canned = json.dumps({"files": [
         {"id": 1, "part_type": "Head", "part_name": "Helm", "sup_base_filename": None},

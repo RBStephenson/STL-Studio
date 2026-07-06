@@ -9,6 +9,7 @@ literal paths like `/grouping-strategy` on the sibling routers.
 import logging
 import os
 import shutil
+from dataclasses import dataclass
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -473,15 +474,29 @@ def update_stl_file(file_id: int, body: STLFileUpdate, db: Session = Depends(get
     return {"ok": True}
 
 
-def _load_organize_config(db):
+@dataclass
+class _OrganizeConfig:
+    """Resolved organizer endpoint. A dataclass (not a tuple) so the secret
+    ``api_key`` field stays isolated under static analysis — packing it into a
+    tuple alongside the URL spreads its taint to every element on unpack and
+    trips CodeQL's clear-text-logging query even though the key is never logged."""
+    url: str
+    model: str
+    api_key: str
+    timeout: int
+    api_type: str
+    effort: str | None
+
+
+def _load_organize_config(db) -> "_OrganizeConfig":
     """Resolve the AI organizer's endpoint. Raises HTTPException on misconfiguration.
 
-    Returns (url, model, api_key, timeout, api_type, effort). The organizer is
-    driven by a named AiApiConfig assigned via the ``ai_organize_api`` setting
-    (the "Use API" selector in the UI); both OpenAI-compatible (e.g. Ollama) and
-    Anthropic connections are supported. For backward compatibility with installs
-    that predate named configs, it falls back to the legacy ``ai_organize_url`` /
-    ``ai_organize_model`` app_settings when no config is assigned.
+    The organizer is driven by a named AiApiConfig assigned via the
+    ``ai_organize_api`` setting (the "Use API" selector in the UI); both
+    OpenAI-compatible (e.g. Ollama) and Anthropic connections are supported. For
+    backward compatibility with installs that predate named configs, it falls
+    back to the legacy ``ai_organize_url`` / ``ai_organize_model`` app_settings
+    when no config is assigned.
     """
     from app.models import AppSetting, AiApiConfig
     from app.services import secrets as _secrets
@@ -507,19 +522,19 @@ def _load_organize_config(db):
                     status_code=400,
                     detail="The Anthropic API assigned to organizing has no model selected.",
                 )
-            return ("", cfg.model, key, cfg.request_timeout, "anthropic", cfg.effort)
+            return _OrganizeConfig("", cfg.model, key, cfg.request_timeout, "anthropic", cfg.effort)
         # OpenAI-compatible (Ollama, LM Studio, …).
         if not cfg.url:
             raise HTTPException(
                 status_code=400,
                 detail="This OpenAI-compatible API has no URL set — add one in Settings.",
             )
-        return (cfg.url, cfg.model or "", key, cfg.request_timeout, "openai", None)
+        return _OrganizeConfig(cfg.url, cfg.model or "", key, cfg.request_timeout, "openai", None)
 
     # Legacy fallback: standalone ai_organize_* app_settings.
     url_row = db.get(AppSetting, "ai_organize_url")
     model_row = db.get(AppSetting, "ai_organize_model")
-    return (
+    return _OrganizeConfig(
         url_row.value if url_row else "",
         model_row.value if model_row else "",
         _secrets.get_organize_api_key(db) or "",
@@ -567,7 +582,7 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     if not model.stl_files:
         raise HTTPException(status_code=400, detail="Model has no STL files to organize")
 
-    url, org_model, api_key, timeout, api_type, effort = _load_organize_config(db)
+    org_cfg = _load_organize_config(db)
 
     file_dicts = [
         {"id": f.id, "filename": f.filename, "part_type": f.part_type, "part_name": f.part_name}
@@ -585,8 +600,8 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
 
     try:
         organize_result = ai_organize.run(
-            file_dicts, url, org_model, api_key,
-            timeout=timeout, api_type=api_type, effort=effort,
+            file_dicts, org_cfg.url, org_cfg.model, org_cfg.api_key,
+            timeout=org_cfg.timeout, api_type=org_cfg.api_type, effort=org_cfg.effort,
         )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
