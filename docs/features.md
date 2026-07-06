@@ -651,7 +651,9 @@ entry has:
   take 30–90s or more, so raise this for remote endpoints — e.g. `60`. The
   setting is per-connection, so a fast local API and a slow remote one can each
   have their own value.
-- **API key** — stored encrypted server-side. For Ollama and similar local
+- **API key** — stored encrypted server-side, using a separate encryption key
+  (`STL_SECRET_KEY`, see [Docker configuration](docker.md#optional-environment-variables))
+  so a leaked database alone doesn't expose it. For Ollama and similar local
   endpoints, a key is optional.
 
 You can add multiple entries of the same type — for example, two Anthropic
