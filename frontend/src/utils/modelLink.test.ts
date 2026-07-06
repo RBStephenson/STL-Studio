@@ -50,13 +50,31 @@ describe("modelLinkTo", () => {
     expect(modelLinkTo(m)).toBe("/groups/5/Vigilante?gid=42");
   });
 
+  it("uses the durable group label for grouped cards when available", () => {
+    const m = model({
+      variant_count: 3,
+      character: "Old Scanner Label",
+      variant_group_id: 42,
+      variant_group: {
+        id: 42,
+        creator_id: 5,
+        label: "Renamed Group",
+        rep_model_id: 1,
+        source: "manual",
+        reason: null,
+        confidence: null,
+      },
+    });
+    expect(modelLinkTo(m)).toBe("/groups/5/Renamed%20Group?gid=42");
+  });
+
   it("encodes special characters in the character name", () => {
     const m = model({ variant_count: 2, character: "Spider-Man (Alt)", variant_group_id: 7 });
     expect(modelLinkTo(m)).toBe("/groups/5/Spider-Man%20(Alt)?gid=7");
   });
 
-  it("falls back to model route when character is null even with variant_count > 1", () => {
+  it("uses the model name as the readable segment when a grouped card has no character", () => {
     const m = model({ variant_count: 2, character: null, variant_group_id: 42 });
-    expect(modelLinkTo(m)).toBe("/models/1");
+    expect(modelLinkTo(m)).toBe("/groups/5/Test?gid=42");
   });
 });

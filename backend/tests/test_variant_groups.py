@@ -123,6 +123,37 @@ class TestBackfill:
         assert labels == {"Ada", "Leon"}
 
 
+class TestStartupBackfill:
+    def test_repairs_legacy_character_groups_missing_durable_group(self, db, monkeypatch):
+        """Standalone legacy DBs can be stamped after create_all without running
+        0017's data backfill. Startup repair should make those groups visible
+        without requiring the user to force a rescan."""
+        from sqlalchemy.orm import sessionmaker
+        import app.main as main_module
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(main_module, "SessionLocal", Session)
+
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Ada 1", character="Ada Wong")
+        b = make_model(db, creator, name="Ada 2", character="Ada Wong")
+        solo = make_model(db, creator, name="Solo", character="Solo")
+        pinned = make_model(db, creator, name="Pinned", character="Ada Wong")
+        pinned.no_group = True
+        b.is_group_rep = True
+        db.commit()
+
+        created = main_module._backfill_missing_variant_groups()
+        db.expire_all()
+
+        assert created == 1
+        group = db.query(VariantGroup).filter_by(label="Ada Wong").one()
+        assert group.rep_model_id == b.id
+        assert {m.id for m in group.models} == {a.id, b.id}
+        assert db.get(Model, solo.id).variant_group_id is None
+        assert db.get(Model, pinned.id).variant_group_id is None
+
+
 # ---------------------------------------------------------------------------
 # set_grouping_strategy() only regroups creators under the target path (#650)
 # ---------------------------------------------------------------------------
