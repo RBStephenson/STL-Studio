@@ -476,10 +476,11 @@ def update_stl_file(file_id: int, body: STLFileUpdate, db: Session = Depends(get
 def _load_organize_config(db):
     """Resolve the AI organizer's endpoint. Raises HTTPException on misconfiguration.
 
-    Returns (url, model, api_key, timeout). The organizer is driven by a named
-    AiApiConfig assigned via the ``ai_organize_api`` setting (the "Use API"
-    selector in the UI). For backward compatibility with installs that predate
-    named configs, it falls back to the legacy ``ai_organize_url`` /
+    Returns (url, model, api_key, timeout, api_type, effort). The organizer is
+    driven by a named AiApiConfig assigned via the ``ai_organize_api`` setting
+    (the "Use API" selector in the UI); both OpenAI-compatible (e.g. Ollama) and
+    Anthropic connections are supported. For backward compatibility with installs
+    that predate named configs, it falls back to the legacy ``ai_organize_url`` /
     ``ai_organize_model`` app_settings when no config is assigned.
     """
     from app.models import AppSetting, AiApiConfig
@@ -499,17 +500,21 @@ def _load_organize_config(db):
                 status_code=400,
                 detail="The AI API assigned to organizing no longer exists — reselect one in Settings.",
             )
-        if cfg.api_type != "openai" or not cfg.url:
+        key = _secrets.get_ai_api_config_key(db, cfg.id) or ""
+        if cfg.api_type == "anthropic":
+            if not cfg.model:
+                raise HTTPException(
+                    status_code=400,
+                    detail="The Anthropic API assigned to organizing has no model selected.",
+                )
+            return ("", cfg.model, key, cfg.request_timeout, "anthropic", cfg.effort)
+        # OpenAI-compatible (Ollama, LM Studio, …).
+        if not cfg.url:
             raise HTTPException(
                 status_code=400,
-                detail="AI organizing requires an OpenAI-compatible API (e.g. Ollama) with a URL set.",
+                detail="This OpenAI-compatible API has no URL set — add one in Settings.",
             )
-        return (
-            cfg.url,
-            cfg.model or "",
-            _secrets.get_ai_api_config_key(db, cfg.id) or "",
-            cfg.request_timeout,
-        )
+        return (cfg.url, cfg.model or "", key, cfg.request_timeout, "openai", None)
 
     # Legacy fallback: standalone ai_organize_* app_settings.
     url_row = db.get(AppSetting, "ai_organize_url")
@@ -519,6 +524,8 @@ def _load_organize_config(db):
         model_row.value if model_row else "",
         _secrets.get_organize_api_key(db) or "",
         10,
+        "openai",
+        None,
     )
 
 
@@ -560,7 +567,7 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     if not model.stl_files:
         raise HTTPException(status_code=400, detail="Model has no STL files to organize")
 
-    url, org_model, api_key, timeout = _load_organize_config(db)
+    url, org_model, api_key, timeout, api_type, effort = _load_organize_config(db)
 
     file_dicts = [
         {"id": f.id, "filename": f.filename, "part_type": f.part_type, "part_name": f.part_name}
@@ -577,7 +584,10 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     ]
 
     try:
-        organize_result = ai_organize.run(file_dicts, url, org_model, api_key, timeout=timeout)
+        organize_result = ai_organize.run(
+            file_dicts, url, org_model, api_key,
+            timeout=timeout, api_type=api_type, effort=effort,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 

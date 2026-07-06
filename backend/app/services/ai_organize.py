@@ -18,12 +18,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from anthropic import Anthropic  # module symbol so tests can monkeypatch it
 
 _log = logging.getLogger(__name__)
 
 # Fallback request timeout (seconds) when a caller doesn't specify one. The
 # real value normally comes from the assigned AiApiConfig.request_timeout.
 _DEFAULT_TIMEOUT = 10.0
+
+# Anthropic-only knobs. The organize response is a small JSON object, so a
+# modest cap is plenty; effort maps to an extended-thinking budget (mirrors the
+# painting guide generator).
+_ANTHROPIC_MAX_TOKENS = 4096
+_EFFORT_THINKING_BUDGET = {"low": 0, "medium": 4096, "high": 10000}
 
 
 @dataclass
@@ -274,14 +281,106 @@ Rules:
 Format: {"files": [{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}, ...]}"""
 
 
-def _llm_refine(
+def _parse_suggestions(raw_text: str, source: str) -> LlmOutcome:
+    """Parse a model's raw text reply into an :class:`LlmOutcome`.
+
+    Shared by the OpenAI and Anthropic paths: strips an optional ```json fence,
+    parses the JSON object, and extracts its ``files`` list. ``source`` is a
+    human-readable label (endpoint URL or "Anthropic API") used in log/error text.
+    """
+    # Full model output — only emitted when LOG_LEVEL=DEBUG, so the INFO trace
+    # stays terse while the raw suggestions are available on demand.
+    _log.debug("ai_organize llm_raw_response %s", raw_text[:2000])
+
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("```", 2)[1]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+        raw_text = raw_text.rsplit("```", 1)[0].strip()
+
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        detail = f"LLM returned non-JSON content from {source}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    suggestions = data.get("files", []) if isinstance(data, dict) else []
+    if not isinstance(suggestions, list):
+        _log.warning("ai_organize llm_error malformed 'files' field from %s", source)
+        return LlmOutcome(status="error",
+                          detail=f"Malformed 'files' field in response from {source}")
+
+    _log_step("llm_done", suggestions=len(suggestions))
+    return LlmOutcome(status="ok", suggestions=suggestions)
+
+
+def _text_from_anthropic(resp: Any) -> str:
+    """Concatenate the text blocks of an Anthropic messages response (skips any
+    extended-thinking blocks)."""
+    parts = []
+    for block in getattr(resp, "content", []) or []:
+        if getattr(block, "type", None) == "text":
+            parts.append(getattr(block, "text", ""))
+    return "".join(parts).strip()
+
+
+def _llm_refine_anthropic(
+    files: list[dict[str, Any]],
+    model: str,
+    api_key: str,
+    timeout: float = _DEFAULT_TIMEOUT,
+    effort: str | None = None,
+) -> LlmOutcome:
+    """Refine via the Anthropic Messages API. Mirrors the OpenAI path's contract:
+    returns ``status="error"`` with a human-readable ``detail`` on any failure."""
+    source = "Anthropic API"
+    if not api_key:
+        detail = "No API key configured for this Anthropic connection."
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    _log_step("llm_request", endpoint=source, model=model,
+              file_count=len(files), timeout_s=timeout)
+    t0 = time.monotonic()
+    try:
+        client = Anthropic(api_key=api_key, timeout=timeout)
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": _ANTHROPIC_MAX_TOKENS,
+            "system": _SYSTEM_PROMPT,
+            "messages": [
+                {"role": "user", "content": json.dumps(files, ensure_ascii=False)},
+            ],
+        }
+        budget = _EFFORT_THINKING_BUDGET.get((effort or "low"), 0)
+        if budget:
+            # max_tokens must exceed the thinking budget.
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            kwargs["max_tokens"] = _ANTHROPIC_MAX_TOKENS + budget
+        resp = client.messages.create(**kwargs)
+    except Exception as exc:  # anthropic.APIError, auth, timeout, etc.
+        detail = f"{exc.__class__.__name__}: {exc}".strip().rstrip(":")
+        _log.warning("ai_organize llm_error source=%s reason=%s", source, detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    _log_step("llm_response", elapsed_s=round(time.monotonic() - t0, 1), status="ok")
+    raw_text = _text_from_anthropic(resp)
+    if not raw_text:
+        detail = f"Empty response from {source}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
+    return _parse_suggestions(raw_text, source)
+
+
+def _llm_refine_openai(
     files: list[dict[str, Any]],
     base_url: str,
     model: str,
     api_key: str,
     timeout: float = _DEFAULT_TIMEOUT,
 ) -> LlmOutcome:
-    """Call the LLM and return an :class:`LlmOutcome`.
+    """Call an OpenAI-compatible /v1/chat/completions endpoint (e.g. Ollama).
 
     On any failure the outcome carries ``status="error"`` and a human-readable
     ``detail``, and the caller falls back to the heuristic results. Errors are
@@ -357,31 +456,7 @@ def _llm_refine(
         _log.warning("ai_organize llm_error %s", detail)
         return LlmOutcome(status="error", detail=detail)
 
-    # Full model output — only emitted when LOG_LEVEL=DEBUG, so the INFO trace
-    # stays terse while the raw suggestions are available on demand.
-    _log.debug("ai_organize llm_raw_response %s", raw_text[:2000])
-
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("```", 2)[1]
-        if raw_text.startswith("json"):
-            raw_text = raw_text[4:]
-        raw_text = raw_text.rsplit("```", 1)[0].strip()
-
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError:
-        detail = f"LLM returned non-JSON content from {endpoint}"
-        _log.warning("ai_organize llm_error %s", detail)
-        return LlmOutcome(status="error", detail=detail)
-
-    suggestions = data.get("files", [])
-    if not isinstance(suggestions, list):
-        _log.warning("ai_organize llm_error malformed 'files' field from %s", endpoint)
-        return LlmOutcome(status="error",
-                          detail=f"Malformed 'files' field in response from {endpoint}")
-
-    _log_step("llm_done", suggestions=len(suggestions))
-    return LlmOutcome(status="ok", suggestions=suggestions)
+    return _parse_suggestions(raw_text, endpoint)
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +472,8 @@ def run(
     model: str,
     api_key: str = "",
     timeout: float = _DEFAULT_TIMEOUT,
+    api_type: str = "openai",
+    effort: str | None = None,
 ) -> OrganizeResult:
     """Return merged suggestions plus the outcome of the optional LLM pass.
 
@@ -406,8 +483,15 @@ def run(
     for models with hundreds of files. The returned :class:`OrganizeResult`
     reports whether the LLM ran, was skipped, was disabled, or errored so the
     caller can surface that to the user instead of silently degrading.
+
+    ``api_type`` selects the transport: "openai" (an OpenAI-compatible endpoint
+    at ``base_url``, e.g. Ollama) or "anthropic" (the Anthropic Messages API,
+    which needs no URL but requires ``api_key``; ``effort`` maps to a thinking
+    budget).
     """
-    _log_step("start", file_count=len(files), has_llm=bool(base_url and model))
+    # An Anthropic config carries no URL; an OpenAI-compatible one needs one.
+    llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
+    _log_step("start", file_count=len(files), has_llm=llm_ready, api_type=api_type)
     outcome = LlmOutcome(status="disabled")
 
     # Stage 1: fast Python heuristics
@@ -429,7 +513,7 @@ def run(
                 sug["part_type"] = type_by_filename[base]
 
     # Stage 2: LLM refinement for genuinely ambiguous files only.
-    if base_url and model:
+    if llm_ready:
         unresolved = [
             f for f in files
             if not (merged.get(f["id"]) or {}).get("part_type")
@@ -438,7 +522,10 @@ def run(
 
         if unresolved:
             _log_step("llm_batch", sending=len(unresolved), of=len(files))
-            outcome = _llm_refine(unresolved, base_url, model, api_key, timeout=timeout)
+            if api_type == "anthropic":
+                outcome = _llm_refine_anthropic(unresolved, model, api_key, timeout, effort)
+            else:
+                outcome = _llm_refine_openai(unresolved, base_url, model, api_key, timeout=timeout)
             for s in outcome.suggestions:
                 fid = s.get("id")
                 if not isinstance(fid, int):

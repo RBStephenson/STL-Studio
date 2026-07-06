@@ -673,9 +673,10 @@ Controls which AI features are active and which named API each one uses.
   out), the review still opens with the heuristic suggestions and a message
   explaining what went wrong — see [Logging](#logging) to inspect the details.
 
-> **Requires an OpenAI-compatible API** (e.g. Ollama). Assign one under
-> **AI APIs**, then select it here. If a remote endpoint is slow to respond,
-> raise that connection's **Timeout** (see AI APIs above).
+> Works with either an **OpenAI-compatible API** (e.g. Ollama) or an
+> **Anthropic** connection — assign one under **AI APIs**, then select it here.
+> If a remote endpoint is slow to respond, raise that connection's **Timeout**
+> (see AI APIs above).
 
 ### Metadata
 
