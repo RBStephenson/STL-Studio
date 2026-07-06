@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     stl_drive_1: str = ""
     stl_drive_2: str = ""
 
+    # Hostnames trusted by the write-request guard in addition to localhost, for
+    # running behind a reverse proxy on a custom domain (e.g. stl.pagden.us).
+    # Comma-separated; set via TRUSTED_HOSTS. Writes (POST/PUT/PATCH/DELETE) are
+    # allowed when the request's Origin/Host hostname is localhost or one of
+    # these. Empty (the default) = localhost-only.
+    trusted_hosts: str = ""
+
     # MyMiniFactory REST API key (simple ?key= query auth). When set, the MMF
     # adapter uses the API for object detail + search and falls back to scraping
     # on miss. Register an app at MMF Settings -> Developer to obtain a key.
@@ -32,6 +39,10 @@ class Settings(BaseSettings):
     @property
     def stl_root_list(self) -> list[str]:
         return [r.strip() for r in self.stl_roots.split(",") if r.strip()]
+
+    @property
+    def trusted_host_list(self) -> list[str]:
+        return [h.strip().lower() for h in self.trusted_hosts.split(",") if h.strip()]
 
     def to_native_path(self, docker_path: str) -> str:
         """Translate a Docker container path to the native host path, if mappings are configured."""

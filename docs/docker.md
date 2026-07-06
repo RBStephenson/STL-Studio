@@ -85,6 +85,7 @@ services:
     environment:
       - DATABASE_URL=sqlite:////data/stl_inventory.db
       - STL_ROOTS=/mnt/drive1
+      - TRUSTED_HOSTS=stl.example.com     # ← your public hostname (see below)
     volumes:
       - /host/data:/data
       - /host/library:/mnt/drive1
@@ -99,10 +100,29 @@ services:
       - stl-inventory-backend
 ```
 
-A `405` when saving settings, or a folder browser that "can't open" anything,
-almost always means `/api` isn't reaching the backend — check that you're
-pointing at the **frontend** (not the backend) and that `BACKEND_ORIGIN` names
-your backend correctly.
+### `TRUSTED_HOSTS` — required behind a reverse proxy
+
+The backend rejects **writes** (adding a folder, saving settings, scanning…)
+from any hostname it doesn't trust — a CSRF / DNS-rebinding guard that defaults
+to **localhost only**. Accessed via a domain like `stl.example.com`, every write
+comes back as **`403 Cross-origin request blocked`** or **`Request Host not
+allowed`** until you allowlist that hostname:
+
+```yaml
+environment:
+  - TRUSTED_HOSTS=stl.example.com        # comma-separated for multiple
+```
+
+Set it to the hostname(s) you browse to. Reads work without it; only writes are
+gated. Localhost stays trusted regardless, and unlisted domains stay blocked.
+
+### Troubleshooting
+
+- **`405` on save, or folder browser "can't open" anything** → `/api` isn't
+  reaching the backend. Point your proxy at the **frontend** (not the backend),
+  and check `BACKEND_ORIGIN` names your backend service.
+- **`403 Cross-origin request blocked` / `Request Host not allowed`** → set
+  `TRUSTED_HOSTS` to your public hostname (above).
 
 ---
 

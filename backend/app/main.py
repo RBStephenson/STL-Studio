@@ -5,6 +5,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.config import settings as app_settings
 from app.database import Base, engine, SessionLocal
 from app.routers import (
     models, tags, groups, print_queue, thumbnails,
@@ -238,28 +239,35 @@ async def lifespan(app: FastAPI):
     yield
 
 
-# --- Localhost CSRF protection (#213) -------------------------------------
+# --- Write-request origin/host guard (#213) -------------------------------
 # The server binds to 127.0.0.1, but any web page the user visits can still
 # fire requests at http://localhost:<port>. Browsers attach an Origin header
 # to cross-site requests, and a DNS-rebinding page arrives with a non-local
-# Host header — so state-changing requests must present local values for both.
+# Host header — so state-changing requests must present a trusted value for both.
+#
+# "Trusted" is localhost by default, plus any hostnames in TRUSTED_HOSTS. A
+# reverse-proxy deployment on a custom domain (e.g. stl.pagden.us) sets that so
+# its own writes are allowed, without weakening the guard for anyone else.
 
 _LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def _is_local_hostname(hostname: str | None) -> bool:
-    return hostname is not None and hostname.lower() in _LOCAL_HOSTNAMES
+def _is_trusted_hostname(hostname: str | None) -> bool:
+    if hostname is None:
+        return False
+    h = hostname.lower()
+    return h in _LOCAL_HOSTNAMES or h in app_settings.trusted_host_list
 
 
-def _origin_is_local(origin: str) -> bool:
-    return _is_local_hostname(urlsplit(origin).hostname)
+def _origin_is_trusted(origin: str) -> bool:
+    return _is_trusted_hostname(urlsplit(origin).hostname)
 
 
-def _host_is_local(host: str) -> bool:
+def _host_is_trusted(host: str) -> bool:
     # Host is "name[:port]" or "[v6addr][:port]" — parse as a netloc.
     try:
-        return _is_local_hostname(urlsplit(f"//{host}").hostname)
+        return _is_trusted_hostname(urlsplit(f"//{host}").hostname)
     except ValueError:
         return False
 
@@ -268,12 +276,12 @@ async def _block_cross_origin_writes(request, call_next):
     if request.method in _UNSAFE_METHODS:
         origin = request.headers.get("origin")
         # No Origin header = not a browser cross-site request (curl, scripts).
-        if origin is not None and not _origin_is_local(origin):
+        if origin is not None and not _origin_is_trusted(origin):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Cross-origin request blocked"},
             )
-        if not _host_is_local(request.headers.get("host", "")):
+        if not _host_is_trusted(request.headers.get("host", "")):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Request Host not allowed"},

@@ -24,6 +24,9 @@ services:
       - STL_DRIVE_1=${STL_DRIVE_1:-}
       - STL_DRIVE_2=${STL_DRIVE_2:-}
       - PYTHONUNBUFFERED=1
+      # Serving this behind a reverse proxy on a real domain? Allowlist that
+      # hostname or writes are blocked (see docs/docker.md → TRUSTED_HOSTS).
+      # - TRUSTED_HOSTS=stl.example.com
     # Allows the backend to reach services on the host (e.g. Ollama at localhost:11434).
     # host-gateway resolves to the host's IP as seen from the container's network.
     extra_hosts:
