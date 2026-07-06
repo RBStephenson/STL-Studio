@@ -1,10 +1,10 @@
 fastapi==0.139.0
-uvicorn[standard]==0.49.0
+uvicorn[standard]==0.50.0
 sqlalchemy==2.0.51
 alembic==1.18.4
 pydantic==2.13.4
 pydantic-settings==2.14.2
-aiofiles==24.1.0
+aiofiles==25.1.0
 httpx==0.28.1
 truststore==0.10.4
 beautifulsoup4==4.15.0
@@ -17,9 +17,9 @@ cryptography==49.0.0  # Fernet encryption-at-rest for the AI API key (#517)
 # Painting module (#182). Color math + image handling are used from M1;
 # playwright's browser (Chromium) install is deferred to M3 — the pip
 # package does NOT bundle it.
-numpy==2.5.0
+numpy==2.5.1
 scikit-image==0.26.0
 pillow==12.2.0
-playwright==1.60.0
+playwright==1.61.0
 anthropic==0.116.0
-pypdf==6.13.3  # merge per-guide PDFs into a series bundle (#490)
+pypdf==6.14.2  # merge per-guide PDFs into a series bundle (#490)

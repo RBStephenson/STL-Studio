@@ -211,8 +211,9 @@ class QueueReorder(BaseModel):
 
 
 class GroupReorder(BaseModel):
-    creator_id: int
-    character: str
+    creator_id: Optional[int] = None
+    character: Optional[str] = None
+    group_id: Optional[int] = None
     # Member ids in the desired display order. Empty = reset (clear the whole
     # group's manual order, falling back to the heuristic). Ids not in the group
     # are ignored.
@@ -490,6 +491,9 @@ class AppSettingsRead(BaseModel):
     ai_guides_enabled: bool = False
     ai_guides_api: Optional[int] = None
     ai_organize_api: Optional[int] = None
+    # Application log verbosity for the `app.*` loggers. Changing this in the UI
+    # takes effect immediately (no restart) and persists across restarts.
+    log_level: str = "INFO"
 
 
 class AppSettingsUpdate(BaseModel):
@@ -524,6 +528,7 @@ class AppSettingsUpdate(BaseModel):
     ai_guides_enabled: Optional[bool] = None
     ai_guides_api: Optional[int] = None
     ai_organize_api: Optional[int] = None
+    log_level: Optional[str] = Field(None, pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
@@ -579,6 +584,8 @@ class AiApiConfigRead(BaseModel):
     url: Optional[str] = None
     model: str
     effort: Optional[str] = None
+    # Per-connection request timeout (seconds). Default 10.
+    request_timeout: int = 10
     key_set: bool
     key_hint: Optional[str] = None
 
@@ -589,6 +596,7 @@ class AiApiConfigCreate(BaseModel):
     url: Optional[str] = Field(None, max_length=500)
     model: str = Field("", max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    request_timeout: int = Field(10, ge=1, le=600)
 
 
 class AiApiConfigUpdate(BaseModel):
@@ -596,6 +604,7 @@ class AiApiConfigUpdate(BaseModel):
     url: Optional[str] = Field(None, max_length=500)
     model: Optional[str] = Field(None, max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    request_timeout: Optional[int] = Field(None, ge=1, le=600)
 
 
 # --- AI settings (#517) ---------------------------------------------------
@@ -646,6 +655,11 @@ class AiOrganizeSuggestionPreview(BaseModel):
 
 class AiOrganizePreviewResult(BaseModel):
     suggestions: list[AiOrganizeSuggestionPreview]
+    # Outcome of the optional LLM pass so the UI can distinguish "AI ran" from
+    # "AI failed / was skipped" instead of silently showing heuristics-only.
+    # status: "ok" | "skipped" | "disabled" | "error". detail is set on error.
+    llm_status: str = "disabled"
+    llm_detail: Optional[str] = None
 
 
 class AiOrganizeApplyItem(BaseModel):

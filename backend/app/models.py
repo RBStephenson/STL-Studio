@@ -316,6 +316,10 @@ class AiApiConfig(Base):
     url = Column(String, nullable=True)         # OpenAI-compatible base URL
     model = Column(String, nullable=False, default="")
     effort = Column(String, nullable=True)      # Anthropic only: "low"|"medium"|"high"
+    # Per-connection request timeout in seconds. Remote endpoints (e.g. an
+    # Ollama box loading a model cold) can take far longer than a local one, so
+    # this is tunable per config rather than a single global. Default 10s.
+    request_timeout = Column(Integer, nullable=False, default=10, server_default="10")
     created_at = Column(DateTime, default=utcnow)
 
 

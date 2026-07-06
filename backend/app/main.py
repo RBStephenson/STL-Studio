@@ -179,6 +179,97 @@ def _seed_tag_index():
         db.close()
 
 
+def _backfill_missing_variant_groups() -> int:
+    """Repair legacy DBs that have scanner characters but no durable groups.
+
+    Standalone builds can open older local SQLite files that predate Alembic.
+    `create_all()` creates the modern tables before `_run_migrations()` decides
+    whether to stamp those DBs, so historical data migrations such as 0017's
+    variant-group backfill may never run. This repair is intentionally narrow:
+    it only groups live, unpinned models that still have no variant_group_id and
+    share the same (creator_id, character).
+    """
+    from collections import defaultdict
+    import logging
+
+    from sqlalchemy import text
+
+    from app.models import Model, VariantGroup
+
+    logger = logging.getLogger(__name__)
+    with engine.connect() as conn:
+        tables = {
+            r[0]
+            for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+        }
+        if "models" not in tables:
+            return 0
+        model_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(models)"))}
+        if "variant_group_id" not in model_cols:
+            conn.execute(text("ALTER TABLE models ADD COLUMN variant_group_id INTEGER"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_variant_group_id "
+            "ON models (variant_group_id)"
+        ))
+        conn.commit()
+        if "no_group" not in model_cols:
+            conn.execute(text(
+                "ALTER TABLE models ADD COLUMN no_group BOOLEAN NOT NULL DEFAULT 0"
+            ))
+            conn.commit()
+
+    db = SessionLocal()
+    created = 0
+    try:
+        rows = (
+            db.query(Model)
+            .filter(
+                Model.excluded == False,  # noqa: E712
+                Model.no_group == False,  # noqa: E712
+                Model.creator_id != None,  # noqa: E711
+                Model.character != None,  # noqa: E711
+                Model.character != "",
+                Model.variant_group_id == None,  # noqa: E711
+            )
+            .all()
+        )
+        buckets: dict[tuple[int, str], list[Model]] = defaultdict(list)
+        for model in rows:
+            if model.creator_id is None or not model.character:
+                continue
+            buckets[(model.creator_id, model.character)].append(model)
+
+        for (creator_id, label), members in buckets.items():
+            if len(members) < 2:
+                continue
+            group = VariantGroup(
+                creator_id=creator_id,
+                label=label,
+                rep_model_id=next((m.id for m in members if m.is_group_rep), members[0].id),
+                source="auto",
+                reason="legacy character backfill",
+                confidence=0.6,
+            )
+            db.add(group)
+            db.flush()
+            for member in members:
+                member.variant_group_id = group.id
+            created += 1
+
+        if created:
+            db.commit()
+            logger.info("Backfilled %s missing variant group(s)", created)
+        else:
+            db.rollback()
+        return created
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to backfill missing variant groups")
+        return 0
+    finally:
+        db.close()
+
+
 def _run_migrations() -> None:
     """Create tables and reconcile schema at startup.
 
@@ -231,11 +322,42 @@ def _run_migrations() -> None:
         logger.info("Alembic: schema up to date")
 
 
+def _apply_persisted_log_level():
+    """Apply a log level persisted via the Settings UI, overriding the env default.
+
+    Runs at startup once the DB is available so a level chosen in the UI
+    survives a restart. An invalid stored value is ignored (kept resilient —
+    the schema validates on write, so this only guards against manual edits).
+    """
+    import logging
+    from app.logging_config import apply_log_level
+    from app.models import AppSetting
+
+    db = SessionLocal()
+    try:
+        row = db.get(AppSetting, "log_level")
+        if row and row.value:
+            apply_log_level(row.value)
+    except ValueError:
+        logging.getLogger("app").warning(
+            "Ignoring invalid persisted log_level"
+        )
+    except Exception:
+        # Best-effort, mirroring the other startup helpers: a DB that isn't
+        # ready yet (e.g. under test harnesses) must not abort startup. The env
+        # LOG_LEVEL default already applied in configure_logging stays in force.
+        logging.getLogger("app").debug("Could not read persisted log_level", exc_info=True)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # One-time startup migrations / seeding, run before the app serves requests.
     _run_migrations()
+    _backfill_missing_variant_groups()
     _seed_tag_index()
+    _apply_persisted_log_level()
     yield
 
 
@@ -304,6 +426,11 @@ def create_app(api_prefix: str = "") -> FastAPI:
     used by both the Docker deployment (no prefix; nginx adds /api) and the
     standalone binary (api_prefix="/api", frontend served from the same app).
     """
+    # Bootstrap logging from the env default (LOG_LEVEL). A level persisted in
+    # the DB via the Settings UI is applied later, in the lifespan startup, once
+    # the database is available (see _apply_persisted_log_level).
+    from app.logging_config import configure_logging
+    configure_logging(app_settings.log_level)
     app = FastAPI(title="STL Studio", version="0.1.0", lifespan=lifespan)
 
     app.middleware("http")(_block_cross_origin_writes)

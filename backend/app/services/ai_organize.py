@@ -14,11 +14,63 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from anthropic import Anthropic  # module symbol so tests can monkeypatch it
 
 _log = logging.getLogger(__name__)
+
+# Fallback request timeout (seconds) when a caller doesn't specify one. The
+# real value normally comes from the assigned AiApiConfig.request_timeout.
+_DEFAULT_TIMEOUT = 10.0
+
+# Anthropic-only knobs. The organize response is a small JSON object, so a
+# modest cap is plenty; effort maps to an extended-thinking budget (mirrors the
+# painting guide generator).
+_ANTHROPIC_MAX_TOKENS = 4096
+_EFFORT_THINKING_BUDGET = {"low": 0, "medium": 4096, "high": 10000}
+
+
+# Matches the ``scheme://userinfo@`` prefix of a URL anywhere in a string, so we
+# can scrub credentials both from bare endpoint URLs and from URLs echoed inside
+# exception messages / response bodies.
+_URL_CRED_RE = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*://)[^/@\s]*@")
+
+
+def _redact_url(text: str) -> str:
+    """Strip any userinfo (``user:password@``) from URLs within ``text``.
+
+    A user could configure an endpoint like ``https://user:secret@host:11434``;
+    we log the endpoint in the request trace and error details, so drop the
+    credential component before it reaches a log or the surfaced error message.
+    Works on a bare URL or a URL embedded in a larger string (e.g. an httpx
+    exception message).
+    """
+    return _URL_CRED_RE.sub(lambda m: m.group("scheme"), text)
+
+
+@dataclass
+class LlmOutcome:
+    """Result of the LLM refinement stage, so callers can tell what happened.
+
+    ``status`` is one of:
+      - "disabled":  no URL/model configured — heuristics only, by design.
+      - "skipped":   LLM configured but heuristics resolved everything.
+      - "ok":        LLM was called and returned suggestions.
+      - "error":     LLM was called but failed; ``detail`` explains why.
+    """
+    status: str = "disabled"
+    detail: str | None = None
+    suggestions: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class OrganizeResult:
+    """Merged suggestions plus the outcome of the optional LLM pass."""
+    suggestions: list[dict[str, Any]]
+    llm: LlmOutcome
 
 
 _SENSITIVE_LOG_KEYS = {
@@ -247,16 +299,111 @@ Rules:
 Format: {"files": [{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}, ...]}"""
 
 
-def _llm_refine(
+def _parse_suggestions(raw_text: str, source: str) -> LlmOutcome:
+    """Parse a model's raw text reply into an :class:`LlmOutcome`.
+
+    Shared by the OpenAI and Anthropic paths: strips an optional ```json fence,
+    parses the JSON object, and extracts its ``files`` list. ``source`` is a
+    human-readable label (endpoint URL or "Anthropic API") used in log/error text.
+    """
+    # Full model output — only emitted when LOG_LEVEL=DEBUG, so the INFO trace
+    # stays terse while the raw suggestions are available on demand.
+    _log.debug("ai_organize llm_raw_response %s", raw_text[:2000])
+
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("```", 2)[1]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+        raw_text = raw_text.rsplit("```", 1)[0].strip()
+
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        detail = f"LLM returned non-JSON content from {source}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    suggestions = data.get("files", []) if isinstance(data, dict) else []
+    if not isinstance(suggestions, list):
+        _log.warning("ai_organize llm_error malformed 'files' field from %s", source)
+        return LlmOutcome(status="error",
+                          detail=f"Malformed 'files' field in response from {source}")
+
+    _log_step("llm_done", suggestions=len(suggestions))
+    return LlmOutcome(status="ok", suggestions=suggestions)
+
+
+def _text_from_anthropic(resp: Any) -> str:
+    """Concatenate the text blocks of an Anthropic messages response (skips any
+    extended-thinking blocks)."""
+    parts = []
+    for block in getattr(resp, "content", []) or []:
+        if getattr(block, "type", None) == "text":
+            parts.append(getattr(block, "text", ""))
+    return "".join(parts).strip()
+
+
+def _llm_refine_anthropic(
+    files: list[dict[str, Any]],
+    model: str,
+    api_key: str,
+    timeout: float = _DEFAULT_TIMEOUT,
+    effort: str | None = None,
+) -> LlmOutcome:
+    """Refine via the Anthropic Messages API. Mirrors the OpenAI path's contract:
+    returns ``status="error"`` with a human-readable ``detail`` on any failure."""
+    source = "Anthropic API"
+    if not api_key:
+        detail = "No API key configured for this Anthropic connection."
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    _log_step("llm_request", endpoint=source, model=model,
+              file_count=len(files), timeout_s=timeout)
+    t0 = time.monotonic()
+    try:
+        client = Anthropic(api_key=api_key, timeout=timeout)
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": _ANTHROPIC_MAX_TOKENS,
+            "system": _SYSTEM_PROMPT,
+            "messages": [
+                {"role": "user", "content": json.dumps(files, ensure_ascii=False)},
+            ],
+        }
+        budget = _EFFORT_THINKING_BUDGET.get((effort or "low"), 0)
+        if budget:
+            # max_tokens must exceed the thinking budget.
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            kwargs["max_tokens"] = _ANTHROPIC_MAX_TOKENS + budget
+        resp = client.messages.create(**kwargs)
+    except Exception as exc:  # anthropic.APIError, auth, timeout, etc.
+        detail = f"{exc.__class__.__name__}: {exc}".strip().rstrip(":")
+        _log.warning("ai_organize llm_error source=%s reason=%s", source, detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    _log_step("llm_response", elapsed_s=round(time.monotonic() - t0, 1), status="ok")
+    raw_text = _text_from_anthropic(resp)
+    if not raw_text:
+        detail = f"Empty response from {source}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
+    return _parse_suggestions(raw_text, source)
+
+
+def _llm_refine_openai(
     files: list[dict[str, Any]],
     base_url: str,
     model: str,
     api_key: str,
-) -> list[dict[str, Any]]:
-    """Call the LLM and return a merged suggestion list.
+    timeout: float = _DEFAULT_TIMEOUT,
+) -> LlmOutcome:
+    """Call an OpenAI-compatible /v1/chat/completions endpoint (e.g. Ollama).
 
-    On any error, logs and returns an empty list so the caller falls back to
-    the heuristic results.
+    On any failure the outcome carries ``status="error"`` and a human-readable
+    ``detail``, and the caller falls back to the heuristic results. Errors are
+    logged at WARNING (not INFO) with the endpoint and the underlying reason so
+    connection refusals, timeouts, and HTTP errors are distinguishable in logs.
     """
     import re as _re
     base_url = _re.sub(
@@ -280,52 +427,57 @@ def _llm_refine(
     }
 
     endpoint = f"{base_url}/v1/chat/completions"
-    _log_step("llm_request", endpoint=endpoint, model=model, file_count=len(files))
+    # Credential-safe form for logs and surfaced error messages.
+    log_endpoint = _redact_url(endpoint)
+    _log_step("llm_request", endpoint=log_endpoint, model=model,
+              file_count=len(files), timeout_s=timeout)
     t0 = time.monotonic()
 
+    def _request_error(exc: httpx.RequestError) -> LlmOutcome:
+        # str(exc) includes the target host/port and the OS-level reason
+        # (e.g. "Connection refused", "timed out"), which the class name alone
+        # discarded. A timeout is by far the most common remote-Ollama failure,
+        # so name it explicitly. Redact the exception text too: httpx errors
+        # echo the request URL, which may carry userinfo credentials.
+        detail = _redact_url(f"{exc.__class__.__name__}: {exc}".strip().rstrip(":"))
+        if isinstance(exc, httpx.TimeoutException):
+            detail = (
+                f"Timed out after {timeout:g}s calling {log_endpoint} — the model may "
+                f"be cold-starting; raise this API's timeout in Settings."
+            )
+        _log.warning("ai_organize llm_error endpoint=%r reason=%s", log_endpoint, detail)
+        return LlmOutcome(status="error", detail=detail)
+
     try:
-        resp = httpx.post(endpoint, json=payload, headers=headers, timeout=10)
+        resp = httpx.post(endpoint, json=payload, headers=headers, timeout=timeout)
     except httpx.RequestError as exc:
-        _log_step("llm_error", reason=exc.__class__.__name__)
-        return []
+        return _request_error(exc)
 
     if resp.status_code == 400 and "response_format" in resp.text:
         payload.pop("response_format", None)
         try:
-            resp = httpx.post(endpoint, json=payload, headers=headers, timeout=10)
+            resp = httpx.post(endpoint, json=payload, headers=headers, timeout=timeout)
         except httpx.RequestError as exc:
-            _log_step("llm_error", reason=exc.__class__.__name__)
-            return []
+            return _request_error(exc)
 
     elapsed = time.monotonic() - t0
-    _log_step("llm_response", elapsed_s=round(elapsed, 1))
+    _log_step("llm_response", elapsed_s=round(elapsed, 1), status=resp.status_code)
 
     if not resp.is_success:
-        _log_step("llm_error", reason="http_error")
-        return []
+        body_snippet = resp.text[:300].replace("\n", " ")
+        detail = f"HTTP {resp.status_code} from {log_endpoint}: {body_snippet}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
 
     try:
         body      = resp.json()
         raw_text: str = body["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError):
-        _log_step("llm_error", reason="bad_shape")
-        return []
+    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        detail = f"Unexpected response shape from {log_endpoint}: {exc.__class__.__name__}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
 
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("```", 2)[1]
-        if raw_text.startswith("json"):
-            raw_text = raw_text[4:]
-        raw_text = raw_text.rsplit("```", 1)[0].strip()
-
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError:
-        _log.warning("ai_organize llm returned non-JSON response")
-        return []
-
-    suggestions = data.get("files", [])
-    _log_step("llm_done", suggestions=len(suggestions) if isinstance(suggestions, list) else "bad")
-    return suggestions if isinstance(suggestions, list) else []
+    return _parse_suggestions(raw_text, log_endpoint)
 
 
 # ---------------------------------------------------------------------------
@@ -340,15 +492,28 @@ def run(
     base_url: str,
     model: str,
     api_key: str = "",
-) -> list[dict[str, Any]]:
-    """Return a merged list of suggestions for the given files.
+    timeout: float = _DEFAULT_TIMEOUT,
+    api_type: str = "openai",
+    effort: str | None = None,
+) -> OrganizeResult:
+    """Return merged suggestions plus the outcome of the optional LLM pass.
 
     Heuristics run first and are always returned immediately. The LLM is
     only called for files where heuristics could NOT determine a part_type
     (capped at _LLM_FILE_CAP), so the response time stays reasonable even
-    for models with hundreds of files.
+    for models with hundreds of files. The returned :class:`OrganizeResult`
+    reports whether the LLM ran, was skipped, was disabled, or errored so the
+    caller can surface that to the user instead of silently degrading.
+
+    ``api_type`` selects the transport: "openai" (an OpenAI-compatible endpoint
+    at ``base_url``, e.g. Ollama) or "anthropic" (the Anthropic Messages API,
+    which needs no URL but requires ``api_key``; ``effort`` maps to a thinking
+    budget).
     """
-    _log_step("start", file_count=len(files), has_llm=bool(base_url and model))
+    # An Anthropic config carries no URL; an OpenAI-compatible one needs one.
+    llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
+    _log_step("start", file_count=len(files), has_llm=llm_ready, api_type=api_type)
+    outcome = LlmOutcome(status="disabled")
 
     # Stage 1: fast Python heuristics
     heuristic = heuristic_pass(files)
@@ -369,7 +534,7 @@ def run(
                 sug["part_type"] = type_by_filename[base]
 
     # Stage 2: LLM refinement for genuinely ambiguous files only.
-    if base_url and model:
+    if llm_ready:
         unresolved = [
             f for f in files
             if not (merged.get(f["id"]) or {}).get("part_type")
@@ -378,8 +543,11 @@ def run(
 
         if unresolved:
             _log_step("llm_batch", sending=len(unresolved), of=len(files))
-            llm_results = _llm_refine(unresolved, base_url, model, api_key)
-            for s in llm_results:
+            if api_type == "anthropic":
+                outcome = _llm_refine_anthropic(unresolved, model, api_key, timeout, effort)
+            else:
+                outcome = _llm_refine_openai(unresolved, base_url, model, api_key, timeout=timeout)
+            for s in outcome.suggestions:
                 fid = s.get("id")
                 if not isinstance(fid, int):
                     continue
@@ -392,8 +560,9 @@ def run(
                     existing["sup_base_filename"] = s["sup_base_filename"]
                 merged[fid] = existing
         else:
+            outcome = LlmOutcome(status="skipped")
             _log_step("llm_skip", reason="no unresolved files after heuristics")
 
     result = list(merged.values())
-    _log_step("done", total_suggestions=len(result))
-    return result
+    _log_step("done", total_suggestions=len(result), llm_status=outcome.status)
+    return OrganizeResult(suggestions=result, llm=outcome)
