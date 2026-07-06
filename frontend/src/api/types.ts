@@ -234,7 +234,11 @@ export interface AppSettings {
   ai_guides_enabled: boolean;
   ai_guides_api: number | null;
   ai_organize_api: number | null;
+  // Application log verbosity — changing it takes effect immediately (no restart).
+  log_level: LogLevel;
 }
+
+export type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
 
 export interface AiApiConfig {
   id: number;
@@ -243,6 +247,8 @@ export interface AiApiConfig {
   url: string | null;
   model: string;
   effort: string | null;
+  // Per-connection request timeout in seconds (default 10).
+  request_timeout: number;
   key_set: boolean;
   key_hint: string | null;
 }
@@ -279,6 +285,11 @@ export interface AiOrganizeSuggestionPreview {
 
 export interface AiOrganizePreviewResult {
   suggestions: AiOrganizeSuggestionPreview[];
+  // Outcome of the optional LLM pass so the UI can distinguish "AI ran" from
+  // "AI failed / was skipped": "ok" | "skipped" | "disabled" | "error".
+  // llm_detail carries the failure reason when llm_status === "error".
+  llm_status?: "ok" | "skipped" | "disabled" | "error";
+  llm_detail?: string | null;
 }
 
 export interface AiOrganizeModelsList {

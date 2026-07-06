@@ -1,8 +1,11 @@
-import { Images, RotateCw, Tag, LayoutPanelTop } from "lucide-react";
+import { Images, RotateCw, Tag, LayoutPanelTop, ScrollText } from "lucide-react";
 import { useAppSettings } from "../../context/AppSettingsContext";
+import { LogLevel } from "../../api/client";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
 import { errMsg } from "../../utils/err";
+
+const LOG_LEVELS: LogLevel[] = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
 
 export default function PreferencesTab() {
   const { settings, update } = useAppSettings();
@@ -19,6 +22,14 @@ export default function PreferencesTab() {
   const setRecentDays = async (n: number) => {
     try {
       await update({ recent_days: n });
+    } catch (e) {
+      flash(errMsg(e) || "Could not update setting", "err");
+    }
+  };
+
+  const setLogLevel = async (level: LogLevel) => {
+    try {
+      await update({ log_level: level });
     } catch (e) {
       flash(errMsg(e) || "Could not update setting", "err");
     }
@@ -177,6 +188,38 @@ export default function PreferencesTab() {
             </p>
           </div>
         </label>
+      </section>
+
+      {/* Logging */}
+      <section className="mt-8 pt-6 border-t border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <ScrollText size={14} /> Logging
+        </h2>
+        <div className="flex items-center gap-3 self-start">
+          <span className="text-sm text-gray-300">Server log level</span>
+          <div className="flex rounded overflow-hidden border border-gray-700">
+            {LOG_LEVELS.map((level) => (
+              <button
+                key={level}
+                onClick={() => setLogLevel(level)}
+                className={`px-3 py-1 text-xs transition-colors ${
+                  settings.log_level === level
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                {level}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 mt-2">
+          Controls how much the backend logs to its output (visible via{" "}
+          <code className="text-gray-400">docker compose logs -f backend</code>). Takes effect
+          immediately — no restart needed. Use <span className="text-gray-400">DEBUG</span> to see
+          full AI request/response detail; leave at <span className="text-gray-400">INFO</span> for
+          normal operation.
+        </p>
       </section>
     </div>
   );

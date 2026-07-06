@@ -28,6 +28,7 @@ const DEFAULTS: AppSettings = {
   ai_guides_enabled: false,
   ai_guides_api: null,
   ai_organize_api: null,
+  log_level: "INFO",
 };
 
 interface AppSettingsContextValue {

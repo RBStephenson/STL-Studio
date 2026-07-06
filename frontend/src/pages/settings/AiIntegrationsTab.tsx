@@ -16,6 +16,7 @@ interface DraftConfig {
   url: string;
   model: string;
   effort: string;
+  request_timeout: number;
 }
 
 const EMPTY_DRAFT: DraftConfig = {
@@ -24,6 +25,7 @@ const EMPTY_DRAFT: DraftConfig = {
   url: "",
   model: "",
   effort: "low",
+  request_timeout: 10,
 };
 
 const ANTHROPIC_MODELS = [
@@ -174,6 +176,22 @@ function ConfigForm({
         </div>
       )}
 
+      {/* Request timeout — per connection. Remote endpoints (e.g. an Ollama box
+          loading a model cold) can take far longer than a local one. */}
+      <div>
+        <label className="block text-xs text-gray-400 mb-1">
+          Timeout <span className="text-gray-600 ml-1">(seconds — raise for slow/remote endpoints)</span>
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={600}
+          value={draft.request_timeout}
+          onChange={(e) => onChange({ request_timeout: Number(e.target.value) })}
+          className={`max-w-[8rem] ${INPUT}`}
+        />
+      </div>
+
       {/* API Key */}
       <div>
         <label className="block text-xs text-gray-400 mb-1">
@@ -245,6 +263,7 @@ function ConfigCard({
     url: config.url ?? "",
     model: config.model,
     effort: config.effort ?? "low",
+    request_timeout: config.request_timeout ?? 10,
   });
   const [modelList, setModelList] = useState<string[]>([]);
   const [modelListLoading, setModelListLoading] = useState(false);
@@ -279,6 +298,7 @@ function ConfigCard({
         url: draft.api_type === "openai" ? (draft.url.trim() || null) : null,
         model: draft.model,
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
+        request_timeout: draft.request_timeout,
       });
       setLocalConfig(updated);
       onUpdated(updated);
@@ -342,6 +362,7 @@ function ConfigCard({
             {localConfig.model && <span>{localConfig.model}</span>}
             {localConfig.url && <span className="truncate max-w-[200px]">{localConfig.url}</span>}
             {localConfig.effort && localConfig.api_type === "anthropic" && <span>effort: {localConfig.effort}</span>}
+            <span>timeout: {localConfig.request_timeout}s</span>
             <span>{localConfig.key_set ? `Key ••••${localConfig.key_hint?.replace(/^…/, "")}` : "No key"}</span>
           </div>
         </div>
@@ -441,6 +462,7 @@ function AddConfigCard({
         url: draft.api_type === "openai" ? (draft.url.trim() || null) : null,
         model: draft.model,
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
+        request_timeout: draft.request_timeout,
       });
       setPendingId(created.id);
       setPendingConfig(created);
