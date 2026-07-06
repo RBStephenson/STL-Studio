@@ -6,8 +6,6 @@ no file is ever written, the ephemeral in-memory test DB stores its key as an
 ordinary row instead, and a real (non-ephemeral) DATABASE_URL without
 STL_SECRET_KEY set falls back to an in-memory-only key.
 """
-import os
-
 from app.services import secrets
 
 
