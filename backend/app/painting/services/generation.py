@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import json
+from dataclasses import dataclass
 
 from anthropic import Anthropic
 from pydantic import ValidationError
@@ -62,6 +63,59 @@ def _model(db: Session) -> str:
     row = db.get(AppSetting, "ai_model")
     value = row.value if row is not None else None
     return value or DEFAULT_MODEL
+
+
+@dataclass
+class GuidesConfig:
+    """Resolved AI Guide Drafts endpoint (model/key/effort). A dataclass (not a
+    tuple) so the secret ``api_key`` field stays isolated under static
+    analysis — see ``_OrganizeConfig`` in app/routers/models.py for why."""
+    model: str
+    api_key: str
+    effort: str
+
+
+def load_guides_config(db: Session) -> GuidesConfig:
+    """Resolve the AI Guide Drafts endpoint. Raises MissingApiKeyError (a
+    GenerationError) if nothing usable is configured — callers surface that as
+    a 503, or as the job's error state.
+
+    Driven by a named AiApiConfig assigned via the ``ai_guides_api`` setting
+    (the "Use API" selector in Settings → AI & Integrations → AI Functions).
+    Falls back to the legacy global ``ai_api_key`` / ``ai_model`` / ``ai_effort``
+    settings when no config is assigned, for installs that predate named
+    configs. Guide drafts are Anthropic-only today — the whole prompt/response
+    pipeline assumes the Messages API — so only an Anthropic config applies.
+    """
+    enabled_row = db.get(AppSetting, "ai_guides_enabled")
+    if not enabled_row or not bool(enabled_row.value):
+        raise MissingApiKeyError("AI Guide Drafts is not enabled.")
+
+    api_row = db.get(AppSetting, "ai_guides_api")
+    config_id = api_row.value if api_row else None
+    if config_id:
+        from app.models import AiApiConfig
+
+        cfg = db.get(AiApiConfig, int(config_id))
+        if not cfg:
+            raise MissingApiKeyError(
+                "The AI API assigned to Guide Drafts no longer exists — reselect one in Settings."
+            )
+        if cfg.api_type != "anthropic":
+            raise MissingApiKeyError(
+                "AI Guide Drafts requires an Anthropic API — reselect one in Settings."
+            )
+        key = secrets.get_ai_api_config_key(db, cfg.id)
+        if not key:
+            raise MissingApiKeyError("No API key is configured for the assigned AI API.")
+        effort = cfg.effort if cfg.effort in _EFFORT_THINKING_BUDGET else "low"
+        return GuidesConfig(model=cfg.model or DEFAULT_MODEL, api_key=key, effort=effort)
+
+    # Legacy fallback: standalone ai_api_key_enc / ai_model / ai_effort settings.
+    key = secrets.get_ai_api_key(db)
+    if not key:
+        raise MissingApiKeyError("No AI API key is configured.")
+    return GuidesConfig(model=_model(db), api_key=key, effort=_effort(db))
 
 
 def _text_from_response(resp) -> str:
@@ -123,18 +177,16 @@ def _build_message_content(db: Session, guide: Guide):
 def generate_guide_draft(db: Session, guide: Guide) -> GuideDraft:
     """Call Claude to generate a GuideDraft for a guide. Free of persistence —
     the job runner reconciles paints and saves the result."""
-    key = secrets.get_ai_api_key(db)
-    if not key:
-        raise MissingApiKeyError("No AI API key is configured.")
+    cfg = load_guides_config(db)
 
-    client = Anthropic(api_key=key)
+    client = Anthropic(api_key=cfg.api_key)
     kwargs = {
-        "model": _model(db),
+        "model": cfg.model,
         "max_tokens": _MAX_TOKENS,
         "system": assemble_system_prompt(db),
         "messages": [{"role": "user", "content": _build_message_content(db, guide)}],
     }
-    budget = _EFFORT_THINKING_BUDGET[_effort(db)]
+    budget = _EFFORT_THINKING_BUDGET[cfg.effort]
     if budget:
         kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
         # max_tokens must exceed the thinking budget.

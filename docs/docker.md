@@ -309,6 +309,44 @@ You can also change the level live in the UI under **Settings → Preferences �
 Logging** — that value overrides `LOG_LEVEL` and persists across restarts. See
 [Logging](features.md#logging).
 
+**`STL_SECRET_KEY`** (backend) is **not** another API key — it's the
+encryption key that protects the API keys/credentials you already entered in
+Settings (AI provider keys, Cults3D, MyMiniFactory). Those are stored in the
+database as ciphertext, never plaintext; `STL_SECRET_KEY` is what decrypts
+them back into usable keys at runtime.
+
+It's kept deliberately separate from the database itself: if the database file
+ever leaks (a backup uploaded somewhere, a misconfigured volume, a stolen
+disk), the ciphertext alone is useless without this key. If the key lived
+*inside* the database it protects, that protection would be pointless — a
+leak would hand over the lock and the key together.
+
+It is **never written to a file** by the app. If unset, a key is generated in
+memory for that process's lifetime only — the app still works, but every
+restart forgets it, so anything encrypted with the old one becomes permanently
+undecryptable (you'd just re-enter your API keys). Set a stable value once to
+make your stored keys survive restarts/upgrades:
+
+```yaml
+services:
+  backend:
+    environment:
+      - STL_SECRET_KEY=your-generated-key-here
+```
+
+Generate one with:
+
+```bash
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Keep this value itself somewhere safe (a password manager, alongside your
+other infra secrets) — it's the one credential that isn't recoverable by
+re-entering anything in the UI.
+
+Keep this value secret and back it up — if it's lost, previously stored keys
+become undecryptable and must be re-entered.
+
 Tail the backend's output with `docker compose logs -f backend`.
 `PYTHONUNBUFFERED=1` (already set in the shipped compose files) keeps log lines
 from being buffered.

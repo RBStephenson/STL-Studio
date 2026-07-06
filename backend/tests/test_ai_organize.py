@@ -129,6 +129,75 @@ def test_endpoint_drives_anthropic_config(client, db, monkeypatch):
     assert sug[f.id]["part_type"] == "Weapon"
 
 
+# --- Success-via-API-or-nothing (#821): the endpoint never substitutes
+# heuristic-only suggestions for a non-"ok" LLM outcome, even though the
+# service layer (ai_organize.run) computes and returns them internally. ---
+
+def _seeded_model(db, filename="mystery_blob.stl"):
+    m = Model(name="Endpoint Test", folder_path="/lib/endpoint")
+    db.add(m)
+    db.flush()
+    f = STLFile(model_id=m.id, filename=filename, path=f"/lib/endpoint/{filename}")
+    db.add(f)
+    db.commit()
+    return m, f
+
+
+def test_endpoint_returns_empty_suggestions_on_llm_error(client, db, monkeypatch):
+    m, f = _seeded_model(db)
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: (_ for _ in ()).throw(
+        ai.httpx.ConnectError("connection refused")
+    ))
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Ollama", "api_type": "openai", "url": "http://x:11434", "model": "llama3",
+    }).json()
+    client.patch("/settings", json={"ai_organize_enabled": True, "ai_organize_api": cfg["id"]})
+
+    r = client.post(f"/models/{m.id}/ai-organize")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["llm_status"] == "error"
+    assert body["llm_detail"]
+    assert body["suggestions"] == []
+
+
+def test_endpoint_returns_empty_suggestions_when_disabled(client, db):
+    m, f = _seeded_model(db)
+    # ai_organize_enabled is left False (the default) — the resolver itself
+    # would 400 if we called it directly, but the endpoint requires it be
+    # enabled to even attempt a run, so this exercises the "disabled" outcome
+    # via a config assigned with no model set (never becomes llm_ready).
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Ollama", "api_type": "openai", "url": "http://x:11434", "model": "",
+    }).json()
+    client.patch("/settings", json={"ai_organize_enabled": True, "ai_organize_api": cfg["id"]})
+
+    r = client.post(f"/models/{m.id}/ai-organize")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["llm_status"] == "disabled"
+    assert body["llm_detail"]
+    assert body["suggestions"] == []
+
+
+def test_endpoint_returns_empty_suggestions_when_skipped(client, db):
+    """A well-named file that heuristics fully resolve needs no AI call —
+    llm_status is 'skipped', and per #821 that still means zero suggestions,
+    not the heuristic guess presented as an AI result."""
+    m, f = _seeded_model(db, filename="Sword_of_Truth.stl")  # heuristics resolve this: Weapon
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Ollama", "api_type": "openai", "url": "http://x:11434", "model": "llama3",
+    }).json()
+    client.patch("/settings", json={"ai_organize_enabled": True, "ai_organize_api": cfg["id"]})
+
+    r = client.post(f"/models/{m.id}/ai-organize")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["llm_status"] == "skipped"
+    assert body["llm_detail"]
+    assert body["suggestions"] == []
+
+
 def test_openai_path_refines_via_httpx(monkeypatch):
     """Regression for the OpenAI-compatible path after the openai/anthropic split."""
     content = json.dumps({"files": [

@@ -651,7 +651,9 @@ entry has:
   take 30–90s or more, so raise this for remote endpoints — e.g. `60`. The
   setting is per-connection, so a fast local API and a slow remote one can each
   have their own value.
-- **API key** — stored encrypted server-side. For Ollama and similar local
+- **API key** — stored encrypted server-side, using a separate encryption key
+  (`STL_SECRET_KEY`, see [Docker configuration](docker.md#optional-environment-variables))
+  so a leaked database alone doesn't expose it. For Ollama and similar local
   endpoints, a key is optional.
 
 You can add multiple entries of the same type — for example, two Anthropic
@@ -666,12 +668,14 @@ Controls which AI features are active and which named API each one uses.
   guide for review before saving. Choose which configured API to use.
 - **AI Naming & Organizing** — when enabled, normalizes part names, assigns
   categories, and links presupported files on a per-model basis. Choose which
-  configured API to use. Fast built-in heuristics run first and handle
-  well-named files on their own; the AI is only called for files the heuristics
-  can't classify, so a model whose parts are already clearly named may not need
-  the AI at all. If the AI call fails (e.g. the endpoint is unreachable or times
-  out), the review still opens with the heuristic suggestions and a message
-  explaining what went wrong — see [Logging](#logging) to inspect the details.
+  configured API to use. Internally, fast built-in heuristics run first and
+  handle well-named files on their own — the AI is only called for files the
+  heuristics can't classify. But the review modal only ever shows suggestions
+  the AI actually produced: it's **success via the API, or nothing** — a
+  heuristic guess is never presented as if the AI made it. If every file was
+  already unambiguous, if the AI call failed, or if no API is configured yet,
+  the modal opens with a clear explanation instead of any rows to review — see
+  [Logging](#logging) to inspect the details of a failed call.
 
 > Works with either an **OpenAI-compatible API** (e.g. Ollama) or an
 > **Anthropic** connection — assign one under **AI APIs**, then select it here.

@@ -8,6 +8,7 @@ import types
 import pytest
 from cryptography.fernet import Fernet
 
+from app.models import AppSetting
 from app.painting.models import Guide
 from app.painting.schemas import GuideDraft
 from app.painting.services import generation
@@ -20,6 +21,15 @@ def _key(monkeypatch):
     secrets.reset_cache()
     yield
     secrets.reset_cache()
+
+
+@pytest.fixture(autouse=True)
+def _enabled(db):
+    """These tests exercise generate_guide_draft's legacy-fallback path (a
+    global ai_api_key, no assigned AiApiConfig) — see test_guides_config.py
+    for the named-config resolution itself."""
+    db.add(AppSetting(key="ai_guides_enabled", value=True))
+    db.commit()
 
 
 def _guide(db):
