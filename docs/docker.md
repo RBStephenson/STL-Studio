@@ -126,6 +126,72 @@ gated. Localhost stays trusted regardless, and unlisted domains stay blocked.
 
 ---
 
+## For NAS servers (TrueNAS, Synology, Unraid…)
+
+A complete, copy-paste example for a NAS behind a reverse proxy. Replace the
+paths and hostname with your own; everything else is deployment-ready.
+
+```yaml
+services:
+  stl-inventory-backend:
+    image: ghcr.io/rbstephenson/stl-inventory-backend:latest
+    container_name: stl-inventory-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=sqlite:////data/stl_inventory.db
+      - STL_ROOTS=/mnt/drive1                 # container path seeded as a scan root
+      - TRUSTED_HOSTS=stl.example.com         # the hostname you browse to
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # app DB + encryption key — MUST be a writable, persistent dataset
+      - /mnt/pool/appdata/stl-inventory/data:/data
+      # your STL library — this host path appears at /mnt/drive1 in the container
+      - /mnt/pool/models/library:/mnt/drive1
+      # optional import staging area
+      - /mnt/pool/models/import:/import
+
+  stl-inventory-frontend:
+    image: ghcr.io/rbstephenson/stl-inventory-frontend:latest
+    container_name: stl-inventory-frontend
+    restart: unless-stopped
+    environment:
+      # must match the backend's service/container name and port
+      - BACKEND_ORIGIN=http://stl-inventory-backend:8000
+    ports:
+      # host:container — point your reverse proxy at <nas-ip>:8080
+      - "8080:3000"
+    depends_on:
+      - stl-inventory-backend
+```
+
+**The three knobs that make a NAS + reverse-proxy deployment work:**
+
+| Setting | On | Value |
+|---------|-----|-------|
+| Volume mount `…:/mnt/drive1` | backend | your library dataset → `/mnt/drive1` |
+| `STL_ROOTS` | backend | `/mnt/drive1` (the **container** path, not the host path) |
+| `TRUSTED_HOSTS` | backend | the public hostname, e.g. `stl.example.com` |
+| `BACKEND_ORIGIN` | frontend | `http://<backend-service-name>:8000` |
+
+**Reverse proxy:** create one proxy host for your domain and forward it to the
+**frontend** at `<nas-ip>:8080`. Do **not** add a separate `/api` rule — the
+frontend serves the UI and proxies `/api` to the backend internally. Don't
+publish the backend port at all.
+
+**NAS dataset paths** differ by platform — use yours in place of `/mnt/pool/…`:
+
+| NAS | Typical path prefix |
+|-----|---------------------|
+| TrueNAS SCALE | `/mnt/<pool>/…` |
+| Synology | `/volume1/…` |
+| Unraid | `/mnt/user/…` |
+
+> **Private registry?** If you mirror the images (e.g. a self-hosted registry),
+> swap `ghcr.io/rbstephenson/…` for your own path — the config is otherwise
+> identical.
+
+---
+
 ## How drive mounts are wired
 
 There are three things you need to set for Docker mode to see your library:
