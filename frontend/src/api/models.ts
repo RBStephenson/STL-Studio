@@ -134,8 +134,10 @@ export const modelsApi = {
   characters: (creatorId: number) =>
     request<string[]>(`/models/characters?creator_id=${creatorId}`),
   variants: (creatorId: number, character: string, groupId?: number | null) => {
-    const gid = groupId ? `&group_id=${groupId}` : "";
-    return request<ModelList>(`/models/variants?creator_id=${creatorId}&character=${encodeURIComponent(character)}${gid}`);
+    if (groupId) {
+      return request<ModelList>(`/models/variants?group_id=${groupId}`);
+    }
+    return request<ModelList>(`/models/variants?creator_id=${creatorId}&character=${encodeURIComponent(character)}`);
   },
   splitPack: (id: number) =>
     request<{ ok: boolean; created: number; message: string }>(`/models/${id}/split`, {
@@ -175,11 +177,11 @@ export const modelsApi = {
     }),
   // Persist a manual model order within a variant group (#399). Empty `ids`
   // resets the group to its heuristic order.
-  reorderGroup: (creatorId: number, character: string, ids: number[]) =>
+  reorderGroup: (creatorId: number, character: string, ids: number[], groupId?: number | null) =>
     request<{ ok: boolean; reset: boolean; updated: number }>(`/models/group/reorder`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ creator_id: creatorId, character, ids }),
+      body: JSON.stringify({ creator_id: creatorId, character, group_id: groupId, ids }),
     }),
   updateSTLFile: (fileId: number, body: Record<string, unknown>) =>
     request<{ ok: boolean }>(`/models/stl-files/${fileId}`, {

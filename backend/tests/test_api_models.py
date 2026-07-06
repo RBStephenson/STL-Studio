@@ -1568,6 +1568,49 @@ class TestManualGroupEndpoints:
         resp = client.patch(f"/models/groups/{gid}", json={"rep_model_id": outsider.id})
         assert resp.status_code == 400
 
+    def test_group_rep_uses_durable_group_not_character(self, client, db):
+        """Renamed/manual groups can contain members with different scanner
+        characters. Setting the display thumbnail must clear siblings by
+        variant_group_id, not by stale character labels."""
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A", character="Alpha")
+        b = make_model(db, creator, name="B", character="Beta")
+        commit_all(db)
+        client.post("/models/groups/merge", json={"model_ids": [a.id, b.id], "label": "Manual"})
+
+        assert (
+            client.patch(f"/models/{a.id}/group-rep", json={"is_group_rep": True}).status_code
+            == 200
+        )
+        assert (
+            client.patch(f"/models/{b.id}/group-rep", json={"is_group_rep": True}).status_code
+            == 200
+        )
+
+        db.refresh(a); db.refresh(b)
+        assert a.is_group_rep is False
+        assert b.is_group_rep is True
+
+    def test_reorder_uses_group_id_when_character_is_stale(self, client, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="A", character="Alpha")
+        b = make_model(db, creator, name="B", character="Beta")
+        commit_all(db)
+        gid = client.post(
+            "/models/groups/merge",
+            json={"model_ids": [a.id, b.id], "label": "Manual"},
+        ).json()["id"]
+
+        resp = client.patch(
+            "/models/group/reorder",
+            json={"group_id": gid, "ids": [b.id, a.id]},
+        )
+
+        assert resp.status_code == 200
+        db.refresh(a); db.refresh(b)
+        assert b.variant_order == 0
+        assert a.variant_order == 1
+
 
 class TestGroupingStrategy:
     """P4 (#618): per-subtree grouping strategy."""

@@ -12,14 +12,14 @@ RUN npm run build
 # ---- serve stage ----
 FROM nginx:1.29.8-alpine
 
-# Serve the built SPA on :3000 with history-API fallback so client-side routes
-# (e.g. /painting/shelf) resolve to index.html instead of 404ing. The outer
-# proxy service still handles /api → backend, so no API config is baked in here.
-RUN printf 'server {\n\
-  listen 3000;\n\
-  root /usr/share/nginx/html;\n\
-  location / { try_files $uri $uri/ /index.html; }\n\
-}\n' > /etc/nginx/conf.d/default.conf
+# Serve the SPA on :3000 AND reverse-proxy /api → the backend, so the frontend
+# container is a self-contained entry point (no separate proxy service needed).
+# The backend address is a runtime variable: the nginx image envsubst's
+# /etc/nginx/templates/*.template into /etc/nginx/conf.d/ at container start.
+# Override BACKEND_ORIGIN to match your backend's service/host (default suits
+# the repo's docker-compose service name).
+ENV BACKEND_ORIGIN=http://backend:8000
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
 COPY --from=build /app/dist /usr/share/nginx/html
 
