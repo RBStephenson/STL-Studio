@@ -33,16 +33,22 @@ def set_group_rep(model_id: int, body: GroupRepUpdate, db: Session = Depends(get
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if model.creator_id is None or not model.character:
+    if model.variant_group_id is None and (model.creator_id is None or not model.character):
         raise HTTPException(status_code=400, detail="Model is not part of a variant group.")
 
     if body.is_group_rep:
         # Clear the flag across the whole group first, then set it on this model.
-        db.query(Model).filter(
-            Model.creator_id == model.creator_id,
-            Model.character == model.character,
-            Model.id != model.id,
-        ).update({Model.is_group_rep: False}, synchronize_session=False)
+        if model.variant_group_id is not None:
+            db.query(Model).filter(
+                Model.variant_group_id == model.variant_group_id,
+                Model.id != model.id,
+            ).update({Model.is_group_rep: False}, synchronize_session=False)
+        else:
+            db.query(Model).filter(
+                Model.creator_id == model.creator_id,
+                Model.character == model.character,
+                Model.id != model.id,
+            ).update({Model.is_group_rep: False}, synchronize_session=False)
         model.is_group_rep = True
         # Rep resolution for durable groups reads VariantGroup.rep_model_id, not
         # this legacy flag (#678) — keep both in sync so the button's effect is
@@ -72,10 +78,15 @@ def reorder_group(body: GroupReorder, db: Session = Depends(get_db)):
     group — clears every member's variant_order so the heuristic order resumes.
     Ids that don't belong to the group are ignored. Scans never touch
     variant_order, so no scan-in-progress guard is needed."""
-    group = db.query(Model).filter(
-        Model.creator_id == body.creator_id,
-        Model.character == body.character,
-    )
+    if body.group_id is not None:
+        group = db.query(Model).filter(Model.variant_group_id == body.group_id)
+    elif body.creator_id is not None and body.character:
+        group = db.query(Model).filter(
+            Model.creator_id == body.creator_id,
+            Model.character == body.character,
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Provide group_id or (creator_id and character).")
     if not body.ids:
         updated = group.update({Model.variant_order: None}, synchronize_session=False)
         db.commit()

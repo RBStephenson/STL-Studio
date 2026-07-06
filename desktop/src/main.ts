@@ -12,7 +12,7 @@
  */
 import { join } from "node:path";
 
-import { Menu, app, BrowserWindow, dialog } from "electron";
+import { Menu, app, BrowserWindow, dialog, screen } from "electron";
 import type { WebContents } from "electron";
 
 import { LOCKFILE_NAME, baseUrl, resolveBackendExe } from "./config";
@@ -24,12 +24,14 @@ import type { NavTarget } from "./menu";
 import { findFreePort, runtimeDeps } from "./runtime";
 import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
+import { readWindowState, saveWindowState } from "./windowState";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
 const SPLASH_HTML = join(__dirname, "..", "splash.html");
 const APP_ICON = join(__dirname, "..", "resources", "stl_studio.ico");
 // Matches splash.html's background so there's no white flash before it paints.
 const WINDOW_BG = "#070b16";
+const WINDOW_STATE_SAVE_DELAY_MS = 250;
 
 // Repo root during dev: desktop/dist/main.js -> up two levels. Used only to
 // resolve the dev backend-exe fallback; the packaged app resolves the sidecar
@@ -39,6 +41,7 @@ const REPO_ROOT = join(__dirname, "..", "..");
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarProcess | null = null;
 let deps: SidecarDeps | null = null;
+let windowStateSaveTimer: NodeJS.Timeout | null = null;
 
 const IS_MAC = process.platform === "darwin";
 
@@ -70,9 +73,10 @@ function installApplicationMenu(): void {
 }
 
 function createWindow(): BrowserWindow {
+  const userDataDir = app.getPath("userData");
+  const savedState = readWindowState(userDataDir, screen.getAllDisplays());
   const win = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    ...savedState.bounds,
     show: false,
     title: "STL Studio",
     icon: APP_ICON,
@@ -82,6 +86,9 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   });
+  if (savedState.isMaximized) {
+    win.maximize();
+  }
   // Show the branded splash immediately (shown once it paints) so the app never
   // looks hung while the backend boots; bootBackendAndLoad swaps to the app.
   win.once("ready-to-show", () => win.show());
@@ -105,6 +112,37 @@ function createWindow(): BrowserWindow {
     } else if (command === "browser-forward" && history.canGoForward()) {
       history.goForward();
     }
+  });
+
+  const saveCurrentWindowState = (): void => {
+    try {
+      saveWindowState(userDataDir, {
+        bounds: win.getNormalBounds(),
+        isMaximized: win.isMaximized(),
+      });
+    } catch (err) {
+      console.warn("Failed to save window state", err);
+    }
+  };
+
+  const persistWindowState = (): void => {
+    if (windowStateSaveTimer) {
+      clearTimeout(windowStateSaveTimer);
+    }
+    windowStateSaveTimer = setTimeout(() => {
+      windowStateSaveTimer = null;
+      saveCurrentWindowState();
+    }, WINDOW_STATE_SAVE_DELAY_MS);
+  };
+
+  win.on("resize", persistWindowState);
+  win.on("move", persistWindowState);
+  win.on("close", () => {
+    if (windowStateSaveTimer) {
+      clearTimeout(windowStateSaveTimer);
+      windowStateSaveTimer = null;
+    }
+    saveCurrentWindowState();
   });
 
   return win;
