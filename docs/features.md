@@ -676,7 +676,9 @@ entry has:
 - **API key** — stored encrypted server-side, using a separate encryption key
   (`STL_SECRET_KEY`, see [Docker configuration](docker.md#optional-environment-variables))
   so a leaked database alone doesn't expose it. For Ollama and similar local
-  endpoints, a key is optional.
+  endpoints, a key is optional. Entered alongside the other fields and saved
+  together with **Add API**/**Save changes** — there's no separate save step
+  for the key.
 
 You can add multiple entries of the same type — for example, two Anthropic
 entries using different models for different tasks, or both a local Ollama

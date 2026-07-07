@@ -613,6 +613,9 @@ class AiApiConfigCreate(BaseModel):
     model: str = Field("", max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     request_timeout: int = Field(10, ge=1, le=600)
+    # Optional so a config can still be created key-less (e.g. Ollama), but lets
+    # the client set the key in the same request instead of a follow-up call.
+    api_key: Optional[str] = Field(None, max_length=400)
 
 
 class AiApiConfigUpdate(BaseModel):
@@ -621,6 +624,7 @@ class AiApiConfigUpdate(BaseModel):
     model: Optional[str] = Field(None, max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     request_timeout: Optional[int] = Field(None, ge=1, le=600)
+    api_key: Optional[str] = Field(None, max_length=400)
 
 
 # --- AI settings (#517) ---------------------------------------------------

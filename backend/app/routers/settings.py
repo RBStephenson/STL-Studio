@@ -330,9 +330,9 @@ def create_ai_api_config(body: AiApiConfigCreate, db: Session = Depends(get_db))
     db.add(c)
     db.commit()
     db.refresh(c)
-    return AiApiConfigRead(id=c.id, name=c.name, api_type=c.api_type, url=c.url,
-                           model=c.model, effort=c.effort,
-                           request_timeout=c.request_timeout, key_set=False, key_hint=None)
+    if body.api_key:
+        secrets.set_ai_api_config_key(db, c.id, body.api_key)
+    return _config_to_read(db, c)
 
 
 @router.patch("/ai-apis/{config_id}", response_model=AiApiConfigRead)
@@ -340,8 +340,12 @@ def update_ai_api_config(config_id: int, body: AiApiConfigUpdate, db: Session = 
     c = db.get(AiApiConfig, config_id)
     if not c:
         raise HTTPException(status_code=404, detail="Config not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+    api_key = updates.pop("api_key", None)
+    for field, value in updates.items():
         setattr(c, field, value)
+    if api_key:
+        secrets.set_ai_api_config_key(db, config_id, api_key)
     db.commit()
     db.refresh(c)
     return _config_to_read(db, c)
