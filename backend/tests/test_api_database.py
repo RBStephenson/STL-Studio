@@ -110,8 +110,7 @@ def test_restore_continues_when_pre_restore_snapshot_fails(file_db_client, monke
     body = resp.json()
     assert body["ok"] is True
     assert body["snapshot"] is None
-    assert "Pre-restore snapshot failed" in body["warning"]
-    assert "unable to open database file" in body["warning"]
+    assert body["warning"] == "Pre-restore snapshot failed"
     assert not _backups_dir(db_path).exists() or not list(
         _backups_dir(db_path).glob("pre_restore_*.db")
     )
