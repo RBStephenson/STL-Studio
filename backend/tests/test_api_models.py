@@ -952,6 +952,50 @@ class TestThumbnailUpload:
         )
         assert resp.status_code == 400
 
+    def test_upload_jpeg_uses_matching_extension(self, client, db):
+        """A non-PNG upload must be saved with its own extension, not mislabeled
+        .png — otherwise the stored bytes and the file's extension disagree."""
+        creator = make_creator(db)
+        model = make_model(db, creator, name="JpegUpload")
+        db.commit()
+
+        jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("photo.jpg", jpeg_bytes, "image/jpeg")},
+        )
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_path.endswith(".jpg")
+
+    def test_upload_gif_is_accepted(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="GifUpload")
+        db.commit()
+
+        gif_bytes = b"GIF89a" + b"\x00" * 16
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("anim.gif", gif_bytes, "image/gif")},
+        )
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_path.endswith(".gif")
+
+    def test_upload_rejects_oversized_file(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="TooBig")
+        db.commit()
+
+        oversized = b"\x89PNG\r\n\x1a\n" + b"\x00" * (15 * 1024 * 1024 + 1)
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("big.png", oversized, "image/png")},
+        )
+        assert resp.status_code == 413
+
 
 # ---------------------------------------------------------------------------
 # Exclude filters (#204 / #205)

@@ -40,20 +40,27 @@ class SanitizedSegment:
     over_length: bool     # cleaned value still exceeds MAX_COMPONENT_LEN
 
 
-def sanitize_segment(name: str) -> SanitizedSegment:
+def sanitize_segment(name: str, slugify: bool = False) -> SanitizedSegment:
     """Clean a single path component and report reserved-name / over-length flags.
 
     Steps: NFC-normalize, replace forbidden chars, strip trailing dots/spaces,
     fall back to ``_`` for an empty result, flag reserved device names and
     components that remain over the length cap (not truncated here).
+
+    ``slugify=True`` runs :func:`slug_segment` instead (lowercase, hyphenated,
+    ASCII-only) before the reserved-name/length checks, so callers that want
+    import-style directory naming still get the same safety guarantees.
     """
-    s = unicodedata.normalize("NFC", name or "")
-    s = _FORBIDDEN_RE.sub(_REPLACEMENT, s)
-    # Trailing dots/spaces are stripped by Windows on creation — normalize now
-    # so the stored path matches what the filesystem would actually produce.
-    s = s.rstrip(". ")
-    if not s:
-        s = _REPLACEMENT
+    if slugify:
+        s = slug_segment(name)
+    else:
+        s = unicodedata.normalize("NFC", name or "")
+        s = _FORBIDDEN_RE.sub(_REPLACEMENT, s)
+        # Trailing dots/spaces are stripped by Windows on creation — normalize
+        # now so the stored path matches what the filesystem would produce.
+        s = s.rstrip(". ")
+        if not s:
+            s = _REPLACEMENT
 
     stem = s.split(".", 1)[0].upper()
     reserved = stem in _RESERVED_NAMES
@@ -70,13 +77,13 @@ def path_over_length(full_path: str) -> bool:
     return len(full_path) > MAX_PATH_LEN
 
 
-# Slug sanitizer for import folder naming — separate from sanitize_segment so the
-# reorganize engine's existing behaviour is unchanged for in-library moves.
+# Slug transform used by sanitize_segment(slugify=True) and directly by any
+# caller that only needs the raw lowercase-hyphenated form.
 _SLUG_NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 
 def slug_segment(name: str) -> str:
-    """Convert a title to a filesystem-safe slug: lowercase, non-alnum runs → dash.
+    """Convert a name to a filesystem-safe slug: lowercase, non-alnum runs → dash.
 
     Strips Unicode accent marks so accented chars become their ASCII base letter.
     Falls back to a single underscore if the result is empty.

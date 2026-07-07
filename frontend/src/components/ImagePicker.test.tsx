@@ -104,6 +104,41 @@ describe("ImagePicker – From URL tab", () => {
   });
 });
 
+describe("ImagePicker – Upload tab", () => {
+  it("uploads the chosen file and calls onApplied on success", async () => {
+    const { onApplied } = renderPicker();
+
+    await userEvent.click(screen.getByRole("button", { name: /upload/i }));
+    const file = new File(["fake-bytes"], "photo.png", { type: "image/png" });
+
+    fetchMock.mockImplementationOnce(() => jsonResponse({ ok: true, path: "/d/7.png" }));
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, file);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/models/7/thumbnail/upload",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(onApplied).toHaveBeenCalled();
+  });
+
+  it("shows the backend error detail when the upload fails", async () => {
+    const { onApplied } = renderPicker();
+
+    await userEvent.click(screen.getByRole("button", { name: /upload/i }));
+    const file = new File(["fake-bytes"], "photo.png", { type: "image/png" });
+
+    fetchMock.mockImplementationOnce(() =>
+      jsonResponse({ detail: "Image too large (max 15 MB)" }, false)
+    );
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, file);
+
+    expect(await screen.findByText("Image too large (max 15 MB)")).toBeInTheDocument();
+    expect(onApplied).not.toHaveBeenCalled();
+  });
+});
+
 describe("ImagePicker – From Folder tab", () => {
   it("re-fetches with ?refresh=true when Refresh is clicked", async () => {
     renderPicker();

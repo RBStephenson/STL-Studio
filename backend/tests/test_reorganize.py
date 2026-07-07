@@ -68,7 +68,8 @@ class TestPreviewHappyPath:
         _model_with_file(db, tmp_path, creator_name="Abe3D", character="Joker", title="Bust")
 
         entry = client.get("/reorganize/preview").json()["entries"][0]
-        assert entry["proposed_dir"].endswith("Abe3D/Joker/Bust")
+        # Destination segments render lowercase/hyphenated by default (#reorganize).
+        assert entry["proposed_dir"].endswith("abe3d/joker/bust")
         assert entry["eligible"] is True
         assert entry["escapes_scan_root"] is False
 
@@ -82,7 +83,7 @@ class TestSentinels:
         assert "character" in entry["missing_fields"]
         assert entry["unclassifiable"] is True
         assert entry["eligible"] is False
-        assert "_Unknown Character" in entry["proposed_dir"]
+        assert "unknown-character" in entry["proposed_dir"]
 
 
 class TestCollisions:
@@ -182,7 +183,7 @@ class TestTemplateValidation:
         entry = client.get(
             "/reorganize/preview", params={"template": "{creator}/{title}"}
         ).json()["entries"][0]
-        assert entry["proposed_dir"].endswith("Abe3D/Bust")
+        assert entry["proposed_dir"].endswith("abe3d/bust")
 
 
 class TestResolution:
@@ -199,7 +200,7 @@ class TestResolution:
         entry = resp.json()["entries"][0]
         assert entry["eligible"] is True
         assert "character" not in entry["missing_fields"]
-        assert entry["proposed_dir"].endswith("Harley/Bust")
+        assert entry["proposed_dir"].endswith("harley/bust")
 
     def test_suffix_breaks_a_collision(self, client, db, tmp_path):
         _root(db, tmp_path)
@@ -213,7 +214,7 @@ class TestResolution:
         by_id = {e["model_id"]: e for e in data["entries"]}
         assert by_id[m1.id]["collision"] is False
         assert by_id[m2.id]["collision"] is False
-        assert by_id[m2.id]["proposed_dir"].endswith("Bust v2")
+        assert by_id[m2.id]["proposed_dir"].endswith("bust-v2")
 
     def test_post_preview_persists_new_manifest(self, client, db, tmp_path):
         from app.models import ReorganizeManifest
