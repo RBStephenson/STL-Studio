@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { AlertCircle, Database, Download, ShieldAlert, ShieldCheck, Trash2, Upload, Wrench } from "lucide-react";
+import { AlertCircle, Database, Download, LoaderCircle, ShieldAlert, ShieldCheck, Trash2, Upload, Wrench } from "lucide-react";
 import { api } from "../../api/client";
 import type { DatabaseHealth } from "../../api/database";
 import FlashBanner from "./FlashBanner";
@@ -142,7 +142,18 @@ export default function DataTab() {
             <p className="text-xs text-gray-500 mb-3">
               Run a SQLite integrity check or attempt a safe index repair. Repair snapshots the database first and does not touch STL files.
             </p>
-            {health && (
+            {busy === "health" ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mb-3 flex items-center gap-2 rounded-lg border border-sky-900/70 bg-sky-950/20 px-3 py-2 text-xs text-sky-300"
+              >
+                <LoaderCircle size={14} className="animate-spin shrink-0" />
+                <span>
+                  <span className="font-semibold">Checking database...</span> This can take a minute on a large library.
+                </span>
+              </div>
+            ) : health && (
               <div
                 className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
                   health.ok

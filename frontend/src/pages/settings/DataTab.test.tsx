@@ -3,6 +3,14 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import DataTab from "./DataTab";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 vi.mock("../../api/client", () => ({
   api: {
     database: {
@@ -37,6 +45,24 @@ describe("DataTab database health", () => {
     expect(api.database.health).toHaveBeenCalled();
     expect(await screen.findByText(/healthy/i)).toBeInTheDocument();
     expect(screen.getByText("ok")).toBeInTheDocument();
+  });
+
+  it("shows progress while the database health check is running", async () => {
+    const { api } = await import("../../api/client");
+    const health = deferred<{ ok: boolean; status: "healthy"; detail: string }>();
+    vi.mocked(api.database.health).mockReturnValue(health.promise);
+
+    render(<DataTab />);
+
+    await userEvent.click(screen.getByRole("button", { name: /check health/i }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(/checking database/i);
+    expect(screen.getByRole("button", { name: /checking/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /repair database/i })).toBeDisabled();
+
+    health.resolve({ ok: true, status: "healthy", detail: "ok" });
+
+    expect(await screen.findByText(/healthy/i)).toBeInTheDocument();
   });
 
   it("confirms repair before calling the repair endpoint", async () => {
