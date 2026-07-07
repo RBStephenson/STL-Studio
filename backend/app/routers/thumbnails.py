@@ -16,7 +16,8 @@ from app.schemas import (
     ThumbnailUpdate, ThumbnailFromUrl, BatchThumbnailFromUrl,
 )
 from app.services.thumbnails import (
-    ThumbnailDownloadError, download_thumbnail, fetch_image_bytes, store_thumbnail,
+    CONTENT_TYPE_EXT, MAX_BYTES, ThumbnailDownloadError,
+    download_thumbnail, fetch_image_bytes, store_thumbnail,
 )
 from app.services import scanner
 from app.utils import utcnow
@@ -145,14 +146,22 @@ async def upload_thumbnail(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Store a captured PNG from the 3D viewer as this model's thumbnail."""
+    """Store an uploaded image, or a captured PNG from the 3D viewer, as this
+    model's thumbnail. Shares store_thumbnail()'s path confinement and stale-
+    file cleanup with the from-url path — the same one Collections' cover
+    upload uses for its own file (store_collection_cover)."""
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if file.content_type not in ("image/png", "image/jpeg", "image/webp"):
-        raise HTTPException(status_code=400, detail="Only PNG/JPEG/WebP images are accepted")
+    ext = CONTENT_TYPE_EXT.get(file.content_type or "")
+    if ext is None:
+        raise HTTPException(status_code=400, detail="Only PNG/JPEG/WebP/GIF images are accepted")
 
-    out = store_thumbnail(model_id, ".png", await file.read())
+    data = await file.read()
+    if len(data) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large (max 15 MB)")
+
+    out = store_thumbnail(model_id, ext, data)
 
     model.thumbnail_path = str(out)
     model.thumbnail_url = None

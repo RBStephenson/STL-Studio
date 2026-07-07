@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models import Model, Creator, ModelTag, CollectionModel, ScanRoot, STLFile, VariantGroup
 from app.schemas import (
-    ModelList, ModelRead, ModelDetail, CreatorRead,
+    ModelList, ModelRead, ModelDetail, CreatorRead, CreatorCreate,
     ModelUpdate, STLFileUpdate, BulkDeleteRequest, BulkDeleteResponse,
     AiOrganizeResult, AiOrganizeSuggestion,
     AiOrganizeSuggestionPreview, AiOrganizePreviewResult,
@@ -29,8 +29,10 @@ from app.services.path_guard import is_within_roots
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
 from app.services.variant_sync import propagate_source_url
 from app.services.tag_sync import sync_model_tags
-from app.services import ai_organize
+from app.services import ai_organize, reorganize
+from app.services.reorganize_template import ReorganizeTemplateError
 from app.services.scanner import resolve_creator
+from app.routers.reorganize import _stored_template, _slugify_all
 from app.config import settings
 from app.utils import utcnow, like_escape
 
@@ -357,6 +359,39 @@ def list_creators(db: Session = Depends(get_db)):
         cr = CreatorRead.model_validate(creator)
         cr.model_count = cnt
         result.append(cr)
+    return result
+
+
+@router.post("/creators", response_model=CreatorRead, status_code=201)
+def create_creator(body: CreatorCreate, db: Session = Depends(get_db)):
+    """Add a creator manually (no models required). Same case-insensitive
+    dedup rule as resolve_creator(), so this can't fork a duplicate row that a
+    later scan/enrich would otherwise resolve to. Best-effort creates the
+    creator's library directory on disk; a failure there never fails the
+    request, since the creator row is the source of truth."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Creator name is required")
+    existing = db.query(Creator).filter(func.lower(Creator.name) == name.lower()).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Creator '{existing.name}' already exists")
+
+    creator = Creator(name=name, source_url=body.source_url)
+    db.add(creator)
+    db.commit()
+    db.refresh(creator)
+
+    try:
+        target = reorganize.creator_scan_dir(
+            db, _stored_template(db, None), name, slugify=_slugify_all(db)
+        )
+        if target:
+            os.makedirs(target, exist_ok=True)
+    except (OSError, ReorganizeTemplateError) as e:
+        _log.warning("Could not create library directory for creator %r: %s", name, e)
+
+    result = CreatorRead.model_validate(creator)
+    result.model_count = 0
     return result
 
 
@@ -876,4 +911,15 @@ def get_model(model_id: int, db: Session = Depends(get_db)):
     result = ModelDetail.model_validate(model)
     result.native_folder_path = settings.to_native_path(model.folder_path)
     result.collection_ids = [link.collection_id for link in model.collection_links]
+
+    try:
+        template = _stored_template(db, None)
+        manifest = reorganize.build_manifest(
+            db, template, model_ids=[model.id], slugify_all=_slugify_all(db)
+        )
+        entry = manifest.entries[0] if manifest.entries else None
+        result.unorganized = bool(entry and entry.kind != "in_place")
+    except ReorganizeTemplateError as e:
+        _log.warning("Could not compute organize status for model %s: %s", model_id, e)
+
     return result

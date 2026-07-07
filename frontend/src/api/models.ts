@@ -23,6 +23,12 @@ export const modelsApi = {
   get: (id: number) => request<ModelDetail>(`/models/${id}`),
   stats: () => request<ModelStats>("/models/stats"),
   creators: () => request<Creator[]>("/models/creators/list"),
+  createCreator: (name: string, source_url?: string) =>
+    request<Creator>("/models/creators", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, source_url: source_url || null }),
+    }),
   tags: () => request<{ tag: string; count: number }[]>("/models/tags/all"),
   renameTag: (oldTag: string, newTag: string) =>
     request<{ ok: boolean; updated: number }>("/models/tags/rename", {

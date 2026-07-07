@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ReorganizeManifest
+from app.models import AppSetting, ReorganizeManifest
 from app.schemas import (
     ReorganizeApplyRequest,
     ReorganizeApplyResponse,
@@ -84,6 +84,22 @@ def _compute_stats(entries: list[ReorganizeEntry]) -> ReorganizeStats:
     )
 
 
+def _slugify_all(db: Session) -> bool:
+    """Whether every destination segment renders lowercase/hyphenated. Defaults
+    to on (matches AppSettingsRead.reorganize_slugify); a stored row overrides."""
+    row = db.get(AppSetting, "reorganize_slugify")
+    return bool(row.value) if row is not None else True
+
+
+def _stored_template(db: Session, template: str | None) -> str | None:
+    """An explicit template wins; otherwise fall back to the persisted setting
+    (build_manifest itself falls back further to the built-in default)."""
+    if template:
+        return template
+    row = db.get(AppSetting, "reorganize_template")
+    return row.value if row is not None else None
+
+
 def _build_and_persist(
     db: Session,
     template: str | None,
@@ -94,7 +110,8 @@ def _build_and_persist(
 ) -> ReorganizePreviewResponse:
     try:
         manifest = reorganize.build_manifest(
-            db, template, root_id, overrides, inbox_source, slugify_title=slugify_title
+            db, template, root_id, overrides, inbox_source,
+            slugify_title=slugify_title, slugify_all=_slugify_all(db),
         )
     except ReorganizeTemplateError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -123,7 +140,7 @@ def preview(
     root_id: int | None = Query(None),
     db: Session = Depends(get_db),
 ) -> ReorganizePreviewResponse:
-    return _build_and_persist(db, template, root_id, None)
+    return _build_and_persist(db, _stored_template(db, template), root_id, None)
 
 
 @router.post("/preview", response_model=ReorganizePreviewResponse)
@@ -134,7 +151,7 @@ def preview_with_overrides(
     resolved manifest is a new persisted artifact with its own fingerprint
     baseline, so apply/undo verify against exactly what the user approved."""
     overrides = {mid: ov.model_dump(exclude_none=True) for mid, ov in body.overrides.items()}
-    return _build_and_persist(db, body.template, body.root_id, overrides)
+    return _build_and_persist(db, _stored_template(db, body.template), body.root_id, overrides)
 
 
 @router.post("/apply", response_model=ReorganizeApplyResponse)

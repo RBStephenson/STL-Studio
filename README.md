@@ -108,7 +108,7 @@ A folder is only indexed as a model if it contains 3D files.
 ### Model Detail
 - View and edit tags, metadata, source URL, NSFW flag
 - **Inline tag editing** — add or remove tags directly from the detail view without opening the full edit form
-- Image picker for choosing the thumbnail from the model's folder
+- Image picker for choosing the thumbnail from the model's folder, a URL, or a direct upload
 - STL preview (3D viewer)
 - **Part labeling** — tag each STL file with a part category (head, right arm, base, weapon, etc.) using a free-text input with common suggestions
 
@@ -132,8 +132,16 @@ A folder is only indexed as a model if it contains 3D files.
 
 ### Collections
 - Group models into named sets independent of tags/creators (projects, wishlists, etc.)
-- Create / rename / delete from the Collections page; add a model from its detail panel, or bulk-add from the Library selection bar
+- Create (name, description, and cover image in one modal) / rename / delete from the Collections page; add a model from its detail panel, or bulk-add from the Library selection bar
 - Stored in the database and included in every backup
+
+### Creators
+- Add a creator manually — its library folder is created automatically — instead of waiting for a scan to find one
+- Per-creator rescan and storefront enrichment (see below)
+
+### Reorganize Library
+- Preview and apply a folder template (default `{creator}/{character}/{title}`) to tidy files on disk
+- Destination template and lowercase/hyphenated ("slug") formatting are saved settings, shared with manual creator-folder creation and the model detail page's "unorganized" indicator
 
 ### Storefront Enrichment
 - Paste a Gumroad, Cults3D, MyMiniFactory, or Loot Studios creator URL

@@ -29,6 +29,8 @@ DEFAULTS = {
     "ai_guides_api": None,
     "ai_organize_api": None,
     "log_level": "INFO",
+    "reorganize_template": "",
+    "reorganize_slugify": True,
 }
 
 
