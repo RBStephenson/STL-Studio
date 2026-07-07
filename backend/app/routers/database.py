@@ -8,6 +8,7 @@ are refused (409) while a scan, reorganize apply, or undo is in progress, to avo
 corrupting an in-flight write or leaving on-disk files and DB rows diverged.
 """
 import os
+import logging
 import shutil
 import sqlite3
 import tempfile
@@ -23,6 +24,7 @@ from app.services import scanner
 from app.services.write_lock import LibraryBusy, library_write
 
 router = APIRouter(prefix="/database", tags=["database"])
+log = logging.getLogger(__name__)
 
 # How many pre-restore / pre-reset snapshots to keep per reason before the oldest
 # are pruned. Bounds disk use while still giving a few levels of undo (#222).
@@ -130,6 +132,15 @@ def _snapshot_db(reason: str) -> Path | None:
         _safe_unlink(old)
 
     return dest
+
+
+def _try_snapshot_db(reason: str) -> tuple[Path | None, str | None]:
+    """Best-effort snapshot wrapper for operations that can proceed without one."""
+    try:
+        return _snapshot_db(reason), None
+    except Exception as e:
+        log.warning("Database %s snapshot failed; continuing without snapshot: %s", reason, e)
+        return None, f"Pre-{reason} snapshot failed: {e}"
 
 
 @router.get("/backup")
@@ -266,7 +277,7 @@ async def restore_database(file: UploadFile = File(...)):
         with library_write("database_restore"):
             # Snapshot the current library before we overwrite it, so a
             # wrong-file restore is recoverable (#222).
-            snapshot = _snapshot_db("restore")
+            snapshot, warning = _try_snapshot_db("restore")
 
             # Drop pooled connections so the file isn't held open, then swap it in
             # and clear the stale WAL/SHM sidecars that belonged to the old DB.
@@ -282,7 +293,7 @@ async def restore_database(file: UploadFile = File(...)):
     except LibraryBusy:
         _safe_unlink(tmp)
         raise HTTPException(409, "Library is busy — a scan, apply, or undo is in progress")
-    return {"ok": True, "snapshot": str(snapshot) if snapshot else None}
+    return {"ok": True, "snapshot": str(snapshot) if snapshot else None, "warning": warning}
 
 
 @router.post("/reset")

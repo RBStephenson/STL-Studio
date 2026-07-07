@@ -87,8 +87,13 @@ export default function DataTab() {
       setBusy("restore");
       setDangerError(null);
       try {
-        await api.database.restore(restoreFile);
+        const result = await api.database.restore(restoreFile);
         closeDanger();
+        if (result.warning) {
+          flash(`Database restored; ${result.warning} Reloading...`, "ok");
+          setTimeout(() => window.location.reload(), 1200);
+          return;
+        }
         flash("Database restored — reloading…", "ok");
         setTimeout(() => window.location.reload(), 1200);
       } catch (e) {
