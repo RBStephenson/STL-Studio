@@ -140,7 +140,7 @@ def _try_snapshot_db(reason: str) -> tuple[Path | None, str | None]:
         return _snapshot_db(reason), None
     except Exception as e:
         log.warning("Database %s snapshot failed; continuing without snapshot: %s", reason, e)
-        return None, f"Pre-{reason} snapshot failed: {e}"
+        return None, f"Pre-{reason} snapshot failed"
 
 
 @router.get("/backup")
