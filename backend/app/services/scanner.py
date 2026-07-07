@@ -1365,6 +1365,46 @@ def _merge_scan_gallery_paths(
     return result
 
 
+def refresh_model_gallery(db: Session, model: Model) -> None:
+    """Re-sync one model's gallery images with what's actually on disk.
+
+    Reuses the same discovery/merge primitives a full or per-creator scan
+    applies to every model (_collect_gallery_images / _merge_scan_gallery_paths)
+    — just scoped to this one model, on demand, without touching naming, tags,
+    or STL indexing. Mutates the passed-in ORM object; the caller commits.
+    """
+    folder = Path(model.folder_path)
+    if not folder.exists():
+        return
+
+    creator_boundary: Path | None = None
+    creator = model.creator or (
+        db.query(Creator).filter(Creator.id == model.creator_id).first()
+        if model.creator_id else None
+    )
+    if creator:
+        for creator_dir, _tags, _grp in _creator_dirs_for(creator, db):
+            if _is_within_boundary(str(folder), creator_dir):
+                creator_boundary = creator_dir
+                break
+
+    boundary = creator_boundary or folder
+    gallery_images = _collect_gallery_images(folder, boundary=boundary, stl_cache={})
+
+    if not model.thumbnail_path and gallery_images:
+        model.thumbnail_path = str(gallery_images[0])
+
+    model.image_paths = _merge_scan_gallery_paths(
+        existing=model.image_paths or [],
+        discovered=[str(img) for img in gallery_images],
+        removed=model.removed_image_paths or [],
+        boundary=boundary,
+    )
+
+    if model.primary_image_path and model.primary_image_path not in model.image_paths:
+        model.primary_image_path = None
+
+
 def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
                     stl_cache: dict[str, bool] | None = None):
     """

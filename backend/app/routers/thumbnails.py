@@ -6,6 +6,7 @@ so the literal `group` segment isn't captured as a model_id (FastAPI matches in
 declaration order).
 """
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -20,6 +21,8 @@ from app.services.thumbnails import (
     download_thumbnail, fetch_image_bytes, store_thumbnail,
 )
 from app.services import scanner
+from app.services.path_guard import assert_within_roots
+from app.services.path_sanitize import sanitize_segment
 from app.utils import utcnow
 
 
@@ -168,3 +171,84 @@ async def upload_thumbnail(
     model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "path": str(out)}
+
+
+def _unique_gallery_filename(folder: Path, original_name: str, ext: str) -> str:
+    """A collision-safe filename for a gallery upload, sanitized the same way
+    reorganize destination segments are (path_sanitize.sanitize_segment)."""
+    stem = sanitize_segment(Path(original_name).stem or "image").value
+    candidate = f"{stem}{ext}"
+    n = 1
+    while (folder / candidate).exists():
+        candidate = f"{stem}_{n}{ext}"
+        n += 1
+    return candidate
+
+
+@router.post("/{model_id}/images/refresh")
+def refresh_gallery(model_id: int, db: Session = Depends(get_db)):
+    """Re-sync this model's gallery with what's actually on disk — picks up
+    images placed directly into the folder outside the app, and drops entries
+    for files that no longer exist, without a full/creator rescan."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    scanner.refresh_model_gallery(db, model)
+    model.updated_at = utcnow()
+    db.commit()
+    db.refresh(model)
+    return {
+        "ok": True,
+        "image_paths": model.image_paths,
+        "thumbnail_path": model.thumbnail_path,
+        "primary_image_path": model.primary_image_path,
+    }
+
+
+@router.post("/{model_id}/images/upload")
+async def upload_gallery_images(
+    model_id: int,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    """Upload one or more images directly into this model's own folder, then
+    re-sync the gallery from disk — the same refresh the folder-drop case
+    (#gallery) uses, so anything else placed there manually shows up too."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    folder = Path(model.folder_path)
+    if not folder.is_dir():
+        raise HTTPException(status_code=409, detail="This model's folder doesn't exist on disk")
+
+    saved: list[str] = []
+    for file in files:
+        ext = CONTENT_TYPE_EXT.get(file.content_type or "")
+        if ext is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{file.filename}: only PNG/JPEG/WebP/GIF images are accepted",
+            )
+        data = await file.read()
+        if len(data) > MAX_BYTES:
+            raise HTTPException(
+                status_code=413, detail=f"{file.filename}: image too large (max 15 MB)"
+            )
+
+        name = _unique_gallery_filename(folder, file.filename or "image", ext)
+        dest = assert_within_roots(folder / name, [folder])
+        Path(dest).write_bytes(data)
+        saved.append(dest)
+
+    scanner.refresh_model_gallery(db, model)
+    model.updated_at = utcnow()
+    db.commit()
+    db.refresh(model)
+    return {
+        "ok": True,
+        "uploaded": saved,
+        "image_paths": model.image_paths,
+        "thumbnail_path": model.thumbnail_path,
+    }
