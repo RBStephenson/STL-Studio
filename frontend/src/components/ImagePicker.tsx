@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { X, Check, ImageOff, Loader2, Link2, Trash2, FolderOpen, ArrowUp, Folder, HardDrive, Image, RefreshCw } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { X, Check, ImageOff, Loader2, Link2, Upload, Trash2, FolderOpen, ArrowUp, Folder, HardDrive, Image, RefreshCw } from "lucide-react";
 import { errMsg } from "../utils/err";
 
 interface ImageEntry {
@@ -47,7 +47,10 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
   const [selected, setSelected] = useState<string | null>(currentPath);
   const [urlInput, setUrlInput] = useState("");
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<"local" | "url">("local");
+  const [tab, setTab] = useState<"local" | "url" | "upload">("local");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [browsing, setBrowsing] = useState(false);
   const [browseListing, setBrowseListing] = useState<BrowseListing | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -142,6 +145,31 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
     }
   };
 
+  // Uploads immediately on file selection — same one-step pattern as
+  // CollectionCoverPicker's Upload tab, and the same endpoint the 3D viewer's
+  // "capture" button posts to (store_thumbnail, the same path-confinement
+  // helper store_collection_cover uses).
+  const submitUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const r = await fetch(`/api/models/${modelId}/thumbnail/upload`, { method: "POST", body: form });
+      if (!r.ok) {
+        const data = await r.json().catch(() => null);
+        throw new Error(data?.detail ?? "Could not upload image");
+      }
+      onApplied();
+    } catch (err) {
+      setUploadError(errMsg(err) ?? "Could not upload image");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
       <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
@@ -156,7 +184,7 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
 
         {/* Tabs */}
         <div className="flex border-b border-gray-800">
-          {(["local", "url"] as const).map((t) => (
+          {(["local", "url", "upload"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -166,13 +194,40 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
                   : "border-transparent text-gray-500 hover:text-gray-300"
               }`}
             >
-              {t === "local" ? "From Folder" : "From URL"}
+              {t === "local" ? "From Folder" : t === "url" ? "From URL" : "Upload"}
             </button>
           ))}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          {tab === "url" ? (
+          {tab === "upload" ? (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-gray-500">
+                Upload a PNG, JPEG, WebP, or GIF from your computer (max 15 MB). It's set as the
+                thumbnail immediately.
+              </p>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={submitUpload}
+              />
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="flex items-center justify-center gap-2 px-4 py-8 rounded border-2 border-dashed border-gray-700 hover:border-indigo-500 text-gray-400 hover:text-gray-200 disabled:opacity-50 transition-colors"
+              >
+                {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                <span className="text-sm">{uploading ? "Uploading…" : "Click to choose a file"}</span>
+              </button>
+              {uploadError && (
+                <p className="text-sm text-red-400 bg-red-950/40 border border-red-800 rounded px-3 py-2">
+                  {uploadError}
+                </p>
+              )}
+            </div>
+          ) : tab === "url" ? (
             <div className="flex flex-col gap-3">
               <p className="text-sm text-gray-500">
                 Paste an image URL to use as the thumbnail. The image is downloaded
@@ -361,7 +416,7 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
             <button onClick={onClose} className="px-4 py-2 rounded bg-gray-800 hover:bg-gray-700 text-sm text-gray-300">
               Cancel
             </button>
-            {savedAsLink ? (
+            {tab === "upload" ? null : savedAsLink ? (
               <button
                 onClick={onApplied}
                 className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm flex items-center gap-1.5 transition-colors"
