@@ -12,6 +12,12 @@ export type DatabaseRepairResult = DatabaseHealth & {
   snapshot: string | null;
 };
 
+export type DatabaseRestoreResult = {
+  ok: boolean;
+  snapshot: string | null;
+  warning?: string | null;
+};
+
 export const databaseApi = {
   backup: async () => {
     const res = await fetch(`${BASE}/database/backup`);
@@ -34,7 +40,7 @@ export const databaseApi = {
       try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
       throw new Error(detail);
     }
-    return res.json() as Promise<{ ok: boolean }>;
+    return res.json() as Promise<DatabaseRestoreResult>;
   },
   health: async () => {
     const res = await fetch(`${BASE}/database/health`);

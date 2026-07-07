@@ -91,6 +91,31 @@ def test_restore_snapshots_before_swapping(file_db_client):
     assert len(snaps) == 1
 
 
+def test_restore_continues_when_pre_restore_snapshot_fails(file_db_client, monkeypatch):
+    client, db_path = file_db_client
+    backup_bytes = _make_backup_upload(client)
+
+    def fail_snapshot(reason):
+        assert reason == "restore"
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(database_router, "_snapshot_db", fail_snapshot)
+
+    resp = client.post(
+        "/database/restore",
+        files={"file": ("backup.db", io.BytesIO(backup_bytes), "application/octet-stream")},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["snapshot"] is None
+    assert body["warning"] == "Pre-restore snapshot failed"
+    assert not _backups_dir(db_path).exists() or not list(
+        _backups_dir(db_path).glob("pre_restore_*.db")
+    )
+
+
 def test_invalid_restore_takes_no_snapshot(file_db_client):
     """A restore rejected at validation must not leave a snapshot behind."""
     client, db_path = file_db_client
