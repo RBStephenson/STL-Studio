@@ -16,6 +16,7 @@ A tour of every screen and what it does.
 - [Bulk editor (tags & enrich)](#bulk-editor-tags--enrich)
 - [Import folder](#import-folder)
 - [Creators & per-creator rescan](#creators--per-creator-rescan)
+- [Reorganize library](#reorganize-library)
 - [Settings](#settings)
 - [AI & Integrations](#ai--integrations)
 - [Logging](#logging)
@@ -208,6 +209,10 @@ Click a card to open the model. From here you can:
 - Add the model to one or more **Collections** (see below).
 - See the model's **Location** on disk — copy the path, or (standalone only)
   click **Open folder** to jump to it in your file manager.
+- An **unorganized** icon appears next to the title if the model's current
+  folder no longer matches where [Reorganize](#reorganize-library) would put
+  it (e.g. after changing its creator or title) — hover it for a tooltip.
+  Nothing moves automatically; run Reorganize to actually move it.
 
 ### File parts, sup variants & label naming
 
@@ -255,6 +260,8 @@ If the auto-chosen thumbnail is wrong (or missing), open a model and click
 - **From Folder** — every image found in that model's own folder, to pick from.
 - **From URL** — paste any image URL; the image is downloaded and stored
   locally, so it keeps working even when the site blocks hot-linking.
+- **Upload** — pick a PNG, JPEG, WebP, or GIF from your computer (max 15 MB);
+  it's applied as the thumbnail immediately.
 - **Clear** — remove the thumbnail entirely.
 
 To clear an image quickly without opening the dialog, use **Clear image** in a
@@ -335,7 +342,10 @@ creators. Use them for things like "Army project", "Current print queue", or
 Each collection card displays its cover image (if set), name, a truncated
 description (hover for the full text), and model count.
 
-- **Create** a collection with the **New Collection** button.
+- **Create** a collection with the **New Collection** button — a dialog asks
+  for a name and optional description, then immediately offers the cover-image
+  picker (URL, upload, or from one of the collection's models once you've
+  added some) so a new collection can be fully set up in one step.
 - **Edit name & description** — hover the card and click the pencil icon. The
   form shows a name field and a scrollable multi-line description box; press
   **Save** or click **Cancel**. Clearing the description removes it.
@@ -436,6 +446,10 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
 The **Creators** page lists every creator with their model count. From here you
 can:
 
+- **Add Creator** — add a creator manually, before you've imported any of
+  their models. Its library folder is created automatically (using the
+  [Reorganize](#reorganize-library) destination template) so it's ready for
+  files to land in.
 - Click a creator to browse just their models in the Library.
 - **Rescan** a single creator — a targeted scan of just that creator's folder.
   Because you usually add models one creator at a time, this is much faster than
@@ -595,6 +609,14 @@ as the standalone HTML version.
 files on disk to match a folder template — by default
 `{creator}/{character}/{title}`.
 
+The destination template and a **"Lowercase, hyphenated directory names"**
+toggle live in **Settings → Library → Reorganize** — both are saved server-side,
+so they're shared with manual [creator](#creators--per-creator-rescan) folder
+creation and the model detail [unorganized indicator](#model-detail), not just
+this page. The toggle is on by default: every segment renders slug-style (e.g.
+`abe-3d` instead of `Abe 3D`), matching how imported folders are named. Turn it
+off to keep each segment's original casing and spacing.
+
 - **Preview first.** The page shows exactly where every model *would* move, one row
   each, with a move-kind chip (move / rename / case rename / in place / merge) and
   blocker chips for anything unsafe (collision, over-length or reserved name,
@@ -741,7 +763,7 @@ break them. All three take effect on the next scan.
 A safety cap protects against an over-broad ignore pattern: if a single scan
 would remove more than half your models, the cleanup is skipped and logged.
 
-## Backup, restore & reset
+## Backup, restore, repair & reset
 
 At the bottom of **Settings**, under **Data Management**, you can manage the
 library database itself. This only ever touches the *index* — your metadata,
@@ -751,6 +773,12 @@ never modified.**
 - **Download Backup** — saves a consistent snapshot of your whole library as a
   `.db` file (named with a timestamp). Keep this somewhere safe; it's the only
   way to recover your tags, favorites, and queue if something goes wrong.
+- **Check Health** - runs SQLite's integrity check against the live database
+  without changing it.
+- **Repair Database** - snapshots the database, runs a conservative SQLite
+  `REINDEX`, and verifies integrity again. This can fix index-only corruption;
+  deeper table corruption still requires restoring a clean backup or manual
+  recovery.
 - **Restore from Backup…** — pick a previously downloaded `.db` file to replace
   your current library with it. The file is validated first (it must be a real
   STL Studio backup), and an older backup's schema is brought up to date
@@ -758,10 +786,9 @@ never modified.**
 - **Delete All Data** — wipes the entire index back to empty. You'd then run a
   full scan to rebuild it.
 
-Restore and Delete are in a **Danger Zone**: each overwrites or erases your
-library and **cannot be undone**, so they make you type a confirmation phrase
-first. Download a backup before using either. (Neither can run while a scan is
-in progress.)
+Repair, Restore, and Delete require a confirmation phrase because they can modify
+or replace the index. Download a backup before using them. (They cannot run while
+a scan is in progress.)
 
 ## NSFW toggle
 

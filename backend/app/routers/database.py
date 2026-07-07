@@ -1,4 +1,4 @@
-"""Database management: backup, restore, and reset.
+"""Database management: backup, restore, health checks, repair, and reset.
 
 These operate directly on the SQLite database file. Backup uses SQLite's online
 backup API to capture a consistent snapshot (folding in any WAL contents);
@@ -8,6 +8,7 @@ are refused (409) while a scan, reorganize apply, or undo is in progress, to avo
 corrupting an in-flight write or leaving on-disk files and DB rows diverged.
 """
 import os
+import logging
 import shutil
 import sqlite3
 import tempfile
@@ -23,10 +24,15 @@ from app.services import scanner
 from app.services.write_lock import LibraryBusy, library_write
 
 router = APIRouter(prefix="/database", tags=["database"])
+log = logging.getLogger(__name__)
 
 # How many pre-restore / pre-reset snapshots to keep per reason before the oldest
 # are pruned. Bounds disk use while still giving a few levels of undo (#222).
 SNAPSHOT_KEEP = 3
+
+
+def _stamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 def _db_path() -> Path:
@@ -49,6 +55,39 @@ def _require_idle():
         raise HTTPException(409, "A scan is currently running — wait for it to finish or cancel it first")
 
 
+def _integrity_check(path: Path) -> str:
+    """Return SQLite's integrity_check result for a database file."""
+    conn = sqlite3.connect(str(path))
+    try:
+        return conn.execute("PRAGMA integrity_check").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _copy_db_files(reason: str) -> Path:
+    """Copy the DB and any WAL/SHM sidecars before an in-place maintenance op."""
+    db_path = _db_path()
+    if not db_path.exists():
+        raise HTTPException(404, "Database file not found")
+
+    backups = db_path.parent / "backups"
+    backups.mkdir(parents=True, exist_ok=True)
+    stamp = _stamp()
+    dest = backups / f"pre_{reason}_{stamp}"
+    n = 2
+    while dest.exists():
+        dest = backups / f"pre_{reason}_{stamp}_{n}"
+        n += 1
+    dest.mkdir()
+
+    shutil.copy2(db_path, dest / db_path.name)
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(str(db_path) + suffix)
+        if sidecar.exists():
+            shutil.copy2(sidecar, dest / sidecar.name)
+    return dest
+
+
 def _snapshot_db(reason: str) -> Path | None:
     """Snapshot the live DB to <data_dir>/backups/pre_<reason>_<stamp>.db before a
     destructive operation, so even a mis-clicked restore/reset is one file-copy
@@ -69,7 +108,7 @@ def _snapshot_db(reason: str) -> Path | None:
 
     backups = db_path.parent / "backups"
     backups.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = _stamp()
     dest = backups / f"pre_{reason}_{stamp}.db"
     # Guard against two snapshots landing in the same wall-clock second.
     n = 2
@@ -95,6 +134,15 @@ def _snapshot_db(reason: str) -> Path | None:
     return dest
 
 
+def _try_snapshot_db(reason: str) -> tuple[Path | None, str | None]:
+    """Best-effort snapshot wrapper for operations that can proceed without one."""
+    try:
+        return _snapshot_db(reason), None
+    except Exception as e:
+        log.warning("Database %s snapshot failed; continuing without snapshot: %s", reason, e)
+        return None, f"Pre-{reason} snapshot failed"
+
+
 @router.get("/backup")
 def backup_database(background_tasks: BackgroundTasks):
     """Stream a consistent snapshot of the database as a downloadable .db file."""
@@ -102,7 +150,7 @@ def backup_database(background_tasks: BackgroundTasks):
     if not db_path.exists():
         raise HTTPException(404, "Database file not found")
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = _stamp()
     tmp = Path(tempfile.gettempdir()) / f"stl_inventory_backup_{stamp}.db"
 
     # Online backup API gives a transactionally-consistent copy that includes
@@ -122,6 +170,73 @@ def backup_database(background_tasks: BackgroundTasks):
         filename=f"stl_inventory_backup_{stamp}.db",
         media_type="application/octet-stream",
     )
+
+
+@router.get("/health")
+def database_health():
+    """Run a read-only SQLite integrity check against the live database."""
+    db_path = _db_path()
+    if not db_path.exists():
+        raise HTTPException(404, "Database file not found")
+
+    try:
+        detail = _integrity_check(db_path)
+    except sqlite3.Error as e:
+        raise HTTPException(500, f"Database health check failed: {e}")
+    healthy = detail == "ok"
+    return {
+        "ok": healthy,
+        "status": "healthy" if healthy else "corrupt",
+        "detail": detail,
+    }
+
+
+@router.post("/repair")
+def repair_database():
+    """Attempt a conservative in-place repair for index-only SQLite corruption."""
+    _require_idle()
+
+    try:
+        with library_write("database_repair"):
+            db_path = _db_path()
+            if not db_path.exists():
+                raise HTTPException(404, "Database file not found")
+
+            engine.dispose()
+            snapshot = _copy_db_files("repair")
+            before = _integrity_check(db_path)
+            if before == "ok":
+                return {
+                    "ok": True,
+                    "status": "healthy",
+                    "detail": before,
+                    "before": before,
+                    "repaired": False,
+                    "snapshot": str(snapshot),
+                }
+
+            conn = sqlite3.connect(str(db_path))
+            try:
+                conn.execute("REINDEX")
+                conn.commit()
+            finally:
+                conn.close()
+
+            after = _integrity_check(db_path)
+    except LibraryBusy:
+        raise HTTPException(409, "Library is busy â€” a scan, apply, or undo is in progress")
+    except sqlite3.Error as e:
+        raise HTTPException(500, f"Database repair failed: {e}")
+
+    repaired = after == "ok"
+    return {
+        "ok": repaired,
+        "status": "healthy" if repaired else "corrupt",
+        "detail": after,
+        "before": before,
+        "repaired": repaired,
+        "snapshot": str(snapshot),
+    }
 
 
 @router.post("/restore")
@@ -162,7 +277,7 @@ async def restore_database(file: UploadFile = File(...)):
         with library_write("database_restore"):
             # Snapshot the current library before we overwrite it, so a
             # wrong-file restore is recoverable (#222).
-            snapshot = _snapshot_db("restore")
+            snapshot, warning = _try_snapshot_db("restore")
 
             # Drop pooled connections so the file isn't held open, then swap it in
             # and clear the stale WAL/SHM sidecars that belonged to the old DB.
@@ -178,7 +293,7 @@ async def restore_database(file: UploadFile = File(...)):
     except LibraryBusy:
         _safe_unlink(tmp)
         raise HTTPException(409, "Library is busy — a scan, apply, or undo is in progress")
-    return {"ok": True, "snapshot": str(snapshot) if snapshot else None}
+    return {"ok": True, "snapshot": str(snapshot) if snapshot else None, "warning": warning}
 
 
 @router.post("/reset")

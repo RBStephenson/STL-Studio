@@ -20,6 +20,11 @@ class CreatorRead(CreatorBase):
         from_attributes = True
 
 
+class CreatorCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    source_url: Optional[str] = None
+
+
 class STLFileRead(BaseModel):
     id: int
     path: str
@@ -114,6 +119,10 @@ class ModelDetail(ModelRead):
     stl_files: list[STLFileRead] = []
     creator: Optional[CreatorRead] = None
     collection_ids: list[int] = []
+    # True when this model's current folder no longer matches where it would
+    # land under the library's organize template. Purely informational — never
+    # blocks a save; the user still has to run Reorganize to actually move it.
+    unorganized: bool = False
 
 
 class ModelList(BaseModel):
@@ -494,6 +503,11 @@ class AppSettingsRead(BaseModel):
     # Application log verbosity for the `app.*` loggers. Changing this in the UI
     # takes effect immediately (no restart) and persists across restarts.
     log_level: str = "INFO"
+    # Library reorganize destination template ("" = the built-in default,
+    # {creator}/{character}/{title}) and whether every segment is rendered
+    # lowercase/hyphenated (import-style) rather than case-preserving.
+    reorganize_template: str = ""
+    reorganize_slugify: bool = True
 
 
 class AppSettingsUpdate(BaseModel):
@@ -529,6 +543,8 @@ class AppSettingsUpdate(BaseModel):
     ai_guides_api: Optional[int] = None
     ai_organize_api: Optional[int] = None
     log_level: Optional[str] = Field(None, pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
+    reorganize_template: Optional[str] = Field(None, max_length=500)
+    reorganize_slugify: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
