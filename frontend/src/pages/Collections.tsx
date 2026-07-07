@@ -4,6 +4,7 @@ import { FolderOpen, Plus, Trash2, Pencil, Check, X, ImagePlus } from "lucide-re
 import { api, Collection } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import CollectionCoverPicker from "../components/CollectionCoverPicker";
+import CreateCollectionModal from "../components/CreateCollectionModal";
 import { errMsg } from "../utils/err";
 
 function CollectionCard({
@@ -162,16 +163,11 @@ export default function Collections() {
   const { toast } = useToast();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
 
   useEffect(() => { api.collections.list().then(setCollections).catch(() => {}); }, []);
 
-  const create = async () => {
-    if (!name.trim()) return;
-    const col = await api.collections.create(name.trim());
+  const addCreated = (col: Collection) => {
     setCollections((prev) => [...prev, { ...col, model_count: 0 }]);
-    setName("");
-    setCreating(false);
   };
 
   const renameCollection = async (col: Collection, newName: string, description: string) => {
@@ -219,23 +215,11 @@ export default function Collections() {
       </div>
 
       {creating && (
-        <div className="flex gap-2 mb-4 p-3 bg-gray-900 rounded border border-gray-800">
-          <input
-            autoFocus
-            type="text"
-            placeholder="Collection name…"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && create()}
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
-          />
-          <button onClick={create} className="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm">
-            Create
-          </button>
-          <button onClick={() => setCreating(false)} className="px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-sm text-gray-400">
-            Cancel
-          </button>
-        </div>
+        <CreateCollectionModal
+          onClose={() => setCreating(false)}
+          onCreated={addCreated}
+          onCoverUpdate={updateCover}
+        />
       )}
 
       {collections.length === 0 ? (

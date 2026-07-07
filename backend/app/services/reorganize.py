@@ -23,11 +23,7 @@ from app.models import (
     PackOverride,
     ScanRoot,
 )
-from app.services.path_sanitize import (
-    path_over_length,
-    sanitize_segment,
-    slug_segment,
-)
+from app.services.path_sanitize import path_over_length, sanitize_segment
 from app.services.reorganize_template import parse_template, render_segments
 
 UNKNOWN_CREATOR = "_Unknown Creator"
@@ -136,6 +132,8 @@ def build_manifest(
     overrides: dict[int, dict] | None = None,
     inbox_source: str | None = None,
     slugify_title: bool = False,
+    slugify_all: bool = False,
+    model_ids: list[int] | None = None,
 ) -> Manifest:
     """Build the reorganize preview manifest. Raises ReorganizeTemplateError on
     a malformed template (caller maps to 4xx).
@@ -144,7 +142,12 @@ def build_manifest(
     ``creator`` / ``character`` / ``title`` substitutions (fix unclassifiable) and
     an optional ``suffix`` appended to the title segment (dodge a collision /
     shorten an over-length or reserved name). A regenerated manifest with
-    overrides is a fresh artifact with its own fingerprint baseline."""
+    overrides is a fresh artifact with its own fingerprint baseline.
+
+    ``slugify_all`` renders every segment lowercase/hyphenated (import-style),
+    overriding the narrower ``slugify_title`` (title-only) used by inbox import.
+    ``model_ids``, when given, restricts the built entries to those models —
+    the collision/overlap passes then only run over that subset."""
     overrides = overrides or {}
     segments = parse_template(template)
     canonical_template = "/".join(segments)
@@ -216,11 +219,16 @@ def build_manifest(
     else:
         models = models_q.all()
 
+    if model_ids is not None:
+        wanted = set(model_ids)
+        models = [m for m in models if m.id in wanted]
+
     entries: list[Entry] = []
     for m in models:
         entries.append(_build_entry(m, segments, root_keys, pack_paths,
                                     overrides.get(m.id), _dest_for(m),
-                                    slugify_title=slugify_title))
+                                    slugify_title=slugify_title,
+                                    slugify_all=slugify_all))
 
     _detect_collisions(entries)
     _detect_overlaps(entries)
@@ -235,6 +243,7 @@ def _build_entry(
     override: dict | None = None,
     dest_root: str | None = None,
     slugify_title: bool = False,
+    slugify_all: bool = False,
 ) -> Entry:
     # User resolutions (Phase 2c) take precedence over model metadata and clear
     # the corresponding 'missing' flag.
@@ -279,15 +288,13 @@ def _build_entry(
     over_len = False
     safe_parts: list[str] = []
     for raw_seg, part in zip(segments, rendered):
-        # When slugify_title is on, segments containing {title} get a slug instead of
-        # the standard sanitizer so import folder names are lowercase-with-dashes.
-        if slugify_title and "{title}" in raw_seg.lower():
-            safe_parts.append(slug_segment(part))
-        else:
-            sani = sanitize_segment(part)
-            reserved = reserved or sani.reserved_name
-            over_len = over_len or sani.over_length
-            safe_parts.append(sani.value)
+        # slugify_all lowercases/hyphenates every segment (import-style);
+        # slugify_title narrows that to just the {title} segment.
+        do_slug = slugify_all or (slugify_title and "{title}" in raw_seg.lower())
+        sani = sanitize_segment(part, slugify=do_slug)
+        reserved = reserved or sani.reserved_name
+        over_len = over_len or sani.over_length
+        safe_parts.append(sani.value)
 
     current_dir = _canon(m.folder_path or "")
     cur_key = _key(m.folder_path or "")
@@ -375,6 +382,45 @@ def _build_entry(
         escapes_scan_root=escapes,
         missing_files_on_disk=missing_files_on_disk,
     )
+
+
+def creator_scan_dir(
+    db: Session, template: str | None, creator_name: str, slugify: bool = True,
+) -> str | None:
+    """The on-disk directory a brand-new creator's folder should live in.
+
+    Renders only the template segments up to and including the first one that
+    references ``{creator}``, anchored at the primary enabled scan root.
+    ``slugify`` mirrors the library's ``reorganize_slugify`` setting — when
+    off, the creator name keeps its original casing/spacing (still made
+    filesystem-safe). Returns ``None`` when the template doesn't reference
+    ``{creator}``, an earlier segment needs ``{character}``/``{title}`` (not
+    available for a bare creator), or there's no scan root to anchor to.
+    """
+    segments = parse_template(template)
+    idx = next((i for i, seg in enumerate(segments) if "{creator}" in seg.lower()), None)
+    if idx is None:
+        return None
+    lead = segments[: idx + 1]
+    other_fields = {
+        f for seg in lead for f in ("character", "title")
+        if ("{" + f + "}") in seg.lower()
+    }
+    if other_fields:
+        return None
+
+    primary = (
+        db.query(ScanRoot)
+        .filter(ScanRoot.enabled == True)  # noqa: E712
+        .order_by(ScanRoot.id)
+        .first()
+    )
+    if not primary or not primary.path:
+        return None
+
+    rendered = render_segments(lead, {"creator": creator_name})
+    parts = [sanitize_segment(p, slugify=slugify).value for p in rendered]
+    return _canon(_canon(primary.path) + "/" + "/".join(parts))
 
 
 def _classify_kind(current_dir: str, proposed_dir: str) -> str:
