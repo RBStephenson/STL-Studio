@@ -26,5 +26,7 @@ export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
   ai_guides_api: null,
   ai_organize_api: null,
   log_level: "INFO",
+  reorganize_template: "",
+  reorganize_slugify: true,
   ...over,
 });

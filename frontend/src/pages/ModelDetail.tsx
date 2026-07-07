@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw } from "lucide-react";
 import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
 import FindOnWeb from "../components/FindOnWeb";
@@ -474,7 +474,17 @@ export default function ModelDetail() {
               {model.character && (
                 <p className="text-sm text-indigo-400 mb-1">{model.character}</p>
               )}
-              <h1 className="text-2xl font-bold text-gray-100 break-words">{model.title || model.name}</h1>
+              <h1 className="text-2xl font-bold text-gray-100 break-words flex items-center gap-2">
+                {model.title || model.name}
+                {model.unorganized && (
+                  <span
+                    title="Unorganized — location doesn't match your organize template. Run Reorganize Library to move it."
+                    className="inline-flex shrink-0"
+                  >
+                    <FolderSync size={18} className="text-amber-400" />
+                  </span>
+                )}
+              </h1>
               {model.creator && (
                 <p className="text-gray-400 mt-1">by {model.creator.name}</p>
               )}

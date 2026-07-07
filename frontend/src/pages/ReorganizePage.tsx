@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import type {
   ReorganizeEntry,
   ReorganizePreview,
@@ -63,7 +64,16 @@ function isResolvable(e: ReorganizeEntry): boolean {
 }
 
 export default function ReorganizePage() {
+  const { settings } = useAppSettings();
   const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
+  // Seed the field from the saved library setting once it's loaded (async),
+  // but only until the user starts typing their own one-off template.
+  const [templateTouched, setTemplateTouched] = useState(false);
+  useEffect(() => {
+    if (!templateTouched && settings.reorganize_template) {
+      setTemplate(settings.reorganize_template);
+    }
+  }, [settings.reorganize_template, templateTouched]);
   const [overrides, setOverrides] = useState<Record<number, ReorganizeOverride>>({});
   const [preview, setPreview] = useState<ReorganizePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -193,7 +203,7 @@ export default function ReorganizePage() {
         <input
           type="text"
           value={template}
-          onChange={(e) => setTemplate(e.target.value)}
+          onChange={(e) => { setTemplate(e.target.value); setTemplateTouched(true); }}
           className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
           aria-label="Destination template"
         />

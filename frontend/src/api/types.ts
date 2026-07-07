@@ -103,6 +103,9 @@ export interface ModelDetail extends Model {
   stl_files: STLFile[];
   creator: { id: number; name: string; source_url: string | null } | null;
   collection_ids: number[];
+  // True when this model's current folder no longer matches where it would
+  // land under the library's organize template (see /settings library tab).
+  unorganized: boolean;
 }
 
 export interface ModelList {
@@ -236,6 +239,11 @@ export interface AppSettings {
   ai_organize_api: number | null;
   // Application log verbosity — changing it takes effect immediately (no restart).
   log_level: LogLevel;
+  // Library reorganize destination template ("" = the built-in default,
+  // {creator}/{character}/{title}) and whether every segment renders
+  // lowercase/hyphenated (import-style) rather than case-preserving.
+  reorganize_template: string;
+  reorganize_slugify: boolean;
 }
 
 export type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";

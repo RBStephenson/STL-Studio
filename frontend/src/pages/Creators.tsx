@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Users, Zap, X, RefreshCw, Loader2 } from "lucide-react";
+import { Users, Zap, X, RefreshCw, Loader2, Plus } from "lucide-react";
 import { api, Creator, ScanStatus } from "../api/client";
 import StorefrontEnrich from "../components/StorefrontEnrich";
 import RefreshEnrich from "../components/RefreshEnrich";
+import CreateCreatorModal from "../components/CreateCreatorModal";
 import { useToast } from "../context/ToastContext";
 
 export default function Creators() {
@@ -12,10 +13,16 @@ export default function Creators() {
   const [search, setSearch] = useState("");
   const [scanningId, setScanningId] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState<"name" | "models">("name");
+  const [adding, setAdding] = useState(false);
   const { toast } = useToast();
 
   const loadCreators = () => api.models.creators().then(setCreators).catch(() => {});
   useEffect(() => { loadCreators(); }, []);
+
+  const onCreated = (creator: Creator) => {
+    setCreators((prev) => [...prev, creator]);
+    toast(`Added creator "${creator.name}"`, "success");
+  };
 
   const rescan = async (c: Creator) => {
     if (scanningId !== null) return;  // a scan is already running
@@ -74,8 +81,19 @@ export default function Creators() {
             onChange={(e) => setSearch(e.target.value)}
             className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-48"
           />
+          <button
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm transition-colors"
+            title="Add a creator without waiting for a scan to find one"
+          >
+            <Plus size={14} /> Add Creator
+          </button>
         </div>
       </div>
+
+      {adding && (
+        <CreateCreatorModal onClose={() => setAdding(false)} onCreated={onCreated} />
+      )}
 
       {/* Storefront enrich panel */}
       {enriching && (
