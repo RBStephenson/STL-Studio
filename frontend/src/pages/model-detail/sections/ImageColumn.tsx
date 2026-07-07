@@ -4,15 +4,36 @@
 // file) is owned by the shell and passed in, because it is shared with the
 // lightbox overlay and keyboard-navigation effects.
 
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useRef, useState } from "react";
 import {
   Images, Box, Package, ZoomIn, ImageOff, Bookmark, BookmarkCheck, ImagePlus,
+  Upload, RefreshCw, Loader2,
 } from "lucide-react";
 import { GalleryRotator, GalleryRotatorHandle } from "../../../components/ModelCard";
-import { api, ModelDetail as ModelDetailType } from "../../../api/client";
+import { api, ApiError, ModelDetail as ModelDetailType } from "../../../api/client";
 import { useAppSettings } from "../../../context/AppSettingsContext";
 import { useConfirm } from "../../../context/ConfirmContext";
+import { errMsg } from "../../../utils/err";
 import type { ViewMode } from "../utils";
+
+/** A gallery thumbnail that hides itself (instead of a broken-image icon) if
+ * its file no longer resolves — e.g. image_paths is momentarily stale. */
+function GalleryThumb({
+  src, alt, active, onClick,
+}: { src: string; alt: string; active: boolean; onClick: () => void }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return null;
+  return (
+    <button
+      onClick={onClick}
+      className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
+        active ? "border-indigo-500" : "border-gray-800 hover:border-gray-600"
+      }`}
+    >
+      <img src={src} alt={alt} className="w-full h-full object-cover" onError={() => setBroken(true)} />
+    </button>
+  );
+}
 
 const STLViewer = lazy(() => import("../../../components/STLViewer"));
 
@@ -64,6 +85,40 @@ export default function ImageColumn({
   const galleryHasThumbnail =
     !!model.thumbnail_path && galleryPaths.some((path) => path === model.thumbnail_path);
   const isRemoteImagePath = (path: string | null) => !!path && path.includes("://");
+
+  const [uploading, setUploading] = useState(false);
+  const [refreshingGallery, setRefreshingGallery] = useState(false);
+  const [galleryActionError, setGalleryActionError] = useState<string | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  const uploadImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    setUploading(true);
+    setGalleryActionError(null);
+    try {
+      await api.models.uploadGalleryImages(model.id, files);
+      onReload();
+    } catch (err) {
+      setGalleryActionError(err instanceof ApiError ? err.message : errMsg(err) ?? "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const refreshGallery = async () => {
+    setRefreshingGallery(true);
+    setGalleryActionError(null);
+    try {
+      await api.models.refreshGallery(model.id);
+      onReload();
+    } catch (err) {
+      setGalleryActionError(err instanceof ApiError ? err.message : errMsg(err) ?? "Refresh failed");
+    } finally {
+      setRefreshingGallery(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -237,8 +292,38 @@ export default function ImageColumn({
                   </button>
                 </>
               )}
+              <button
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={uploading}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-gray-300 hover:text-white text-xs disabled:opacity-50"
+              >
+                {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                Upload images
+              </button>
+              <button
+                onClick={refreshGallery}
+                disabled={refreshingGallery}
+                title="Re-sync with images placed directly in the model's folder"
+                className="flex items-center gap-1.5 p-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-gray-300 hover:text-white disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={refreshingGallery ? "animate-spin" : ""} />
+              </button>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                multiple
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={uploadImages}
+              />
             </div>
           </div>
+
+          {galleryActionError && (
+            <p className="text-xs text-red-400 bg-red-950/40 border border-red-800 rounded px-3 py-2">
+              {galleryActionError}
+            </p>
+          )}
 
           {/* Thumbnail strip — explicit thumbnail + gallery sections to avoid index mapping bugs */}
           {(() => {
@@ -251,27 +336,22 @@ export default function ImageColumn({
             return (
               <div className="flex gap-2 flex-wrap">
                 {showSeparateThumb && (
-                  <button
+                  <GalleryThumb
+                    key={thumbSrc}
+                    src={thumbSrc}
+                    alt=""
+                    active={galleryPaths.length === 0 && activeImage === thumbSrc}
                     onClick={() => onSetActiveImage(thumbSrc)}
-                    className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
-                      galleryPaths.length === 0 && activeImage === thumbSrc
-                        ? "border-indigo-500"
-                        : "border-gray-800 hover:border-gray-600"
-                    }`}
-                  >
-                    <img src={thumbSrc} alt="" className="w-full h-full object-cover" />
-                  </button>
+                  />
                 )}
                 {galleryPaths.map((path, i) => (
-                  <button
-                    key={i}
+                  <GalleryThumb
+                    key={path}
+                    src={api.fileUrl(path)}
+                    alt=""
+                    active={i === galleryIdx}
                     onClick={() => rotatorRef.current?.goTo(i)}
-                    className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
-                      i === galleryIdx ? "border-indigo-500" : "border-gray-800 hover:border-gray-600"
-                    }`}
-                  >
-                    <img src={api.fileUrl(path)} alt="" className="w-full h-full object-cover" />
-                  </button>
+                  />
                 ))}
               </div>
             );
