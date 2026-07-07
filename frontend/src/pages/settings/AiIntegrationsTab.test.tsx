@@ -40,7 +40,6 @@ vi.mock("../../api/client", () => ({
         create: vi.fn(),
         update: vi.fn(),
         delete: vi.fn(),
-        setKey: vi.fn(),
         clearKey: vi.fn(),
         getModels: vi.fn().mockResolvedValue({ models: [] }),
       },
@@ -55,6 +54,34 @@ const renderTab = () =>
 // Anthropic and Cults Save buttons don't collide.
 const mmfSave = (input: HTMLElement) =>
   within(input.closest("div")!).getByRole("button", { name: "Save" });
+
+describe("AiIntegrationsTab – add an AI API config", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("creates the config and its key in a single request — no separate Save key step", async () => {
+    const { api } = await import("../../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
+    vi.mocked(api.settings.aiApis.create).mockResolvedValue({
+      id: 1, name: "Ollama Crawlspace", api_type: "anthropic", url: null,
+      model: "claude-haiku-4-5", effort: "low", request_timeout: 10,
+      key_set: true, key_hint: "…cret",
+    });
+
+    renderTab();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add API" }));
+    await userEvent.type(screen.getByPlaceholderText("e.g. Ollama Local, Anthropic Creative"), "Ollama Crawlspace");
+    await userEvent.type(screen.getByPlaceholderText("sk-ant-…"), "sk-ant-secret");
+
+    expect(screen.queryByRole("button", { name: "Save key" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Add API" }));
+
+    expect(api.settings.aiApis.create).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Ollama Crawlspace", api_key: "sk-ant-secret" })
+    );
+  });
+});
 
 describe("AiIntegrationsTab – MyMiniFactory key", () => {
   beforeEach(() => { vi.clearAllMocks(); });
