@@ -800,7 +800,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: "backup",
-    title: "Backup, restore & reset",
+    title: "Backup, restore, repair & reset",
     icon: Database,
     body: (
       <>
@@ -810,6 +810,8 @@ const SECTIONS: Section[] = [
           <strong>your STL files on disk are never modified.</strong>
         </p>
         <ul>
+          <li><strong>Check Health</strong> runs SQLite's integrity check without changing the database.</li>
+          <li><strong>Repair Database</strong> snapshots the database, runs a conservative <code>REINDEX</code>, and verifies integrity again. It can fix index-only corruption; deeper corruption still needs a clean backup or manual recovery.</li>
           <li><strong>Download Backup</strong> — saves a timestamped <code>.db</code> snapshot of your tags, favorites, and print queue. It's the only way to recover them if something goes wrong.</li>
           <li><strong>Restore from Backup…</strong> — replace your current library with a previously downloaded <code>.db</code>. This is also how you migrate to a new machine. The file is validated first.</li>
           <li><strong>Delete All Data</strong> — wipes the index back to empty; run a full scan to rebuild.</li>
@@ -817,6 +819,7 @@ const SECTIONS: Section[] = [
         <p className="text-gray-500">
           Restore and Delete live in a <strong>Danger Zone</strong> and make you type a
           confirmation phrase, since they can't be undone. Neither runs while a scan is in progress.
+          Repair also requires the confirmation phrase because it modifies SQLite indexes.
         </p>
       </>
     ),

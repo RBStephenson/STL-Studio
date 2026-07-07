@@ -741,7 +741,7 @@ break them. All three take effect on the next scan.
 A safety cap protects against an over-broad ignore pattern: if a single scan
 would remove more than half your models, the cleanup is skipped and logged.
 
-## Backup, restore & reset
+## Backup, restore, repair & reset
 
 At the bottom of **Settings**, under **Data Management**, you can manage the
 library database itself. This only ever touches the *index* — your metadata,
@@ -751,6 +751,12 @@ never modified.**
 - **Download Backup** — saves a consistent snapshot of your whole library as a
   `.db` file (named with a timestamp). Keep this somewhere safe; it's the only
   way to recover your tags, favorites, and queue if something goes wrong.
+- **Check Health** - runs SQLite's integrity check against the live database
+  without changing it.
+- **Repair Database** - snapshots the database, runs a conservative SQLite
+  `REINDEX`, and verifies integrity again. This can fix index-only corruption;
+  deeper table corruption still requires restoring a clean backup or manual
+  recovery.
 - **Restore from Backup…** — pick a previously downloaded `.db` file to replace
   your current library with it. The file is validated first (it must be a real
   STL Studio backup), and an older backup's schema is brought up to date
@@ -758,10 +764,9 @@ never modified.**
 - **Delete All Data** — wipes the entire index back to empty. You'd then run a
   full scan to rebuild it.
 
-Restore and Delete are in a **Danger Zone**: each overwrites or erases your
-library and **cannot be undone**, so they make you type a confirmation phrase
-first. Download a backup before using either. (Neither can run while a scan is
-in progress.)
+Repair, Restore, and Delete require a confirmation phrase because they can modify
+or replace the index. Download a backup before using them. (They cannot run while
+a scan is in progress.)
 
 ## NSFW toggle
 

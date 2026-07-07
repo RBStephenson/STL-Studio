@@ -105,6 +105,65 @@ def test_invalid_restore_takes_no_snapshot(file_db_client):
 
 
 # ---------------------------------------------------------------------------
+# Health check and conservative repair
+# ---------------------------------------------------------------------------
+
+def test_database_health_reports_clean_database(file_db_client):
+    client, _db_path = file_db_client
+
+    resp = client.get("/database/health")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "ok": True,
+        "status": "healthy",
+        "detail": "ok",
+    }
+
+
+def test_repair_snapshots_and_reindexes_until_clean(file_db_client, monkeypatch):
+    client, db_path = file_db_client
+    checks = iter(["wrong # of entries in index uq_paints_line_code", "ok"])
+
+    def fake_integrity_check(_path):
+        return next(checks)
+
+    monkeypatch.setattr(database_router, "_integrity_check", fake_integrity_check)
+
+    resp = client.post("/database/repair")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["status"] == "healthy"
+    assert body["before"] == "wrong # of entries in index uq_paints_line_code"
+    assert body["detail"] == "ok"
+    assert body["repaired"] is True
+    snapshot = body["snapshot"]
+    assert "pre_repair_" in snapshot
+    assert (db_path.parent / "backups").exists()
+    repair_dirs = list(_backups_dir(db_path).glob("pre_repair_*"))
+    assert len(repair_dirs) == 1
+    assert (repair_dirs[0] / "stl_inventory.db").exists()
+
+
+def test_repair_returns_current_health_when_already_clean(file_db_client):
+    client, db_path = file_db_client
+
+    resp = client.post("/database/repair")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["status"] == "healthy"
+    assert body["detail"] == "ok"
+    assert body["before"] == "ok"
+    assert body["repaired"] is False
+    assert "pre_repair_" in body["snapshot"]
+    assert list(_backups_dir(db_path).glob("pre_repair_*"))
+
+
+# ---------------------------------------------------------------------------
 # Pruning keeps only the newest N per reason
 # ---------------------------------------------------------------------------
 
@@ -182,4 +241,18 @@ def test_restore_returns_409_when_library_busy(file_db_client):
     assert resp.status_code == 409
     assert not _backups_dir(db_path).exists() or not list(
         _backups_dir(db_path).glob("pre_restore_*.db")
+    )
+
+
+def test_repair_returns_409_when_library_busy(file_db_client):
+    """A repair mutates SQLite indexes, so it must honor the shared write lock."""
+    from app.services import write_lock
+
+    client, db_path = file_db_client
+
+    with write_lock.library_write("apply"):
+        resp = client.post("/database/repair")
+    assert resp.status_code == 409
+    assert not _backups_dir(db_path).exists() or not list(
+        _backups_dir(db_path).glob("pre_repair_*")
     )
