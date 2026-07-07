@@ -186,6 +186,8 @@ The **Paint Shelf** is always available in the nav. Enabling **Settings → Pain
 - **Settings → Data Management** to back up, restore, or reset the catalog
 - **Download Backup** saves a consistent snapshot (`.db`) of your index — tags,
   favorites, and print queue
+- **Check Health** runs SQLite integrity validation; **Repair Database** snapshots
+  first, runs a conservative `REINDEX`, and verifies integrity again
 - **Restore** swaps in a validated backup (also how you migrate to a new
   machine); **Reset** wipes the index to empty
 - Backups only cover the index — your STL files on disk are never touched
