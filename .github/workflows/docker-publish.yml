@@ -45,18 +45,18 @@ jobs:
         with:
           # metadata-action lowercases the name, which GHCR requires.
           images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.service }}
-          # Release-driven versions: publishing a GitHub Release for tag v1.2.3
-          # publishes :1.2.3, :1.2, :1 and :latest. Pushes to main publish :main
-          # (moving) and :sha-<hash> (pinned) rolling dev images — no version, no
-          # :latest. The semver values come from the release's git tag.
+          # Release-driven versions publish semver tags. Pushes to main publish
+          # the rolling dev tags :main, :latest, and :sha-<hash> so Docker users
+          # can track the newest successful main build without a GitHub Release.
           tags: |
             type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
-          # :latest tracks the newest published release, never a main push. A
-          # pre-release (e.g. v1.2.3-rc1) is excluded from :latest by latest=auto.
+          # latest=auto still allows release events to mark full releases as
+          # :latest, while the explicit raw tag above makes main pushes update it.
           flavor: |
             latest=auto
 

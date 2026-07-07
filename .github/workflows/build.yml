@@ -17,6 +17,18 @@ on:
         description: "Git ref to build (defaults to the triggering ref)"
         type: string
         default: ""
+      release_draft:
+        description: "Create/update release assets on a draft release"
+        type: boolean
+        default: true
+      release_prerelease:
+        description: "Mark created/updated release as a prerelease"
+        type: boolean
+        default: false
+      artifact_retention_days:
+        description: "Retention period for non-release CI artifacts"
+        type: number
+        default: 7
 
 jobs:
   build:
@@ -113,7 +125,9 @@ jobs:
         with:
           tag_name: ${{ inputs.tag }}
           files: desktop/release/*.exe
-          draft: true            # stay a draft; release.yml's publish job flips it
+          draft: ${{ inputs.release_draft }}
+          prerelease: ${{ inputs.release_prerelease }}
+          overwrite_files: true
 
       - name: Upload to draft release (Linux binary)
         if: ${{ inputs.release && matrix.os != 'windows-latest' }}
@@ -121,7 +135,9 @@ jobs:
         with:
           tag_name: ${{ inputs.tag }}
           files: dist-standalone/stl-library-${{ matrix.label }}
-          draft: true
+          draft: ${{ inputs.release_draft }}
+          prerelease: ${{ inputs.release_prerelease }}
+          overwrite_files: true
 
       - name: Upload build artifact (Windows installer)
         if: ${{ !inputs.release && matrix.os == 'windows-latest' }}
@@ -129,7 +145,7 @@ jobs:
         with:
           name: stl-studio-setup-${{ matrix.label }}
           path: desktop/release/*.exe
-          retention-days: 7
+          retention-days: ${{ inputs.artifact_retention_days }}
 
       - name: Upload build artifact (Linux binary)
         if: ${{ !inputs.release && matrix.os != 'windows-latest' }}
@@ -137,4 +153,4 @@ jobs:
         with:
           name: stl-library-${{ matrix.label }}
           path: dist-standalone/stl-library-${{ matrix.label }}
-          retention-days: 7
+          retention-days: ${{ inputs.artifact_retention_days }}
