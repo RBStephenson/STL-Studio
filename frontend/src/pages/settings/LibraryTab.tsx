@@ -408,6 +408,10 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             />
             <p className="text-xs text-gray-600 mt-1">
               Used by Reorganize Library, new creator folders, and the "unorganized" flag on a model's page.
+              Tokens: <code className="text-gray-400">{"{creator}"}</code>,{" "}
+              <code className="text-gray-400">{"{character}"}</code>,{" "}
+              <code className="text-gray-400">{"{scale}"}</code>,{" "}
+              <code className="text-gray-400">{"{title}"}</code>.
             </p>
           </div>
           <label className="flex items-start gap-3 cursor-pointer select-none">

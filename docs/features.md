@@ -609,6 +609,11 @@ as the standalone HTML version.
 files on disk to match a folder template — by default
 `{creator}/{character}/{title}`.
 
+Destination templates support `{creator}`, `{character}`, `{scale}`, and
+`{title}`. `{scale}` comes from scanner-detected scale auto-tags such as `1:6`
+or `75mm`; if a template uses `{scale}` and a model has no detected scale, that
+row is marked unclassifiable until you resolve it.
+
 The destination template and a **"Lowercase, hyphenated directory names"**
 toggle live in **Settings → Library → Reorganize** — both are saved server-side,
 so they're shared with manual [creator](#creators--per-creator-rescan) folder

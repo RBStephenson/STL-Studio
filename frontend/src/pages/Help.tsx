@@ -754,6 +754,10 @@ const SECTIONS: Section[] = [
           to <code>/reorganize</code>) tidies your files on disk to match a folder
           template — by default <code>{"{creator}/{character}/{title}"}</code>.
         </p>
+        <p>
+          Templates can also include <code>{"{scale}"}</code>, using scanner-detected
+          scale tags like <code>1:6</code> or <code>75mm</code>.
+        </p>
         <p className="font-medium text-gray-200">How it works</p>
         <ul>
           <li>

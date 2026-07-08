@@ -504,7 +504,7 @@ class AppSettingsRead(BaseModel):
     # takes effect immediately (no restart) and persists across restarts.
     log_level: str = "INFO"
     # Library reorganize destination template ("" = the built-in default,
-    # {creator}/{character}/{title}) and whether every segment is rendered
+    # {creator}/{character}/{title}; optional {scale}) and whether every segment is rendered
     # lowercase/hyphenated (import-style) rather than case-preserving.
     reorganize_template: str = ""
     reorganize_slugify: bool = True
@@ -826,6 +826,7 @@ class ReorganizeOverride(BaseModel):
     falls back to the model's metadata; suffix is appended to the title."""
     creator: Optional[str] = None
     character: Optional[str] = None
+    scale: Optional[str] = None
     title: Optional[str] = None
     suffix: Optional[str] = None
 

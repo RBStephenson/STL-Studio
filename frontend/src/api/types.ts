@@ -240,7 +240,7 @@ export interface AppSettings {
   // Application log verbosity — changing it takes effect immediately (no restart).
   log_level: LogLevel;
   // Library reorganize destination template ("" = the built-in default,
-  // {creator}/{character}/{title}) and whether every segment renders
+  // {creator}/{character}/{title}; optional {scale}) and whether every segment renders
   // lowercase/hyphenated (import-style) rather than case-preserving.
   reorganize_template: string;
   reorganize_slugify: boolean;
@@ -934,6 +934,7 @@ export interface ReorganizePreview {
 export interface ReorganizeOverride {
   creator?: string;
   character?: string;
+  scale?: string;
   title?: string;
   suffix?: string;
 }

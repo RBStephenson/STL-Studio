@@ -12,6 +12,7 @@ than ``os.path.normcase`` — normcase is identity on POSIX (the test/CI host), 
 relying on it would silently disable case-collision detection there.
 """
 import os
+import re
 import unicodedata
 from dataclasses import dataclass, field
 
@@ -24,10 +25,12 @@ from app.models import (
     ScanRoot,
 )
 from app.services.path_sanitize import path_over_length, sanitize_segment
-from app.services.reorganize_template import parse_template, render_segments
+from app.services.reorganize_template import VALID_FIELDS, parse_template, render_segments
 
 UNKNOWN_CREATOR = "_Unknown Creator"
 UNKNOWN_CHARACTER = "_Unknown Character"
+UNKNOWN_SCALE = "_Unknown Scale"
+_SCALE_TAG_RE = re.compile(r"^(\d{1,4}mm|1[:/\-_]\d{1,2})$", re.I)
 
 
 def _canon(path: str) -> str:
@@ -127,6 +130,18 @@ def _stat_file(path: str) -> tuple[int, int, bool, bool]:
         return st.st_size, st.st_mtime_ns, is_link, False
     except OSError:
         return 0, 0, False, True
+
+
+def _scale_value(auto_tags: list | None) -> str:
+    """Return the first scanner scale tag, normalizing ratio separators."""
+    for raw in auto_tags or []:
+        tag = str(raw).strip()
+        if not _SCALE_TAG_RE.match(tag):
+            continue
+        if tag.lower().endswith("mm"):
+            return tag.lower()
+        return tag.replace("/", ":").replace("-", ":").replace("_", ":")
+    return ""
 
 
 def build_manifest(
@@ -254,13 +269,14 @@ def _build_entry(
     override = override or {}
     ov_creator = (override.get("creator") or "").strip()
     ov_character = (override.get("character") or "").strip()
+    ov_scale = (override.get("scale") or "").strip()
     ov_title = (override.get("title") or "").strip()
     ov_suffix = (override.get("suffix") or "").strip()
 
     # Fields actually referenced in the template — only flag missing for these.
     used_fields = {
         f for seg in segments
-        for f in ("creator", "character", "title")
+        for f in VALID_FIELDS
         if ("{" + f + "}") in seg.lower()
     }
 
@@ -276,6 +292,11 @@ def _build_entry(
         character = UNKNOWN_CHARACTER
         if "character" in used_fields:
             missing.append("character")
+    scale = ov_scale or _scale_value(m.auto_tags)
+    if not scale:
+        scale = UNKNOWN_SCALE
+        if "scale" in used_fields:
+            missing.append("scale")
     title = ov_title or m.title or m.name or ""
     if not (ov_title or (m.title or "").strip()):
         # title fell back to folder name — only 'missing' if that's also empty
@@ -285,7 +306,12 @@ def _build_entry(
     if ov_suffix:
         title = f"{title} {ov_suffix}"
 
-    values = {"creator": creator_name, "character": character, "title": title}
+    values = {
+        "creator": creator_name,
+        "character": character,
+        "scale": scale,
+        "title": title,
+    }
     rendered = render_segments(segments, values)
 
     reserved = False
@@ -443,8 +469,9 @@ def creator_scan_dir(
     ``slugify`` mirrors the library's ``reorganize_slugify`` setting — when
     off, the creator name keeps its original casing/spacing (still made
     filesystem-safe). Returns ``None`` when the template doesn't reference
-    ``{creator}``, an earlier segment needs ``{character}``/``{title}`` (not
-    available for a bare creator), or there's no scan root to anchor to.
+    ``{creator}``, an earlier segment needs ``{character}``/``{scale}``/
+    ``{title}`` (not available for a bare creator), or there's no scan root to
+    anchor to.
     """
     segments = parse_template(template)
     idx = next((i for i, seg in enumerate(segments) if "{creator}" in seg.lower()), None)
@@ -452,7 +479,7 @@ def creator_scan_dir(
         return None
     lead = segments[: idx + 1]
     other_fields = {
-        f for seg in lead for f in ("character", "title")
+        f for seg in lead for f in ("character", "scale", "title")
         if ("{" + f + "}") in seg.lower()
     }
     if other_fields:
