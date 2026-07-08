@@ -41,6 +41,10 @@ interface Props {
 // are added on disk.
 const imageListCache = new Map<string, ImageEntry[]>();
 
+function clearCachedImageList(cacheKey?: string) {
+  if (cacheKey) imageListCache.delete(cacheKey);
+}
+
 export default function ImagePicker({ modelId, currentPath, currentUrl, onApplied, onClose, cacheKey }: Props) {
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -124,6 +128,7 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
               ? `Saved as a direct link — the server couldn't download it (${data.detail}). It may not display if the site blocks embedding.`
               : "Saved as a direct link — it may not display if the site blocks embedding.",
           );
+          clearCachedImageList(cacheKey);
           return;
         }
       } else {
@@ -137,6 +142,7 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
         });
         if (!r.ok) throw new Error("Could not update the thumbnail");
       }
+      clearCachedImageList(cacheKey);
       onApplied();
     } catch (e) {
       setApplyError(errMsg(e) ?? null);
@@ -162,6 +168,7 @@ export default function ImagePicker({ modelId, currentPath, currentUrl, onApplie
         const data = await r.json().catch(() => null);
         throw new Error(data?.detail ?? "Could not upload image");
       }
+      clearCachedImageList(cacheKey);
       onApplied();
     } catch (err) {
       setUploadError(errMsg(err) ?? "Could not upload image");

@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { createRef } from "react";
 import ModelCard, { GalleryRotator, GalleryRotatorHandle } from "./ModelCard";
 import { Model } from "../api/client";
+import { QueryWrapper } from "../test/queryWrapper";
 
 vi.mock("../context/NSFWContext", () => ({ useNSFW: () => ({ showNSFW: true }) }));
 vi.mock("../context/AppSettingsContext", () => ({ useAppSettings: () => ({ settings: { recent_days: 30 } }) }));
@@ -50,23 +51,27 @@ const MODEL = {
 } as unknown as Model;
 
 const renderCard = (model: Partial<Model> = {}) =>
-  render(<MemoryRouter><ModelCard model={{ ...MODEL, ...model } as Model} /></MemoryRouter>);
+  render(
+    <QueryWrapper>
+      <MemoryRouter><ModelCard model={{ ...MODEL, ...model } as Model} /></MemoryRouter>
+    </QueryWrapper>
+  );
 
 describe("ModelCard quick-assign button (#172)", () => {
   it("shows the quick-assign button with aria-label", () => {
-    render(<MemoryRouter><ModelCard model={MODEL} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL} /></MemoryRouter></QueryWrapper>);
     expect(screen.getByLabelText("Quick assign tags and collections")).toBeInTheDocument();
   });
 
   it("opens the QuickAssignPopover when the button is clicked", () => {
-    render(<MemoryRouter><ModelCard model={MODEL} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL} /></MemoryRouter></QueryWrapper>);
     expect(screen.queryByTestId("quick-assign-popover")).toBeNull();
     fireEvent.click(screen.getByLabelText("Quick assign tags and collections"));
     expect(screen.getByTestId("quick-assign-popover")).toBeInTheDocument();
   });
 
   it("closes the popover when onClose is called", () => {
-    render(<MemoryRouter><ModelCard model={MODEL} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL} /></MemoryRouter></QueryWrapper>);
     fireEvent.click(screen.getByLabelText("Quick assign tags and collections"));
     expect(screen.getByTestId("quick-assign-popover")).toBeInTheDocument();
     fireEvent.click(screen.getByText("close-popover"));
@@ -96,13 +101,13 @@ describe("ModelCard parsed-attribute badges (#609)", () => {
 
 describe("ModelCard painting-guide badge (#263)", () => {
   it("shows the Guide badge when the model has a guide", () => {
-    render(<MemoryRouter><ModelCard model={MODEL as Model} hasGuide={true} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL as Model} hasGuide={true} /></MemoryRouter></QueryWrapper>);
     expect(screen.getByText("Guide")).toBeInTheDocument();
     expect(screen.getByTitle("Has a painting guide")).toBeInTheDocument();
   });
 
   it("omits the badge when there is no guide", () => {
-    render(<MemoryRouter><ModelCard model={MODEL as Model} hasGuide={false} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL as Model} hasGuide={false} /></MemoryRouter></QueryWrapper>);
     expect(screen.queryByText("Guide")).toBeNull();
   });
 });
