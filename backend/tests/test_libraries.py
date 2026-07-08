@@ -45,8 +45,15 @@ class TestListLibraries:
     def test_library_exposes_write_enabled_flag(self, db, client, tmp_path):
         _make_root(db, str(tmp_path / "b"), name="minis", is_writable=True)
         r = client.get("/scan/libraries")
-        # Default deployment is read-only (reorganize_write_enabled defaults False).
+        # Reorganize feature flag defaults off, so write_enabled is False.
         assert r.json()[0]["write_enabled"] is False
+
+    def test_write_enabled_true_when_reorganize_enabled(self, db, client, tmp_path):
+        from tests.conftest import set_reorganize_enabled
+        _make_root(db, str(tmp_path / "b"), name="minis", is_writable=True)
+        set_reorganize_enabled(db, True)
+        r = client.get("/scan/libraries")
+        assert r.json()[0]["write_enabled"] is True
 
     def test_backfills_name_for_legacy_writable_root(self, db, client, tmp_path):
         p = tmp_path / "legacy"

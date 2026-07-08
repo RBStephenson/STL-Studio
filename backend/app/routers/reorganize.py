@@ -159,8 +159,8 @@ def preview_with_overrides(
 def apply(body: ReorganizeApplyRequest, db: Session = Depends(get_db)) -> ReorganizeApplyResponse:
     """Execute the selected entries of a previously-previewed manifest (#324, 2a).
 
-    Refused unless the deployment opts into write mode AND each destination probes
-    writable; aborts on drift; serialized against scans by the app-wide write lock.
+    Refused unless the `reorganize_enabled` feature flag is on AND each destination
+    probes writable; aborts on drift; serialized against scans by the app-wide write lock.
     """
     try:
         manifest_id = reorganize_apply._validate_manifest_id(body.manifest_id)
@@ -183,7 +183,7 @@ def undo(body: ReorganizeUndoRequest, db: Session = Depends(get_db)) -> Reorgani
     """Reverse a completed apply by replaying its undo log (#324, 2b).
 
     Idempotent and partial-apply safe: drifted / missing / origin-occupied files
-    are skipped and reported, never forced. Same write-mode guard and app-wide
+    are skipped and reported, never forced. Same feature-flag guard and app-wide
     lock as apply.
     """
     try:

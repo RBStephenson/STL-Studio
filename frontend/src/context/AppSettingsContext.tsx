@@ -31,6 +31,7 @@ const DEFAULTS: AppSettings = {
   log_level: "INFO",
   reorganize_template: "",
   reorganize_slugify: true,
+  reorganize_enabled: false,
 };
 
 interface AppSettingsContextValue {

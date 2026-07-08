@@ -80,6 +80,20 @@ def make_creator(db, name="Test Creator") -> Creator:
     return c
 
 
+def set_reorganize_enabled(db, enabled: bool) -> None:
+    """Set the `reorganize_enabled` feature-flag app-setting for tests.
+
+    Replaces the old `monkeypatch.setattr(settings, "reorganize_write_enabled")`
+    now that the write gate reads the DB flag."""
+    from app.models import AppSetting
+    row = db.get(AppSetting, "reorganize_enabled")
+    if row is None:
+        db.add(AppSetting(key="reorganize_enabled", value=enabled))
+    else:
+        row.value = enabled
+    db.commit()
+
+
 def make_model(
     db,
     creator: Creator,

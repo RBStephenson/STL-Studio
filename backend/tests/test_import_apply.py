@@ -4,15 +4,15 @@ import os
 
 import pytest
 
-from app.config import settings
 from app.models import Creator, ImportSourceMapping, Model, ScanRoot, STLFile
 from app.services import reorganize
 from app.utils import utcnow
+from tests.conftest import set_reorganize_enabled
 
 
 @pytest.fixture()
-def write_mode(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "reorganize_write_enabled", True)
+def write_mode(db):
+    set_reorganize_enabled(db, True)
 
 
 def _library(db, path, name="lib", primary=False):
@@ -76,8 +76,8 @@ class TestImportApplyReporting:
         assert body["skipped"] == 1
         assert body["ineligible"][0]["reasons"]
 
-    def test_blocked_when_write_disabled(self, client, db, tmp_path, monkeypatch):
-        monkeypatch.setattr(settings, "reorganize_write_enabled", False)
+    def test_blocked_when_write_disabled(self, client, db, tmp_path):
+        set_reorganize_enabled(db, False)
         lib = _library(db, tmp_path / "lib")
         src = os.path.realpath(str(tmp_path / "inbox"))
         db.add(ImportSourceMapping(source_path=src, library_id=lib.id))

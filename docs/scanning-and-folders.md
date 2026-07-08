@@ -178,6 +178,7 @@ If the destination drive isn't a scan root yet, add it first under **Settings �
 Add a Folder**, then name it and tick **Import destination**.
 
 Marking a folder an import destination only makes it *eligible*. The actual
-on-disk move still requires **write mode** (`reorganize_write_enabled`) — the
-read-only Docker default refuses moves; standalone builds opt in. This mirrors
+on-disk move still requires the **Reorganize Library** feature flag
+(`reorganize_enabled`) to be turned on under **Settings → Library** — it defaults
+off, and while off both Reorganize and import moves are refused. This mirrors
 [Reorganize](features.md#reorganize-library)'s safety posture.
