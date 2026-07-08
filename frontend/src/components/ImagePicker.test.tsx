@@ -197,6 +197,30 @@ describe("ImagePicker – group image-list cache (#303)", () => {
     expect(imageListCalls()).toBe(2);
   });
 
+  it("drops the sibling cache after applying a thumbnail", async () => {
+    const cacheKey = "9:CacheDrop";
+    fetchMock.mockImplementation((url: string) =>
+      url.startsWith("/api/files/model-images/") ? jsonResponse(oneImage) : jsonResponse({}),
+    );
+
+    const first = renderPicker(vi.fn(), { modelId: 7, cacheKey });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(1);
+    first.unmount();
+
+    const second = renderPicker(vi.fn(), { modelId: 8, cacheKey });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(1);
+
+    await userEvent.click(screen.getByTitle("a.png"));
+    await userEvent.click(screen.getByRole("button", { name: /set as thumbnail/i }));
+    second.unmount();
+
+    renderPicker(vi.fn(), { modelId: 9, cacheKey });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(2);
+  });
+
   it("always fetches when no cacheKey is given", async () => {
     fetchMock.mockImplementation((url: string) =>
       url.startsWith("/api/files/model-images/") ? jsonResponse(oneImage) : jsonResponse({}),

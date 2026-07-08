@@ -116,6 +116,7 @@ def set_print_status(model_id: int, body: PrintStatusUpdate, db: Session = Depen
     was_queued = model.print_status == "queued"
     was_printed = model.print_status == "printed"
     model.print_status = body.status
+    model.updated_at = utcnow()
 
     if body.status == "queued":
         # Appending to the queue: new entries go to the end of the manual order

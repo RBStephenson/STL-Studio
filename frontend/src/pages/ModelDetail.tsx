@@ -15,6 +15,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 import { useConfirm } from "../context/ConfirmContext";
 import { queryKeys } from "../hooks/queries/keys";
+import { invalidateModelViews } from "../hooks/queries/invalidation";
 import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
 import { useModelGuideId } from "../hooks/queries/guides";
 import { useModelTags } from "./model-detail/hooks/useModelTags";
@@ -322,6 +323,7 @@ export default function ModelDetail() {
     setNsfw(next);
     try {
       await api.models.setNSFW(Number(id), next);
+      invalidateModelViews(queryClient, { modelId: Number(id), includeVariants: false });
     } catch {
       setNsfw(!next);  // revert on failure
       toast("Couldn't update NSFW flag — try again.", "error");
@@ -333,6 +335,7 @@ export default function ModelDetail() {
     setFavorite(next);
     try {
       await api.models.setFavorite(Number(id), next);
+      invalidateModelViews(queryClient, { modelId: Number(id), includeVariants: false });
     } catch {
       setFavorite(!next);  // revert on failure
       toast("Couldn't update favorite — try again.", "error");
@@ -344,6 +347,7 @@ export default function ModelDetail() {
     setRating(next);
     try {
       await api.models.setRating(Number(id), next);
+      invalidateModelViews(queryClient, { modelId: Number(id), includeVariants: false });
     } catch {
       setRating(prev);  // revert on failure
       toast("Couldn't update rating — try again.", "error");
@@ -356,7 +360,7 @@ export default function ModelDetail() {
   const load = useCallback(() => {
     if (numericId == null) return;
     modelQuery.refetch();
-    queryClient.invalidateQueries({ queryKey: queryKeys.models.variantsAll });
+    invalidateModelViews(queryClient, { includeVariants: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [numericId, queryClient]);
 
