@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { resolveBackendExe } from "./config";
 
-const exeName = process.platform === "win32" ? "stl-library.exe" : "stl-library";
+const exeName = process.platform === "win32" ? "stl-studio.exe" : "stl-studio";
 
 describe("resolveBackendExe", () => {
   afterEach(() => {

@@ -17,7 +17,7 @@ and download the file for your operating system:
 | OS | File |
 |----|------|
 | Windows | `STL Studio Setup <version>.exe` (installer) |
-| Linux | `stl-library-linux` |
+| Linux | `stl-studio-linux` |
 
 For testing the newest successful `main` build before a versioned release, use
 the rolling `Main Build` prerelease on the same Releases page.

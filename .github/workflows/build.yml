@@ -83,9 +83,9 @@ jobs:
       # The backend exe is a headless windowless sidecar (Phase 2, STUDIO-72). On
       # Windows it is wrapped by Electron below; on Linux it ships as-is with the
       # browser fallback (#463). electron-builder expects the *unlabelled*
-      # dist-standalone/stl-library.exe, so packaging runs before any rename.
+      # dist-standalone/stl-studio.exe, so packaging runs before any rename.
       - name: Build executable
-        run: pyinstaller packaging/stl-library.spec --distpath dist-standalone
+        run: pyinstaller packaging/stl-studio.spec --distpath dist-standalone
 
       # ---- Windows: wrap the backend exe in the Electron NSIS installer ----
       # (Phase 4, STUDIO-74). desktop/electron-builder.yml copies the sidecar from
@@ -130,7 +130,7 @@ jobs:
       #      of the installer above) ----
       - name: Rename artifact (Linux)
         if: matrix.os != 'windows-latest'
-        run: mv dist-standalone/stl-library dist-standalone/stl-library-${{ matrix.label }}
+        run: mv dist-standalone/stl-studio dist-standalone/stl-studio-${{ matrix.label }}
 
       # ---- Upload to the DRAFT release (release.yml publishes it afterwards) OR
       #      keep as a CI artifact (build-check). Uploading to a draft keeps the
@@ -151,7 +151,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
-          files: dist-standalone/stl-library-${{ matrix.label }}
+          files: dist-standalone/stl-studio-${{ matrix.label }}
           draft: ${{ inputs.release_draft }}
           prerelease: ${{ inputs.release_prerelease }}
           overwrite_files: true
@@ -168,6 +168,6 @@ jobs:
         if: ${{ !inputs.release && matrix.os != 'windows-latest' }}
         uses: actions/upload-artifact@v7
         with:
-          name: stl-library-${{ matrix.label }}
-          path: dist-standalone/stl-library-${{ matrix.label }}
+          name: stl-studio-${{ matrix.label }}
+          path: dist-standalone/stl-studio-${{ matrix.label }}
           retention-days: ${{ inputs.artifact_retention_days }}

@@ -71,7 +71,7 @@ def _configure_env(data_dir: Path) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="stl-library",
+        prog="stl-studio",
         description="Serve STL Studio headlessly on 127.0.0.1.",
     )
     parser.add_argument(
