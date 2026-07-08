@@ -173,14 +173,15 @@ describe("ModelCard thumbnail cache-busting (#185)", () => {
 });
 
 describe("ModelCard no-image placeholder", () => {
-  it("shows the branded placeholder when the model has no image at all", () => {
+  it("shows the same placeholder icon as Model Detail when the model has no image at all", () => {
     const { container } = renderCard();
-    expect(container.querySelector('img[src="/model-placeholder.png"]')).toBeInTheDocument();
+    expect(container.querySelector("svg.lucide-package")).toBeInTheDocument();
   });
 
   it("shows the real image instead of the placeholder once one is set", () => {
     const { container } = renderCard({ thumbnail_path: "/data/thumbnails/7.png" });
-    expect(container.querySelector('img[src="/model-placeholder.png"]')).not.toBeInTheDocument();
+    expect(container.querySelector("svg.lucide-package")).not.toBeInTheDocument();
+    expect(screen.getByRole("img")).toBeInTheDocument();
   });
 });
 
