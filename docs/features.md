@@ -437,9 +437,11 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
   loose files → an `_Inbox` creator) — handy when you don't need per-pack review.
 - **Inbox flag** — un-filed imports are marked **inbox**; the Library's
   `?is_inbox=1` filter shows just these.
-- The **move** step is **standalone-only** (Docker mounts are read-only) and
-  requires write mode; importing and enriching work everywhere. Packs missing a
-  creator/character (or otherwise blocked) are reported as skipped, not moved.
+- The **move** step requires the **Reorganize Library** feature flag (**Settings →
+  Library**, off by default) and a writable destination — Docker mounts are
+  read-only, so moves are effectively standalone-only. Importing and enriching
+  work everywhere. Packs missing a creator/character (or otherwise blocked) are
+  reported as skipped, not moved.
 
 ## Creators & per-creator rescan
 
@@ -643,9 +645,11 @@ off to keep each segment's original casing and spacing.
 - **Undo.** **Undo last apply** reverses the batch, skipping anything you've since
   edited or that now sits where a file would return.
 
-Apply moves real files, so it is **standalone-only and opt-in**: it stays disabled
-unless the deployment enables write mode and the destination is actually writable
-(the read-only Docker mount can never apply). Preview and resolve work everywhere.
+Apply moves real files, so it is **opt-in**: it stays disabled unless the
+**Reorganize Library** feature flag is turned on under **Settings → Library**
+(off by default) and the destination is actually writable (the read-only Docker
+mount can never apply, making apply effectively standalone-only). Preview and
+resolve work everywhere.
 
 ## Settings
 

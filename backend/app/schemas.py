@@ -346,7 +346,7 @@ class LibraryRead(BaseModel):
     path: str
     name: str
     is_writable: bool
-    write_enabled: bool  # deployment-level reorganize_write_enabled flag
+    write_enabled: bool  # the reorganize_enabled app-setting feature flag
 
     class Config:
         from_attributes = True
@@ -508,6 +508,11 @@ class AppSettingsRead(BaseModel):
     # lowercase/hyphenated (import-style) rather than case-preserving.
     reorganize_template: str = ""
     reorganize_slugify: bool = True
+    # Feature flag: gates the Library reorganize feature end-to-end — the UI
+    # (nav link, /reorganize route/page) AND the destructive apply/undo writes.
+    # Default off; toggled from the Library settings tab. Retires the old
+    # deployment-level REORGANIZE_WRITE_ENABLED env var.
+    reorganize_enabled: bool = False
     # Collections page: give every card the same box size (the one cover art
     # already uses) instead of a compact box for collections with no cover.
     collections_uniform_size: bool = True
@@ -548,6 +553,7 @@ class AppSettingsUpdate(BaseModel):
     log_level: Optional[str] = Field(None, pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
     reorganize_template: Optional[str] = Field(None, max_length=500)
     reorganize_slugify: Optional[bool] = None
+    reorganize_enabled: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")

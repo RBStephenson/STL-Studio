@@ -29,13 +29,6 @@ class Settings(BaseSettings):
     # on miss. Register an app at MMF Settings -> Developer to obtain a key.
     mmf_api_key: str = ""
 
-    # Library reorganize apply (#324, Phase 2a) — the ONLY feature that moves
-    # user files on disk. Default OFF: a deployment must opt in explicitly, and
-    # even then apply re-probes each destination directory for writability at run
-    # time. The read-only Docker mount is the intended default safety posture, so
-    # this stays off unless a writable standalone deployment sets it.
-    reorganize_write_enabled: bool = False
-
     # Root log level for the application's own loggers (the `app.*` hierarchy).
     # Uvicorn only configures its own loggers, leaving `app.*` at the default
     # WARNING with no handler — so INFO-level diagnostics (e.g. the AI organizer

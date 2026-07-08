@@ -174,7 +174,7 @@ The **Paint Shelf** is always available in the nav. Enabling **Settings → Pain
 - **Libraries** — name a folder and tick **Import destination** in Settings; a source→library mapping is saved per source and inherited by its packs
 - **Move N imported packs → library** files them into the chosen library via the reorganize engine (drift-checked, with undo); the **inbox** flag clears as they land
 - **Quick import (whole folder)** keeps the original one-shot index; imported models are flagged **inbox** (`?is_inbox=1` filter)
-- The move step is standalone-only and needs write mode (Docker mounts are read-only); import + enrich work everywhere
+- The move step needs the **Reorganize Library** feature flag on (Settings → Library, off by default) and a writable destination — Docker mounts are read-only, so it's effectively standalone-only; import + enrich work everywhere
 
 ### Scan
 - **Parallel** — scans up to 4 creator directories concurrently for faster indexing on large libraries

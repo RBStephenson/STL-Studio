@@ -34,13 +34,26 @@ from typing import Callable
 
 from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.models import Model, PackOverride, ReorganizeManifest, ScanRoot, STLFile
+from app.models import AppSetting, Model, PackOverride, ReorganizeManifest, ScanRoot, STLFile
 from app.services import write_lock
 from app.utils import utcnow
 
 MoveFn = Callable[[str, str], None]
 StatFn = Callable[[str], tuple[int, int]]   # path -> (size_bytes, mtime_ns)
+
+# The reorganize feature flag (app_settings). Default off — see AppSettingsRead.
+REORGANIZE_ENABLED_KEY = "reorganize_enabled"
+_REORGANIZE_ENABLED_DEFAULT = False
+
+
+def reorganize_enabled(db: Session) -> bool:
+    """Whether the Library reorganize feature is enabled (app-setting flag).
+
+    Single source of truth for both the destructive apply/undo write gate here
+    and the read-only ``write_enabled`` hint the libraries endpoint surfaces.
+    """
+    row = db.get(AppSetting, REORGANIZE_ENABLED_KEY)
+    return bool(row.value) if row is not None else _REORGANIZE_ENABLED_DEFAULT
 
 
 class ApplyError(Exception):
@@ -278,9 +291,9 @@ def apply_manifest(
     """Execute the selected entries of a persisted manifest. See module docstring
     for the safety contract. Raises ApplyError (mapped to HTTP by the router) or
     write_lock.LibraryBusy on contention."""
-    if not settings.reorganize_write_enabled:
+    if not reorganize_enabled(db):
         raise ApplyError(
-            "Reorganize apply is disabled — this deployment is read-only",
+            "Reorganize is disabled — enable it on the Library settings tab",
             status=403,
         )
     _validate_manifest_id(manifest_id)
@@ -509,9 +522,9 @@ def undo_manifest(
     not forced. Running undo twice simply skips everything the first run already
     reversed.
     """
-    if not settings.reorganize_write_enabled:
+    if not reorganize_enabled(db):
         raise ApplyError(
-            "Reorganize apply is disabled — this deployment is read-only",
+            "Reorganize is disabled — enable it on the Library settings tab",
             status=403,
         )
 

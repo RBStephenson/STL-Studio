@@ -17,13 +17,13 @@ from app.config import settings
 from app.models import PackOverride
 from app.services import write_lock
 from app.services.reorganize_apply import ApplyError, _safe_move, apply_manifest
-from tests.conftest import make_creator, make_model, make_stl_file
+from tests.conftest import make_creator, make_model, make_stl_file, set_reorganize_enabled
 
 
 @pytest.fixture
-def write_mode(tmp_path, monkeypatch):
+def write_mode(tmp_path, monkeypatch, db):
     """Enable apply + point the data dir (undo log / probe) at a writable temp."""
-    monkeypatch.setattr(settings, "reorganize_write_enabled", True)
+    set_reorganize_enabled(db, True)
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path}/stl.db")
     return tmp_path
 
@@ -59,8 +59,8 @@ def _preview(client):
 
 
 class TestWriteModeGuard:
-    def test_apply_refused_when_disabled(self, client, db, tmp_path, monkeypatch):
-        monkeypatch.setattr(settings, "reorganize_write_enabled", False)
+    def test_apply_refused_when_disabled(self, client, db, tmp_path):
+        set_reorganize_enabled(db, False)
         _root(db, tmp_path)
         _seed(db, tmp_path)
         mid = _preview(client)["manifest_id"]
@@ -353,12 +353,12 @@ class TestUndo:
         resp = client.post("/reorganize/undo", json={"manifest_id": mid})
         assert resp.status_code == 404
 
-    def test_undo_refused_when_disabled(self, client, db, tmp_path, write_mode, monkeypatch):
+    def test_undo_refused_when_disabled(self, client, db, tmp_path, write_mode):
         _root(db, tmp_path)
         m = _seed(db, tmp_path)
         mid = _preview(client)["manifest_id"]
         _apply(client, mid, [m.id])
-        monkeypatch.setattr(settings, "reorganize_write_enabled", False)
+        set_reorganize_enabled(db, False)
         resp = client.post("/reorganize/undo", json={"manifest_id": mid})
         assert resp.status_code == 403
 

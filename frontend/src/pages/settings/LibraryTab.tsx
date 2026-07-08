@@ -384,6 +384,25 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
         <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
           <FolderTree size={14} /> Library Tools
         </h2>
+
+        <label className="flex items-start gap-3 cursor-pointer select-none mb-4">
+          <input
+            type="checkbox"
+            checked={settings.reorganize_enabled}
+            onChange={() => update({ reorganize_enabled: !settings.reorganize_enabled })}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-gray-300">Enable Reorganize Library</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Off by default. When on, the Reorganize Library tool appears below and
+              can move files on disk to match your template — including import moves.
+              A read-only deployment (e.g. Docker mounts) still can't write regardless.
+            </p>
+          </div>
+        </label>
+
+        {settings.reorganize_enabled && (
         <Link
           to="/reorganize"
           className="flex items-center gap-2 text-sm text-gray-300 hover:text-indigo-300 bg-gray-900 border border-gray-800 hover:border-indigo-700 rounded-lg px-4 py-3 self-start transition-colors w-fit"
@@ -392,6 +411,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           Reorganize Library
           <span className="text-xs text-gray-600">— preview a tidy layout, resolve flags, then apply</span>
         </Link>
+        )}
 
         <div className="bg-gray-900/60 border border-gray-800 rounded-lg px-4 py-3 mt-4 flex flex-col gap-3">
           <div>

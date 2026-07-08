@@ -1,4 +1,5 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useAppSettings } from "./context/AppSettingsContext";
 import Navbar from "./components/Navbar";
 import Library from "./pages/Library";
 import ModelDetail from "./pages/ModelDetail";
@@ -24,6 +25,14 @@ import ImportPage from "./pages/ImportPage";
 import ImportPreviewPage from "./pages/ImportPreviewPage";
 import BackToTop from "./components/BackToTop";
 
+// The Reorganize feature is gated behind the `reorganize_enabled` flag: when
+// off, the page is unreachable even by direct URL (the nav link is hidden in
+// the Library settings tab).
+function ReorganizeRoute() {
+  const { settings } = useAppSettings();
+  return settings.reorganize_enabled ? <ReorganizePage /> : <Navigate to="/" replace />;
+}
+
 export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
@@ -39,7 +48,7 @@ export default function App() {
           <Route path="/queue" element={<Queue />} />
           <Route path="/triage" element={<Triage />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/reorganize" element={<ReorganizePage />} />
+          <Route path="/reorganize" element={<ReorganizeRoute />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/import/preview" element={<ImportPreviewPage />} />
           <Route path="/tags" element={<TagsPage />} />
