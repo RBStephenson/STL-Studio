@@ -874,7 +874,7 @@ export type ReorganizeCollisionKind =
   | "none" | "exact" | "case_only" | "unicode_only" | "legitimate_duplicate";
 
 export interface ReorganizeFileMove {
-  stl_file_id: number;
+  stl_file_id: number | null;
   current_path: string;
   proposed_path: string;
   size_bytes: number;
@@ -882,6 +882,9 @@ export interface ReorganizeFileMove {
   content_hash: string | null;
   fingerprint_method: "stat" | "content_hash";
   missing_file: boolean;
+  // "stl" repaths an STLFile row; "image" repaths one of the model's own
+  // image_paths/thumbnail_path/primary_image_path instead.
+  kind: "stl" | "image";
 }
 
 export interface ReorganizeEntry {

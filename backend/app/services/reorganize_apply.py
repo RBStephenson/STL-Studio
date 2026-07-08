@@ -165,11 +165,15 @@ class _UndoLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = open(self.path, "a", encoding="utf-8")
 
-    def record(self, src: str, dst: str, size_bytes: int, mtime_ns: int) -> None:
+    def record(
+        self, src: str, dst: str, size_bytes: int, mtime_ns: int,
+        kind: str = "stl", model_id: int | None = None,
+    ) -> None:
         rec = {
             "from": src, "to": dst,
             "size_bytes": size_bytes, "mtime_ns": mtime_ns,
             "ts": utcnow().isoformat(), "status": "done",
+            "kind": kind, "model_id": model_id,
         }
         self._fh.write(json.dumps(rec) + "\n")
         self._fh.flush()
@@ -250,8 +254,15 @@ def _verify_no_drift(
 
 def _ordered_moves(selected: list[dict]) -> list[dict]:
     """Flatten entries to per-file moves, deepest source first so a destination
-    nested under another source can't destroy the child before it's extracted."""
-    moves = [f for entry in selected for f in entry["files"]]
+    nested under another source can't destroy the child before it's extracted.
+
+    Each move carries its owning model_id — undo needs it to repath an image
+    move directly (there's no STLFile row to look it up by, the way an STL
+    move's model is found)."""
+    moves = [
+        {**f, "model_id": entry["model_id"]}
+        for entry in selected for f in entry["files"]
+    ]
     moves.sort(key=lambda f: f["current_path"].count("/"), reverse=True)
     return moves
 
@@ -319,7 +330,10 @@ def apply_manifest(
                 move_fn(src, dst)
                 # Record only AFTER the move completes — the log is the recovery
                 # source of truth, so it must reflect reality on disk.
-                log.record(f["current_path"], f["proposed_path"], f["size_bytes"], f["mtime_ns"])
+                log.record(
+                    f["current_path"], f["proposed_path"], f["size_bytes"], f["mtime_ns"],
+                    kind=f.get("kind", "stl"), model_id=f.get("model_id"),
+                )
                 moved += 1
         except Exception as e:
             # 2a does not auto-undo: stop, keep the partial log for recovery, and
@@ -342,10 +356,10 @@ def apply_manifest(
 
 
 def _repath_db(db: Session, selected: list[dict]) -> None:
-    """Update Model.folder_path, STLFile.path, and the path-keyed PackOverride
-    references — all in one transaction under the write lock. A row-by-row
-    repath in a partially-moved state would race the unique constraints on
-    STLFile.path / Model.folder_path.
+    """Update Model.folder_path, STLFile.path, the model's own image fields,
+    and the path-keyed PackOverride references — all in one transaction under
+    the write lock. A row-by-row repath in a partially-moved state would race
+    the unique constraints on STLFile.path / Model.folder_path.
 
     GroupOverride no longer needs this (#678 Phase 5): the equivalent flag
     (Model.no_group) lives on the Model row itself, so it moves for free."""
@@ -356,6 +370,10 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
             model.is_inbox = False   # moved into the managed library
             model.updated_at = utcnow()
         for f in entry["files"]:
+            if f.get("kind") == "image":
+                if model is not None:
+                    _repath_model_image(model, f["current_path"], f["proposed_path"])
+                continue
             stl = db.get(STLFile, f["stl_file_id"])
             if stl is not None:
                 stl.path = f["proposed_path"]
@@ -365,6 +383,29 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
         if old_dir is not None:
             _repath_overrides(db, PackOverride, old_dir, new_dir)
     db.commit()
+
+
+def _repath_model_image(model: Model, old_path: str, new_path: str) -> None:
+    """Point a moved gallery image's occurrences on the model row at its new
+    location — image_paths, thumbnail_path, primary_image_path, and any
+    removed_image_paths entry (so a previously-removed image doesn't
+    reappear on the next rescan just because its old path no longer matches
+    the moved file's new one)."""
+    old_key = _key(old_path)
+    if isinstance(model.image_paths, list):
+        model.image_paths = [
+            new_path if _key(p) == old_key else p
+            for p in model.image_paths
+        ]
+    if model.thumbnail_path and _key(model.thumbnail_path) == old_key:
+        model.thumbnail_path = new_path
+    if model.primary_image_path and _key(model.primary_image_path) == old_key:
+        model.primary_image_path = new_path
+    if isinstance(model.removed_image_paths, list):
+        model.removed_image_paths = [
+            new_path if _key(p) == old_key else p
+            for p in model.removed_image_paths
+        ]
 
 
 def _entry_source_dir(entry: dict) -> str | None:
@@ -489,12 +530,15 @@ def undo_manifest(
 
     with write_lock.library_write("undo", timeout=0.0):
         skipped: list[dict] = []
-        reversed_moves: list[tuple[str, str]] = []   # (to, from) that succeeded
+        # (to, from, kind, model_id) per succeeded reversal.
+        reversed_moves: list[tuple[str, str, str, int | None]] = []
 
         # Reverse order: a move made last is undone first, mirroring apply's
         # deepest-source-first so a re-created parent never blocks a child.
         for rec in reversed(records):
             to, frm = rec["to"], rec["from"]
+            rec_kind = rec.get("kind", "stl")  # older logs predate the field
+            rec_model_id = rec.get("model_id")  # older logs predate the field
             # The "to" path (current location after apply) must be inside a scan
             # root. The "frm" path (original location) must be inside a scan root
             # OR an approved inbox source dir from the trusted manifest. Either
@@ -529,7 +573,7 @@ def undo_manifest(
             except Exception as e:
                 skipped.append({"path": to, "reason": f"move_failed: {e}"})
                 continue
-            reversed_moves.append((to, frm))
+            reversed_moves.append((to, frm, rec_kind, rec_model_id))
 
         _repath_db_undo(db, reversed_moves, roots)
         return UndoResult(
@@ -540,13 +584,20 @@ def undo_manifest(
 
 
 def _repath_db_undo(
-    db: Session, reversed_moves: list[tuple[str, str]], roots: list[str]
+    db: Session, reversed_moves: list[tuple[str, str, str, int | None]], roots: list[str]
 ) -> None:
-    """Point STLFile.path / Model.folder_path and the path-keyed overrides back to
-    the pre-apply locations, in one transaction. The log only carries paths, so
-    rows are found by their current (``to``) path."""
+    """Point STLFile.path / Model.folder_path, the model's own image fields,
+    and the path-keyed overrides back to the pre-apply locations, in one
+    transaction. STL rows are found by their current (``to``) path; an image
+    move has no such row, so it's repathed via the record's own model_id."""
     override_dirs: set[tuple[str, str]] = set()   # (proposed_dir, source_dir)
-    for to, frm in reversed_moves:
+    for to, frm, kind, model_id in reversed_moves:
+        if kind == "image":
+            model = db.get(Model, model_id) if model_id is not None else None
+            if model is not None:
+                _repath_model_image(model, to, frm)
+            continue
+
         stl = db.query(STLFile).filter(STLFile.path == to).first()
         if stl is None:
             continue

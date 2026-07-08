@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import ModelCard from "./ModelCard";
+import { createRef } from "react";
+import ModelCard, { GalleryRotator, GalleryRotatorHandle } from "./ModelCard";
 import { Model } from "../api/client";
 
 vi.mock("../context/NSFWContext", () => ({ useNSFW: () => ({ showNSFW: true }) }));
@@ -283,5 +284,55 @@ describe("ModelCard inline star rating (#167)", () => {
     renderCard({ user_rating: 2 });
     fireEvent.click(screen.getByRole("radio", { name: "2 stars" }));
     await waitFor(() => expect(vi.mocked(api.models.setRating)).toHaveBeenCalledWith(7, null));
+  });
+});
+
+describe("GalleryRotator index reset on paths change", () => {
+  const renderRotator = (paths: string[]) => {
+    const ref = createRef<GalleryRotatorHandle>();
+    const utils = render(
+      <GalleryRotator ref={ref} paths={paths} alt="x" blur={false} autoRotate={false} />
+    );
+    return { ref, ...utils };
+  };
+
+  it("clamps a now out-of-range index back to the first image when paths shrink", async () => {
+    const { ref, rerender, container } = renderRotator(["a.png", "b.png", "c.png"]);
+
+    // goTo() fades out before committing the new idx — wait for it to land.
+    ref.current?.goTo(2);
+    await waitFor(() =>
+      expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("c.png"))
+    );
+
+    // Simulate the parent staying mounted (e.g. Prev/Next, or an upload that
+    // reconciled the gallery) while the paths array shrinks — without a
+    // reset, idx=2 would be past the end of the new array.
+    rerender(<GalleryRotator ref={ref} paths={["only.png"]} alt="x" blur={false} autoRotate={false} />);
+
+    expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("only.png"));
+  });
+
+  it("clears stale broken-image state so a new paths list isn't poisoned by it", () => {
+    const { ref, rerender, container } = renderRotator(["broken.png", "b.png"]);
+
+    fireEvent.error(container.querySelector("img")!);
+
+    rerender(<GalleryRotator ref={ref} paths={["fresh.png"]} alt="x" blur={false} autoRotate={false} />);
+
+    expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("fresh.png"));
+  });
+
+  it("does not reset when the same paths list re-renders (no unnecessary flicker)", async () => {
+    const { ref, rerender, container } = renderRotator(["a.png", "b.png"]);
+
+    ref.current?.goTo(1);
+    await waitFor(() =>
+      expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("b.png"))
+    );
+
+    rerender(<GalleryRotator ref={ref} paths={["a.png", "b.png"]} alt="x" blur={false} autoRotate={false} />);
+
+    expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("b.png"));
   });
 });

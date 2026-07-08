@@ -755,7 +755,7 @@ CollisionKind = Literal[
 
 
 class ReorganizeFileMove(BaseModel):
-    stl_file_id: int
+    stl_file_id: Optional[int] = None
     current_path: str          # normalized, '/'-internal
     proposed_path: str
     # Real fingerprint for the Phase 2 drift check (decision D) — not the dead
@@ -767,6 +767,9 @@ class ReorganizeFileMove(BaseModel):
     # Source absent/unreadable at preview — (size, mtime) are a zeroed sentinel,
     # not a usable fingerprint for the Phase 2 drift check.
     missing_file: bool = False
+    # "stl" repaths an STLFile row (stl_file_id set); "image" repaths one of
+    # the model's own image_paths/thumbnail_path/primary_image_path instead.
+    kind: str = "stl"
 
 
 class ReorganizeEntry(BaseModel):

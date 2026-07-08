@@ -47,6 +47,7 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
                 content_hash=f.content_hash,
                 fingerprint_method=f.fingerprint_method,
                 missing_file=f.missing_file,
+                kind=f.kind,
             )
             for f in e.files
         ],

@@ -628,7 +628,13 @@ off to keep each segment's original casing and spacing.
 - **Apply.** Tick the eligible rows and **Apply**. The app verifies each file
   hasn't changed since the preview (aborting the whole batch on any drift), moves
   files safely across drives, and repaths the index — packs and manual character
-  groupings are carried along, not orphaned.
+  groupings are carried along, not orphaned. A model's own gallery images
+  (thumbnail, library card image, and the rest of the gallery) move right
+  along with its STL files — only images inherited from a shared parent
+  folder (e.g. a character-level "renders/" dir also used by sibling
+  variants) are left in place, since moving those would break the path for
+  the other models still pointing at them. Once every tracked file has moved
+  out, the now-empty source folder is removed.
 - **Undo.** **Undo last apply** reverses the batch, skipping anything you've since
   edited or that now sits where a file would return.
 
