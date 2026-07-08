@@ -440,3 +440,98 @@ class TestOverrideRepath:
         assert resp.status_code == 200
         db.refresh(m)
         assert m.no_group is True
+
+
+class TestImageMoves:
+    """A model's own gallery images move alongside its STL files (previously
+    only STLs moved, leaving images — and therefore the source folder —
+    behind)."""
+
+    def _seed_with_image(self, db, tmp_path, set_primary=False):
+        from app.models import Creator
+        folder = tmp_path / "_inbox" / "Bust"
+        folder.mkdir(parents=True, exist_ok=True)
+        stl = folder / "head.stl"
+        stl.write_bytes(b"solid\nendsolid\n")
+        img = folder / "cover.jpg"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        creator = db.query(Creator).filter_by(name="Abe3D").first() or make_creator(db, name="Abe3D")
+        m = make_model(db, creator, name="Bust", character="Joker")
+        m.folder_path = str(folder).replace("\\", "/")
+        m.title = "Bust"
+        img_path = str(img).replace("\\", "/")
+        m.image_paths = [img_path]
+        m.thumbnail_path = img_path
+        if set_primary:
+            m.primary_image_path = img_path
+        db.commit()
+        make_stl_file(db, m, filename="head.stl", path=str(stl).replace("\\", "/"))
+        db.commit()
+        return m, img_path
+
+    def test_image_moves_with_stl_and_repaths_model_fields(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path, set_primary=True)
+        mid = _preview(client)["manifest_id"]
+
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["moved_files"] == 2  # stl + image
+
+        db.refresh(m)
+        assert not os.path.exists(img_path)
+        assert os.path.exists(m.thumbnail_path)
+        assert m.thumbnail_path in m.image_paths
+        assert m.primary_image_path == m.thumbnail_path
+        # The old import folder is now genuinely empty and gets pruned.
+        assert not os.path.isdir(os.path.dirname(img_path))
+
+    def test_stale_missing_image_does_not_block_eligibility(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path)
+        os.remove(img_path)  # gone before preview, e.g. a stale gallery entry
+        preview = _preview(client)
+        entry = preview["entries"][0]
+
+        assert entry["eligible"] is True
+        assert entry["missing_files_on_disk"] is False
+        assert len(entry["files"]) == 1  # only the STL — the missing image is skipped
+
+    def test_shared_image_outside_model_folder_is_left_alone(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, _ = self._seed_with_image(db, tmp_path)
+        # A "character"-level image the model's gallery inherited from a
+        # shared parent folder — not owned by this model, must not be moved
+        # (another sibling variant could still be pointing at it).
+        shared_img = tmp_path / "_inbox" / "shared.jpg"
+        shared_img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        shared_path = str(shared_img).replace("\\", "/")
+        m.image_paths = [*m.image_paths, shared_path]
+        db.commit()
+
+        mid = _preview(client)["manifest_id"]
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 200, resp.text
+
+        assert shared_img.exists()
+        db.refresh(m)
+        assert shared_path in m.image_paths
+
+    def test_undo_restores_image_file_and_model_fields(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path)
+        mid = _preview(client)["manifest_id"]
+        _apply(client, mid, [m.id])
+        db.refresh(m)
+        moved_thumb = m.thumbnail_path
+        assert os.path.exists(moved_thumb)
+
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["reversed_files"] == 2  # stl + image
+        assert not os.path.exists(moved_thumb)
+        assert os.path.exists(img_path)
+
+        db.refresh(m)
+        assert m.thumbnail_path == img_path
+        assert img_path in m.image_paths
