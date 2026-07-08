@@ -1,4 +1,4 @@
-import { Images, RotateCw, Tag, LayoutPanelTop, ScrollText } from "lucide-react";
+import { FolderOpen, Images, RotateCw, Tag, LayoutPanelTop, ScrollText } from "lucide-react";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import { LogLevel } from "../../api/client";
 import FlashBanner from "./FlashBanner";
@@ -185,6 +185,29 @@ export default function PreferencesTab() {
             <p className="text-xs text-gray-500 mt-0.5">
               Displays the STL file list as a full-width table below the model images and info,
               with an editable Name column. Collections and Location move below the two-column area.
+            </p>
+          </div>
+        </label>
+      </section>
+
+      {/* Collections */}
+      <section className="mt-8 pt-6 border-t border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <FolderOpen size={14} /> Collections
+        </h2>
+        <label className="flex items-start gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={settings.collections_uniform_size}
+            onChange={() => update({ collections_uniform_size: !settings.collections_uniform_size })}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-gray-300">Uniform collection card size</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Gives every collection the same box size, whether or not it has a cover image, instead
+              of a compact box for collections with none. Collections with a cover image always use
+              the larger size.
             </p>
           </div>
         </label>

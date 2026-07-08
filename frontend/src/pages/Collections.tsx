@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { FolderOpen, Plus, Trash2, Pencil, Check, X, ImagePlus } from "lucide-react";
 import { api, Collection } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 import CollectionCoverPicker from "../components/CollectionCoverPicker";
 import CreateCollectionModal from "../components/CreateCollectionModal";
@@ -18,6 +19,7 @@ function CollectionCard({
   onRename: (col: Collection, newName: string, description: string) => Promise<void>;
   onCoverUpdate: (updated: Collection) => void;
 }) {
+  const { settings } = useAppSettings();
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(col.name);
   const [draftDesc, setDraftDesc] = useState(col.description ?? "");
@@ -27,6 +29,9 @@ function CollectionCard({
   const coverUrl = col.cover_image_path
     ? api.fileUrl(col.cover_image_path)
     : null;
+  // A cover image always gets the bigger box; without one, the uniform-size
+  // preference decides whether it matches or stays compact.
+  const bigBox = !!coverUrl || settings.collections_uniform_size;
 
   const startRename = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -91,17 +96,22 @@ function CollectionCard({
           <Link
             to={`/collections/${col.id}`}
             className={`relative bg-gray-900 border border-gray-800 rounded-lg overflow-hidden flex flex-col hover:border-indigo-500 transition-colors block ${
-              coverUrl ? "aspect-[4/3]" : ""
+              bigBox ? "aspect-[4/3]" : ""
             }`}
           >
-            {/* Cover image or placeholder — no cover keeps the box compact instead
-                of matching the full aspect-[4/3] height cover art uses. */}
+            {/* Cover image or placeholder. With the uniform-size preference off,
+                a collection with no cover keeps a compact box instead of matching
+                the full aspect-[4/3] height cover art uses. */}
             {coverUrl ? (
               <img
                 src={coverUrl}
                 alt={col.name}
                 className="absolute inset-0 w-full h-full object-cover"
               />
+            ) : bigBox ? (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-700">
+                <FolderOpen size={32} />
+              </div>
             ) : (
               <div className="h-12 flex items-center justify-center text-gray-700">
                 <FolderOpen size={24} />
@@ -109,7 +119,7 @@ function CollectionCard({
             )}
 
             {/* Solid footer — always opaque so text is legible over any cover image */}
-            <div className={`${coverUrl ? "absolute inset-x-0 bottom-0" : ""} px-3 py-2.5 bg-gray-900 border-t border-gray-800`}>
+            <div className={`${bigBox ? "absolute inset-x-0 bottom-0" : ""} px-3 py-2.5 bg-gray-900 border-t border-gray-800`}>
               <p className="font-medium text-gray-100 text-sm leading-snug truncate">{col.name}</p>
               {col.description && (
                 <p
