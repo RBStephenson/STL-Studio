@@ -90,9 +90,12 @@ function CollectionCard({
         ) : (
           <Link
             to={`/collections/${col.id}`}
-            className="relative bg-gray-900 border border-gray-800 rounded-lg overflow-hidden flex flex-col hover:border-indigo-500 transition-colors block aspect-[4/3]"
+            className={`relative bg-gray-900 border border-gray-800 rounded-lg overflow-hidden flex flex-col hover:border-indigo-500 transition-colors block ${
+              coverUrl ? "aspect-[4/3]" : ""
+            }`}
           >
-            {/* Cover image or placeholder */}
+            {/* Cover image or placeholder — no cover keeps the box compact instead
+                of matching the full aspect-[4/3] height cover art uses. */}
             {coverUrl ? (
               <img
                 src={coverUrl}
@@ -100,13 +103,13 @@ function CollectionCard({
                 className="absolute inset-0 w-full h-full object-cover"
               />
             ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-700">
-                <FolderOpen size={32} />
+              <div className="h-12 flex items-center justify-center text-gray-700">
+                <FolderOpen size={24} />
               </div>
             )}
 
             {/* Solid footer — always opaque so text is legible over any cover image */}
-            <div className="absolute inset-x-0 bottom-0 px-3 py-2.5 bg-gray-900 border-t border-gray-800">
+            <div className={`${coverUrl ? "absolute inset-x-0 bottom-0" : ""} px-3 py-2.5 bg-gray-900 border-t border-gray-800`}>
               <p className="font-medium text-gray-100 text-sm leading-snug truncate">{col.name}</p>
               {col.description && (
                 <p
