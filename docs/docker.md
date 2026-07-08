@@ -326,19 +326,16 @@ It is **never written to a file** by the app. If unset, a key is generated in
 memory for that process's lifetime only — the app still works, but every
 restart forgets it, so anything encrypted with the old one becomes permanently
 undecryptable (you'd just re-enter your API keys). Set a stable value once to
-make your stored keys survive restarts/upgrades:
-
-```yaml
-services:
-  backend:
-    environment:
-      - STL_SECRET_KEY=your-generated-key-here
-```
-
-Generate one with:
+make your stored keys survive restarts/upgrades: generate one and add it to
+your `.env` — `docker-compose.yml` already picks it up from there, no compose
+edit needed:
 
 ```bash
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+```
+STL_SECRET_KEY=your-generated-key-here
 ```
 
 Keep this value itself somewhere safe (a password manager, alongside your
