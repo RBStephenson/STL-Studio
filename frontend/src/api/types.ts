@@ -247,6 +247,9 @@ export interface AppSettings {
   // Feature flag: gates the Reorganize Library feature end-to-end (UI + the
   // destructive apply/undo writes). Off by default; toggled on the Library tab.
   reorganize_enabled: boolean;
+  // Collections page: every card gets the same box size (the one cover art
+  // already uses) instead of a compact box for collections with no cover.
+  collections_uniform_size: boolean;
 }
 
 export type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";

@@ -29,5 +29,6 @@ export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
   reorganize_template: "",
   reorganize_slugify: true,
   reorganize_enabled: false,
+  collections_uniform_size: true,
   ...over,
 });

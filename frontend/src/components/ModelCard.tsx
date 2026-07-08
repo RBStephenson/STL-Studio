@@ -1,7 +1,7 @@
 import { memo, useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
-import { Star, Heart, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
+import { Package, Star, Heart, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
 import { Model, PrintStatus, PRINT_STATUS_CYCLE, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -327,8 +327,10 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             loading="lazy"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <img src="/model-placeholder.png" alt="" className="w-16 h-16 object-contain opacity-70" />
+          // Same treatment as the empty state on Model Detail's image panel
+          // (ImageColumn.tsx) — one placeholder look across the app.
+          <div className="w-full h-full bg-gray-900 flex items-center justify-center text-gray-700">
+            <Package size={48} />
           </div>
         )}
 

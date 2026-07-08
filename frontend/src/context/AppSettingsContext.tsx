@@ -32,6 +32,7 @@ const DEFAULTS: AppSettings = {
   reorganize_template: "",
   reorganize_slugify: true,
   reorganize_enabled: false,
+  collections_uniform_size: true,
 };
 
 interface AppSettingsContextValue {

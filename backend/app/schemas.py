@@ -513,6 +513,9 @@ class AppSettingsRead(BaseModel):
     # Default off; toggled from the Library settings tab. Retires the old
     # deployment-level REORGANIZE_WRITE_ENABLED env var.
     reorganize_enabled: bool = False
+    # Collections page: give every card the same box size (the one cover art
+    # already uses) instead of a compact box for collections with no cover.
+    collections_uniform_size: bool = True
 
 
 class AppSettingsUpdate(BaseModel):
@@ -551,6 +554,7 @@ class AppSettingsUpdate(BaseModel):
     reorganize_template: Optional[str] = Field(None, max_length=500)
     reorganize_slugify: Optional[bool] = None
     reorganize_enabled: Optional[bool] = None
+    collections_uniform_size: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
