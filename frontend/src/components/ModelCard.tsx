@@ -592,6 +592,18 @@ export const GalleryRotator = forwardRef<
   const validCount = paths.length - broken.size;
   const filename = paths[idx]?.replace(/\\/g, "/").split("/").pop() ?? "";
 
+  // Reset to a known-good state whenever the actual set of images changes —
+  // e.g. a new upload adds paths, or the parent stays mounted across model
+  // navigation (no remount). Without this, idx/broken carry over from the
+  // previous paths array: idx can point past the end of a shorter list, or
+  // sit on an index this array never actually failed at, rendering a blank
+  // image with no way to recover (goTo() just re-sets the same stale idx).
+  const pathsKey = paths.join("|");
+  useEffect(() => {
+    setIdx(0);
+    setBroken(new Set());
+  }, [pathsKey]);
+
   const nextValid = useCallback((from: number, step: 1 | -1, brokenSet: Set<number>) => {
     for (let i = 1; i <= paths.length; i++) {
       const n = ((from + step * i) % paths.length + paths.length) % paths.length;

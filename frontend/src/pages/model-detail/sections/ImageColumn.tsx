@@ -4,7 +4,7 @@
 // file) is owned by the shell and passed in, because it is shared with the
 // lightbox overlay and keyboard-navigation effects.
 
-import { Suspense, lazy, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import {
   Images, Box, Package, ZoomIn, ImageOff, Bookmark, BookmarkCheck, ImagePlus,
   Upload, RefreshCw, Loader2,
@@ -91,6 +91,13 @@ export default function ImageColumn({
   const [galleryActionError, setGalleryActionError] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
+  // Single-image (non-gallery) mode: fall back to the placeholder icon rather
+  // than a raw broken-image glyph if activeImage no longer resolves. Reset
+  // whenever the image itself changes, so a fixed/replaced image gets a
+  // fresh chance to load.
+  const [activeImageBroken, setActiveImageBroken] = useState(false);
+  useEffect(() => setActiveImageBroken(false), [activeImage]);
+
   const uploadImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
@@ -163,11 +170,12 @@ export default function ImageColumn({
                 rotationMs={galleryRotationMs}
                 onIndexChange={onGalleryIndexChange}
               />
-            ) : activeImage ? (
+            ) : activeImage && !activeImageBroken ? (
               <img
                 src={activeImage}
                 alt={model.title ?? model.name}
                 onClick={onOpenLightbox}
+                onError={() => setActiveImageBroken(true)}
                 className={`w-full h-full object-contain transition-all cursor-zoom-in ${
                   nsfw && !showNSFW ? "blur-2xl" : ""
                 }`}
@@ -189,7 +197,7 @@ export default function ImageColumn({
             )}
 
             {/* Zoom button */}
-            {(galleryPaths.length > 0 || activeImage) && (
+            {(galleryPaths.length > 0 || (activeImage && !activeImageBroken)) && (
               <button
                 onClick={onOpenLightbox}
                 className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-gray-300 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"

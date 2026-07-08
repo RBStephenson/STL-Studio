@@ -137,6 +137,16 @@ describe("ImageColumn", () => {
     expect(screen.getByRole("img")).toHaveAttribute("src", "thumb.png");
   });
 
+  it("shows the placeholder icon instead of a broken image when activeImage fails to load", () => {
+    renderCol({ activeImage: "gone.png" });
+
+    const img = screen.getByRole("img");
+    expect(img).toHaveAttribute("src", "gone.png");
+    fireEvent.error(img);
+
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
   it("does not render a duplicate thumbnail strip item when the thumbnail is in the gallery", () => {
     const { container } = renderCol({
       model: { ...baseModel, thumbnail_path: "a.png", image_paths: ["a.png", "b.png"] } as ModelDetailType,
