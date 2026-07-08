@@ -210,6 +210,7 @@ export default function ReorganizePage() {
         <div className="text-xs text-gray-500">
           Tokens: <code className="text-indigo-400">{"{creator}"}</code>{" "}
           <code className="text-indigo-400">{"{character}"}</code>{" "}
+          <code className="text-indigo-400">{"{scale}"}</code>{" "}
           <code className="text-indigo-400">{"{title}"}</code> — separate levels with <code>/</code>.
         </div>
         {error && <div className="text-sm text-rose-400">{error}</div>}
@@ -287,8 +288,8 @@ export default function ReorganizePage() {
                       {!e.eligible && isResolvable(e) && (
                         <div className="pt-2 border-t border-gray-800/60">
                           <div className="text-xs text-gray-400 mb-1">Resolve</div>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            {(["creator", "character", "title", "suffix"] as const).map((field) => (
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                            {(["creator", "character", "scale", "title", "suffix"] as const).map((field) => (
                               <input
                                 key={field}
                                 type="text"

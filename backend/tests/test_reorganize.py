@@ -22,7 +22,7 @@ def _get_creator(db, name):
 
 
 def _model_with_file(db, tmp_path, creator_name="Abe3D", character="Joker",
-                     title="Bust", filename="head.stl", subdir=""):
+                     title="Bust", filename="head.stl", subdir="", auto_tags=None):
     """Create creator/character/title model with one real file on disk."""
     folder = tmp_path / creator_name / (character or "loose") / title / subdir
     folder.mkdir(parents=True, exist_ok=True)
@@ -32,6 +32,7 @@ def _model_with_file(db, tmp_path, creator_name="Abe3D", character="Joker",
     m = make_model(db, creator, name=title, character=character)
     m.folder_path = str(folder)
     m.title = title
+    m.auto_tags = auto_tags or []
     db.commit()
     make_stl_file(db, m, filename=filename, path=str(f))
     db.commit()
@@ -171,10 +172,10 @@ class TestMissingFile:
 
 
 class TestTemplateValidation:
-    def test_malformed_template_returns_400(self, client, db, tmp_path):
+    def test_unknown_template_field_returns_400(self, client, db, tmp_path):
         _root(db, tmp_path)
         _model_with_file(db, tmp_path)
-        resp = client.get("/reorganize/preview", params={"template": "{creator}/{scale}"})
+        resp = client.get("/reorganize/preview", params={"template": "{creator}/{franchise}"})
         assert resp.status_code == 400
 
     def test_custom_template_applied(self, client, db, tmp_path):
@@ -184,6 +185,34 @@ class TestTemplateValidation:
             "/reorganize/preview", params={"template": "{creator}/{title}"}
         ).json()["entries"][0]
         assert entry["proposed_dir"].endswith("abe3d/bust")
+
+    def test_scale_template_uses_detected_auto_tag(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust", auto_tags=["1:6", "statue"])
+
+        entry = client.get(
+            "/reorganize/preview", params={"template": "{creator}/{scale}/{title}"}
+        ).json()["entries"][0]
+
+        assert entry["proposed_dir"].endswith("abe3d/1-6/bust")
+        assert entry["eligible"] is True
+        assert "scale" not in entry["missing_fields"]
+
+    def test_missing_scale_only_blocks_when_template_uses_scale(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust")
+
+        default_entry = client.get("/reorganize/preview").json()["entries"][0]
+        assert "scale" not in default_entry["missing_fields"]
+        assert default_entry["eligible"] is True
+
+        scale_entry = client.get(
+            "/reorganize/preview", params={"template": "{creator}/{scale}/{title}"}
+        ).json()["entries"][0]
+        assert "scale" in scale_entry["missing_fields"]
+        assert scale_entry["unclassifiable"] is True
+        assert scale_entry["eligible"] is False
+        assert "unknown-scale" in scale_entry["proposed_dir"]
 
 
 class TestResolution:
@@ -201,6 +230,21 @@ class TestResolution:
         assert entry["eligible"] is True
         assert "character" not in entry["missing_fields"]
         assert entry["proposed_dir"].endswith("harley/bust")
+
+    def test_override_resolves_missing_scale(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path)
+
+        resp = client.post("/reorganize/preview", json={
+            "template": "{creator}/{scale}/{title}",
+            "overrides": {str(m.id): {"scale": "75mm"}},
+        })
+
+        assert resp.status_code == 200
+        entry = resp.json()["entries"][0]
+        assert entry["eligible"] is True
+        assert "scale" not in entry["missing_fields"]
+        assert entry["proposed_dir"].endswith("abe3d/75mm/bust")
 
     def test_suffix_breaks_a_collision(self, client, db, tmp_path):
         _root(db, tmp_path)

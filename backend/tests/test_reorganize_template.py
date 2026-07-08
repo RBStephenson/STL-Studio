@@ -28,9 +28,14 @@ class TestParseTemplate:
         # mixed literal+token in one segment is allowed
         assert parse_template("creator-{creator}") == ["creator-{creator}"]
 
+    def test_scale_field_allowed(self):
+        assert parse_template("{creator}/{scale}/{title}") == [
+            "{creator}", "{scale}", "{title}",
+        ]
+
     def test_unknown_field_rejected(self):
         with pytest.raises(ReorganizeTemplateError, match="Unknown template field"):
-            parse_template("{creator}/{scale}")
+            parse_template("{creator}/{franchise}")
 
     def test_unbalanced_brace_rejected(self):
         with pytest.raises(ReorganizeTemplateError, match="unbalanced braces"):
@@ -49,6 +54,14 @@ class TestRenderSegments:
         segs = parse_template("{creator}/{character}/{title}")
         out = render_segments(segs, {"creator": "Abe3D", "character": "Joker", "title": "Bust"})
         assert out == ["Abe3D", "Joker", "Bust"]
+
+    def test_substitutes_scale_field(self):
+        segs = parse_template("{creator}/{scale}/{title}")
+        out = render_segments(
+            segs,
+            {"creator": "Abe3D", "character": "", "scale": "1:6", "title": "Bust"},
+        )
+        assert out == ["Abe3D", "1:6", "Bust"]
 
     def test_preserves_literals(self):
         segs = parse_template("Models/{creator}")
