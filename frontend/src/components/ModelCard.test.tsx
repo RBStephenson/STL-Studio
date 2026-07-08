@@ -172,6 +172,18 @@ describe("ModelCard thumbnail cache-busting (#185)", () => {
   });
 });
 
+describe("ModelCard no-image placeholder", () => {
+  it("shows the branded placeholder when the model has no image at all", () => {
+    const { container } = renderCard();
+    expect(container.querySelector('img[src="/model-placeholder.png"]')).toBeInTheDocument();
+  });
+
+  it("shows the real image instead of the placeholder once one is set", () => {
+    const { container } = renderCard({ thumbnail_path: "/data/thumbnails/7.png" });
+    expect(container.querySelector('img[src="/model-placeholder.png"]')).not.toBeInTheDocument();
+  });
+});
+
 describe("ModelCard print-status cycle (#166)", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
