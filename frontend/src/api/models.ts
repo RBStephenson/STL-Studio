@@ -71,6 +71,23 @@ export const modelsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ thumbnail_path: null, thumbnail_url: null }),
     }),
+  // Re-syncs image_paths with what's actually in the model's folder — picks up
+  // files placed there manually, drops entries for files no longer on disk.
+  refreshGallery: (id: number) =>
+    request<{ ok: boolean; image_paths: string[]; thumbnail_path: string | null }>(
+      `/models/${id}/images/refresh`,
+      { method: "POST" },
+    ),
+  uploadGalleryImages: async (id: number, files: File[]) => {
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    const res = await fetch(`${BASE}/models/${id}/images/upload`, { method: "POST", body: form });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.detail ?? `${res.status} ${res.statusText}`);
+    }
+    return res.json() as Promise<{ ok: boolean; image_paths: string[]; thumbnail_path: string | null }>;
+  },
   setNSFW: (id: number, nsfw: boolean) =>
     request<{ ok: boolean }>(`/models/${id}`, {
       method: "PATCH",

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Printer, Check, History, GripVertical } from "lucide-react";
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
@@ -9,10 +10,18 @@ import {
   useSortable, sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { api, Model, Collection } from "../api/client";
+import { api, Model, ModelList } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import BulkTagBar from "../components/BulkTagBar";
 import { useToast } from "../context/ToastContext";
+import { useCollections } from "../hooks/queries/collections";
+import { invalidateModelViews } from "../hooks/queries/invalidation";
+import {
+  QUEUED_MODELS_PARAMS,
+  useQueuedModels,
+  useRecentlyPrintedModels,
+} from "../hooks/queries/models";
+import { queryKeys } from "../hooks/queries/keys";
 
 /** A queued card wrapped so it can be dragged to reorder. The drag handle lives
  *  in the bottom-left corner so it doesn't clash with the card's favorite/queue
@@ -48,12 +57,15 @@ function SortableCard({ model, onMutate, selected, onSelect }: {
 }
 
 export default function Queue() {
-  const [queued, setQueued] = useState<Model[]>([]);
-  const [printed, setPrinted] = useState<Model[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selection, setSelection] = useState<Set<number>>(new Set());
-  const [collections, setCollections] = useState<Collection[]>([]);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const queuedQuery = useQueuedModels();
+  const printedQuery = useRecentlyPrintedModels();
+  const queued = queuedQuery.data?.items ?? [];
+  const printed = printedQuery.data?.items ?? [];
+  const collections = useCollections().data ?? [];
+  const loading = queuedQuery.isPending || printedQuery.isPending;
 
   const toggleSelect = useCallback((id: number) => {
     setSelection(prev => {
@@ -75,22 +87,9 @@ export default function Queue() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [q, p] = await Promise.all([
-        api.models.list({ print_status: "queued", sort: "queue", group_variants: false, page_size: 200 }),
-        api.models.list({ print_status: "printed", sort: "printed_at", group_variants: false, page_size: 60 }),
-      ]);
-      setQueued(q.items);
-      setPrinted(p.items);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { api.collections.list().then(setCollections).catch(() => {}); }, []);
+  const refreshQueue = useCallback(() => {
+    invalidateModelViews(queryClient, { includeVariants: false });
+  }, [queryClient]);
 
   const onDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -100,12 +99,16 @@ export default function Queue() {
     if (oldIndex === -1 || newIndex === -1) return;
 
     const next = arrayMove(queued, oldIndex, newIndex);
-    setQueued(next);   // optimistic
+    queryClient.setQueryData<ModelList>(
+      queryKeys.models.list(QUEUED_MODELS_PARAMS),
+      (prev) => prev ? { ...prev, items: next } : prev,
+    );
     try {
       await api.models.reorderQueue(next.map((m) => m.id));
+      queryClient.invalidateQueries({ queryKey: queryKeys.models.list(QUEUED_MODELS_PARAMS) });
     } catch {
-      toast("Couldn't save the new order — reloading.", "error");
-      load();
+      toast("Couldn't save the new order - reloading.", "error");
+      queryClient.invalidateQueries({ queryKey: queryKeys.models.list(QUEUED_MODELS_PARAMS) });
     }
   };
 
@@ -139,7 +142,7 @@ export default function Queue() {
           <SortableContext items={queued.map((m) => m.id)} strategy={rectSortingStrategy}>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
               {queued.map((m) => (
-                <SortableCard key={m.id} model={m} onMutate={load} selected={selection.has(m.id)} onSelect={toggleSelect} />
+                <SortableCard key={m.id} model={m} onMutate={refreshQueue} selected={selection.has(m.id)} onSelect={toggleSelect} />
               ))}
             </div>
           </SortableContext>
@@ -152,7 +155,7 @@ export default function Queue() {
           totalOnPage={queued.length}
           onSelectAll={selectAll}
           onClear={clearSelection}
-          onDone={load}
+          onDone={refreshQueue}
           collections={collections}
         />
       )}
@@ -168,7 +171,7 @@ export default function Queue() {
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 opacity-75">
             {printed.map((m) => (
               <div key={m.id} className="relative">
-                <ModelCard model={m} backTo="/queue" />
+                <ModelCard model={m} backTo="/queue" onMutate={refreshQueue} />
                 {m.printed_at && (
                   <span className="absolute top-2 left-2 z-10 flex items-center gap-1 bg-emerald-900/90 text-emerald-300 text-xs px-1.5 py-0.5 rounded font-medium">
                     <Check size={10} />

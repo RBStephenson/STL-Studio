@@ -56,7 +56,7 @@ def _parent(path: str) -> str:
 
 @dataclass
 class FileMove:
-    stl_file_id: int
+    stl_file_id: int | None
     current_path: str
     proposed_path: str
     size_bytes: int
@@ -67,6 +67,10 @@ class FileMove:
     # then a sentinel, not a real fingerprint — Phase 2's drift check can't
     # distinguish "gone" from "matches" without this flag, so the move is unsafe.
     missing_file: bool
+    # "stl" repaths an STLFile row (stl_file_id set); "image" repaths one of
+    # the model's own image_paths/thumbnail_path/primary_image_path instead —
+    # see reorganize_apply._repath_db.
+    kind: str = "stl"
 
 
 @dataclass
@@ -335,6 +339,51 @@ def _build_entry(
             missing_file=is_missing,
         ))
     spans_multiple_dirs = len(src_dirs) > 1
+
+    # Local gallery images move alongside the STLs. Scoped to images that live
+    # inside the model's OWN folder tree — a gallery image inherited from a
+    # shared parent folder (e.g. a character-level "renders/" dir referenced
+    # by several sibling variants) is deliberately left in place, since moving
+    # it would break the path for every other model still pointing at it.
+    # Missing/stale entries (the file no longer exists — #854/#855) are just
+    # skipped rather than treated as a blocker: a stale gallery path shouldn't
+    # stop the model's STLs from being reorganized. Never counted toward
+    # spans_multiple_dirs — images commonly live in their own subfolder next
+    # to the STLs, and that's not the ambiguous-source-directory case that
+    # check exists to catch.
+    cur_prefix = cur_key + "/"
+
+    def _owned_local_image(p: object) -> bool:
+        if not isinstance(p, str) or not p or "://" in p:
+            return False
+        k = _key(p)
+        return k == cur_key or k.startswith(cur_prefix)
+
+    seen_image_keys: set[str] = set()
+    image_candidates: list[str] = []
+    for p in [*(m.image_paths or []), m.thumbnail_path, m.primary_image_path]:
+        if _owned_local_image(p):
+            k = _key(p)
+            if k not in seen_image_keys:
+                seen_image_keys.add(k)
+                image_candidates.append(p)
+
+    for p in image_candidates:
+        size, mtime_ns, link, is_missing = _stat_file(p)
+        if is_missing:
+            continue
+        is_symlink = is_symlink or link
+        files.append(FileMove(
+            stl_file_id=None,
+            current_path=_canon(p),
+            proposed_path=_canon(proposed_dir + "/" + os.path.basename(p)),
+            size_bytes=size,
+            mtime_ns=mtime_ns,
+            content_hash=None,
+            fingerprint_method="stat",
+            missing_file=False,
+            kind="image",
+        ))
 
     # Path-keyed overrides this move invalidates (under the model's folder).
     pack_refs = [p for p in pack_paths if _key(p) == cur_key or _key(p).startswith(cur_key + "/")]

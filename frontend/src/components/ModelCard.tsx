@@ -1,4 +1,5 @@
 import { memo, useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import { Package, Star, Heart, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
 import { Model, PrintStatus, PRINT_STATUS_CYCLE, api } from "../api/client";
@@ -9,6 +10,7 @@ import { isRecentlyAdded } from "../utils/recentlyAdded";
 import { modelLinkTo } from "../utils/modelLink";
 import QuickAssignPopover from "./QuickAssignPopover";
 import StarRating from "./StarRating";
+import { invalidateModelViews } from "../hooks/queries/invalidation";
 
 interface Props {
   model: Model;
@@ -82,6 +84,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   const { showNSFW } = useNSFW();
   const { settings } = useAppSettings();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [nsfw, setNsfw] = useState(model.nsfw);
   const isNew = isRecentlyAdded(model.created_at, settings.recent_days);
 
@@ -139,6 +142,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     setLocalGroupLabel(next);
     try {
       await api.models.patchGroup(model.variant_group_id, { label: next });
+      invalidateModelViews(queryClient, { modelId: model.id });
       onMutate?.();
     } catch {
       setLocalGroupLabel(prev);  // revert on failure
@@ -151,6 +155,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     setLocalTitle(next);
     try {
       await api.models.update(model.id, { title: next });
+      invalidateModelViews(queryClient, { modelId: model.id });
       onMutate?.();
     } catch {
       setLocalTitle(prev);  // revert on failure
@@ -171,6 +176,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     setRating(next);
     try {
       await api.models.setRating(model.id, next);
+      invalidateModelViews(queryClient, { modelId: model.id, includeVariants: false });
       onMutate?.();
     } catch {
       setRating(prev);  // revert on failure
@@ -185,6 +191,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     setNsfw(next);
     try {
       await api.models.setNSFW(model.id, next);
+      invalidateModelViews(queryClient, { modelId: model.id, includeVariants: false });
     } catch {
       setNsfw(!next);  // revert on failure
       toast("Couldn't update NSFW flag — try again.", "error");
@@ -198,6 +205,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     setFavorite(next);
     try {
       await api.models.setFavorite(model.id, next);
+      invalidateModelViews(queryClient, { modelId: model.id, includeVariants: false });
       onMutate?.();
     } catch {
       setFavorite(!next);  // revert on failure
@@ -213,6 +221,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     setPrintStatus(next);
     try {
       await api.models.setPrintStatus(model.id, next);
+      invalidateModelViews(queryClient, { modelId: model.id, includeVariants: false });
       onMutate?.();
     } catch {
       setPrintStatus(printStatus);  // revert on failure
@@ -227,6 +236,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     const next = !excludedView;
     try {
       await api.models.setExcluded(model.id, next);
+      invalidateModelViews(queryClient, { modelId: model.id, includeVariants: false });
       onRemoved?.(model.id);  // card leaves the current view
       onMutate?.();
       toast(next ? "Model excluded from the viewer." : "Model restored.", "success");
@@ -591,6 +601,18 @@ export const GalleryRotator = forwardRef<
   const urls = paths.map((p) => api.fileUrl(p));
   const validCount = paths.length - broken.size;
   const filename = paths[idx]?.replace(/\\/g, "/").split("/").pop() ?? "";
+
+  // Reset to a known-good state whenever the actual set of images changes —
+  // e.g. a new upload adds paths, or the parent stays mounted across model
+  // navigation (no remount). Without this, idx/broken carry over from the
+  // previous paths array: idx can point past the end of a shorter list, or
+  // sit on an index this array never actually failed at, rendering a blank
+  // image with no way to recover (goTo() just re-sets the same stale idx).
+  const pathsKey = paths.join("|");
+  useEffect(() => {
+    setIdx(0);
+    setBroken(new Set());
+  }, [pathsKey]);
 
   const nextValid = useCallback((from: number, step: 1 | -1, brokenSet: Set<number>) => {
     for (let i = 1; i <= paths.length; i++) {

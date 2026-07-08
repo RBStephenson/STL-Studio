@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import ModelCard from "./ModelCard";
+import { createRef } from "react";
+import ModelCard, { GalleryRotator, GalleryRotatorHandle } from "./ModelCard";
 import { Model } from "../api/client";
+import { QueryWrapper } from "../test/queryWrapper";
 
 vi.mock("../context/NSFWContext", () => ({ useNSFW: () => ({ showNSFW: true }) }));
 vi.mock("../context/AppSettingsContext", () => ({ useAppSettings: () => ({ settings: { recent_days: 30 } }) }));
@@ -49,23 +51,27 @@ const MODEL = {
 } as unknown as Model;
 
 const renderCard = (model: Partial<Model> = {}) =>
-  render(<MemoryRouter><ModelCard model={{ ...MODEL, ...model } as Model} /></MemoryRouter>);
+  render(
+    <QueryWrapper>
+      <MemoryRouter><ModelCard model={{ ...MODEL, ...model } as Model} /></MemoryRouter>
+    </QueryWrapper>
+  );
 
 describe("ModelCard quick-assign button (#172)", () => {
   it("shows the quick-assign button with aria-label", () => {
-    render(<MemoryRouter><ModelCard model={MODEL} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL} /></MemoryRouter></QueryWrapper>);
     expect(screen.getByLabelText("Quick assign tags and collections")).toBeInTheDocument();
   });
 
   it("opens the QuickAssignPopover when the button is clicked", () => {
-    render(<MemoryRouter><ModelCard model={MODEL} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL} /></MemoryRouter></QueryWrapper>);
     expect(screen.queryByTestId("quick-assign-popover")).toBeNull();
     fireEvent.click(screen.getByLabelText("Quick assign tags and collections"));
     expect(screen.getByTestId("quick-assign-popover")).toBeInTheDocument();
   });
 
   it("closes the popover when onClose is called", () => {
-    render(<MemoryRouter><ModelCard model={MODEL} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL} /></MemoryRouter></QueryWrapper>);
     fireEvent.click(screen.getByLabelText("Quick assign tags and collections"));
     expect(screen.getByTestId("quick-assign-popover")).toBeInTheDocument();
     fireEvent.click(screen.getByText("close-popover"));
@@ -95,13 +101,13 @@ describe("ModelCard parsed-attribute badges (#609)", () => {
 
 describe("ModelCard painting-guide badge (#263)", () => {
   it("shows the Guide badge when the model has a guide", () => {
-    render(<MemoryRouter><ModelCard model={MODEL as Model} hasGuide={true} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL as Model} hasGuide={true} /></MemoryRouter></QueryWrapper>);
     expect(screen.getByText("Guide")).toBeInTheDocument();
     expect(screen.getByTitle("Has a painting guide")).toBeInTheDocument();
   });
 
   it("omits the badge when there is no guide", () => {
-    render(<MemoryRouter><ModelCard model={MODEL as Model} hasGuide={false} /></MemoryRouter>);
+    render(<QueryWrapper><MemoryRouter><ModelCard model={MODEL as Model} hasGuide={false} /></MemoryRouter></QueryWrapper>);
     expect(screen.queryByText("Guide")).toBeNull();
   });
 });
@@ -283,5 +289,55 @@ describe("ModelCard inline star rating (#167)", () => {
     renderCard({ user_rating: 2 });
     fireEvent.click(screen.getByRole("radio", { name: "2 stars" }));
     await waitFor(() => expect(vi.mocked(api.models.setRating)).toHaveBeenCalledWith(7, null));
+  });
+});
+
+describe("GalleryRotator index reset on paths change", () => {
+  const renderRotator = (paths: string[]) => {
+    const ref = createRef<GalleryRotatorHandle>();
+    const utils = render(
+      <GalleryRotator ref={ref} paths={paths} alt="x" blur={false} autoRotate={false} />
+    );
+    return { ref, ...utils };
+  };
+
+  it("clamps a now out-of-range index back to the first image when paths shrink", async () => {
+    const { ref, rerender, container } = renderRotator(["a.png", "b.png", "c.png"]);
+
+    // goTo() fades out before committing the new idx — wait for it to land.
+    ref.current?.goTo(2);
+    await waitFor(() =>
+      expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("c.png"))
+    );
+
+    // Simulate the parent staying mounted (e.g. Prev/Next, or an upload that
+    // reconciled the gallery) while the paths array shrinks — without a
+    // reset, idx=2 would be past the end of the new array.
+    rerender(<GalleryRotator ref={ref} paths={["only.png"]} alt="x" blur={false} autoRotate={false} />);
+
+    expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("only.png"));
+  });
+
+  it("clears stale broken-image state so a new paths list isn't poisoned by it", () => {
+    const { ref, rerender, container } = renderRotator(["broken.png", "b.png"]);
+
+    fireEvent.error(container.querySelector("img")!);
+
+    rerender(<GalleryRotator ref={ref} paths={["fresh.png"]} alt="x" blur={false} autoRotate={false} />);
+
+    expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("fresh.png"));
+  });
+
+  it("does not reset when the same paths list re-renders (no unnecessary flicker)", async () => {
+    const { ref, rerender, container } = renderRotator(["a.png", "b.png"]);
+
+    ref.current?.goTo(1);
+    await waitFor(() =>
+      expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("b.png"))
+    );
+
+    rerender(<GalleryRotator ref={ref} paths={["a.png", "b.png"]} alt="x" blur={false} autoRotate={false} />);
+
+    expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("b.png"));
   });
 });

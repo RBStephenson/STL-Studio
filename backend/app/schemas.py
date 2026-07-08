@@ -613,6 +613,9 @@ class AiApiConfigCreate(BaseModel):
     model: str = Field("", max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     request_timeout: int = Field(10, ge=1, le=600)
+    # Optional so a config can still be created key-less (e.g. Ollama), but lets
+    # the client set the key in the same request instead of a follow-up call.
+    api_key: Optional[str] = Field(None, max_length=400)
 
 
 class AiApiConfigUpdate(BaseModel):
@@ -621,6 +624,7 @@ class AiApiConfigUpdate(BaseModel):
     model: Optional[str] = Field(None, max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     request_timeout: Optional[int] = Field(None, ge=1, le=600)
+    api_key: Optional[str] = Field(None, max_length=400)
 
 
 # --- AI settings (#517) ---------------------------------------------------
@@ -751,7 +755,7 @@ CollisionKind = Literal[
 
 
 class ReorganizeFileMove(BaseModel):
-    stl_file_id: int
+    stl_file_id: Optional[int] = None
     current_path: str          # normalized, '/'-internal
     proposed_path: str
     # Real fingerprint for the Phase 2 drift check (decision D) — not the dead
@@ -763,6 +767,9 @@ class ReorganizeFileMove(BaseModel):
     # Source absent/unreadable at preview — (size, mtime) are a zeroed sentinel,
     # not a usable fingerprint for the Phase 2 drift check.
     missing_file: bool = False
+    # "stl" repaths an STLFile row (stl_file_id set); "image" repaths one of
+    # the model's own image_paths/thumbnail_path/primary_image_path instead.
+    kind: str = "stl"
 
 
 class ReorganizeEntry(BaseModel):

@@ -278,7 +278,7 @@ export default function ReorganizePage() {
                   {isOpen && (
                     <div className="px-3 pb-2 space-y-2 border-t border-gray-800 pt-2">
                       {e.files.map((f) => (
-                        <div key={f.stl_file_id} className="text-xs font-mono text-gray-500">
+                        <div key={f.current_path} className="text-xs font-mono text-gray-500">
                           <span className="text-gray-600">{f.current_path}</span>
                           <span className="text-gray-700"> → </span>
                           <span className="text-gray-400">{f.proposed_path}</span>

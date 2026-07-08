@@ -628,7 +628,13 @@ off to keep each segment's original casing and spacing.
 - **Apply.** Tick the eligible rows and **Apply**. The app verifies each file
   hasn't changed since the preview (aborting the whole batch on any drift), moves
   files safely across drives, and repaths the index — packs and manual character
-  groupings are carried along, not orphaned.
+  groupings are carried along, not orphaned. A model's own gallery images
+  (thumbnail, library card image, and the rest of the gallery) move right
+  along with its STL files — only images inherited from a shared parent
+  folder (e.g. a character-level "renders/" dir also used by sibling
+  variants) are left in place, since moving those would break the path for
+  the other models still pointing at them. Once every tracked file has moved
+  out, the now-empty source folder is removed.
 - **Undo.** **Undo last apply** reverses the batch, skipping anything you've since
   edited or that now sits where a file would return.
 
@@ -676,7 +682,9 @@ entry has:
 - **API key** — stored encrypted server-side, using a separate encryption key
   (`STL_SECRET_KEY`, see [Docker configuration](docker.md#optional-environment-variables))
   so a leaked database alone doesn't expose it. For Ollama and similar local
-  endpoints, a key is optional.
+  endpoints, a key is optional. Entered alongside the other fields and saved
+  together with **Add API**/**Save changes** — there's no separate save step
+  for the key.
 
 You can add multiple entries of the same type — for example, two Anthropic
 entries using different models for different tasks, or both a local Ollama
