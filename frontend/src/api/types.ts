@@ -244,6 +244,9 @@ export interface AppSettings {
   // lowercase/hyphenated (import-style) rather than case-preserving.
   reorganize_template: string;
   reorganize_slugify: boolean;
+  // Feature flag: gates the Reorganize Library feature end-to-end (UI + the
+  // destructive apply/undo writes). Off by default; toggled on the Library tab.
+  reorganize_enabled: boolean;
 }
 
 export type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";

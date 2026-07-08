@@ -28,5 +28,6 @@ export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
   log_level: "INFO",
   reorganize_template: "",
   reorganize_slugify: true,
+  reorganize_enabled: false,
   ...over,
 });
