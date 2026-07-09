@@ -55,3 +55,60 @@ export function sanitizeCss(css: string | null | undefined): string {
   );
   return out.trim();
 }
+
+// Structurally scope sanitized guide CSS so every selector is contained under
+// `.guide-reader`. sanitizeCss only strips dangerous *content* (script
+// protocols, @import, breakout markup) — a plain `body{display:none}` or
+// `button{pointer-events:none}` sails through it untouched and, injected as a
+// global <style>, breaks app chrome outside the reader (STUDIO-90). This must
+// run on the sanitizeCss() output, not raw guide.head_style.
+export function scopeCss(css: string, scopeClass = ".guide-reader"): string {
+  // Strip comments first so a `{`/`}` inside one can't desync brace matching.
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  return scopeRuleList(withoutComments, scopeClass);
+}
+
+function scopeRuleList(css: string, scopeClass: string): string {
+  let out = "";
+  let i = 0;
+  while (i < css.length) {
+    const braceIdx = css.indexOf("{", i);
+    if (braceIdx === -1) break; // trailing text with no block — drop it
+    const header = css.slice(i, braceIdx).trim();
+
+    let depth = 1;
+    let j = braceIdx + 1;
+    while (j < css.length && depth > 0) {
+      if (css[j] === "{") depth++;
+      else if (css[j] === "}") depth--;
+      j++;
+    }
+    const body = css.slice(braceIdx + 1, j - 1);
+    i = j;
+
+    if (!header) continue;
+    const lowerHeader = header.toLowerCase();
+    if (lowerHeader.startsWith("@media") || lowerHeader.startsWith("@supports")) {
+      // Conditional at-rules are safe to keep — scope their nested rules.
+      out += `${header}{${scopeRuleList(body, scopeClass)}}`;
+    } else if (header.startsWith("@")) {
+      // @keyframes/@font-face/@page/@charset/etc. are global-scope constructs
+      // with no safe way to contain them here — drop rather than risk leakage.
+      continue;
+    } else {
+      const selectors = header
+        .split(",")
+        .map((s) => scopeSelector(s.trim(), scopeClass))
+        .filter(Boolean);
+      if (selectors.length) out += `${selectors.join(",")}{${body}}`;
+    }
+  }
+  return out;
+}
+
+function scopeSelector(selector: string, scopeClass: string): string {
+  if (!selector) return "";
+  if (selector.toLowerCase() === ":root") return scopeClass;
+  if (selector.startsWith(scopeClass)) return selector;
+  return `${scopeClass} ${selector}`;
+}
