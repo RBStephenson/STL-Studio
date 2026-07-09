@@ -3,8 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw } from "lucide-react";
-import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult } from "../api/client";
+import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult, AiOrganizeStrategy } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
+import AiOrganizeStrategyModal from "../components/AiOrganizeStrategyModal";
 import FindOnWeb from "../components/FindOnWeb";
 import ImagePicker from "../components/ImagePicker";
 import MetadataEditor from "../components/MetadataEditor";
@@ -119,6 +120,7 @@ export default function ModelDetail() {
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [aiOrganizing, setAiOrganizing] = useState(false);
   const [aiOrganizeResult, setAiOrganizeResult] = useState<AiOrganizePreviewResult | null>(null);
+  const [showAiOrganizeStrategy, setShowAiOrganizeStrategy] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
@@ -237,8 +239,16 @@ export default function ModelDetail() {
     }
   };
 
-  const runAiOrganize = async () => {
+  // Button click opens the strategy picker (#878) rather than calling the API
+  // directly — the actual call happens in runAiOrganize once a strategy is chosen.
+  const runAiOrganize = () => {
     if (!model || aiOrganizing) return;
+    setShowAiOrganizeStrategy(true);
+  };
+
+  const organizeWithStrategy = async (strategy: AiOrganizeStrategy) => {
+    if (!model) return;
+    setShowAiOrganizeStrategy(false);
     setAiOrganizing(true);
     try {
       // Always open the modal so the user sees WHY, whether that's a review
@@ -246,7 +256,7 @@ export default function ModelDetail() {
       // error) — AI Organize never silently substitutes heuristics for a
       // real AI result (#821), so an empty response is still feedback worth
       // surfacing, not a value to swallow into a toast.
-      setAiOrganizeResult(await api.models.aiOrganize(model.id));
+      setAiOrganizeResult(await api.models.aiOrganize(model.id, strategy));
     } catch (e) {
       toast(errMsg(e) || "AI organize failed", "error");
     } finally {
@@ -899,6 +909,13 @@ export default function ModelDetail() {
           modelName={model.title || model.name}
           files={model.stl_files.map((f) => ({ ...f, part_type: partTypes[f.id] || f.part_type }))}
           onClose={() => setShowKitBuilder(false)}
+        />
+      )}
+
+      {showAiOrganizeStrategy && (
+        <AiOrganizeStrategyModal
+          onChoose={organizeWithStrategy}
+          onClose={() => setShowAiOrganizeStrategy(false)}
         />
       )}
 
