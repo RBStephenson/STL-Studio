@@ -285,18 +285,33 @@ def heuristic_pass(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # LLM refinement (optional)
 # ---------------------------------------------------------------------------
 
+# The app's fixed category list (mirrors frontend/src/pages/model-detail/utils.ts
+# PART_TYPE_SUGGESTIONS — the only categories the Category combobox offers).
+# Keep the two in sync by hand; there's no shared build step across the
+# Python/TypeScript boundary. The AI must pick from this exact list so its
+# output lines up with what the UI (and _normalize_type below) expects,
+# instead of inventing near-miss variants like "Accessory" vs "Accessories".
+CANONICAL_PART_TYPES = [
+    "Head", "Torso", "Body",
+    "Right Arm", "Left Arm", "Arms",
+    "Right Leg", "Left Leg", "Legs",
+    "Hands", "Feet", "Base",
+    "Weapon", "Shield", "Armor", "Cloak", "Cape",
+    "Hair", "Wings", "Tail", "Accessories",
+]
+
 _SYSTEM_PROMPT = """You are an assistant that normalizes 3D-printing STL file names for a miniature figure library.
 
 Given a JSON list of STL files with heuristically-suggested part_type and part_name, refine only what is wrong or missing.
 
 Rules:
-1. part_type: one short category — Body, Head, Arm, Leg, Hand, Foot, Weapon, Shield, Armor, Base, Full, Accessory, Torso, Shoulder. Null if truly unknowable.
+1. part_type: one category from this exact list — {part_types}. Null if truly unknowable. Never invent a category outside this list.
 2. part_name: a short human-readable label (e.g. "Right Arm", "Helmeted Head"). Strip underscores, extensions, and redundant tokens.
 3. sup_base_filename: if this file is a presupported variant, return the EXACT filename of its base counterpart in the list. Otherwise null.
 4. Omit files where the existing heuristic suggestions are already correct.
 5. Return ONLY the JSON object — no markdown, no explanation.
 
-Format: {"files": [{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}, ...]}"""
+Format: {{"files": [{{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}}, ...]}}""".format(part_types=", ".join(CANONICAL_PART_TYPES))
 
 
 def _parse_suggestions(raw_text: str, source: str) -> LlmOutcome:
@@ -498,12 +513,20 @@ def run(
 ) -> OrganizeResult:
     """Return merged suggestions plus the outcome of the optional LLM pass.
 
-    Heuristics run first and are always returned immediately. The LLM is
-    only called for files where heuristics could NOT determine a part_type
-    (capped at _LLM_FILE_CAP), so the response time stays reasonable even
-    for models with hundreds of files. The returned :class:`OrganizeResult`
-    reports whether the LLM ran, was skipped, was disabled, or errored so the
-    caller can surface that to the user instead of silently degrading.
+    Heuristics run first and are always returned immediately. The LLM then
+    always runs too (capped at _LLM_FILE_CAP files, so the response time
+    stays reasonable even for models with hundreds of files) — it is never
+    skipped just because heuristics filled in every part_type; the AI still
+    gets a chance to correct a wrong heuristic guess or fix a part_name,
+    which "already resolved" coverage of part_type alone can't tell you.
+    Each candidate file is sent with its current best-known part_type/
+    part_name (the heuristic suggestion when there is one, else what was
+    already stored), matching what the system prompt tells the model it's
+    receiving. Sup_ files are excluded — they inherit their base file's type
+    and would just duplicate that file's request. The returned
+    :class:`OrganizeResult` reports whether the LLM ran, was skipped (no
+    non-Sup files to send), was disabled, or errored so the caller can
+    surface that to the user instead of silently degrading.
 
     ``api_type`` selects the transport: "openai" (an OpenAI-compatible endpoint
     at ``base_url``, e.g. Ollama) or "anthropic" (the Anthropic Messages API,
@@ -533,20 +556,29 @@ def run(
             if base and type_by_filename.get(base):
                 sug["part_type"] = type_by_filename[base]
 
-    # Stage 2: LLM refinement for genuinely ambiguous files only.
+    # Stage 2: LLM refinement — always runs (never skipped based on how much
+    # heuristics already resolved); it can confirm, correct, or fill in gaps.
     if llm_ready:
-        unresolved = [
-            f for f in files
-            if not (merged.get(f["id"]) or {}).get("part_type")
-            and not _is_sup(f["filename"])   # Sup_ files inherit; don't duplicate
+        def _with_heuristic(f: dict[str, Any]) -> dict[str, Any]:
+            sug = merged.get(f["id"]) or {}
+            out = dict(f)
+            if sug.get("part_type") is not None:
+                out["part_type"] = sug["part_type"]
+            if sug.get("part_name"):
+                out["part_name"] = sug["part_name"]
+            return out
+
+        candidates = [
+            _with_heuristic(f) for f in files
+            if not _is_sup(f["filename"])   # Sup_ files inherit; don't duplicate
         ][:_LLM_FILE_CAP]
 
-        if unresolved:
-            _log_step("llm_batch", sending=len(unresolved), of=len(files))
+        if candidates:
+            _log_step("llm_batch", sending=len(candidates), of=len(files))
             if api_type == "anthropic":
-                outcome = _llm_refine_anthropic(unresolved, model, api_key, timeout, effort)
+                outcome = _llm_refine_anthropic(candidates, model, api_key, timeout, effort)
             else:
-                outcome = _llm_refine_openai(unresolved, base_url, model, api_key, timeout=timeout)
+                outcome = _llm_refine_openai(candidates, base_url, model, api_key, timeout=timeout)
             for s in outcome.suggestions:
                 fid = s.get("id")
                 if not isinstance(fid, int):
@@ -561,7 +593,7 @@ def run(
                 merged[fid] = existing
         else:
             outcome = LlmOutcome(status="skipped")
-            _log_step("llm_skip", reason="no unresolved files after heuristics")
+            _log_step("llm_skip", reason="no non-Sup files to send")
 
     result = list(merged.values())
     _log_step("done", total_suggestions=len(result), llm_status=outcome.status)
