@@ -2,7 +2,7 @@
 // Extracted from ModelDetail.tsx (STUDIO-63 P1) — behavior-preserving.
 
 export const PART_TYPE_SUGGESTIONS = [
-  "Head", "Torso", "Body",
+  "Head", "Torso", "Body", "Full",
   "Right Arm", "Left Arm", "Arms",
   "Right Leg", "Left Leg", "Legs",
   "Hands", "Feet", "Base",
