@@ -422,6 +422,13 @@ def test_system_prompt_lists_the_canonical_categories():
     assert "Shoulder" not in ai._SYSTEM_PROMPT
 
 
+def test_full_is_a_canonical_category():
+    """"Full" (a single presupported/complete-figure file, as opposed to a
+    part broken out separately) is a first-class category, not just a
+    heuristic guess — must be selectable/snappable like any other."""
+    assert "Full" in ai.CANONICAL_PART_TYPES
+
+
 # --- Unit-based strategy (#878) ---
 
 def test_to_pascal_case_title_cases_each_word():

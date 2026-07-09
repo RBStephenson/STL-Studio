@@ -300,7 +300,7 @@ def heuristic_pass(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # output lines up with what the UI (and _normalize_type below) expects,
 # instead of inventing near-miss variants like "Accessory" vs "Accessories".
 CANONICAL_PART_TYPES = [
-    "Head", "Torso", "Body",
+    "Head", "Torso", "Body", "Full",
     "Right Arm", "Left Arm", "Arms",
     "Right Leg", "Left Leg", "Legs",
     "Hands", "Feet", "Base",
