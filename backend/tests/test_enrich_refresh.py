@@ -12,11 +12,13 @@ see conftest.db). A separate section covers the /enrich/refresh HTTP route
 itself: starting the thread, the 409-when-running guard, and the status
 endpoint.
 """
+import threading
 from datetime import timedelta
 from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.fernet import Fernet
+from sqlalchemy.orm import sessionmaker
 
 import app.routers.enrich as enrich
 from app.services import enrich_refresh, secrets
@@ -337,29 +339,21 @@ class TestRefreshRoute:
         """The route must not itself do the fetch/apply work — only launch it."""
         called = {}
 
-        def _fake_run_refresh(**kwargs):
+        def _fake_start_refresh(**kwargs):
             called.update(kwargs)
-            return {"running": False, "message": "done", "candidates": 0, "refreshed": 0, "failed": 0, "errors": 0}
+            return True
 
-        monkeypatch.setattr(enrich.enrich_refresh, "run_refresh", _fake_run_refresh)
+        monkeypatch.setattr(enrich.enrich_refresh, "start_refresh", _fake_start_refresh)
 
         resp = client.post("/enrich/refresh", json={"creator_id": 3, "stale_days": 7})
         assert resp.status_code == 200
         assert resp.json() == {"ok": True, "running": True, "message": "refresh started"}
-
-        # Thread is daemon + async-started; give it a moment to invoke the target.
-        import time
-        for _ in range(50):
-            if called:
-                break
-            time.sleep(0.01)
+        # start_refresh registers synchronously on the request thread (STUDIO-85) —
+        # no polling needed, unlike the old raw-thread launch.
         assert called == {"creator_id": 3, "model_ids": None, "stale_days": 7}
 
     def test_409_when_already_running(self, client, monkeypatch):
-        monkeypatch.setattr(
-            enrich.enrich_refresh, "get_status",
-            lambda: {"running": True, "message": "starting", "candidates": 0, "refreshed": 0, "failed": 0, "errors": 0},
-        )
+        monkeypatch.setattr(enrich.enrich_refresh, "start_refresh", lambda **kw: False)
         resp = client.post("/enrich/refresh", json={})
         assert resp.status_code == 409
 
@@ -371,3 +365,40 @@ class TestRefreshRoute:
         resp = client.get("/enrich/refresh/status")
         assert resp.status_code == 200
         assert resp.json()["candidates"] == 5
+
+
+class TestRefreshSingleFlight:
+    """STUDIO-85: the race is closed by registering the job on the request
+    thread (JobRunner.start under its lock) rather than checking get_status()
+    and only registering later inside the background thread's body."""
+
+    def test_concurrent_starts_one_wins_one_rejected(self, db, test_engine, monkeypatch):
+        # start_refresh always opens its own session (db=None) — point that at
+        # a fresh session bound to this test's in-memory engine (StaticPool,
+        # check_same_thread=False, so it's safe to touch from the background
+        # thread) rather than the test's shared `db` fixture session, matching
+        # production's own-session lifecycle (opened and closed by the job).
+        monkeypatch.setattr(enrich_refresh, "SessionLocal", sessionmaker(bind=test_engine))
+
+        creator = make_creator(db)
+        _enriched_model(db, creator, name="dragon")
+        db.commit()
+
+        release = threading.Event()
+
+        async def _blocking_fetch_url(url, mmf_api_key=None):
+            release.wait(timeout=5)
+            return _deep()
+
+        monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", _blocking_fetch_url)
+
+        started_first = enrich_refresh.start_refresh()
+        assert started_first is True
+        # No sleep/poll required: runner.start registers RUNNING before returning.
+        assert enrich_refresh.get_status()["running"] is True
+
+        started_second = enrich_refresh.start_refresh()
+        assert started_second is False
+
+        release.set()
+        assert enrich_refresh.runner.wait(enrich_refresh._JOB_KEY, timeout=5)

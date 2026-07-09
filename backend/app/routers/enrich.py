@@ -3,7 +3,6 @@ Bulk enrichment endpoints — storefront scrape + fuzzy match + batch apply.
 """
 import dataclasses
 import logging
-import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -280,20 +279,16 @@ def refresh_enrich(body: RefreshRequest):
     that's already matched, so it overwrites aggressively: the title and
     thumbnail are replaced, not just filled. A model whose fetch fails is left
     untouched (counted in ``failed``) rather than clobbered with shallow data.
-    """
-    if enrich_refresh.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="Refresh already running")
 
-    thread = threading.Thread(
-        target=enrich_refresh.run_refresh,
-        kwargs={
-            "creator_id": body.creator_id,
-            "model_ids": body.model_ids,
-            "stale_days": body.stale_days,
-        },
-        daemon=True,
-    )
-    thread.start()
+    Single-flight (STUDIO-85): ``start_refresh`` registers the job on this
+    request thread before returning, so two concurrent POSTs can't both start
+    a job — the loser gets 409 instead of racing the winner into a duplicate
+    refresh.
+    """
+    if not enrich_refresh.start_refresh(
+        creator_id=body.creator_id, model_ids=body.model_ids, stale_days=body.stale_days,
+    ):
+        raise HTTPException(status_code=409, detail="Refresh already running")
     return {"ok": True, "running": True, "message": "refresh started"}
 
 
