@@ -554,3 +554,73 @@ class TestImageMoves:
         db.refresh(m)
         assert m.thumbnail_path == img_path
         assert img_path in m.image_paths
+
+
+class TestImageCollisionSkip:
+    """A collision on a model's own tracked image (not one of its STL files)
+    is skipped rather than failing the whole batch — the file might be
+    incidental marketing art bundled with a download, or debris from an
+    earlier interrupted apply; unlike an STL collision, it isn't worth
+    aborting an otherwise-successful move over (#884)."""
+
+    def _seed_with_image(self, db, tmp_path):
+        from app.models import Creator
+        folder = tmp_path / "_inbox" / "Bust"
+        folder.mkdir(parents=True, exist_ok=True)
+        stl = folder / "head.stl"
+        stl.write_bytes(b"solid\nendsolid\n")
+        img = folder / "carousel.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        creator = db.query(Creator).filter_by(name="Abe3D").first() or make_creator(db, name="Abe3D")
+        m = make_model(db, creator, name="Bust", character="Joker")
+        m.folder_path = str(folder).replace("\\", "/")
+        m.title = "Bust"
+        img_path = str(img).replace("\\", "/")
+        m.image_paths = [img_path]
+        db.commit()
+        make_stl_file(db, m, filename="head.stl", path=str(stl).replace("\\", "/"))
+        db.commit()
+        return m, img_path
+
+    def test_colliding_image_is_skipped_stl_still_moves(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path)
+        preview = _preview(client)
+        entry = preview["entries"][0]
+        mid = preview["manifest_id"]
+        image_file = next(f for f in entry["files"] if f["kind"] == "image")
+        stray_dest = image_file["proposed_path"]
+        os.makedirs(os.path.dirname(stray_dest), exist_ok=True)
+        with open(stray_dest, "wb") as fh:
+            fh.write(b"unrelated stray file")
+
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["moved_files"] == 1  # only the STL — the image was skipped
+
+        db.refresh(m)
+        assert os.path.exists(img_path)  # left in place, unmoved
+        assert img_path in m.image_paths  # DB unchanged for the skipped image
+        with open(stray_dest, "rb") as fh:
+            assert fh.read() == b"unrelated stray file"  # stray file untouched
+
+    def test_stl_collision_still_hard_fails_the_batch(self, client, db, tmp_path, write_mode):
+        """The leniency above is image-only — an STL file colliding with an
+        existing destination still aborts the whole batch, exactly as before."""
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path)
+        preview = _preview(client)
+        entry = preview["entries"][0]
+        mid = preview["manifest_id"]
+        stl_file = next(f for f in entry["files"] if f["kind"] == "stl")
+        stray_dest = stl_file["proposed_path"]
+        os.makedirs(os.path.dirname(stray_dest), exist_ok=True)
+        with open(stray_dest, "wb") as fh:
+            fh.write(b"unrelated stray file")
+
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 500
+        assert "already exists" in resp.json()["detail"]["message"]
+        db.refresh(m)
+        assert os.path.exists(img_path)  # nothing moved — image untouched too
+        assert m.folder_path == str(tmp_path / "_inbox" / "Bust").replace("\\", "/")

@@ -24,6 +24,7 @@ mid-batch crash, and drift without a second real filesystem.
 """
 import errno
 import json
+import logging
 import os
 import re
 import shutil
@@ -37,6 +38,8 @@ from sqlalchemy.orm import Session
 from app.models import AppSetting, Model, PackOverride, ReorganizeManifest, ScanRoot, STLFile
 from app.services import write_lock
 from app.utils import utcnow
+
+_log = logging.getLogger(__name__)
 
 MoveFn = Callable[[str, str], None]
 StatFn = Callable[[str], tuple[int, int]]   # path -> (size_bytes, mtime_ns)
@@ -341,6 +344,11 @@ def apply_manifest(
         moves = _ordered_moves(selected)
         total = len(moves)
         moved = 0
+        # (model_id, current_path) of image moves skipped below — never STL
+        # moves, which still hard-fail. Excluded from _repath_db afterward so
+        # the DB isn't repathed to a destination the file was never actually
+        # written to.
+        skipped_images: set[tuple[int | None, str]] = set()
         try:
             for f in moves:
                 # Source may be an inbox dir (outside scan roots); destination
@@ -348,7 +356,23 @@ def apply_manifest(
                 # on is now validated, not raw manifest data.
                 src = _confine(f["current_path"], src_roots)
                 dst = _confine(f["proposed_path"], roots)
-                move_fn(src, dst)
+                try:
+                    move_fn(src, dst)
+                except FileExistsError:
+                    # A non-STL image colliding with an unrelated leftover file
+                    # (e.g. marketing art bundled with a download, or debris
+                    # from an earlier interrupted apply) isn't worth failing an
+                    # otherwise-successful STL move over — skip it and keep
+                    # going. An STL collision is never this forgiving: it still
+                    # aborts the batch below, since a wrong/missing STL file is
+                    # a real data problem, not an incidental extra image.
+                    if f.get("kind") != "image":
+                        raise
+                    _log.warning(
+                        "Skipping colliding image (destination already exists): %s", dst,
+                    )
+                    skipped_images.add((f.get("model_id"), f["current_path"]))
+                    continue
                 # Record only AFTER the move completes — the log is the recovery
                 # source of truth, so it must reflect reality on disk.
                 log.record(
@@ -367,6 +391,13 @@ def apply_manifest(
             ) from e
         finally:
             log.close()
+
+        if skipped_images:
+            for entry in selected:
+                entry["files"] = [
+                    f for f in entry["files"]
+                    if (entry["model_id"], f["current_path"]) not in skipped_images
+                ]
 
         _repath_db(db, selected)
         _prune_empty_sources(selected)
