@@ -58,6 +58,45 @@ class TestAllowedRoots:
         files_module._roots_cache = None
         assert files_module._is_safe_path(f) is False
 
+    def test_inbox_model_folder_is_allowed_though_not_a_scan_root(self, db, tmp_path):
+        """Import/inbox models are deliberately never registered as a scan
+        root (scan_inbox_folder skips it on purpose) — but a request for an
+        image inside one of their own folders must still be servable, or the
+        Import Preview page can never show a real thumbnail (#888-follow-up)."""
+        import app.routers.files as files_module
+
+        creator = make_creator(db, "Inbox Creator")
+        inbox_folder = tmp_path / "import" / "some-pack"
+        inbox_folder.mkdir(parents=True)
+        m = make_model(db, creator, name="Some Pack")
+        m.folder_path = str(inbox_folder)
+        m.is_inbox = True
+        db.commit()
+
+        f = inbox_folder / "photo.jpg"
+        f.write_bytes(b"\xff\xd8\xff")
+
+        files_module._roots_cache = None
+        assert files_module._is_safe_path(f) is True
+
+    def test_non_inbox_model_folder_does_not_widen_the_allowlist(self, db, tmp_path):
+        """A regular (non-inbox) model's folder_path must NOT be treated as an
+        allowed root — only scan_roots and actual inbox folders are."""
+        import app.routers.files as files_module
+
+        creator = make_creator(db, "Regular Creator")
+        model_folder = tmp_path / "library" / "some-model"
+        model_folder.mkdir(parents=True)
+        m = make_model(db, creator, name="Some Model")
+        m.folder_path = str(model_folder)
+        db.commit()
+
+        f = model_folder / "photo.jpg"
+        f.write_bytes(b"\xff\xd8\xff")
+
+        files_module._roots_cache = None
+        assert files_module._is_safe_path(f) is False
+
 
 # ---------------------------------------------------------------------------
 # /files/stl

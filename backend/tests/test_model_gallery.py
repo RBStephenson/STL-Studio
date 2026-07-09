@@ -34,6 +34,25 @@ class TestRefreshModelGallery:
         assert any(p.endswith("gallery_00.jpg") for p in m.image_paths)
         assert any(p.endswith("gallery_01.jpg") for p in m.image_paths)
 
+    def test_ignores_hidden_directories(self, db, tmp_path):
+        """Other tools stash their own resized derivative caches in hidden
+        dot-directories alongside real content — none of that should ever
+        surface as a gallery image (#888-follow-up)."""
+        _root(db, tmp_path)
+        m, folder = _model_with_folder(db, tmp_path)
+        (folder / "real_photo.jpg").write_bytes(b"fake-jpg")
+        hidden = folder / ".othertool" / "derivatives" / "real_photo.jpg"
+        hidden.mkdir(parents=True)
+        (hidden / "carousel.jpg").write_bytes(b"fake-jpg")
+        (hidden / "preview.jpg").write_bytes(b"fake-jpg")
+
+        refresh_model_gallery(db, m)
+        db.commit()
+
+        assert len(m.image_paths) == 1
+        assert m.image_paths[0].endswith("real_photo.jpg")
+        assert not any(".othertool" in p for p in m.image_paths)
+
     def test_drops_stale_entries_for_deleted_files(self, db, tmp_path):
         _root(db, tmp_path)
         m, folder = _model_with_folder(db, tmp_path)
