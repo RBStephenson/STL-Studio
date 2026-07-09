@@ -313,6 +313,36 @@ Rules:
 
 Format: {{"files": [{{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}}, ...]}}""".format(part_types=", ".join(CANONICAL_PART_TYPES))
 
+# Unit-based strategy (#878): groups files by the in-game unit/character they
+# belong to (e.g. every file for "Royal Guard 1" — head, helmet, weapon —
+# shares that name) instead of by physical part type. Deliberately NOT
+# constrained to CANONICAL_PART_TYPES — a unit name is derived per-model, so
+# there's no fixed list to snap to; _to_pascal_case below is the only
+# normalization applied, to keep casing consistent across a unit's files.
+_UNIT_SYSTEM_PROMPT = """You are an assistant that groups 3D-printing STL files for a miniature figure library by the in-game unit or character they belong to, not by physical part type.
+
+Given a JSON list of STL files, infer which files belong to the same named unit (e.g. every file for "Royal Guard 1" — its head, helmet, weapon, etc. — should share that unit name) and return that unit name as part_type.
+
+Rules:
+1. part_type: a short unit/character name derived from the filenames (e.g. "Royal Guard 1", "Ogre Champion"). This is NOT a physical part category like "Head" or "Weapon" — group by which unit the file belongs to. Use the exact same name (consistent spelling and number) across every file belonging to that unit. Null if truly unknowable.
+2. part_name: a short human-readable label for what this specific file physically is (e.g. "Head Female", "Right Arm"). Strip underscores, extensions, and redundant tokens.
+3. sup_base_filename: if this file is a presupported variant, return the EXACT filename of its base counterpart in the list. Otherwise null.
+4. Return ONLY the JSON object — no markdown, no explanation.
+
+Format: {"files": [{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}, ...]}"""
+
+
+def _to_pascal_case(s: str) -> str:
+    """Title-case each whitespace/underscore/hyphen-separated word.
+
+    Unit-based part_type suggestions are freeform (never snapped to a fixed
+    list), so nothing else guarantees consistent casing across a unit's files
+    — the LLM could return "Royal Guard 1" for one file and "royal guard 1"
+    for another. This is applied to every unit-strategy suggestion so the
+    same unit always renders identically."""
+    words = [w for w in re.split(r"[\s_\-]+", s.strip()) if w]
+    return " ".join(w.capitalize() for w in words)
+
 
 def _parse_suggestions(raw_text: str, source: str) -> LlmOutcome:
     """Parse a model's raw text reply into an :class:`LlmOutcome`.
@@ -364,6 +394,7 @@ def _llm_refine_anthropic(
     api_key: str,
     timeout: float = _DEFAULT_TIMEOUT,
     effort: str | None = None,
+    system_prompt: str = _SYSTEM_PROMPT,
 ) -> LlmOutcome:
     """Refine via the Anthropic Messages API. Mirrors the OpenAI path's contract:
     returns ``status="error"`` with a human-readable ``detail`` on any failure."""
@@ -381,7 +412,7 @@ def _llm_refine_anthropic(
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": _ANTHROPIC_MAX_TOKENS,
-            "system": _SYSTEM_PROMPT,
+            "system": system_prompt,
             "messages": [
                 {"role": "user", "content": json.dumps(files, ensure_ascii=False)},
             ],
@@ -412,6 +443,7 @@ def _llm_refine_openai(
     model: str,
     api_key: str,
     timeout: float = _DEFAULT_TIMEOUT,
+    system_prompt: str = _SYSTEM_PROMPT,
 ) -> LlmOutcome:
     """Call an OpenAI-compatible /v1/chat/completions endpoint (e.g. Ollama).
 
@@ -434,7 +466,7 @@ def _llm_refine_openai(
     payload: dict[str, Any] = {
         "model": model,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(files, ensure_ascii=False)},
         ],
         "temperature": 0.1,
@@ -510,23 +542,35 @@ def run(
     timeout: float = _DEFAULT_TIMEOUT,
     api_type: str = "openai",
     effort: str | None = None,
+    strategy: str = "parts",
 ) -> OrganizeResult:
     """Return merged suggestions plus the outcome of the optional LLM pass.
 
-    Heuristics run first and are always returned immediately. The LLM then
-    always runs too (capped at _LLM_FILE_CAP files, so the response time
-    stays reasonable even for models with hundreds of files) — it is never
-    skipped just because heuristics filled in every part_type; the AI still
-    gets a chance to correct a wrong heuristic guess or fix a part_name,
-    which "already resolved" coverage of part_type alone can't tell you.
-    Each candidate file is sent with its current best-known part_type/
-    part_name (the heuristic suggestion when there is one, else what was
-    already stored), matching what the system prompt tells the model it's
-    receiving. Sup_ files are excluded — they inherit their base file's type
-    and would just duplicate that file's request. The returned
-    :class:`OrganizeResult` reports whether the LLM ran, was skipped (no
-    non-Sup files to send), was disabled, or errored so the caller can
-    surface that to the user instead of silently degrading.
+    ``strategy="parts"`` (default): heuristics run first and are always
+    returned immediately. The LLM then always runs too (capped at
+    _LLM_FILE_CAP files, so the response time stays reasonable even for
+    models with hundreds of files) — it is never skipped just because
+    heuristics filled in every part_type; the AI still gets a chance to
+    correct a wrong heuristic guess or fix a part_name, which "already
+    resolved" coverage of part_type alone can't tell you. Each candidate file
+    is sent with its current best-known part_type/part_name (the heuristic
+    suggestion when there is one, else what was already stored), matching
+    what the system prompt tells the model it's receiving.
+
+    ``strategy="unit"`` (#878): groups files by the in-game unit/character
+    they belong to instead of by physical part — e.g. every file for "Royal
+    Guard 1" gets that as its part_type, not "Head"/"Weapon"/etc. There is no
+    keyword heuristic for this (a unit name isn't derivable from the same
+    part-type keyword map), so this strategy skips Stage 1 entirely and goes
+    straight to the LLM with the unit-grouping prompt. Its part_type
+    suggestions are freeform (no canonical list to snap to), so each one is
+    Pascal-cased for consistency across a unit's files before being returned.
+
+    Both strategies: Sup_ files are excluded from the LLM batch — they
+    inherit their base file's type and would just duplicate that file's
+    request. The returned :class:`OrganizeResult` reports whether the LLM
+    ran, was skipped (no non-Sup files to send), was disabled, or errored so
+    the caller can surface that to the user instead of silently degrading.
 
     ``api_type`` selects the transport: "openai" (an OpenAI-compatible endpoint
     at ``base_url``, e.g. Ollama) or "anthropic" (the Anthropic Messages API,
@@ -535,29 +579,32 @@ def run(
     """
     # An Anthropic config carries no URL; an OpenAI-compatible one needs one.
     llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
-    _log_step("start", file_count=len(files), has_llm=llm_ready, api_type=api_type)
+    _log_step("start", file_count=len(files), has_llm=llm_ready, api_type=api_type, strategy=strategy)
     outcome = LlmOutcome(status="disabled")
+    merged: dict[int, dict[str, Any]] = {}
 
-    # Stage 1: fast Python heuristics
-    heuristic = heuristic_pass(files)
-    merged: dict[int, dict[str, Any]] = {s["id"]: s for s in heuristic}
+    if strategy == "parts":
+        # Stage 1: fast Python heuristics
+        heuristic = heuristic_pass(files)
+        merged = {s["id"]: s for s in heuristic}
 
-    # For Sup_ files whose base file's type WAS inferred, inherit it.
-    all_filenames = [f["filename"] for f in files]
-    type_by_filename: dict[str, str | None] = {}
-    for f in files:
-        sug = merged.get(f["id"])
-        type_by_filename[f["filename"]] = sug.get("part_type") if sug else f.get("part_type")
+        # For Sup_ files whose base file's type WAS inferred, inherit it.
+        all_filenames = [f["filename"] for f in files]
+        type_by_filename: dict[str, str | None] = {}
+        for f in files:
+            sug = merged.get(f["id"])
+            type_by_filename[f["filename"]] = sug.get("part_type") if sug else f.get("part_type")
 
-    for f in files:
-        sug = merged.get(f["id"])
-        if sug and sug.get("part_type") is None and _is_sup(f["filename"]):
-            base = sug.get("sup_base_filename") or _find_base(f["filename"], all_filenames)
-            if base and type_by_filename.get(base):
-                sug["part_type"] = type_by_filename[base]
+        for f in files:
+            sug = merged.get(f["id"])
+            if sug and sug.get("part_type") is None and _is_sup(f["filename"]):
+                base = sug.get("sup_base_filename") or _find_base(f["filename"], all_filenames)
+                if base and type_by_filename.get(base):
+                    sug["part_type"] = type_by_filename[base]
 
-    # Stage 2: LLM refinement — always runs (never skipped based on how much
-    # heuristics already resolved); it can confirm, correct, or fill in gaps.
+    # Stage 2: LLM refinement — always runs when configured (never skipped
+    # based on how much Stage 1 already resolved; unit strategy has no Stage
+    # 1 at all, so this is the only stage).
     if llm_ready:
         def _with_heuristic(f: dict[str, Any]) -> dict[str, Any]:
             sug = merged.get(f["id"]) or {}
@@ -575,17 +622,24 @@ def run(
 
         if candidates:
             _log_step("llm_batch", sending=len(candidates), of=len(files))
+            system_prompt = _UNIT_SYSTEM_PROMPT if strategy == "unit" else _SYSTEM_PROMPT
             if api_type == "anthropic":
-                outcome = _llm_refine_anthropic(candidates, model, api_key, timeout, effort)
+                outcome = _llm_refine_anthropic(
+                    candidates, model, api_key, timeout, effort, system_prompt=system_prompt,
+                )
             else:
-                outcome = _llm_refine_openai(candidates, base_url, model, api_key, timeout=timeout)
+                outcome = _llm_refine_openai(
+                    candidates, base_url, model, api_key, timeout=timeout, system_prompt=system_prompt,
+                )
             for s in outcome.suggestions:
                 fid = s.get("id")
                 if not isinstance(fid, int):
                     continue
                 existing = merged.get(fid, {"id": fid, "filename": "", "sup_base_filename": None})
                 if s.get("part_type") is not None:
-                    existing["part_type"] = s["part_type"]
+                    existing["part_type"] = (
+                        _to_pascal_case(s["part_type"]) if strategy == "unit" else s["part_type"]
+                    )
                 if s.get("part_name"):
                     existing["part_name"] = s["part_name"]
                 if s.get("sup_base_filename"):

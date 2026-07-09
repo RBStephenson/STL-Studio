@@ -314,6 +314,132 @@ def test_system_prompt_lists_the_canonical_categories():
     assert "Shoulder" not in ai._SYSTEM_PROMPT
 
 
+# --- Unit-based strategy (#878) ---
+
+def test_to_pascal_case_title_cases_each_word():
+    assert ai._to_pascal_case("royal guard 1") == "Royal Guard 1"
+    assert ai._to_pascal_case("ROYAL GUARD 1") == "Royal Guard 1"
+    assert ai._to_pascal_case("Royal Guard 1") == "Royal Guard 1"
+    assert ai._to_pascal_case("royal_guard-1") == "Royal Guard 1"
+    assert ai._to_pascal_case("  ogre   champion  ") == "Ogre Champion"
+
+
+def test_unit_strategy_skips_heuristic_pass(monkeypatch):
+    """Unlike "parts", "unit" has no keyword heuristic — a well-named file
+    that the parts heuristic would resolve on its own must still be sent to
+    the LLM as-is (no part_type/part_name pre-filled from heuristics)."""
+    files = [{"id": 1, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"files": [
+        {"id": 1, "part_type": "royal guard 1", "part_name": "Sword", "sup_base_filename": None},
+    ]})
+    captured: dict = {}
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = json.loads(kwargs["json"]["messages"][1]["content"])
+        captured["system"] = kwargs["json"]["messages"][0]["content"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": canned}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    # No heuristic-inferred part_type ("Weapon") — sent exactly as stored (None).
+    assert captured["payload"][0]["part_type"] is None
+    assert captured["system"] == ai._UNIT_SYSTEM_PROMPT
+
+
+def test_unit_strategy_pascal_cases_the_llm_suggestion(monkeypatch):
+    files = [{"id": 1, "filename": "Royal_Guard_1_Head_Female_1.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"files": [
+        {"id": 1, "part_type": "royal guard 1", "part_name": "Head Female", "sup_base_filename": None},
+    ]})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    assert {s["id"]: s for s in res.suggestions}[1]["part_type"] == "Royal Guard 1"
+
+
+def test_unit_strategy_still_skipped_when_every_file_is_a_sup_variant():
+    files = [{"id": 1, "filename": "Sup_Sword.stl", "part_type": None, "part_name": None}]
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+    assert res.llm.status == "skipped"
+
+
+def test_endpoint_unit_strategy_skips_canonical_snap(client, db, monkeypatch):
+    """A unit name is freeform — it must reach the client exactly as the LLM
+    (Pascal-cased) returned it, never snapped toward a canonical part-type
+    category the way "parts" strategy suggestions are."""
+    m = Model(name="Royal Guard Squad", folder_path="/lib/royal-guard")
+    db.add(m)
+    db.flush()
+    f = STLFile(model_id=m.id, filename="Royal_Guard_1_Head_Female_1.stl",
+               path="/lib/royal-guard/Royal_Guard_1_Head_Female_1.stl")
+    db.add(f)
+    db.commit()
+
+    canned = json.dumps({"files": [
+        {"id": f.id, "part_type": "royal guard 1", "part_name": "Head Female", "sup_base_filename": None},
+    ]})
+    monkeypatch.setattr(ai, "Anthropic", _fake_anthropic(canned))
+
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Claude", "api_type": "anthropic", "model": "claude-opus-4-8", "effort": "low",
+    }).json()
+    client.post(f"/settings/ai-apis/{cfg['id']}/key", json={"key": "sk-ant-test"})
+    client.patch("/settings", json={"ai_organize_enabled": True, "ai_organize_api": cfg["id"]})
+
+    r = client.post(f"/models/{m.id}/ai-organize", json={"strategy": "unit"})
+    assert r.status_code == 200
+    body = r.json()
+    sug = {s["id"]: s for s in body["suggestions"]}
+    # Pascal-cased by the service, and NOT snapped to any canonical category.
+    assert sug[f.id]["part_type"] == "Royal Guard 1"
+
+
+def test_endpoint_defaults_to_parts_strategy_when_body_omitted(client, db, monkeypatch):
+    """Back-compat: a caller that sends no body (the old contract) still gets
+    parts-based behavior, unchanged."""
+    m = Model(name="Legacy Caller", folder_path="/lib/legacy")
+    db.add(m)
+    db.flush()
+    f = STLFile(model_id=m.id, filename="mystery_blob.stl", path="/lib/legacy/mystery_blob.stl")
+    db.add(f)
+    db.commit()
+
+    canned = json.dumps({"files": [
+        {"id": f.id, "part_type": "Weapon", "part_name": "Blade", "sup_base_filename": None},
+    ]})
+    monkeypatch.setattr(ai, "Anthropic", _fake_anthropic(canned))
+
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Claude", "api_type": "anthropic", "model": "claude-opus-4-8", "effort": "low",
+    }).json()
+    client.post(f"/settings/ai-apis/{cfg['id']}/key", json={"key": "sk-ant-test"})
+    client.patch("/settings", json={"ai_organize_enabled": True, "ai_organize_api": cfg["id"]})
+
+    r = client.post(f"/models/{m.id}/ai-organize")  # no body
+    assert r.status_code == 200
+    assert r.json()["suggestions"][0]["part_type"] == "Weapon"
+
+
 def test_ai_category_snaps_to_canonical_name_even_in_a_fresh_library(client, db, monkeypatch):
     """No existing STLFile.part_type values are stored anywhere yet — the AI's
     "Accessory" must still snap to the app's canonical "Accessories", not be

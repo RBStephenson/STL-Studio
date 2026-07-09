@@ -243,14 +243,24 @@ the 3D viewer organises its part picker by category — useful for complex
 multi-part kits.
 
 **AI Organize** (button on the model detail page, requires an AI API assigned
-under [Settings → AI & Integrations](#ai--integrations)) suggests a part type
-and cleaned-up name for every STL file. Fast keyword-based naming rules run
-first, but the AI always runs too — even on files the naming rules already
-resolved — since it can still catch a wrong guess or a name the rules got
-half right. It only ever picks from the app's standard category list, so its
-suggestions land in the same categories the Category combobox offers. Review
-the suggestions in a modal before applying; nothing is written to a file
-until you confirm.
+under [Settings → AI & Integrations](#ai--integrations)) suggests a category
+and cleaned-up name for every STL file. Clicking it first asks you to pick a
+strategy:
+
+- **Parts-based** — the standard approach. Fast keyword-based naming rules run
+  first, but the AI always runs too — even on files the naming rules already
+  resolved — since it can still catch a wrong guess or a name the rules got
+  half right. It only ever picks from the app's standard category list, so its
+  suggestions land in the same categories the Category combobox offers.
+- **Unit-based** — groups files by the in-game unit or character they belong
+  to instead of by physical part (e.g. every file for "Royal Guard 1" — head,
+  helmet, weapon — gets that as its category, not "Head"/"Weapon"). There's no
+  keyword pre-pass for this — it goes straight to the AI. Unit names are
+  derived per model, so they aren't limited to the standard category list;
+  each one is title-cased for consistency across a unit's files.
+
+Either way, review the suggestions in a modal before applying — nothing is
+written to a file until you confirm.
 
 ## 3D viewer
 
