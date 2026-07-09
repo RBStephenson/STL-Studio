@@ -327,17 +327,28 @@ Format: {{"files": [{{"id": <int>, "part_type": <str|null>, "part_name": <str|nu
 # constrained to CANONICAL_PART_TYPES — a unit name is derived per-model, so
 # there's no fixed list to snap to; _to_pascal_case below is the only
 # normalization applied, to keep casing consistent across a unit's files.
+#
+# Response is grouped by unit rather than one flat object per file (#894-
+# follow-up): a unit's name is often several words (e.g. "Ogre Champion With
+# Great Weapon") and previously got repeated verbatim on every one of that
+# unit's files. Stating it once per group instead is a direct, unbounded-
+# with-unit-size win on completion length — the main lever for latency on a
+# slow/local model, and less for it to generate correctly before a
+# repetition/formatting slip corrupts the JSON. sup_base_filename was also
+# dropped: Sup_ files are excluded from every candidate batch (both
+# strategies), so the field could only ever come back null — pure dead
+# weight in both the prompt and every response object.
 _UNIT_SYSTEM_PROMPT = """You are an assistant that groups 3D-printing STL files for a miniature figure library by the in-game unit or character they belong to, not by physical part type.
 
-Given a JSON list of STL files, infer which files belong to the same named unit (e.g. every file for "Royal Guard 1" — its head, helmet, weapon, etc. — should share that unit name) and return that unit name as part_type.
+Given a JSON list of STL files (each {"id": <int>, "filename": <str>}), group them by which in-game unit/character they belong to — e.g. every file for "Royal Guard 1" (its head, helmet, weapon, etc.) belongs in one group — and give each file a short physical-part label.
 
 Rules:
-1. part_type: a short unit/character name derived from the filenames (e.g. "Royal Guard 1", "Ogre Champion"). This is NOT a physical part category like "Head" or "Weapon" — group by which unit the file belongs to. Use the exact same name (consistent spelling and number) across every file belonging to that unit. Null if truly unknowable.
+1. Group name: a short unit/character name derived from the filenames (e.g. "Royal Guard 1", "Ogre Champion"). Use the exact same name (consistent spelling and number) for every file belonging to that unit.
 2. part_name: a short human-readable label for what this specific file physically is (e.g. "Head Female", "Right Arm"). Strip underscores, extensions, and redundant tokens.
-3. sup_base_filename: if this file is a presupported variant, return the EXACT filename of its base counterpart in the list. Otherwise null.
-4. Return ONLY the JSON object — no markdown, no explanation.
+3. Put any file whose unit is truly unknowable in "unknown" instead of guessing.
+4. Return ONLY the JSON object below — no markdown, no explanation, no extra keys.
 
-Format: {"files": [{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}, ...]}"""
+Format: {"units": [{"name": <str>, "members": [{"id": <int>, "part_name": <str|null>}, ...]}, ...], "unknown": [<int>, ...]}"""
 
 
 def _to_pascal_case(s: str) -> str:
@@ -352,6 +363,41 @@ def _to_pascal_case(s: str) -> str:
     return " ".join(w.capitalize() for w in words)
 
 
+def _strip_json_fence(raw_text: str) -> str:
+    """Strip an optional ```json ... ``` fence some models wrap replies in."""
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("```", 2)[1]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+        raw_text = raw_text.rsplit("```", 1)[0].strip()
+    return raw_text
+
+
+def _load_llm_json(raw_text: str, source: str) -> tuple[Any, LlmOutcome | None]:
+    """Strip an optional fence and parse JSON — shared by both response
+    parsers. Returns ``(data, None)`` on success or ``(None, error_outcome)``
+    on failure."""
+    raw_text = _strip_json_fence(raw_text)
+    try:
+        return json.loads(raw_text), None
+    except json.JSONDecodeError:
+        detail = f"LLM returned non-JSON content from {source}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return None, LlmOutcome(status="error", detail=detail)
+
+
+def _flat_suggestions_from_data(data: Any, source: str) -> LlmOutcome:
+    """Extract the "parts"-strategy flat ``{"files": [...]}`` shape."""
+    suggestions = data.get("files", []) if isinstance(data, dict) else []
+    if not isinstance(suggestions, list):
+        _log.warning("ai_organize llm_error malformed 'files' field from %s", source)
+        return LlmOutcome(status="error",
+                          detail=f"Malformed 'files' field in response from {source}")
+
+    _log_step("llm_done", suggestions=len(suggestions))
+    return LlmOutcome(status="ok", suggestions=suggestions)
+
+
 def _parse_suggestions(raw_text: str, source: str) -> LlmOutcome:
     """Parse a model's raw text reply into an :class:`LlmOutcome`.
 
@@ -362,25 +408,65 @@ def _parse_suggestions(raw_text: str, source: str) -> LlmOutcome:
     # Full model output — only emitted when LOG_LEVEL=DEBUG, so the INFO trace
     # stays terse while the raw suggestions are available on demand.
     _log.debug("ai_organize llm_raw_response %s", raw_text[:2000])
+    data, err = _load_llm_json(raw_text, source)
+    if err:
+        return err
+    return _flat_suggestions_from_data(data, source)
 
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("```", 2)[1]
-        if raw_text.startswith("json"):
-            raw_text = raw_text[4:]
-        raw_text = raw_text.rsplit("```", 1)[0].strip()
 
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError:
-        detail = f"LLM returned non-JSON content from {source}"
-        _log.warning("ai_organize llm_error %s", detail)
-        return LlmOutcome(status="error", detail=detail)
+def _parse_unit_suggestions(raw_text: str, source: str) -> LlmOutcome:
+    """Parse the unit strategy's grouped ``{"units": [...], "unknown": [...]}``
+    reply (see _UNIT_SYSTEM_PROMPT), flattening it into the same per-file
+    suggestion shape _parse_suggestions returns — id/part_type/part_name/
+    sup_base_filename — so the batching and merge logic downstream don't need
+    to know the wire format differs. ``part_type`` carries the unit/group
+    name; ``sup_base_filename`` is always None (see _UNIT_SYSTEM_PROMPT's
+    comment for why it was dropped from the prompt).
 
-    suggestions = data.get("files", []) if isinstance(data, dict) else []
-    if not isinstance(suggestions, list):
-        _log.warning("ai_organize llm_error malformed 'files' field from %s", source)
-        return LlmOutcome(status="error",
-                          detail=f"Malformed 'files' field in response from {source}")
+    Falls back to the older flat ``{"files": [...]}`` shape if a model
+    ignores the grouped format and replies in that one anyway — cheap
+    insurance against a model that's simply more reliable with the shape it's
+    seen more of in training.
+    """
+    _log.debug("ai_organize llm_raw_response %s", raw_text[:2000])
+    data, err = _load_llm_json(raw_text, source)
+    if err:
+        return err
+
+    if not isinstance(data, dict):
+        _log.warning("ai_organize llm_error malformed response from %s", source)
+        return LlmOutcome(status="error", detail=f"Malformed response from {source}")
+
+    if "units" not in data and "files" in data:
+        return _flat_suggestions_from_data(data, source)
+
+    suggestions: list[dict[str, Any]] = []
+    units = data.get("units", [])
+    if isinstance(units, list):
+        for group in units:
+            if not isinstance(group, dict):
+                continue
+            name = group.get("name")
+            members = group.get("members", [])
+            if not isinstance(members, list):
+                continue
+            for m in members:
+                if not isinstance(m, dict) or not isinstance(m.get("id"), int):
+                    continue
+                suggestions.append({
+                    "id": m["id"],
+                    "part_type": name,
+                    "part_name": m.get("part_name"),
+                    "sup_base_filename": None,
+                })
+
+    unknown = data.get("unknown", [])
+    if isinstance(unknown, list):
+        for fid in unknown:
+            if isinstance(fid, int):
+                suggestions.append({
+                    "id": fid, "part_type": None, "part_name": None, "sup_base_filename": None,
+                })
 
     _log_step("llm_done", suggestions=len(suggestions))
     return LlmOutcome(status="ok", suggestions=suggestions)
@@ -404,6 +490,7 @@ def _llm_refine_anthropic(
     effort: str | None = None,
     system_prompt: str = _SYSTEM_PROMPT,
     user_prefix: str = "",
+    parser: Callable[[str, str], LlmOutcome] = _parse_suggestions,
 ) -> LlmOutcome:
     """Refine via the Anthropic Messages API. Mirrors the OpenAI path's contract:
     returns ``status="error"`` with a human-readable ``detail`` on any failure.
@@ -411,7 +498,9 @@ def _llm_refine_anthropic(
     ``user_prefix``, when given, is prepended (as plain text, before the JSON
     file list) to the user turn — used by the unit strategy's batching to tell
     a later batch which unit names earlier batches already established, so
-    the same unit doesn't get renamed across batches."""
+    the same unit doesn't get renamed across batches. ``parser`` picks the
+    response shape to expect — the unit strategy's is grouped, not flat (see
+    _parse_unit_suggestions)."""
     source = "Anthropic API"
     if not api_key:
         detail = "No API key configured for this Anthropic connection."
@@ -448,7 +537,7 @@ def _llm_refine_anthropic(
         detail = f"Empty response from {source}"
         _log.warning("ai_organize llm_error %s", detail)
         return LlmOutcome(status="error", detail=detail)
-    return _parse_suggestions(raw_text, source)
+    return parser(raw_text, source)
 
 
 def _llm_refine_openai(
@@ -459,6 +548,7 @@ def _llm_refine_openai(
     timeout: float = _DEFAULT_TIMEOUT,
     system_prompt: str = _SYSTEM_PROMPT,
     user_prefix: str = "",
+    parser: Callable[[str, str], LlmOutcome] = _parse_suggestions,
 ) -> LlmOutcome:
     """Call an OpenAI-compatible /v1/chat/completions endpoint (e.g. Ollama).
 
@@ -467,7 +557,8 @@ def _llm_refine_openai(
     logged at WARNING (not INFO) with the endpoint and the underlying reason so
     connection refusals, timeouts, and HTTP errors are distinguishable in logs.
 
-    ``user_prefix``: see _llm_refine_anthropic — same purpose here.
+    ``user_prefix``: see _llm_refine_anthropic — same purpose here. ``parser``:
+    see _llm_refine_anthropic — same purpose here.
     """
     import re as _re
     base_url = _re.sub(
@@ -542,7 +633,7 @@ def _llm_refine_openai(
         _log.warning("ai_organize llm_error %s", detail)
         return LlmOutcome(status="error", detail=detail)
 
-    return _parse_suggestions(raw_text, log_endpoint)
+    return parser(raw_text, log_endpoint)
 
 
 # ---------------------------------------------------------------------------
@@ -687,8 +778,18 @@ def run(
                 out["part_name"] = sug["part_name"]
             return out
 
+        # Unit strategy has no heuristic stage (merged is always empty), and
+        # its prompt only asks the model to group by filename — the stored
+        # part_type/part_name it would otherwise inherit are stale leftovers
+        # from a different classification scheme, not useful context. Sending
+        # just id/filename shrinks the prompt for no loss of signal.
+        def _candidate(f: dict[str, Any]) -> dict[str, Any]:
+            if strategy == "unit":
+                return {"id": f["id"], "filename": f["filename"]}
+            return _with_heuristic(f)
+
         all_candidates = [
-            _with_heuristic(f) for f in files
+            _candidate(f) for f in files
             if not _is_sup(f["filename"])   # Sup_ files inherit; don't duplicate
         ]
 
@@ -709,15 +810,17 @@ def run(
         if len(representatives) < len(all_candidates):
             _log_step("llm_dedupe", candidates=len(all_candidates), unique=len(representatives))
 
+        parser = _parse_unit_suggestions if strategy == "unit" else _parse_suggestions
+
         def _call_llm(chunk: list[dict[str, Any]], system_prompt: str, user_prefix: str = "") -> LlmOutcome:
             if api_type == "anthropic":
                 return _llm_refine_anthropic(
                     chunk, model, api_key, timeout, effort,
-                    system_prompt=system_prompt, user_prefix=user_prefix,
+                    system_prompt=system_prompt, user_prefix=user_prefix, parser=parser,
                 )
             return _llm_refine_openai(
                 chunk, base_url, model, api_key, timeout=timeout,
-                system_prompt=system_prompt, user_prefix=user_prefix,
+                system_prompt=system_prompt, user_prefix=user_prefix, parser=parser,
             )
 
         if not representatives:
