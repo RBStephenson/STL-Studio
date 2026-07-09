@@ -717,7 +717,12 @@ def split_pack(model_id: int) -> dict:
                 return {"ok": False, "created": 0, "message": "folder not found on disk"}
 
             child_dirs = [d for d in pack.iterdir() if d.is_dir()]
-            if not any(_has_stls(d, recurse=True) for d in child_dirs):
+            try:
+                any_child_has_stls = any(_has_stls(d, recurse=True) for d in child_dirs)
+            except OSError:
+                return {"ok": False, "created": 0,
+                        "message": "couldn't read one or more child folders — try again"}
+            if not any_child_has_stls:
                 return {"ok": False, "created": 0,
                         "message": "no child folders with STLs to split into"}
 
@@ -1158,23 +1163,34 @@ def _index_model(
                     model.needs_review = True
 
         if not folder_unchanged:
-            gallery_images = _collect_gallery_images(
-                folder,
-                boundary=creator_boundary or folder,
-                stl_cache=stl_cache,
-            )
+            try:
+                gallery_images = _collect_gallery_images(
+                    folder,
+                    boundary=creator_boundary or folder,
+                    stl_cache=stl_cache,
+                )
+            except OSError:
+                # A transient read failure (drive hiccup, permission blip) —
+                # not "this model's images are gone". Leave image_paths/
+                # thumbnail_path exactly as they are; a later scan re-tries.
+                logger.warning(
+                    "Gallery image discovery failed for %s — leaving existing "
+                    "image_paths untouched this scan", folder, exc_info=True,
+                )
+                gallery_images = None
 
-            # Thumbnail: walk upward if not already set
-            if not model.thumbnail_path:
-                if gallery_images:
-                    model.thumbnail_path = str(gallery_images[0])
+            if gallery_images is not None:
+                # Thumbnail: walk upward if not already set
+                if not model.thumbnail_path:
+                    if gallery_images:
+                        model.thumbnail_path = str(gallery_images[0])
 
-            model.image_paths = _merge_scan_gallery_paths(
-                existing=model.image_paths or [],
-                discovered=[str(img) for img in gallery_images],
-                removed=model.removed_image_paths or [],
-                boundary=creator_boundary or folder,
-            )
+                model.image_paths = _merge_scan_gallery_paths(
+                    existing=model.image_paths or [],
+                    discovered=[str(img) for img in gallery_images],
+                    removed=model.removed_image_paths or [],
+                    boundary=creator_boundary or folder,
+                )
 
             _index_stl_files(model, folder, db)
 
@@ -1247,13 +1263,32 @@ def _has_hidden_ancestor(path: Path, within: Path) -> bool:
     return any(_is_hidden(p) for p in parts[:-1])
 
 
+def _iter_files_recursive(folder: Path):
+    """Yield every non-hidden file under folder, recursing into subdirectories.
+
+    Deliberately NOT built on Path.rglob()/glob(): both silently swallow any
+    OSError while listing a subdirectory (see CPython's _WildcardSelector —
+    a bare ``except OSError: pass``), so an unreadable folder anywhere in the
+    tree looks identical to "this subtree is genuinely empty". That
+    difference matters here: a caller that merges this into image_paths (a
+    destructive prune of anything not rediscovered) must be able to tell a
+    transient read failure apart from a real deletion, so this walk lets
+    OSError/PermissionError propagate instead.
+    """
+    with os.scandir(folder) as it:
+        entries = list(it)
+    for entry in entries:
+        if _is_hidden(entry.name):
+            continue
+        if entry.is_dir():
+            yield from _iter_files_recursive(Path(entry.path))
+        else:
+            yield Path(entry.path)
+
+
 def _has_stls(folder: Path, recurse: bool = False) -> bool:
     if recurse:
-        return any(
-            f.suffix.lower() in STL_EXTENSIONS
-            for f in folder.rglob("*")
-            if f.is_file() and not _has_hidden_ancestor(f, folder)
-        )
+        return any(p.suffix.lower() in STL_EXTENSIONS for p in _iter_files_recursive(folder))
     return any(f.suffix.lower() in STL_EXTENSIONS for f in folder.iterdir() if f.is_file())
 
 
@@ -1288,14 +1323,13 @@ def _is_within_boundary(path: str, boundary: Path) -> bool:
 
 
 def _image_files_recursive(folder: Path) -> list[Path]:
-    try:
-        return [
-            img for img in sorted(folder.rglob("*"))
-            if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS
-            and not _has_hidden_ancestor(img, folder)
-        ]
-    except (OSError, PermissionError):
-        return []
+    # _iter_files_recursive (not rglob/glob) so a transient read failure
+    # (external-drive hiccup, permission blip) propagates instead of looking
+    # identical to "this folder genuinely has no images" — see its docstring.
+    return sorted(
+        p for p in _iter_files_recursive(folder)
+        if p.suffix.lower() in IMAGE_EXTENSIONS
+    )
 
 
 def _collect_gallery_images(leaf: Path, boundary: Path,
@@ -1307,6 +1341,12 @@ def _collect_gallery_images(leaf: Path, boundary: Path,
       1. Preferred image subdirs, recursively
       2. Direct image files in the folder itself
       3. Any other subdir that doesn't contain STLs
+
+    Raises OSError/PermissionError if any folder along the way couldn't be
+    listed — deliberately not caught here. Callers that merge the result into
+    image_paths (dropping anything not rediscovered) must catch this and skip
+    that merge rather than trust a possibly-incomplete listing as if it were
+    a confirmed-empty one.
     """
     def _has_stls_cached(d: Path) -> bool:
         key = str(d)
@@ -1317,10 +1357,7 @@ def _collect_gallery_images(leaf: Path, boundary: Path,
         return _has_stls(d, recurse=True)
 
     def images_at(folder: Path) -> list[Path]:
-        try:
-            children = list(folder.iterdir())
-        except (OSError, PermissionError):
-            return []
+        children = list(folder.iterdir())
         subdirs = [c for c in children if c.is_dir() and not _is_hidden(c.name)]
         found: list[Path] = []
 
@@ -1397,6 +1434,12 @@ def refresh_model_gallery(db: Session, model: Model) -> None:
     applies to every model (_collect_gallery_images / _merge_scan_gallery_paths)
     — just scoped to this one model, on demand, without touching naming, tags,
     or STL indexing. Mutates the passed-in ORM object; the caller commits.
+
+    Raises OSError/PermissionError if the folder listing failed partway
+    through (a transient drive/permission hiccup) — deliberately not caught
+    here, and nothing has been mutated yet when it's raised, so the caller
+    can surface the failure instead of silently treating an unreliable
+    listing as "no images here anymore".
     """
     folder = Path(model.folder_path)
     if not folder.exists():
