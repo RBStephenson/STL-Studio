@@ -299,6 +299,88 @@ def test_llm_receives_heuristic_suggestion_not_raw_none(monkeypatch):
     assert sent["part_type"] == "Weapon"  # heuristic-inferred, not None
 
 
+# --- Dedupe scale/version variants before hitting the LLM ---
+
+def test_llm_dedupes_scale_variants_of_the_same_part(monkeypatch):
+    """Head_28mm.stl and Head_75mm.stl are the same physical part at
+    different scales — both clean to "Head" — so only one representative
+    should reach the LLM; its answer must still land on both ids."""
+    files = [
+        {"id": 1, "filename": "Head_28mm.stl", "part_type": None, "part_name": None},
+        {"id": 2, "filename": "Head_75mm.stl", "part_type": None, "part_name": None},
+        {"id": 3, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None},
+    ]
+    sent: list[list[dict]] = []
+
+    def _fake_post(url, **kwargs):
+        payload = json.loads(kwargs["json"]["messages"][1]["content"])
+        sent.append(payload)
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": f["part_type"], "part_name": "refined", "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "ok"
+    # 3 candidates collapsed to 2 — only one Head sent, not both scales.
+    assert len(sent) == 1
+    assert len(sent[0]) == 2
+
+    by_id = {s["id"]: s for s in res.suggestions}
+    assert by_id[1]["part_type"] == "Head"
+    assert by_id[2]["part_type"] == "Head"
+    assert by_id[1]["part_name"] == "refined"
+    assert by_id[2]["part_name"] == "refined"   # copied from the representative
+    assert by_id[3]["part_type"] == "Weapon"
+
+
+def test_llm_dedupe_preserved_across_unit_strategy_batches(monkeypatch):
+    """The same dedupe applies to the unit strategy's batched path."""
+    files = [
+        {"id": 1, "filename": "Royal_Guard_1_Head_28mm.stl", "part_type": None, "part_name": None},
+        {"id": 2, "filename": "Royal_Guard_1_Head_75mm.stl", "part_type": None, "part_name": None},
+    ]
+    sent: list[list[dict]] = []
+
+    def _fake_post(url, **kwargs):
+        content_text = kwargs["json"]["messages"][1]["content"]
+        payload = json.loads(content_text.split("\n\n")[-1])
+        sent.append(payload)
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": "royal guard 1", "part_name": None, "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    assert len(sent) == 1
+    assert len(sent[0]) == 1  # both scales collapsed to one representative
+    assert {s["id"] for s in res.suggestions} == {1, 2}
+    assert all(s["part_type"] == "Royal Guard 1" for s in res.suggestions)
+
+
 def test_skipped_only_when_every_file_is_a_sup_variant():
     """The true 'skipped' case: nothing eligible to send at all."""
     files = [{"id": 1, "filename": "Sup_Sword.stl", "part_type": None, "part_name": None}]

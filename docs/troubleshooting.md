@@ -3,6 +3,7 @@
 - [I added models to a creator but they don't show up](#i-added-models-to-a-creator-but-they-dont-show-up)
 - [A model has the wrong thumbnail](#a-model-has-the-wrong-thumbnail)
 - [A model has no thumbnail at all](#a-model-has-no-thumbnail-at-all)
+- [Images in a hidden folder aren't picked up](#images-in-a-hidden-folder-arent-picked-up)
 - [When should I rescan vs. run a full scan?](#when-should-i-rescan-vs-run-a-full-scan)
 - [A whole creator is missing or shows only one model](#a-whole-creator-is-missing-or-shows-only-one-model)
 - [Models are flagged "needs review"](#models-are-flagged-needs-review)
@@ -43,6 +44,14 @@ there genuinely aren't any images there, it can't show one. Options:
 
 - Use **Change image → From URL** to point at an online image.
 - Add an image file to the model's folder and rescan that creator.
+
+## Images in a hidden folder aren't picked up
+
+This is intentional. The scanner skips any dot-prefixed directory — hidden
+folders like `.git`, or similar caches other tools leave behind, are never
+treated as gallery images, STLs, or models of their own. If a model's folder
+already has stale entries from before this behavior existed, rescan that
+creator to drop them.
 
 ## When should I rescan vs. run a full scan?
 

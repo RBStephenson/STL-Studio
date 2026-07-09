@@ -734,9 +734,10 @@ entry has:
 - **Timeout** — how long (in seconds) to wait for a response from this
   endpoint before giving up. Defaults to **10s**, which suits a local Ollama.
   A **remote** Ollama loading a model for the first time (a "cold start") can
-  take 30–90s or more, so raise this for remote endpoints — e.g. `60`. The
-  setting is per-connection, so a fast local API and a slow remote one can each
-  have their own value.
+  take much longer, especially for a large model on modest hardware, so raise
+  this for remote endpoints — up to **600s** (10 minutes). The setting is
+  per-connection, so a fast local API and a slow remote one can each have
+  their own value.
 - **API key** — stored encrypted server-side, using a separate encryption key
   (`STL_SECRET_KEY`, see [Docker configuration](docker.md#optional-environment-variables))
   so a leaked database alone doesn't expose it. For Ollama and similar local

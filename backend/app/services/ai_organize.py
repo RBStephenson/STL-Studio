@@ -627,9 +627,13 @@ def run(
 
     Both strategies: Sup_ files are excluded from the LLM batch — they
     inherit their base file's type and would just duplicate that file's
-    request. The returned :class:`OrganizeResult` reports whether the LLM
-    ran, was skipped (no non-Sup files to send), was disabled, or errored so
-    the caller can surface that to the user instead of silently degrading.
+    request. Remaining candidates are further deduped by cleaned filename
+    (e.g. "Head_28mm.stl" / "Head_75mm.stl" — the same part at different
+    scales both clean to "Head") — only one representative per group is sent,
+    and its suggestion is copied to every sibling. The returned
+    :class:`OrganizeResult` reports whether the LLM ran, was skipped (no
+    non-Sup files to send), was disabled, or errored so the caller can
+    surface that to the user instead of silently degrading.
 
     ``api_type`` selects the transport: "openai" (an OpenAI-compatible endpoint
     at ``base_url``, e.g. Ollama) or "anthropic" (the Anthropic Messages API,
@@ -679,6 +683,23 @@ def run(
             if not _is_sup(f["filename"])   # Sup_ files inherit; don't duplicate
         ]
 
+        # Dedupe scale/version variants of the same physical part (e.g.
+        # "Head_28mm.stl" and "Head_75mm.stl" both clean to "Head") before
+        # hitting the LLM (#861-follow-up). They'd get an identical answer
+        # anyway, since part_type/part_name are derived from the cleaned name
+        # either way — so only the first file per cleaned name is sent, and
+        # its suggestion is copied to every sibling afterward. This shrinks
+        # both the prompt and (more importantly) the completion — fewer JSON
+        # objects to generate is the main lever for latency on a slow/remote
+        # model, and it also means more *distinct* parts fit under
+        # _LLM_FILE_CAP instead of the cap being spent on duplicates.
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for f in all_candidates:
+            groups.setdefault(_clean_name(f["filename"]), []).append(f)
+        representatives = [members[0] for members in groups.values()]
+        if len(representatives) < len(all_candidates):
+            _log_step("llm_dedupe", candidates=len(all_candidates), unique=len(representatives))
+
         def _call_llm(chunk: list[dict[str, Any]], system_prompt: str, user_prefix: str = "") -> LlmOutcome:
             if api_type == "anthropic":
                 return _llm_refine_anthropic(
@@ -690,18 +711,31 @@ def run(
                 system_prompt=system_prompt, user_prefix=user_prefix,
             )
 
-        if not all_candidates:
+        if not representatives:
             outcome = LlmOutcome(status="skipped")
             _log_step("llm_skip", reason="no non-Sup files to send")
         elif strategy == "unit":
             # Batched (#884): a single _LLM_FILE_CAP-sized call would silently
             # drop every file past the cap, since unit strategy has no
             # heuristic fallback to catch the rest (unlike "parts" below).
-            outcome = _run_unit_batches(all_candidates, _call_llm)
+            outcome = _run_unit_batches(representatives, _call_llm)
         else:
-            candidates = all_candidates[:_LLM_FILE_CAP]
+            candidates = representatives[:_LLM_FILE_CAP]
             _log_step("llm_batch", sending=len(candidates), of=len(files))
             outcome = _call_llm(candidates, _SYSTEM_PROMPT)
+
+        # Fan each representative's suggestion back out to every sibling that
+        # shared its cleaned name (a group of 1 is a no-op here).
+        expanded: list[dict[str, Any]] = []
+        rep_id_to_key = {members[0]["id"]: key for key, members in groups.items()}
+        for s in outcome.suggestions:
+            expanded.append(s)
+            key = rep_id_to_key.get(s.get("id"))
+            if key is None:
+                continue
+            for sibling in groups[key][1:]:
+                expanded.append({**s, "id": sibling["id"]})
+        outcome.suggestions = expanded
 
         for s in outcome.suggestions:
             fid = s.get("id")
