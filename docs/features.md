@@ -16,6 +16,7 @@ A tour of every screen and what it does.
 - [Bulk editor (tags & enrich)](#bulk-editor-tags--enrich)
 - [Import folder](#import-folder)
 - [Creators & per-creator rescan](#creators--per-creator-rescan)
+- [Reorganize library](#reorganize-library)
 - [Settings](#settings)
 - [AI & Integrations](#ai--integrations)
 - [Logging](#logging)
@@ -208,6 +209,10 @@ Click a card to open the model. From here you can:
 - Add the model to one or more **Collections** (see below).
 - See the model's **Location** on disk — copy the path, or (standalone only)
   click **Open folder** to jump to it in your file manager.
+- An **unorganized** icon appears next to the title if the model's current
+  folder no longer matches where [Reorganize](#reorganize-library) would put
+  it (e.g. after changing its creator or title) — hover it for a tooltip.
+  Nothing moves automatically; run Reorganize to actually move it.
 
 ### File parts, sup variants & label naming
 
@@ -221,9 +226,10 @@ auto-unfolding collapsed sections as needed. Changing a part's category
 applies to every file linked to it (the base file and all its sups).
 
 The **part type** field is a combobox: start typing to filter a list of
-standard suggestions (Body, Head, Arm, Base, Weapon, etc.), or type any
-custom category name. The dropdown appears automatically and can be dismissed
-with Escape; pressing Enter or clicking away commits the value.
+standard suggestions (listed alphabetically), or type any custom category
+name. The dropdown appears automatically, opening above the field instead of
+below when there isn't room underneath, and can be dismissed with Escape;
+pressing Enter or clicking away commits the value.
 
 **Settings → Preferences → Horizontal parts layout** (on by default) swaps the
 two-column model detail page for a full-width, scrollable files table below the
@@ -235,6 +241,36 @@ in this mode since the table serves the same purpose.
 on each file in the model detail view. Files group into collapsible sections and
 the 3D viewer organises its part picker by category — useful for complex
 multi-part kits.
+
+**Other Files** lists a model's non-STL, non-image files (PDFs, datapackage.json,
+etc.) — click one to download it. Each entry has a delete icon that removes it
+both from disk and from the listing (with a confirmation first); if the file was
+already gone from disk (e.g. deleted outside the app), this still clears the
+stale listing.
+
+**AI Organize** (button on the model detail page, requires an AI API assigned
+under [Settings → AI & Integrations](#ai--integrations)) suggests a category
+and cleaned-up name for every STL file. Clicking it first asks you to pick a
+strategy:
+
+- **Parts-based** — the standard approach. Fast keyword-based naming rules run
+  first, but the AI always runs too — even on files the naming rules already
+  resolved — since it can still catch a wrong guess or a name the rules got
+  half right. It only ever picks from the app's standard category list, so its
+  suggestions land in the same categories the Category combobox offers.
+- **Unit-based** — groups files by the in-game unit or character they belong
+  to instead of by physical part (e.g. every file for "Royal Guard 1" — head,
+  helmet, weapon — gets that as its category, not "Head"/"Weapon"). There's no
+  keyword pre-pass for this — it goes straight to the AI. Unit names are
+  derived per model, so they aren't limited to the standard category list;
+  each one is title-cased for consistency across a unit's files. Large kits
+  are sent to the AI in batches rather than one capped call, so every file
+  gets a suggestion, not just the first ~15 — later batches are told which
+  unit names earlier ones already settled on, so the same unit isn't renamed
+  partway through a big kit.
+
+Either way, review the suggestions in a modal before applying — nothing is
+written to a file until you confirm.
 
 ## 3D viewer
 
@@ -255,6 +291,8 @@ If the auto-chosen thumbnail is wrong (or missing), open a model and click
 - **From Folder** — every image found in that model's own folder, to pick from.
 - **From URL** — paste any image URL; the image is downloaded and stored
   locally, so it keeps working even when the site blocks hot-linking.
+- **Upload** — pick a PNG, JPEG, WebP, or GIF from your computer (max 15 MB);
+  it's applied as the thumbnail immediately.
 - **Clear** — remove the thumbnail entirely.
 
 To clear an image quickly without opening the dialog, use **Clear image** in a
@@ -335,7 +373,10 @@ creators. Use them for things like "Army project", "Current print queue", or
 Each collection card displays its cover image (if set), name, a truncated
 description (hover for the full text), and model count.
 
-- **Create** a collection with the **New Collection** button.
+- **Create** a collection with the **New Collection** button — a dialog asks
+  for a name and optional description, then immediately offers the cover-image
+  picker (URL, upload, or from one of the collection's models once you've
+  added some) so a new collection can be fully set up in one step.
 - **Edit name & description** — hover the card and click the pencil icon. The
   form shows a name field and a scrollable multi-line description box; press
   **Save** or click **Cancel**. Clearing the description removes it.
@@ -414,11 +455,19 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
    saved as a **source → library mapping**: every pack under that source inherits
    it, and the dropdown pre-fills (but stays editable) next time.
 4. **Enrich each pack** — expand a card to set **Creator, Character, Title, and
-   Tags**, then click **Import**. That ingests just that pack's folder as inbox
-   models and applies the metadata.
-5. **Move them in** — a **"Move N imported packs → {library}"** bar files the
-   imported packs into the destination library on disk (drift-checked, with
-   undo). The **inbox** flag clears as each pack lands.
+   Tags**, or paste a **Source URL** and click **Fetch** to pull title, creator,
+   tags, and gallery images from a Gumroad/Cults3D/MyMiniFactory product page
+   (the store — `source_site` — is recorded too). Then click **Import**. That
+   ingests just that pack's folder as inbox models, downloads any fetched
+   gallery images into the pack folder (concurrently, so a slow/unreachable
+   image doesn't block the rest), applies the metadata, and immediately moves
+   that pack into the destination library on disk (drift-checked, with undo)
+   — no separate move step. The **inbox** flag clears as the pack lands, and a
+   progress bar shows what's happening at each stage (downloading images,
+   then moving files).
+5. **"Move N imported packs → {library}"** — a batch bar for moving every
+   already-ingested-but-not-yet-moved pack under the current source in one go
+   (e.g. after a Quick import).
 
 ### Notes
 
@@ -427,15 +476,25 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
   loose files → an `_Inbox` creator) — handy when you don't need per-pack review.
 - **Inbox flag** — un-filed imports are marked **inbox**; the Library's
   `?is_inbox=1` filter shows just these.
-- The **move** step is **standalone-only** (Docker mounts are read-only) and
-  requires write mode; importing and enriching work everywhere. Packs missing a
-  creator/character (or otherwise blocked) are reported as skipped, not moved.
+- The **move** step follows the Reorganize page's slug-formatting setting
+  (**Settings → Library**) — with it on, an imported pack's creator/title
+  segments land already lowercase-and-hyphenated on disk, with no separate
+  manual Reorganize pass needed afterward.
+- The **move** step requires the **Reorganize Library** feature flag (**Settings →
+  Library**, off by default) and a writable destination — Docker mounts are
+  read-only, so moves are effectively standalone-only. Importing and enriching
+  work everywhere. Packs missing a creator/character (or otherwise blocked) are
+  reported as skipped, not moved.
 
 ## Creators & per-creator rescan
 
 The **Creators** page lists every creator with their model count. From here you
 can:
 
+- **Add Creator** — add a creator manually, before you've imported any of
+  their models. Its library folder is created automatically (using the
+  [Reorganize](#reorganize-library) destination template) so it's ready for
+  files to land in.
 - Click a creator to browse just their models in the Library.
 - **Rescan** a single creator — a targeted scan of just that creator's folder.
   Because you usually add models one creator at a time, this is much faster than
@@ -595,6 +654,19 @@ as the standalone HTML version.
 files on disk to match a folder template — by default
 `{creator}/{character}/{title}`.
 
+Destination templates support `{creator}`, `{character}`, `{scale}`, and
+`{title}`. `{scale}` comes from scanner-detected scale auto-tags such as `1:6`
+or `75mm`; if a template uses `{scale}` and a model has no detected scale, that
+row is marked unclassifiable until you resolve it.
+
+The destination template and a **"Lowercase, hyphenated directory names"**
+toggle live in **Settings → Library → Reorganize** — both are saved server-side,
+so they're shared with manual [creator](#creators--per-creator-rescan) folder
+creation and the model detail [unorganized indicator](#model-detail), not just
+this page. The toggle is on by default: every segment renders slug-style (e.g.
+`abe-3d` instead of `Abe 3D`), matching how imported folders are named. Turn it
+off to keep each segment's original casing and spacing.
+
 - **Preview first.** The page shows exactly where every model *would* move, one row
   each, with a move-kind chip (move / rename / case rename / in place / merge) and
   blocker chips for anything unsafe (collision, over-length or reserved name,
@@ -606,13 +678,27 @@ files on disk to match a folder template — by default
 - **Apply.** Tick the eligible rows and **Apply**. The app verifies each file
   hasn't changed since the preview (aborting the whole batch on any drift), moves
   files safely across drives, and repaths the index — packs and manual character
-  groupings are carried along, not orphaned.
+  groupings are carried along, not orphaned. A model's own gallery images
+  (thumbnail, library card image, and the rest of the gallery) move right
+  along with its STL files — only images inherited from a shared parent
+  folder (e.g. a character-level "renders/" dir also used by sibling
+  variants) are left in place, since moving those would break the path for
+  the other models still pointing at them. Once every tracked file has moved
+  out, the now-empty source folder is removed. If one of a model's tracked
+  images collides with an unrelated file already sitting at the destination
+  (e.g. leftover marketing art bundled with a download, or debris from an
+  earlier interrupted apply), that one image is skipped — logged, left where
+  it is — rather than failing the whole batch; an STL file collision still
+  aborts the batch exactly as before, since a wrong or missing STL is a real
+  problem, not an incidental extra image.
 - **Undo.** **Undo last apply** reverses the batch, skipping anything you've since
   edited or that now sits where a file would return.
 
-Apply moves real files, so it is **standalone-only and opt-in**: it stays disabled
-unless the deployment enables write mode and the destination is actually writable
-(the read-only Docker mount can never apply). Preview and resolve work everywhere.
+Apply moves real files, so it is **opt-in**: it stays disabled unless the
+**Reorganize Library** feature flag is turned on under **Settings → Library**
+(off by default) and the destination is actually writable (the read-only Docker
+mount can never apply, making apply effectively standalone-only). Preview and
+resolve work everywhere.
 
 ## Settings
 
@@ -648,13 +734,16 @@ entry has:
 - **Timeout** — how long (in seconds) to wait for a response from this
   endpoint before giving up. Defaults to **10s**, which suits a local Ollama.
   A **remote** Ollama loading a model for the first time (a "cold start") can
-  take 30–90s or more, so raise this for remote endpoints — e.g. `60`. The
-  setting is per-connection, so a fast local API and a slow remote one can each
-  have their own value.
+  take much longer, especially for a large model on modest hardware, so raise
+  this for remote endpoints — up to **600s** (10 minutes). The setting is
+  per-connection, so a fast local API and a slow remote one can each have
+  their own value.
 - **API key** — stored encrypted server-side, using a separate encryption key
   (`STL_SECRET_KEY`, see [Docker configuration](docker.md#optional-environment-variables))
   so a leaked database alone doesn't expose it. For Ollama and similar local
-  endpoints, a key is optional.
+  endpoints, a key is optional. Entered alongside the other fields and saved
+  together with **Add API**/**Save changes** — there's no separate save step
+  for the key.
 
 You can add multiple entries of the same type — for example, two Anthropic
 entries using different models for different tasks, or both a local Ollama
@@ -741,7 +830,7 @@ break them. All three take effect on the next scan.
 A safety cap protects against an over-broad ignore pattern: if a single scan
 would remove more than half your models, the cleanup is skipped and logged.
 
-## Backup, restore & reset
+## Backup, restore, repair & reset
 
 At the bottom of **Settings**, under **Data Management**, you can manage the
 library database itself. This only ever touches the *index* — your metadata,
@@ -751,6 +840,12 @@ never modified.**
 - **Download Backup** — saves a consistent snapshot of your whole library as a
   `.db` file (named with a timestamp). Keep this somewhere safe; it's the only
   way to recover your tags, favorites, and queue if something goes wrong.
+- **Check Health** - runs SQLite's integrity check against the live database
+  without changing it.
+- **Repair Database** - snapshots the database, runs a conservative SQLite
+  `REINDEX`, and verifies integrity again. This can fix index-only corruption;
+  deeper table corruption still requires restoring a clean backup or manual
+  recovery.
 - **Restore from Backup…** — pick a previously downloaded `.db` file to replace
   your current library with it. The file is validated first (it must be a real
   STL Studio backup), and an older backup's schema is brought up to date
@@ -758,10 +853,9 @@ never modified.**
 - **Delete All Data** — wipes the entire index back to empty. You'd then run a
   full scan to rebuild it.
 
-Restore and Delete are in a **Danger Zone**: each overwrites or erases your
-library and **cannot be undone**, so they make you type a confirmation phrase
-first. Download a backup before using either. (Neither can run while a scan is
-in progress.)
+Repair, Restore, and Delete require a confirmation phrase because they can modify
+or replace the index. Download a backup before using them. (They cannot run while
+a scan is in progress.)
 
 ## NSFW toggle
 

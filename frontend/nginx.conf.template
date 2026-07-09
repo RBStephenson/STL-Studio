@@ -27,8 +27,14 @@ server {
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     # LLM calls can take minutes — raise the timeout for all API requests.
-    proxy_read_timeout 300s;
-    proxy_send_timeout 300s;
+    # Must exceed the max per-connection AI request_timeout (600s, see
+    # AiApiConfigCreate.request_timeout) — otherwise nginx cuts the connection
+    # and returns a bare 504 before the backend's own (longer, intentional)
+    # timeout to a slow/remote endpoint even has a chance to fire. When that
+    # happens the backend's outbound call to the LLM keeps running underneath
+    # (and the LLM keeps generating) even though the browser already gave up.
+    proxy_read_timeout 630s;
+    proxy_send_timeout 630s;
   }
 
   # SPA with history-API fallback so client-side routes (e.g. /painting/shelf)

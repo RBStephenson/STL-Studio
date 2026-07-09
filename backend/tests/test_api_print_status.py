@@ -66,6 +66,17 @@ def test_set_status_to_printing(client, db):
     assert m.queue_position is None
 
 
+def test_set_status_updates_model_freshness(client, db):
+    m = setup(db)
+    before = m.updated_at
+
+    r = client.patch(f"/models/{m.id}/print-status", json={"status": "queued"})
+
+    assert r.status_code == 200
+    db.refresh(m)
+    assert m.updated_at > before
+
+
 def test_set_status_to_printed_increments_count(client, db):
     m = setup(db)
     r = client.patch(f"/models/{m.id}/print-status", json={"status": "printed"})

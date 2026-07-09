@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ReorganizeManifest
+from app.models import AppSetting, ReorganizeManifest
 from app.schemas import (
     ReorganizeApplyRequest,
     ReorganizeApplyResponse,
@@ -47,6 +47,7 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
                 content_hash=f.content_hash,
                 fingerprint_method=f.fingerprint_method,
                 missing_file=f.missing_file,
+                kind=f.kind,
             )
             for f in e.files
         ],
@@ -84,6 +85,22 @@ def _compute_stats(entries: list[ReorganizeEntry]) -> ReorganizeStats:
     )
 
 
+def _slugify_all(db: Session) -> bool:
+    """Whether every destination segment renders lowercase/hyphenated. Defaults
+    to on (matches AppSettingsRead.reorganize_slugify); a stored row overrides."""
+    row = db.get(AppSetting, "reorganize_slugify")
+    return bool(row.value) if row is not None else True
+
+
+def _stored_template(db: Session, template: str | None) -> str | None:
+    """An explicit template wins; otherwise fall back to the persisted setting
+    (build_manifest itself falls back further to the built-in default)."""
+    if template:
+        return template
+    row = db.get(AppSetting, "reorganize_template")
+    return row.value if row is not None else None
+
+
 def _build_and_persist(
     db: Session,
     template: str | None,
@@ -91,10 +108,18 @@ def _build_and_persist(
     overrides: dict[int, dict] | None,
     inbox_source: str | None = None,
     slugify_title: bool = False,
+    slugify_all: bool | None = None,
 ) -> ReorganizePreviewResponse:
+    """``slugify_all=None`` (the Reorganize page's own callers) defers to the
+    persisted reorganize_slugify setting. A caller with its own, independent
+    naming contract — e.g. import-apply, which must not silently follow
+    whatever the Reorganize page's slug preference happens to be set to —
+    passes an explicit True/False instead."""
+    resolved_slugify_all = _slugify_all(db) if slugify_all is None else slugify_all
     try:
         manifest = reorganize.build_manifest(
-            db, template, root_id, overrides, inbox_source, slugify_title=slugify_title
+            db, template, root_id, overrides, inbox_source,
+            slugify_title=slugify_title, slugify_all=resolved_slugify_all,
         )
     except ReorganizeTemplateError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -123,7 +148,7 @@ def preview(
     root_id: int | None = Query(None),
     db: Session = Depends(get_db),
 ) -> ReorganizePreviewResponse:
-    return _build_and_persist(db, template, root_id, None)
+    return _build_and_persist(db, _stored_template(db, template), root_id, None)
 
 
 @router.post("/preview", response_model=ReorganizePreviewResponse)
@@ -134,15 +159,15 @@ def preview_with_overrides(
     resolved manifest is a new persisted artifact with its own fingerprint
     baseline, so apply/undo verify against exactly what the user approved."""
     overrides = {mid: ov.model_dump(exclude_none=True) for mid, ov in body.overrides.items()}
-    return _build_and_persist(db, body.template, body.root_id, overrides)
+    return _build_and_persist(db, _stored_template(db, body.template), body.root_id, overrides)
 
 
 @router.post("/apply", response_model=ReorganizeApplyResponse)
 def apply(body: ReorganizeApplyRequest, db: Session = Depends(get_db)) -> ReorganizeApplyResponse:
     """Execute the selected entries of a previously-previewed manifest (#324, 2a).
 
-    Refused unless the deployment opts into write mode AND each destination probes
-    writable; aborts on drift; serialized against scans by the app-wide write lock.
+    Refused unless the `reorganize_enabled` feature flag is on AND each destination
+    probes writable; aborts on drift; serialized against scans by the app-wide write lock.
     """
     try:
         manifest_id = reorganize_apply._validate_manifest_id(body.manifest_id)
@@ -165,7 +190,7 @@ def undo(body: ReorganizeUndoRequest, db: Session = Depends(get_db)) -> Reorgani
     """Reverse a completed apply by replaying its undo log (#324, 2b).
 
     Idempotent and partial-apply safe: drifted / missing / origin-occupied files
-    are skipped and reported, never forced. Same write-mode guard and app-wide
+    are skipped and reported, never forced. Same feature-flag guard and app-wide
     lock as apply.
     """
     try:

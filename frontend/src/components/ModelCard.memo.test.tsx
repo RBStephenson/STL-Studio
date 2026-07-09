@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ReactNode } from "react";
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 import ModelCard from "./ModelCard";
 import { Model } from "../api/client";
+import { createTestQueryClient } from "../test/queryWrapper";
 
 // Render counter wired into a child so we can observe how many times the card's
 // body actually re-rendered. StarRating renders on every ModelCard render, so its
@@ -29,24 +32,36 @@ const MODEL = {
 describe("ModelCard memoization (#382)", () => {
   beforeEach(() => { starRenders = 0; });
 
+  const wrap = (node: ReactNode) => (
+    <QueryClientProvider client={createTestQueryClient()}>
+      <MemoryRouter>{node}</MemoryRouter>
+    </QueryClientProvider>
+  );
+
   it("does not re-render when props are unchanged", () => {
     // Stable references mirror what the Library passes: useCallback'd handlers and
     // stable state arrays. A parent re-render with identical props must be skipped.
     const onSelect = vi.fn();
     const allTags = [{ tag: "bust", count: 3 }];
+    const client = createTestQueryClient();
+    const wrapWithStableClient = (node: ReactNode) => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{node}</MemoryRouter>
+      </QueryClientProvider>
+    );
     const card = (
-      <MemoryRouter>
+      wrapWithStableClient(
         <ModelCard model={MODEL} selected={false} focused={false} onSelect={onSelect} allTagSuggestions={allTags} />
-      </MemoryRouter>
+      )
     );
     const { rerender } = render(card);
     expect(starRenders).toBe(1);
 
     // Same props, new parent render → memo skips the card.
     rerender(
-      <MemoryRouter>
+      wrapWithStableClient(
         <ModelCard model={MODEL} selected={false} focused={false} onSelect={onSelect} allTagSuggestions={allTags} />
-      </MemoryRouter>
+      )
     );
     expect(starRenders).toBe(1);
   });
@@ -54,22 +69,22 @@ describe("ModelCard memoization (#382)", () => {
   it("re-renders when selection changes", () => {
     const onSelect = vi.fn();
     const { rerender } = render(
-      <MemoryRouter><ModelCard model={MODEL} selected={false} onSelect={onSelect} /></MemoryRouter>
+      wrap(<ModelCard model={MODEL} selected={false} onSelect={onSelect} />)
     );
     expect(starRenders).toBe(1);
     rerender(
-      <MemoryRouter><ModelCard model={MODEL} selected={true} onSelect={onSelect} /></MemoryRouter>
+      wrap(<ModelCard model={MODEL} selected={true} onSelect={onSelect} />)
     );
     expect(starRenders).toBe(2);
   });
 
   it("re-renders when keyboard focus changes", () => {
     const { rerender } = render(
-      <MemoryRouter><ModelCard model={MODEL} focused={false} /></MemoryRouter>
+      wrap(<ModelCard model={MODEL} focused={false} />)
     );
     expect(starRenders).toBe(1);
     rerender(
-      <MemoryRouter><ModelCard model={MODEL} focused={true} /></MemoryRouter>
+      wrap(<ModelCard model={MODEL} focused={true} />)
     );
     expect(starRenders).toBe(2);
   });

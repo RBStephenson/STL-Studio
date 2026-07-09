@@ -77,7 +77,6 @@ vi.mock("../api/client", () => ({
         create: vi.fn(),
         update: vi.fn(),
         delete: vi.fn(),
-        setKey: vi.fn(),
         clearKey: vi.fn(),
         getModels: vi.fn().mockResolvedValue({ models: [] }),
       },

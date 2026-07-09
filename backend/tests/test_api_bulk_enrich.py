@@ -54,6 +54,30 @@ class TestBulkEnrich:
         assert a.source_url == url
         assert b.source_url == url
 
+    def test_sets_source_site_on_selected_models(self, client, db):
+        """Regression: source_site was silently dropped (missing from the
+        BulkEnrichUpdate schema) even when the frontend sent it after a
+        storefront scrape — the field was never wired end to end."""
+        _, a, b, c = _setup(db)
+        r = client.patch("/models/bulk/enrich", json={"ids": [a.id, b.id], "source_site": "cults3d"})
+        assert r.status_code == 200
+        db.refresh(a); db.refresh(b); db.refresh(c)
+        assert a.source_site == "cults3d"
+        assert b.source_site == "cults3d"
+        assert c.source_site is None  # unselected — unchanged
+
+    def test_source_site_only_is_a_valid_update(self, client, db):
+        _, a, _, _ = _setup(db)
+        r = client.patch("/models/bulk/enrich", json={"ids": [a.id], "source_site": "myminifactory"})
+        assert r.status_code == 200
+
+    def test_blank_source_site_clears_field(self, client, db):
+        _, a, _, _ = _setup(db)
+        client.patch("/models/bulk/enrich", json={"ids": [a.id], "source_site": "cults3d"})
+        client.patch("/models/bulk/enrich", json={"ids": [a.id], "source_site": "  "})
+        db.refresh(a)
+        assert a.source_site is None  # whitespace-only collapses to NULL
+
     def test_blank_notes_clears_field(self, client, db):
         _, a, _, _ = _setup(db)
         client.patch("/models/bulk/enrich", json={"ids": [a.id], "notes": "temp"})

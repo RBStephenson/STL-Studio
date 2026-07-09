@@ -19,18 +19,20 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models import Model, Creator, ModelTag, CollectionModel, ScanRoot, STLFile, VariantGroup
 from app.schemas import (
-    ModelList, ModelRead, ModelDetail, CreatorRead,
+    ModelList, ModelRead, ModelDetail, CreatorRead, CreatorCreate,
     ModelUpdate, STLFileUpdate, BulkDeleteRequest, BulkDeleteResponse,
-    AiOrganizeResult, AiOrganizeSuggestion,
+    AiOrganizeRequest, AiOrganizeResult, AiOrganizeSuggestion,
     AiOrganizeSuggestionPreview, AiOrganizePreviewResult,
-    AiOrganizeApplyRequest,
+    AiOrganizeApplyRequest, OtherFileDeleteRequest,
 )
 from app.services.path_guard import is_within_roots
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
 from app.services.variant_sync import propagate_source_url
 from app.services.tag_sync import sync_model_tags
-from app.services import ai_organize
+from app.services import ai_organize, reorganize
+from app.services.reorganize_template import ReorganizeTemplateError
 from app.services.scanner import resolve_creator
+from app.routers.reorganize import _stored_template, _slugify_all
 from app.config import settings
 from app.utils import utcnow, like_escape
 
@@ -360,6 +362,39 @@ def list_creators(db: Session = Depends(get_db)):
     return result
 
 
+@router.post("/creators", response_model=CreatorRead, status_code=201)
+def create_creator(body: CreatorCreate, db: Session = Depends(get_db)):
+    """Add a creator manually (no models required). Same case-insensitive
+    dedup rule as resolve_creator(), so this can't fork a duplicate row that a
+    later scan/enrich would otherwise resolve to. Best-effort creates the
+    creator's library directory on disk; a failure there never fails the
+    request, since the creator row is the source of truth."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Creator name is required")
+    existing = db.query(Creator).filter(func.lower(Creator.name) == name.lower()).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Creator '{existing.name}' already exists")
+
+    creator = Creator(name=name, source_url=body.source_url)
+    db.add(creator)
+    db.commit()
+    db.refresh(creator)
+
+    try:
+        target = reorganize.creator_scan_dir(
+            db, _stored_template(db, None), name, slugify=_slugify_all(db)
+        )
+        if target:
+            os.makedirs(target, exist_ok=True)
+    except (OSError, ReorganizeTemplateError) as e:
+        _log.warning("Could not create library directory for creator %r: %s", name, e)
+
+    result = CreatorRead.model_validate(creator)
+    result.model_count = 0
+    return result
+
+
 @router.get("/stats")
 def model_stats(db: Session = Depends(get_db)):
     # All counts ignore user-excluded models so the stats match the visible grid.
@@ -577,12 +612,12 @@ def _normalize_type(suggested: str, existing: list[str]) -> str:
 # these explanations instead.
 _LLM_STATUS_MESSAGES = {
     "disabled": "AI Organize has no API configured. Assign one under Settings → AI & Integrations.",
-    "skipped": "The AI wasn't called — every file was already resolved by naming rules, so there was nothing for it to refine.",
+    "skipped": "The AI wasn't called — this model has no files to send it (only pre-supported variants, which inherit their base file's category).",
 }
 
 
 @router.post("/{model_id}/ai-organize", response_model=AiOrganizePreviewResult)
-def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
+def ai_organize_model(model_id: int, body: AiOrganizeRequest = AiOrganizeRequest(), db: Session = Depends(get_db)):
     """Call the AI organizer and return suggestions without writing to the DB.
 
     Suggestions are only returned when the AI call actually succeeded
@@ -590,6 +625,12 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     substituted, so the client can trust that a non-empty response means the
     AI genuinely ran (#821). The client reviews, optionally edits, then calls
     /ai-organize/apply.
+
+    ``body.strategy`` (#878): "parts" (default) categorizes by physical part
+    type, snapped to the canonical list below. "unit" groups by in-game
+    unit/character instead — those suggestions are freeform (already
+    Pascal-cased by the service) and skip the canonical-list snap, since
+    there's no fixed list of unit names to snap to.
     """
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
@@ -606,17 +647,21 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     by_filename = {f.filename: f.id for f in model.stl_files}
     by_id_filename = {f.id: f.filename for f in model.stl_files}
 
-    # Collect all category names already in the library so AI suggestions snap
-    # to existing names (e.g. "Accessory" → "Accessories").
-    existing_types: list[str] = [
+    # Collect all category names AI suggestions should snap to: the app's
+    # fixed canonical list (so a fresh library still gets clean names, not
+    # just whatever's already stored) plus any custom categories already in
+    # this library (e.g. "Accessory" → "Accessories"). Unit-based suggestions
+    # are freeform and never snapped, so this list is unused for that strategy.
+    existing_types: list[str] = sorted(set(ai_organize.CANONICAL_PART_TYPES) | {
         row[0] for row in
         db.query(STLFile.part_type).filter(STLFile.part_type.isnot(None)).distinct().all()
-    ]
+    })
 
     try:
         organize_result = ai_organize.run(
             file_dicts, org_cfg.url, org_cfg.model, org_cfg.api_key,
             timeout=org_cfg.timeout, api_type=org_cfg.api_type, effort=org_cfg.effort,
+            strategy=body.strategy,
         )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
@@ -630,9 +675,10 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
         )
 
     raw = organize_result.suggestions
-    for s in raw:
-        if s.get("part_type"):
-            s["part_type"] = _normalize_type(s["part_type"], existing_types)
+    if body.strategy == "parts":
+        for s in raw:
+            if s.get("part_type"):
+                s["part_type"] = _normalize_type(s["part_type"], existing_types)
 
     previews: list[AiOrganizeSuggestionPreview] = []
     for s in raw:
@@ -804,6 +850,39 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
     return {"ok": True}
 
 
+@router.delete("/{model_id}/other-files")
+def delete_other_file(model_id: int, body: OtherFileDeleteRequest, db: Session = Depends(get_db)):
+    """Delete one entry from a model's other_files, on disk and in the DB (#880).
+
+    Best-effort on disk: a file that's already gone (e.g. removed outside the
+    app) still gets cleared from other_files rather than leaving a stale
+    listing behind — that mismatch is the actual bug this endpoint fixes.
+    """
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    other_files = model.other_files or []
+    if body.path not in other_files:
+        raise HTTPException(status_code=404, detail="File not found on this model")
+
+    roots = [os.path.realpath(r.path) for r in db.query(ScanRoot).all()]
+    if not is_within_roots(body.path, roots):
+        raise HTTPException(status_code=400, detail="File is outside known scan roots")
+
+    try:
+        os.remove(body.path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete file: {exc}")
+
+    model.other_files = [p for p in other_files if p != body.path]
+    model.updated_at = utcnow()
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/{model_id}/neighbors")
 def get_neighbors(
     model_id: int,
@@ -876,4 +955,15 @@ def get_model(model_id: int, db: Session = Depends(get_db)):
     result = ModelDetail.model_validate(model)
     result.native_folder_path = settings.to_native_path(model.folder_path)
     result.collection_ids = [link.collection_id for link in model.collection_links]
+
+    try:
+        template = _stored_template(db, None)
+        manifest = reorganize.build_manifest(
+            db, template, model_ids=[model.id], slugify_all=_slugify_all(db)
+        )
+        entry = manifest.entries[0] if manifest.entries else None
+        result.unorganized = bool(entry and entry.kind != "in_place")
+    except ReorganizeTemplateError as e:
+        _log.warning("Could not compute organize status for model %s: %s", model_id, e)
+
     return result

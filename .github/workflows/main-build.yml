@@ -1,0 +1,58 @@
+name: Main Build
+
+# Publishes rolling, non-semver build outputs from main. This gives testers a
+# stable download location without turning every commit into a GitHub Release.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: main-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Tag name is "rolling", not "main-build": once a tag has been used by a
+      # GitHub Immutable Release it can never be reused, even after deleting
+      # the release, so a burned tag name can't come back into service.
+      - name: Move rolling build tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f rolling "$GITHUB_SHA"
+          git push --force origin refs/tags/rolling
+
+      - name: Create or update rolling prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          notes="Rolling build from main at ${GITHUB_SHA}. This is not a versioned release."
+          if gh release view rolling >/dev/null 2>&1; then
+            gh release edit rolling --draft=false --prerelease --title "Main Build" --notes "$notes"
+          else
+            gh release create rolling --prerelease --title "Main Build" --notes "$notes"
+          fi
+
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: write
+    with:
+      release: true
+      tag: rolling
+      ref: ${{ github.sha }}
+      release_draft: false
+      release_prerelease: true
+      artifact_retention_days: 30

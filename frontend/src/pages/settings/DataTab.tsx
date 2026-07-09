@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
-import { Database, Download, Upload, Trash2, ShieldAlert, AlertCircle } from "lucide-react";
+import { AlertCircle, Database, Download, LoaderCircle, ShieldAlert, ShieldCheck, Trash2, Upload, Wrench } from "lucide-react";
 import { api } from "../../api/client";
+import type { DatabaseHealth } from "../../api/database";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
 import { errMsg } from "../../utils/err";
@@ -9,11 +10,12 @@ const ACK_PHRASE = "ACKNOWLEDGED";
 
 export default function DataTab() {
   const { success, error, flash } = useSettingsFlash();
-  const [busy, setBusy] = useState<null | "backup" | "restore" | "reset">(null);
-  const [danger, setDanger] = useState<null | "restore" | "reset">(null);
+  const [busy, setBusy] = useState<null | "backup" | "health" | "repair" | "restore" | "reset">(null);
+  const [danger, setDanger] = useState<null | "repair" | "restore" | "reset">(null);
   const [ack, setAck] = useState("");
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [dangerError, setDangerError] = useState<string | null>(null);
+  const [health, setHealth] = useState<DatabaseHealth | null>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
 
   const backup = async () => {
@@ -42,16 +44,56 @@ export default function DataTab() {
     setDanger("restore");
   };
 
+  const checkHealth = async () => {
+    setBusy("health");
+    try {
+      const result = await api.database.health();
+      setHealth(result);
+      flash(result.ok ? "Database health check passed" : "Database corruption detected", result.ok ? "ok" : "err");
+    } catch (e) {
+      flash(errMsg(e) || "Health check failed", "err");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openRepair = () => {
+    setAck("");
+    setRestoreFile(null);
+    setDanger("repair");
+  };
+
   const closeDanger = () => { setDanger(null); setAck(""); setRestoreFile(null); setDangerError(null); };
 
   const confirmDanger = async () => {
     if (ack.trim().toUpperCase() !== ACK_PHRASE) return;
-    if (danger === "restore" && restoreFile) {
+    if (danger === "repair") {
+      setBusy("repair");
+      setDangerError(null);
+      try {
+        const result = await api.database.repair();
+        setHealth({ ok: result.ok, status: result.status, detail: result.detail });
+        closeDanger();
+        flash(
+          result.repaired ? "Database repaired" : result.ok ? "Database is already healthy" : "Database repair did not fully resolve corruption",
+          result.ok ? "ok" : "err",
+        );
+      } catch (e) {
+        setDangerError(errMsg(e) || "Repair failed");
+      } finally {
+        setBusy(null);
+      }
+    } else if (danger === "restore" && restoreFile) {
       setBusy("restore");
       setDangerError(null);
       try {
-        await api.database.restore(restoreFile);
+        const result = await api.database.restore(restoreFile);
         closeDanger();
+        if (result.warning) {
+          flash(`Database restored; ${result.warning} Reloading...`, "ok");
+          setTimeout(() => window.location.reload(), 1200);
+          return;
+        }
         flash("Database restored — reloading…", "ok");
         setTimeout(() => window.location.reload(), 1200);
       } catch (e) {
@@ -98,6 +140,56 @@ export default function DataTab() {
             {busy === "backup" ? "Preparing backup…" : "Download Backup"}
           </button>
 
+          <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950/40 p-4">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+              <ShieldCheck size={14} /> Database Health
+            </p>
+            <p className="text-xs text-gray-500 mb-3">
+              Run a SQLite integrity check or attempt a safe index repair. Repair snapshots the database first and does not touch STL files.
+            </p>
+            {busy === "health" ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mb-3 flex items-center gap-2 rounded-lg border border-sky-900/70 bg-sky-950/20 px-3 py-2 text-xs text-sky-300"
+              >
+                <LoaderCircle size={14} className="animate-spin shrink-0" />
+                <span>
+                  <span className="font-semibold">Checking database...</span> This can take a minute on a large library.
+                </span>
+              </div>
+            ) : health && (
+              <div
+                className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
+                  health.ok
+                    ? "border-emerald-900/70 bg-emerald-950/20 text-emerald-300"
+                    : "border-red-900/70 bg-red-950/20 text-red-300"
+                }`}
+              >
+                <span className="font-semibold">{health.ok ? "Healthy" : "Corruption detected"}:</span>{" "}
+                <span className="font-mono break-words">{health.detail}</span>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={checkHealth}
+                disabled={busy !== null}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ShieldCheck size={15} />
+                {busy === "health" ? "Checking..." : "Check Health"}
+              </button>
+              <button
+                onClick={openRepair}
+                disabled={busy !== null || health?.ok !== false}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-950/50 hover:bg-amber-900/50 border border-amber-800 text-amber-200 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Wrench size={15} />
+                {busy === "repair" ? "Repairing..." : "Repair Database"}
+              </button>
+            </div>
+          </div>
+
           <div className="mt-4 rounded-lg border border-red-900/70 bg-red-950/20 p-4">
             <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-red-400 mb-1">
               <ShieldAlert size={14} /> Danger Zone
@@ -138,9 +230,15 @@ export default function DataTab() {
           <div className="w-full max-w-md rounded-xl border border-red-800 bg-gray-900 p-6 shadow-2xl">
             <h3 className="flex items-center gap-2 text-lg font-bold text-red-300 mb-2">
               <ShieldAlert size={20} />
-              {danger === "restore" ? "Restore database?" : "Delete all data?"}
+              {danger === "repair" ? "Repair database?" : danger === "restore" ? "Restore database?" : "Delete all data?"}
             </h3>
-            {danger === "restore" ? (
+            {danger === "repair" ? (
+              <p className="text-sm text-gray-300 mb-4">
+                This will snapshot your current database, run SQLite <span className="font-mono text-gray-200">REINDEX</span>,
+                and verify the result with an integrity check. It is intended for index corruption only; deeper corruption may
+                still require manual recovery from backup.
+              </p>
+            ) : danger === "restore" ? (
               <p className="text-sm text-gray-300 mb-4">
                 This will <strong className="text-red-300">overwrite your entire current library</strong> with
                 the contents of{" "}
@@ -183,8 +281,8 @@ export default function DataTab() {
                 disabled={busy !== null || ack.trim().toUpperCase() !== ACK_PHRASE}
                 className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {busy === "restore" ? "Restoring…" : busy === "reset" ? "Deleting…"
-                  : danger === "restore" ? "Overwrite Library" : "Delete Everything"}
+                {busy === "repair" ? "Repairing..." : busy === "restore" ? "Restoring…" : busy === "reset" ? "Deleting…"
+                  : danger === "repair" ? "Repair Database" : danger === "restore" ? "Overwrite Library" : "Delete Everything"}
               </button>
             </div>
           </div>

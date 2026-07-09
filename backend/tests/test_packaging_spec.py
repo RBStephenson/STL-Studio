@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_pyinstaller_spec_bundles_truststore_platform_modules():
-    spec = Path(__file__).resolve().parents[2] / "packaging" / "stl-library.spec"
+    spec = Path(__file__).resolve().parents[2] / "packaging" / "stl-studio.spec"
     text = spec.read_text(encoding="utf-8")
 
     for module in (

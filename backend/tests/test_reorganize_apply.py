@@ -17,13 +17,13 @@ from app.config import settings
 from app.models import PackOverride
 from app.services import write_lock
 from app.services.reorganize_apply import ApplyError, _safe_move, apply_manifest
-from tests.conftest import make_creator, make_model, make_stl_file
+from tests.conftest import make_creator, make_model, make_stl_file, set_reorganize_enabled
 
 
 @pytest.fixture
-def write_mode(tmp_path, monkeypatch):
+def write_mode(tmp_path, monkeypatch, db):
     """Enable apply + point the data dir (undo log / probe) at a writable temp."""
-    monkeypatch.setattr(settings, "reorganize_write_enabled", True)
+    set_reorganize_enabled(db, True)
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path}/stl.db")
     return tmp_path
 
@@ -59,8 +59,8 @@ def _preview(client):
 
 
 class TestWriteModeGuard:
-    def test_apply_refused_when_disabled(self, client, db, tmp_path, monkeypatch):
-        monkeypatch.setattr(settings, "reorganize_write_enabled", False)
+    def test_apply_refused_when_disabled(self, client, db, tmp_path):
+        set_reorganize_enabled(db, False)
         _root(db, tmp_path)
         _seed(db, tmp_path)
         mid = _preview(client)["manifest_id"]
@@ -93,6 +93,25 @@ class TestApplyHappyPath:
         assert os.path.exists(data["undo_log"])
         lines = [json.loads(l) for l in open(data["undo_log"]) if l.strip()]
         assert len(lines) == 1 and lines[0]["status"] == "done"
+
+
+class TestOnProgress:
+    """on_progress(moved, total) is purely additive — no callback means no
+    behavior change (covered above); with one, it must fire once per moved
+    file with an accurate running count (STUDIO-XX, import-apply progress bar)."""
+
+    def test_on_progress_called_once_per_file_with_accurate_counts(self, db, tmp_path, write_mode, client):
+        _root(db, tmp_path)
+        m1 = _seed(db, tmp_path, character="Joker", title="Bust")
+        m2 = _seed(db, tmp_path, character="Riddler", title="Cane")
+        mid = _preview(client)["manifest_id"]
+
+        calls: list[tuple[int, int]] = []
+        result = apply_manifest(
+            db, mid, [m1.id, m2.id], on_progress=lambda moved, total: calls.append((moved, total)),
+        )
+        assert result.moved_files == 2
+        assert calls == [(1, 2), (2, 2)]
 
 
 class TestInboxEndToEnd:
@@ -353,12 +372,12 @@ class TestUndo:
         resp = client.post("/reorganize/undo", json={"manifest_id": mid})
         assert resp.status_code == 404
 
-    def test_undo_refused_when_disabled(self, client, db, tmp_path, write_mode, monkeypatch):
+    def test_undo_refused_when_disabled(self, client, db, tmp_path, write_mode):
         _root(db, tmp_path)
         m = _seed(db, tmp_path)
         mid = _preview(client)["manifest_id"]
         _apply(client, mid, [m.id])
-        monkeypatch.setattr(settings, "reorganize_write_enabled", False)
+        set_reorganize_enabled(db, False)
         resp = client.post("/reorganize/undo", json={"manifest_id": mid})
         assert resp.status_code == 403
 
@@ -440,3 +459,168 @@ class TestOverrideRepath:
         assert resp.status_code == 200
         db.refresh(m)
         assert m.no_group is True
+
+
+class TestImageMoves:
+    """A model's own gallery images move alongside its STL files (previously
+    only STLs moved, leaving images — and therefore the source folder —
+    behind)."""
+
+    def _seed_with_image(self, db, tmp_path, set_primary=False):
+        from app.models import Creator
+        folder = tmp_path / "_inbox" / "Bust"
+        folder.mkdir(parents=True, exist_ok=True)
+        stl = folder / "head.stl"
+        stl.write_bytes(b"solid\nendsolid\n")
+        img = folder / "cover.jpg"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        creator = db.query(Creator).filter_by(name="Abe3D").first() or make_creator(db, name="Abe3D")
+        m = make_model(db, creator, name="Bust", character="Joker")
+        m.folder_path = str(folder).replace("\\", "/")
+        m.title = "Bust"
+        img_path = str(img).replace("\\", "/")
+        m.image_paths = [img_path]
+        m.thumbnail_path = img_path
+        if set_primary:
+            m.primary_image_path = img_path
+        db.commit()
+        make_stl_file(db, m, filename="head.stl", path=str(stl).replace("\\", "/"))
+        db.commit()
+        return m, img_path
+
+    def test_image_moves_with_stl_and_repaths_model_fields(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path, set_primary=True)
+        mid = _preview(client)["manifest_id"]
+
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["moved_files"] == 2  # stl + image
+
+        db.refresh(m)
+        assert not os.path.exists(img_path)
+        assert os.path.exists(m.thumbnail_path)
+        assert m.thumbnail_path in m.image_paths
+        assert m.primary_image_path == m.thumbnail_path
+        # The old import folder is now genuinely empty and gets pruned.
+        assert not os.path.isdir(os.path.dirname(img_path))
+
+    def test_stale_missing_image_does_not_block_eligibility(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path)
+        os.remove(img_path)  # gone before preview, e.g. a stale gallery entry
+        preview = _preview(client)
+        entry = preview["entries"][0]
+
+        assert entry["eligible"] is True
+        assert entry["missing_files_on_disk"] is False
+        assert len(entry["files"]) == 1  # only the STL — the missing image is skipped
+
+    def test_shared_image_outside_model_folder_is_left_alone(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, _ = self._seed_with_image(db, tmp_path)
+        # A "character"-level image the model's gallery inherited from a
+        # shared parent folder — not owned by this model, must not be moved
+        # (another sibling variant could still be pointing at it).
+        shared_img = tmp_path / "_inbox" / "shared.jpg"
+        shared_img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        shared_path = str(shared_img).replace("\\", "/")
+        m.image_paths = [*m.image_paths, shared_path]
+        db.commit()
+
+        mid = _preview(client)["manifest_id"]
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 200, resp.text
+
+        assert shared_img.exists()
+        db.refresh(m)
+        assert shared_path in m.image_paths
+
+    def test_undo_restores_image_file_and_model_fields(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path)
+        mid = _preview(client)["manifest_id"]
+        _apply(client, mid, [m.id])
+        db.refresh(m)
+        moved_thumb = m.thumbnail_path
+        assert os.path.exists(moved_thumb)
+
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["reversed_files"] == 2  # stl + image
+        assert not os.path.exists(moved_thumb)
+        assert os.path.exists(img_path)
+
+        db.refresh(m)
+        assert m.thumbnail_path == img_path
+        assert img_path in m.image_paths
+
+
+class TestImageCollisionSkip:
+    """A collision on a model's own tracked image (not one of its STL files)
+    is skipped rather than failing the whole batch — the file might be
+    incidental marketing art bundled with a download, or debris from an
+    earlier interrupted apply; unlike an STL collision, it isn't worth
+    aborting an otherwise-successful move over (#884)."""
+
+    def _seed_with_image(self, db, tmp_path):
+        from app.models import Creator
+        folder = tmp_path / "_inbox" / "Bust"
+        folder.mkdir(parents=True, exist_ok=True)
+        stl = folder / "head.stl"
+        stl.write_bytes(b"solid\nendsolid\n")
+        img = folder / "carousel.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        creator = db.query(Creator).filter_by(name="Abe3D").first() or make_creator(db, name="Abe3D")
+        m = make_model(db, creator, name="Bust", character="Joker")
+        m.folder_path = str(folder).replace("\\", "/")
+        m.title = "Bust"
+        img_path = str(img).replace("\\", "/")
+        m.image_paths = [img_path]
+        db.commit()
+        make_stl_file(db, m, filename="head.stl", path=str(stl).replace("\\", "/"))
+        db.commit()
+        return m, img_path
+
+    def test_colliding_image_is_skipped_stl_still_moves(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path)
+        preview = _preview(client)
+        entry = preview["entries"][0]
+        mid = preview["manifest_id"]
+        image_file = next(f for f in entry["files"] if f["kind"] == "image")
+        stray_dest = image_file["proposed_path"]
+        os.makedirs(os.path.dirname(stray_dest), exist_ok=True)
+        with open(stray_dest, "wb") as fh:
+            fh.write(b"unrelated stray file")
+
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["moved_files"] == 1  # only the STL — the image was skipped
+
+        db.refresh(m)
+        assert os.path.exists(img_path)  # left in place, unmoved
+        assert img_path in m.image_paths  # DB unchanged for the skipped image
+        with open(stray_dest, "rb") as fh:
+            assert fh.read() == b"unrelated stray file"  # stray file untouched
+
+    def test_stl_collision_still_hard_fails_the_batch(self, client, db, tmp_path, write_mode):
+        """The leniency above is image-only — an STL file colliding with an
+        existing destination still aborts the whole batch, exactly as before."""
+        _root(db, tmp_path)
+        m, img_path = self._seed_with_image(db, tmp_path)
+        preview = _preview(client)
+        entry = preview["entries"][0]
+        mid = preview["manifest_id"]
+        stl_file = next(f for f in entry["files"] if f["kind"] == "stl")
+        stray_dest = stl_file["proposed_path"]
+        os.makedirs(os.path.dirname(stray_dest), exist_ok=True)
+        with open(stray_dest, "wb") as fh:
+            fh.write(b"unrelated stray file")
+
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 500
+        assert "already exists" in resp.json()["detail"]["message"]
+        db.refresh(m)
+        assert os.path.exists(img_path)  # nothing moved — image untouched too
+        assert m.folder_path == str(tmp_path / "_inbox" / "Bust").replace("\\", "/")

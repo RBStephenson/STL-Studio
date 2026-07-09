@@ -17,6 +17,7 @@ interface DraftConfig {
   model: string;
   effort: string;
   request_timeout: number;
+  api_key: string;
 }
 
 const EMPTY_DRAFT: DraftConfig = {
@@ -26,6 +27,7 @@ const EMPTY_DRAFT: DraftConfig = {
   model: "",
   effort: "low",
   request_timeout: 10,
+  api_key: "",
 };
 
 const ANTHROPIC_MODELS = [
@@ -53,9 +55,6 @@ function ConfigForm({
   onFetchModels,
   keySet,
   keyHint,
-  keyDraft,
-  onKeyDraftChange,
-  onSaveKey,
   onClearKey,
   editingKey,
   onEditKey,
@@ -72,9 +71,6 @@ function ConfigForm({
   onFetchModels: (url: string) => void;
   keySet: boolean;
   keyHint: string | null;
-  keyDraft: string;
-  onKeyDraftChange: (v: string) => void;
-  onSaveKey: () => void;
   onClearKey: () => void;
   editingKey: boolean;
   onEditKey: () => void;
@@ -209,15 +205,12 @@ function ConfigForm({
           <div className="flex items-center gap-2">
             <input
               type="password"
-              value={keyDraft}
-              onChange={(e) => onKeyDraftChange(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") onSaveKey(); }}
+              value={draft.api_key}
+              onChange={(e) => onChange({ api_key: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Enter") onSubmit(); }}
               placeholder={draft.api_type === "anthropic" ? "sk-ant-…" : "sk-… or any string"}
               className={`flex-1 max-w-sm ${INPUT}`}
             />
-            <button type="button" onClick={onSaveKey} disabled={!keyDraft.trim()} className={BTN_PRIMARY}>
-              Save key
-            </button>
             {keySet && (
               <button type="button" onClick={onCancelKey} className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2">
                 Cancel
@@ -264,11 +257,11 @@ function ConfigCard({
     model: config.model,
     effort: config.effort ?? "low",
     request_timeout: config.request_timeout ?? 10,
+    api_key: "",
   });
   const [modelList, setModelList] = useState<string[]>([]);
   const [modelListLoading, setModelListLoading] = useState(false);
   const [modelListError, setModelListError] = useState<string | null>(null);
-  const [keyDraft, setKeyDraft] = useState("");
   const [editingKey, setEditingKey] = useState(false);
   const [localConfig, setLocalConfig] = useState(config);
 
@@ -299,27 +292,16 @@ function ConfigCard({
         model: draft.model,
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
         request_timeout: draft.request_timeout,
+        ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
       });
       setLocalConfig(updated);
       onUpdated(updated);
+      setDraft((prev) => ({ ...prev, api_key: "" }));
+      setEditingKey(false);
       setExpanded(false);
       flash(`"${updated.name}" updated`, "ok");
     } catch (e) {
       flash(errMsg(e) || "Could not save", "err");
-    }
-  };
-
-  const saveKey = async () => {
-    if (!keyDraft.trim()) return;
-    try {
-      const updated = await api.settings.aiApis.setKey(localConfig.id, keyDraft.trim());
-      setLocalConfig(updated);
-      onUpdated(updated);
-      setKeyDraft("");
-      setEditingKey(false);
-      flash("Key saved", "ok");
-    } catch (e) {
-      flash(errMsg(e) || "Could not save key", "err");
     }
   };
 
@@ -403,13 +385,10 @@ function ConfigCard({
         onFetchModels={fetchModels}
         keySet={localConfig.key_set}
         keyHint={localConfig.key_hint}
-        keyDraft={keyDraft}
-        onKeyDraftChange={setKeyDraft}
-        onSaveKey={saveKey}
         onClearKey={clearKey}
         editingKey={editingKey}
         onEditKey={() => setEditingKey(true)}
-        onCancelKey={() => { setEditingKey(false); setKeyDraft(""); }}
+        onCancelKey={() => { setEditingKey(false); setDraft((prev) => ({ ...prev, api_key: "" })); }}
         onSubmit={save}
         onCancel={() => setExpanded(false)}
         submitLabel="Save changes"
@@ -430,13 +409,9 @@ function AddConfigCard({
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<DraftConfig>(EMPTY_DRAFT);
-  const [pendingId, setPendingId] = useState<number | null>(null);
   const [modelList, setModelList] = useState<string[]>([]);
   const [modelListLoading, setModelListLoading] = useState(false);
   const [modelListError, setModelListError] = useState<string | null>(null);
-  const [keyDraft, setKeyDraft] = useState("");
-  const [editingKey, setEditingKey] = useState(false);
-  const [pendingConfig, setPendingConfig] = useState<AiApiConfig | null>(null);
 
   const fetchModels = async (url: string) => {
     if (!url.trim() || draft.api_type !== "openai") return;
@@ -463,37 +438,12 @@ function AddConfigCard({
         model: draft.model,
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
         request_timeout: draft.request_timeout,
+        ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
       });
-      setPendingId(created.id);
-      setPendingConfig(created);
-      flash(`"${created.name}" added — set a key if required`, "ok");
+      flash(`"${created.name}" added`, "ok");
       onCreated(created);
     } catch (e) {
       flash(errMsg(e) || "Could not create", "err");
-    }
-  };
-
-  const saveKey = async () => {
-    if (!keyDraft.trim() || !pendingId) return;
-    try {
-      const updated = await api.settings.aiApis.setKey(pendingId, keyDraft.trim());
-      setPendingConfig(updated);
-      setKeyDraft("");
-      setEditingKey(false);
-      flash("Key saved", "ok");
-    } catch (e) {
-      flash(errMsg(e) || "Could not save key", "err");
-    }
-  };
-
-  const clearKey = async () => {
-    if (!pendingId) return;
-    try {
-      const updated = await api.settings.aiApis.clearKey(pendingId);
-      setPendingConfig(updated);
-      flash("Key cleared", "ok");
-    } catch (e) {
-      flash(errMsg(e) || "Could not clear key", "err");
     }
   };
 
@@ -507,18 +457,15 @@ function AddConfigCard({
         modelListLoading={modelListLoading}
         modelListError={modelListError}
         onFetchModels={fetchModels}
-        keySet={pendingConfig?.key_set ?? false}
-        keyHint={pendingConfig?.key_hint ?? null}
-        keyDraft={keyDraft}
-        onKeyDraftChange={setKeyDraft}
-        onSaveKey={saveKey}
-        onClearKey={clearKey}
-        editingKey={editingKey}
-        onEditKey={() => setEditingKey(true)}
-        onCancelKey={() => { setEditingKey(false); setKeyDraft(""); }}
+        keySet={false}
+        keyHint={null}
+        onClearKey={() => {}}
+        editingKey={false}
+        onEditKey={() => {}}
+        onCancelKey={() => {}}
         onSubmit={create}
         onCancel={onCancel}
-        submitLabel={pendingId ? "Saved ✓" : "Add API"}
+        submitLabel="Add API"
       />
     </div>
   );

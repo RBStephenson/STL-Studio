@@ -35,7 +35,7 @@ const EXPECTED_SLICE_METHODS: Record<string, string[]> = {
   ],
   settings: ["get", "update", "upsertPreset", "deletePreset", "reloadEnv"],
   painting: ["colorMatch", "colorMatchPoint"],
-  database: ["backup", "restore", "reset"],
+  database: ["backup", "restore", "health", "repair", "reset"],
   collections: [
     "list", "create", "getModels", "addModel", "removeModel", "update",
     "delete", "bulkAddModels",

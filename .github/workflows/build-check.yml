@@ -1,11 +1,10 @@
 name: Build Check
 
 # Verifies the standalone executables still build on Windows and Linux.
-# Runs on PRs to main so packaging breakage is caught before it reaches a release.
+# Runs on PRs to main so packaging breakage is caught before it reaches main.
+# Main pushes are handled by main-build.yml, which publishes the rolling build.
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
   workflow_dispatch:
 

@@ -152,6 +152,26 @@ class TestGalleryImages:
         assert str(removed) not in model.image_paths
         assert str(kept) in model.image_paths
 
+    def test_scan_ignores_hidden_directories(self, db, tmp_path):
+        """A hidden dot-directory (e.g. some other tool's own derivative-
+        thumbnail cache) must never be walked into for images, and never
+        become a model of its own (#888-follow-up)."""
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Knight"
+        _stl(model_dir)
+        _img(model_dir, "real_photo.jpg")
+        hidden = model_dir / ".othertool" / "derivatives" / "real_photo.jpg"
+        hidden.mkdir(parents=True)
+        (hidden / "carousel.jpg").write_bytes(b"\x89PNG\r\n")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert len(models) == 1   # the hidden dir never became a model of its own
+        model = models[0]
+        assert model.image_paths == [str(model_dir / "real_photo.jpg")]
+
     def test_scan_preserves_remote_and_user_added_gallery_paths(self, db, tmp_path):
         creator_dir = tmp_path / "Creator"
         model_dir = creator_dir / "Knight"

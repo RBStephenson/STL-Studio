@@ -104,6 +104,41 @@ describe("ImagePicker – From URL tab", () => {
   });
 });
 
+describe("ImagePicker – Upload tab", () => {
+  it("uploads the chosen file and calls onApplied on success", async () => {
+    const { onApplied } = renderPicker();
+
+    await userEvent.click(screen.getByRole("button", { name: /upload/i }));
+    const file = new File(["fake-bytes"], "photo.png", { type: "image/png" });
+
+    fetchMock.mockImplementationOnce(() => jsonResponse({ ok: true, path: "/d/7.png" }));
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, file);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/models/7/thumbnail/upload",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(onApplied).toHaveBeenCalled();
+  });
+
+  it("shows the backend error detail when the upload fails", async () => {
+    const { onApplied } = renderPicker();
+
+    await userEvent.click(screen.getByRole("button", { name: /upload/i }));
+    const file = new File(["fake-bytes"], "photo.png", { type: "image/png" });
+
+    fetchMock.mockImplementationOnce(() =>
+      jsonResponse({ detail: "Image too large (max 15 MB)" }, false)
+    );
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, file);
+
+    expect(await screen.findByText("Image too large (max 15 MB)")).toBeInTheDocument();
+    expect(onApplied).not.toHaveBeenCalled();
+  });
+});
+
 describe("ImagePicker – From Folder tab", () => {
   it("re-fetches with ?refresh=true when Refresh is clicked", async () => {
     renderPicker();
@@ -159,6 +194,30 @@ describe("ImagePicker – group image-list cache (#303)", () => {
     await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
 
     expect(await screen.findByTitle("new.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(2);
+  });
+
+  it("drops the sibling cache after applying a thumbnail", async () => {
+    const cacheKey = "9:CacheDrop";
+    fetchMock.mockImplementation((url: string) =>
+      url.startsWith("/api/files/model-images/") ? jsonResponse(oneImage) : jsonResponse({}),
+    );
+
+    const first = renderPicker(vi.fn(), { modelId: 7, cacheKey });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(1);
+    first.unmount();
+
+    const second = renderPicker(vi.fn(), { modelId: 8, cacheKey });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
+    expect(imageListCalls()).toBe(1);
+
+    await userEvent.click(screen.getByTitle("a.png"));
+    await userEvent.click(screen.getByRole("button", { name: /set as thumbnail/i }));
+    second.unmount();
+
+    renderPicker(vi.fn(), { modelId: 9, cacheKey });
+    expect(await screen.findByTitle("a.png")).toBeInTheDocument();
     expect(imageListCalls()).toBe(2);
   });
 

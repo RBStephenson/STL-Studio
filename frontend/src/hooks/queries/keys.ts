@@ -10,6 +10,7 @@ export const queryKeys = {
   models: {
     all: ["models"] as const,
     detail: (id: number) => ["models", "detail", id] as const,
+    listAll: ["models", "list"] as const,
     // Paginated/filtered Library grid. Keyed on the full param object so any
     // filter/page/sort change is a distinct cache entry.
     list: (params: Record<string, string | number | boolean>) =>

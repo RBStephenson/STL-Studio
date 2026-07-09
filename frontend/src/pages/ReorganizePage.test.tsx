@@ -96,6 +96,7 @@ describe("ReorganizePage", () => {
     // Expand the ineligible entry.
     fireEvent.click(await screen.findByText("Mystery"));
     expect(await screen.findByLabelText("character for Mystery")).toBeInTheDocument();
+    expect(await screen.findByLabelText("scale for Mystery")).toBeInTheDocument();
     // The eligible entry exposes a selection checkbox; the ineligible one doesn't.
     expect(screen.queryByLabelText("Select Mystery")).not.toBeInTheDocument();
   });
