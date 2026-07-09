@@ -612,7 +612,7 @@ def _normalize_type(suggested: str, existing: list[str]) -> str:
 # these explanations instead.
 _LLM_STATUS_MESSAGES = {
     "disabled": "AI Organize has no API configured. Assign one under Settings → AI & Integrations.",
-    "skipped": "The AI wasn't called — every file was already resolved by naming rules, so there was nothing for it to refine.",
+    "skipped": "The AI wasn't called — this model has no files to send it (only pre-supported variants, which inherit their base file's category).",
 }
 
 
@@ -641,12 +641,14 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     by_filename = {f.filename: f.id for f in model.stl_files}
     by_id_filename = {f.id: f.filename for f in model.stl_files}
 
-    # Collect all category names already in the library so AI suggestions snap
-    # to existing names (e.g. "Accessory" → "Accessories").
-    existing_types: list[str] = [
+    # Collect all category names AI suggestions should snap to: the app's
+    # fixed canonical list (so a fresh library still gets clean names, not
+    # just whatever's already stored) plus any custom categories already in
+    # this library (e.g. "Accessory" → "Accessories").
+    existing_types: list[str] = sorted(set(ai_organize.CANONICAL_PART_TYPES) | {
         row[0] for row in
         db.query(STLFile.part_type).filter(STLFile.part_type.isnot(None)).distinct().all()
-    ]
+    })
 
     try:
         organize_result = ai_organize.run(

@@ -282,6 +282,7 @@ class BulkEnrichUpdate(BaseModel):
     title: Optional[str] = None
     notes: Optional[str] = None
     source_url: Optional[str] = None
+    source_site: Optional[str] = None
 
 
 class BulkDeleteRequest(BaseModel):
@@ -424,6 +425,46 @@ class ImportApplyResponse(BaseModel):
     skipped: int                       # ineligible entries not moved
     ineligible: list[ImportApplyIneligible]
     undo_log: Optional[str] = None
+
+
+class ImportApplyStart(BaseModel):
+    """Immediate response to POST /import/apply. ``started=False`` means there
+    was nothing to move (no eligible files) — ``result`` is already final, no
+    need to poll. ``started=True`` means a background job is now running;
+    poll GET /import/apply/status for progress and the eventual result."""
+    started: bool
+    result: Optional[ImportApplyResponse] = None
+
+
+class ImportApplyStatus(BaseModel):
+    running: bool
+    message: str
+    moved_files: int = 0
+    total_files: int = 0
+    error: Optional[str] = None
+    result: Optional[ImportApplyResponse] = None
+
+
+class DownloadImagesResult(BaseModel):
+    downloaded: int
+
+
+class DownloadImagesStart(BaseModel):
+    """Immediate response to POST /import/download-images. ``started=False``
+    means there was nothing to download (``result`` already final, no need to
+    poll). ``started=True`` means a background job is now running; poll
+    GET /import/download-images/status for progress and the eventual result."""
+    started: bool
+    result: Optional[DownloadImagesResult] = None
+
+
+class DownloadImagesStatus(BaseModel):
+    running: bool
+    message: str
+    downloaded: int = 0
+    total: int = 0
+    error: Optional[str] = None
+    result: Optional[DownloadImagesResult] = None
 
 
 class DownloadZipRequest(BaseModel):
