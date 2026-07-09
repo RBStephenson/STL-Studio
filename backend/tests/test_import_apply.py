@@ -211,19 +211,25 @@ class TestImportApplyScoping:
         assert body["moved_models"] == 1
 
 
-class TestImportApplySlugifyDecoupling:
-    """import-apply must not follow the Reorganize page's reorganize_slugify
-    setting — the '_Inbox' sentinel creator (flat-layout imports, #? ) must
-    land on disk exactly as authored, regardless of that setting's value."""
+class TestImportApplySlugify:
+    """import-apply follows the Reorganize page's reorganize_slugify setting
+    (so imports land already-organized without a separate manual Reorganize
+    pass), but resolves it ONCE per apply and threads that single value through
+    the whole request — including a collision retry — rather than re-reading
+    the setting at each step. Re-reading it was the actual bug (#874): a
+    pack's STL destination and its later non-STL/image cleanup could resolve
+    two different casings if the setting changed between calls, producing a
+    live DMGMinis (mixed-case) / dmgminis (lowercase) split for one pack."""
 
-    def test_inbox_sentinel_creator_name_not_slugified_on_import(
-        self, client, db, tmp_path, write_mode,
-    ):
+    def _set_slugify(self, db, value: bool) -> None:
         from app.models import AppSetting
-        # Default is True; set explicitly so the intent is unambiguous.
-        db.merge(AppSetting(key="reorganize_slugify", value=True))
+        db.merge(AppSetting(key="reorganize_slugify", value=value))
         db.commit()
 
+    def test_inbox_sentinel_creator_name_slugified_when_setting_on(
+        self, client, db, tmp_path, write_mode,
+    ):
+        self._set_slugify(db, True)
         lib = _library(db, tmp_path / "library")
         src = os.path.realpath(str(tmp_path / "inbox"))
         db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
@@ -236,8 +242,62 @@ class TestImportApplySlugifyDecoupling:
         assert status == 200, body
         assert body["moved_models"] == 1
         db.refresh(m)
-        # "_Inbox", not slugified to "inbox".
+        assert "/inbox/" in m.folder_path
+        assert "/_Inbox/" not in m.folder_path
+
+    def test_inbox_sentinel_creator_name_kept_as_authored_when_setting_off(
+        self, client, db, tmp_path, write_mode,
+    ):
+        self._set_slugify(db, False)
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="_Inbox"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 1
+        db.refresh(m)
         assert "/_Inbox/" in m.folder_path
+
+    def test_collision_retry_keeps_same_slugify_value_as_initial_build(
+        self, client, db, tmp_path, write_mode,
+    ):
+        """Regression: the retry-with-suffix path must reuse the slugify_all
+        value resolved at the start of this apply, not re-read the setting —
+        otherwise a mid-request change would split this pack's STL and image
+        destinations across two casings again, exactly like #874."""
+        self._set_slugify(db, True)
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="AbeThreeD"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
+        img = pack / "cover.jpg"; img.write_bytes(b"\x89PNG\r\n\x1a\n")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+
+        # Pre-create the collision at the SLUGIFIED destination (lowercase
+        # creator), since slugify is on for this apply.
+        dest_dir = tmp_path / "library" / "abethreed" / "bust"
+        dest_dir.mkdir(parents=True)
+        (dest_dir / "head.stl").write_bytes(b"stray\n")
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 1
+        db.refresh(m)
+        # Landed at a suffixed but still-slugified destination — the retry
+        # didn't flip back to as-authored casing mid-request.
+        assert m.folder_path != str(dest_dir).replace("\\", "/")
+        assert "/abethreed/" in m.folder_path
+        assert "/AbeThreeD/" not in m.folder_path
+        # The image followed to the same (slugified, suffixed) folder.
+        assert len(m.image_paths) == 1
+        assert m.image_paths[0].startswith(m.folder_path)
 
 
 class TestImportApplyCollisionRetry:
@@ -256,9 +316,10 @@ class TestImportApplyCollisionRetry:
         f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
         m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
 
-        # Pre-create the exact destination file the manifest will compute,
+        # Pre-create the exact destination file the manifest will compute
+        # (slugify is on by default, so the creator segment is lowercased),
         # simulating a stray leftover from a prior interrupted import.
-        dest_dir = tmp_path / "library" / "Abe3D" / "bust"
+        dest_dir = tmp_path / "library" / "abe3d" / "bust"
         dest_dir.mkdir(parents=True)
         (dest_dir / "head.stl").write_bytes(b"stray\n")
 
@@ -322,8 +383,8 @@ class TestImportApplyCleansUpNonStlFiles:
         m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
 
         # Pre-create the un-suffixed destination as a stray collision, same as
-        # TestImportApplyCollisionRetry above.
-        dest_dir = tmp_path / "library" / "Abe3D" / "bust"
+        # TestImportApplyCollisionRetry above (slugify is on by default).
+        dest_dir = tmp_path / "library" / "abe3d" / "bust"
         dest_dir.mkdir(parents=True)
         (dest_dir / "head.stl").write_bytes(b"stray\n")
 

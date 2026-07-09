@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
 from app.models import ImportSourceMapping, Model, ScanRoot, STLFile
-from app.routers.reorganize import _build_and_persist
+from app.routers.reorganize import _build_and_persist, _slugify_all
 from app.routers.scan import _bootstrap_roots, _configured_roots
 from app.schemas import (
     DownloadImagesRequest,
@@ -479,17 +479,23 @@ def _cleanup_non_stl_folders(old_to_new: dict[str, str], db: Session) -> None:
 
 
 def _retry_with_suffix(
-    db: Session, src: str, eligible_ids: list[int],
+    db: Session, src: str, eligible_ids: list[int], slugify_all: bool,
 ) -> tuple[ImportPreviewResponse, list[int]]:
     """Regenerate the manifest with a short random suffix appended to every
     currently-eligible model's title, and return the new (manifest, eligible
     ids) pair for a retry. Only called when nothing has moved yet, so a full
-    regenerate-and-retry is safe — this never runs mid-batch."""
+    regenerate-and-retry is safe — this never runs mid-batch.
+
+    ``slugify_all`` must be the same value the initial manifest for this apply
+    was built with (resolved once by the router, not re-read here) — reading
+    reorganize_slugify fresh on retry could pick a different value than the
+    initial build if the setting changed mid-request, splitting this single
+    pack's STL and image destinations across two casings again (#874)."""
     suffix = uuid.uuid4().hex[:4]
     overrides = {mid: {"suffix": suffix} for mid in eligible_ids}
     resp = _build_and_persist(
         db, "{creator}/{title}", None, overrides, inbox_source=src,
-        slugify_title=True, slugify_all=False,
+        slugify_title=True, slugify_all=slugify_all,
     )
     retry_ids = [e.model_id for e in resp.entries if e.eligible]
     return resp, retry_ids
@@ -548,6 +554,7 @@ def _run_import_apply_job(
     src: str,
     all_old_to_new: dict[str, str],
     all_folder_map: dict[int, str],
+    slugify_all: bool,
 ) -> None:
     """Background body for POST /import/apply once there's real work to do.
     Moving files (and the best-effort cleanup after) can take a while for a
@@ -575,7 +582,7 @@ def _run_import_apply_job(
             # the same path) — safe to retry once with an auto-disambiguated
             # destination instead of failing the whole import outright.
             logger.warning("Import destination collision for %r — retrying with a suffix", src)
-            resp, eligible_ids = _retry_with_suffix(db, src, eligible_ids)
+            resp, eligible_ids = _retry_with_suffix(db, src, eligible_ids, slugify_all)
             if not eligible_ids:
                 handle.update(state=JobState.ERROR, error=str(e), message=str(e))
                 return
@@ -666,12 +673,16 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
 
     # Use {creator}/{title} template so imports land in creator/slug-of-title.
     # slugify_title=True converts the {title} segment to a lowercase-dashes slug.
-    # slugify_all=False is explicit and independent of the Reorganize page's own
-    # slug preference — the sentinel "_Inbox" creator name must render exactly
-    # as written, not silently follow whatever that setting happens to be.
+    # slugify_all mirrors the Reorganize page's reorganize_slugify setting so an
+    # import lands already-organized without a separate manual Reorganize pass —
+    # but it's resolved ONCE here and threaded through the whole apply (including
+    # a collision retry), never re-read mid-request. Reading it fresh at each step
+    # is what caused a single pack's STL and image destinations to split across
+    # two casings when the setting changed between calls (#874).
+    slugify_all = _slugify_all(db)
     resp = _build_and_persist(
         db, "{creator}/{title}", None, None, inbox_source=src,
-        slugify_title=True, slugify_all=False,
+        slugify_title=True, slugify_all=slugify_all,
     )
     eligible_ids = [e.model_id for e in resp.entries if e.eligible]
     ineligible = [
@@ -711,6 +722,7 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
         _IMPORT_APPLY_KEY, _run_import_apply_job, single_flight=True,
         manifest_id=resp.manifest_id, eligible_ids=eligible_ids, ineligible=ineligible,
         src=src, all_old_to_new=all_old_to_new, all_folder_map=all_folder_map,
+        slugify_all=slugify_all,
     )
     if handle is None:
         raise HTTPException(status_code=409, detail="An import is already in progress.")

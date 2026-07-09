@@ -440,6 +440,10 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
   loose files → an `_Inbox` creator) — handy when you don't need per-pack review.
 - **Inbox flag** — un-filed imports are marked **inbox**; the Library's
   `?is_inbox=1` filter shows just these.
+- The **move** step follows the Reorganize page's slug-formatting setting
+  (**Settings → Library**) — with it on, an imported pack's creator/title
+  segments land already lowercase-and-hyphenated on disk, with no separate
+  manual Reorganize pass needed afterward.
 - The **move** step requires the **Reorganize Library** feature flag (**Settings →
   Library**, off by default) and a writable destination — Docker mounts are
   read-only, so moves are effectively standalone-only. Importing and enriching
