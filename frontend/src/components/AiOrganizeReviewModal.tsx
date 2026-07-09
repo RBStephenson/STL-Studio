@@ -2,11 +2,7 @@ import { useState } from "react";
 import { X, Wand2, Loader2, AlertTriangle, Info } from "lucide-react";
 import { api, AiOrganizePreviewResult, AiOrganizeSuggestionPreview, STLFile } from "../api/client";
 import { errMsg } from "../utils/err";
-
-const PART_TYPE_OPTIONS = [
-  "Head", "Body", "Arm", "Leg", "Hand", "Foot",
-  "Weapon", "Shield", "Armor", "Base", "Full", "Accessory", "Unknown",
-];
+import { PART_TYPE_SUGGESTIONS } from "../pages/model-detail/utils";
 
 interface EditableRow extends AiOrganizeSuggestionPreview {
   checked: boolean;
@@ -181,10 +177,10 @@ export default function AiOrganizeReviewModal({
                         className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-gray-100 focus:border-violet-600 focus:outline-none w-28"
                       >
                         <option value="">—</option>
-                        {PART_TYPE_OPTIONS.map((t) => (
+                        {PART_TYPE_SUGGESTIONS.map((t) => (
                           <option key={t} value={t}>{t}</option>
                         ))}
-                        {row.editedPartType && !PART_TYPE_OPTIONS.includes(row.editedPartType) && (
+                        {row.editedPartType && !PART_TYPE_SUGGESTIONS.includes(row.editedPartType) && (
                           <option value={row.editedPartType}>{row.editedPartType}</option>
                         )}
                       </select>
