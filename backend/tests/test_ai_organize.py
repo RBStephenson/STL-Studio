@@ -4,10 +4,42 @@ The Anthropic client is monkeypatched at the `ai_organize.Anthropic` boundary
 (same pattern as the painting generator's tests); no live API call is made.
 """
 import json
+import logging
 import types
+
+import pytest
 
 import app.services.ai_organize as ai
 from app.models import Model, STLFile
+
+
+class _ListHandler(logging.Handler):
+    """Collects formatted log records in a list."""
+    def __init__(self):
+        super().__init__()
+        self.messages: list[str] = []
+
+    def emit(self, record):
+        self.messages.append(self.format(record))
+
+
+@pytest.fixture
+def ai_organize_logs():
+    """Capture ai_organize's log output directly on its own logger.
+
+    The app's `logging_config.configure_logging` deliberately sets
+    `propagate = False` on the top-level "app" logger (to avoid duplicate
+    lines with uvicorn's own root handler) — which also means pytest's
+    caplog, which listens via a handler on the *root* logger, never sees
+    anything the app logs. Attaching directly to ai_organize's own logger
+    sidesteps that entirely.
+    """
+    handler = _ListHandler()
+    ai._log.addHandler(handler)
+    try:
+        yield handler
+    finally:
+        ai._log.removeHandler(handler)
 
 
 def _resp(text: str):
@@ -96,6 +128,30 @@ def test_anthropic_effort_maps_to_thinking_budget(monkeypatch):
     captured.clear()
     ai.run(_UNRESOLVED, "", "claude-opus-4-8", "sk-ant-x", api_type="anthropic", effort="low")
     assert "thinking" not in captured["create"]
+
+
+def test_anthropic_all_thinking_no_text_logs_stop_reason(monkeypatch, ai_organize_logs):
+    """Mirrors the OpenAI path's empty-content diagnostic: if the reply is
+    all "thinking" blocks and no "text" block, stop_reason plus the block
+    types actually returned must be visible to diagnose it."""
+    thinking_block = types.SimpleNamespace(type="thinking", text=None)
+    resp = types.SimpleNamespace(content=[thinking_block], stop_reason="max_tokens")
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        @property
+        def messages(self):
+            return types.SimpleNamespace(create=lambda **kw: resp)
+
+    monkeypatch.setattr(ai, "Anthropic", _Client)
+
+    res = ai.run(_UNRESOLVED, "", "claude-opus-4-8", "sk-ant-x", api_type="anthropic")
+
+    assert res.llm.status == "error"
+    assert "max_tokens" in res.llm.detail
+    assert any("thinking" in m for m in ai_organize_logs.messages)
 
 
 def test_endpoint_drives_anthropic_config(client, db, monkeypatch):
@@ -245,6 +301,86 @@ def test_openai_path_caps_max_tokens(monkeypatch):
     ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
 
     assert captured["payload"]["max_tokens"] == ai._OPENAI_MAX_TOKENS
+
+
+def test_openai_path_disables_thinking(monkeypatch):
+    """Nothing to reason about for this task (filename pattern-matching) —
+    disabling it where the server supports the knob avoids a reasoning
+    model spending its whole max_tokens budget on hidden thinking and
+    emitting nothing into content at all (#903-follow-up)."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert captured["payload"]["think"] is False
+
+
+def test_openai_path_retries_without_think_on_400(monkeypatch):
+    """A strict server that rejects the unrecognized "think" field outright
+    (rather than just ignoring it) gets one retry with it stripped —
+    mirrors the existing response_format retry."""
+    calls: list[dict] = []
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        calls.append(dict(kwargs["json"]))  # snapshot — payload is mutated in place on retry
+
+        class _Resp:
+            def __init__(self, status_code, text, body=None):
+                self.status_code = status_code
+                self.is_success = status_code == 200
+                self.text = text
+                self._body = body
+
+            def json(self):
+                return self._body
+        if len(calls) == 1:
+            return _Resp(400, "unknown field: think")
+        return _Resp(200, "", {"choices": [{"message": {"content": content}}]})
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "ok"
+    assert len(calls) == 2
+    assert "think" in calls[0]
+    assert "think" not in calls[1]
+
+
+def test_openai_path_empty_content_logs_finish_reason_and_message(monkeypatch, ai_organize_logs):
+    """A reasoning model can spend its entire max_tokens budget "thinking"
+    and emit nothing into content — request still succeeds (status 200)
+    with nothing to show for it. finish_reason + the full message object
+    must be visible to diagnose this, not just a generic empty-reply error."""
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{
+                "finish_reason": "length",
+                "message": {"content": "", "reasoning_content": "Let me think about this..."},
+            }]},
+        },
+    )())
+
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "error"
+    assert "length" in res.llm.detail
+    assert any("reasoning_content" in m and "Let me think" in m for m in ai_organize_logs.messages)
 
 
 def test_endpoint_anthropic_without_model_is_400(client, db):
@@ -485,6 +621,62 @@ def test_parse_unit_suggestions_falls_back_to_flat_format():
     outcome = ai._parse_unit_suggestions(raw, "test")
     assert outcome.status == "ok"
     assert outcome.suggestions[0]["part_type"] == "Ogre Champion"
+
+
+# --- Logging the actual reply on a parse failure (#894-follow-up) ---
+# "LLM returned non-JSON content" alone doesn't say whether the model
+# rambled prose, got stuck repeating itself, or was cut off mid-object by
+# max_tokens — seeing the raw reply is the only way to tell which, and it
+# must show up without needing DEBUG-level logging turned on.
+
+def test_non_json_reply_logs_the_raw_text(monkeypatch, ai_organize_logs):
+    garbage = "Sure! Here are the categorized files: " + "blah " * 20
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{"message": {"content": garbage}}]},
+        },
+    )())
+
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "error"
+    assert any("blah blah blah" in m for m in ai_organize_logs.messages)
+
+
+def test_malformed_files_field_logs_the_parsed_json(monkeypatch, ai_organize_logs):
+    """Valid JSON, wrong shape (files isn't a list) — same visibility need."""
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{"message": {
+                "content": json.dumps({"files": "not-a-list"}),
+            }}]},
+        },
+    )())
+
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "error"
+    assert any("not-a-list" in m for m in ai_organize_logs.messages)
+
+
+def test_malformed_unit_response_logs_the_parsed_json(monkeypatch, ai_organize_logs):
+    """Same check for the unit strategy's own malformed-shape branch."""
+    files = [{"id": 1, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None}]
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{"message": {
+                "content": json.dumps(["not", "a", "dict"]),
+            }}]},
+        },
+    )())
+
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "error"
+    assert any("not" in m and "dict" in m for m in ai_organize_logs.messages)
 
 
 def test_unit_strategy_end_to_end_with_grouped_response(monkeypatch):
