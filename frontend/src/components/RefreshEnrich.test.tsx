@@ -121,4 +121,37 @@ describe("RefreshEnrich", () => {
       expect.stringContaining("already running"), "info"
     ));
   });
+
+  it("unmounting mid-poll skips toast/onDone instead of touching the gone component (STUDIO-92)", async () => {
+    let resolveStatus!: (r: Response) => void;
+    const statusPromise = new Promise<Response>((res) => { resolveStatus = res; });
+    const onDone = vi.fn();
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/enrich/refresh/status")) return statusPromise;
+      if (url.includes("/enrich/refresh") && init?.method === "POST") {
+        return { ok: true, status: 200, json: async () => ({ ok: true, running: true, message: "refresh started" }) } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { unmount } = render(<RefreshEnrich scopeLabel="your whole library" onDone={onDone} />);
+    await userEvent.click(screen.getByRole("button", { name: /refresh metadata/i }));
+
+    // Wait until the status poll is actually in flight, then unmount before it resolves.
+    await waitFor(() => expect(
+      fetchMock.mock.calls.some((c) => (c[0] as string).includes("status"))
+    ).toBe(true));
+    unmount();
+
+    resolveStatus({
+      ok: true,
+      json: async () => ({ running: false, candidates: 1, refreshed: 1, failed: 0, errors: 0 }),
+    } as Response);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onDone).not.toHaveBeenCalled();
+    expect(toastMock).not.toHaveBeenCalledWith(expect.stringContaining("Refreshed"), "success");
+  });
 });

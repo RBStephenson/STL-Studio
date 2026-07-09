@@ -1,5 +1,9 @@
 """Tests for on-demand model gallery sync: refresh-from-disk and image upload
 (the model detail page's "Refresh" / "Upload Images" actions)."""
+import os
+
+import pytest
+
 from app.models import Model, ScanRoot
 from app.services.scanner import refresh_model_gallery
 from tests.conftest import make_creator, make_model
@@ -8,6 +12,26 @@ from tests.conftest import make_creator, make_model
 def _root(db, tmp_path):
     db.add(ScanRoot(path=str(tmp_path), enabled=True))
     db.commit()
+
+
+def _break_scandir(monkeypatch, target):
+    """Make os.scandir raise for exactly one directory, passing through to
+    the real implementation everywhere else — simulates a transient read
+    failure on one subfolder (a drive hiccup, a permission blip), not a
+    whole-drive outage."""
+    real_scandir = os.scandir
+    target = str(target)
+
+    def fake_scandir(path="."):
+        try:
+            is_target = os.fspath(path) == target
+        except TypeError:
+            is_target = False   # e.g. an fd, not a path — not what we're simulating
+        if is_target:
+            raise PermissionError("simulated read failure")
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", fake_scandir)
 
 
 def _model_with_folder(db, tmp_path, name="Bust") -> tuple[Model, "object"]:
@@ -82,6 +106,27 @@ class TestRefreshModelGallery:
 
         assert m.primary_image_path is None
 
+    def test_transient_read_error_does_not_prune_known_images(self, db, tmp_path, monkeypatch):
+        """A subfolder that fails to list (drive hiccup, permission blip)
+        must never look identical to "no images here anymore" — a real,
+        already-known gallery image must survive, not get silently pruned
+        (#894-follow-up)."""
+        _root(db, tmp_path)
+        m, folder = _model_with_folder(db, tmp_path)
+        known = folder / "known.jpg"
+        known.write_bytes(b"fake-jpg")
+        m.image_paths = [str(known)]
+        db.commit()
+
+        broken = folder / "broken_subdir"
+        broken.mkdir()
+        _break_scandir(monkeypatch, broken)
+
+        with pytest.raises(OSError):
+            refresh_model_gallery(db, m)
+
+        assert m.image_paths == [str(known)]   # untouched, not pruned
+
     def test_sets_thumbnail_when_unset(self, db, tmp_path):
         _root(db, tmp_path)
         m, folder = _model_with_folder(db, tmp_path)
@@ -132,6 +177,18 @@ class TestRefreshGalleryEndpoint:
         resp = client.post("/models/99999/images/refresh")
         assert resp.status_code == 404
 
+    def test_refresh_surfaces_read_error_instead_of_false_success(self, client, db, tmp_path, monkeypatch):
+        """A transient read failure must come back as a clear error, not a
+        silent 'ok: true' that hides the fact nothing was actually synced."""
+        _root(db, tmp_path)
+        m, folder = _model_with_folder(db, tmp_path)
+        broken = folder / "broken_subdir"
+        broken.mkdir()
+        _break_scandir(monkeypatch, broken)
+
+        resp = client.post(f"/models/{m.id}/images/refresh")
+        assert resp.status_code == 503
+
 
 class TestUploadGalleryImages:
     def test_upload_writes_file_and_syncs_gallery(self, client, db, tmp_path):
@@ -163,6 +220,23 @@ class TestUploadGalleryImages:
         assert resp.status_code == 200
         assert (folder / "photo.png").read_bytes() == b"existing"
         assert (folder / "photo_1.png").exists()
+
+    def test_upload_surfaces_read_error_instead_of_false_success(self, client, db, tmp_path, monkeypatch):
+        """The file itself is safely written before the sync step runs, but a
+        transient read failure during the follow-up gallery sync must still
+        come back as a clear error, not a silent 'ok: true'."""
+        _root(db, tmp_path)
+        m, folder = _model_with_folder(db, tmp_path)
+        broken = folder / "broken_subdir"
+        broken.mkdir()
+        _break_scandir(monkeypatch, broken)
+
+        resp = client.post(
+            f"/models/{m.id}/images/upload",
+            files=[("files", ("photo.png", b"\x89PNG\r\n\x1a\n", "image/png"))],
+        )
+        assert resp.status_code == 503
+        assert (folder / "photo.png").exists()   # the upload itself wasn't lost
 
     def test_upload_rejects_non_image(self, client, db, tmp_path):
         _root(db, tmp_path)

@@ -194,7 +194,14 @@ def refresh_gallery(model_id: int, db: Session = Depends(get_db)):
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
 
-    scanner.refresh_model_gallery(db, model)
+    try:
+        scanner.refresh_model_gallery(db, model)
+    except OSError:
+        logger.warning("Gallery refresh failed for model %s", model_id, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Couldn't read this model's folder right now — try again",
+        )
     model.updated_at = utcnow()
     db.commit()
     db.refresh(model)
@@ -242,7 +249,17 @@ async def upload_gallery_images(
         Path(dest).write_bytes(data)
         saved.append(dest)
 
-    scanner.refresh_model_gallery(db, model)
+    try:
+        scanner.refresh_model_gallery(db, model)
+    except OSError:
+        # The uploaded files are already safely written to disk — only the
+        # gallery re-sync failed. Surface it so the client knows to retry
+        # (via Refresh) rather than assume image_paths reflects reality.
+        logger.warning("Gallery refresh failed for model %s after upload", model_id, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Images were uploaded, but the gallery couldn't be refreshed — try Refresh",
+        )
     model.updated_at = utcnow()
     db.commit()
     db.refresh(model)

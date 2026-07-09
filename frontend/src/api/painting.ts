@@ -1,4 +1,4 @@
-import { request, ApiError, BASE, downloadPdf, stampQuery } from "./base";
+import { request, ApiError, BASE, downloadPdf, stampQuery, triggerBlobDownload } from "./base";
 import type { SeriesExportOptions, StampOptions } from "./base";
 import type {
   ColorMatchResult,
@@ -68,12 +68,7 @@ export const paintingApi = {
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const blob = await res.blob();
       const stamp = new Date().toISOString().slice(0, 10);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `paintRack_export_${stamp}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(blob, `paintRack_export_${stamp}.csv`);
     },
   },
   paints: {

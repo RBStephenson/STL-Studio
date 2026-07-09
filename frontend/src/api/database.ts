@@ -1,4 +1,4 @@
-import { BASE } from "./base";
+import { BASE, triggerBlobDownload } from "./base";
 
 export type DatabaseHealth = {
   ok: boolean;
@@ -24,12 +24,7 @@ export const databaseApi = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     const blob = await res.blob();
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `stl_inventory_backup_${stamp}.db`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(blob, `stl_inventory_backup_${stamp}.db`);
   },
   restore: async (file: File) => {
     const form = new FormData();

@@ -124,6 +124,25 @@ gated. Localhost stays trusted regardless, and unlisted domains stay blocked.
   and check `BACKEND_ORIGIN` names your backend service.
 - **`403 Cross-origin request blocked` / `Request Host not allowed`** → set
   `TRUSTED_HOSTS` to your public hostname (above).
+- **`504` on a slow AI Organize / AI Guide call (a remote Ollama, or a large
+  model), even though the frontend's own timeout is generous** → your
+  external reverse proxy has its own, separate timeout, shorter than the
+  frontend's internal one. The frontend container's nginx already allows up
+  to 630s for `/api/` (matching the highest per-connection AI timeout the app
+  allows), but **anything in front of it — Nginx Proxy Manager, Traefik,
+  Caddy, Cloudflare Tunnel — enforces its own ceiling on top**, and that one
+  isn't ours to raise. Nginx Proxy Manager in particular defaults its proxy
+  host to a much shorter read timeout: open the proxy host → **Advanced** →
+  add
+
+  ```nginx
+  proxy_read_timeout 630s;
+  proxy_send_timeout 630s;
+  ```
+
+  (Traefik: raise `respondingTimeouts.readTimeout` similarly; Cloudflare
+  Tunnel: `originRequest.connectTimeout`/`response timeouts` in its config —
+  its default is far below what a cold-starting remote Ollama needs.)
 
 ---
 

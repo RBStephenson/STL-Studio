@@ -630,8 +630,13 @@ export const GalleryRotator = forwardRef<
     fadeTimerRef.current = setTimeout(() => { setIdx(next); setFade(true); }, 150);
   }, []);
 
-  // Clear any pending fade timer on unmount so it can't setState after teardown.
-  useEffect(() => () => { if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current); }, []);
+  // Clear any pending fade/label timer on unmount so it can't setState after
+  // teardown — labelTimerRef was previously only cleared on mouse-leave, so a
+  // card unmounted while hovered (before the 4s label delay) leaked the timer.
+  useEffect(() => () => {
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    if (labelTimerRef.current) clearTimeout(labelTimerRef.current);
+  }, []);
 
   useImperativeHandle(ref, () => ({ goTo: go }), [go]);
 

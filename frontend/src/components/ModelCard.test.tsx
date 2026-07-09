@@ -354,3 +354,24 @@ describe("GalleryRotator index reset on paths change", () => {
     expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("b.png"));
   });
 });
+
+describe("GalleryRotator label-timer cleanup on unmount (STUDIO-95)", () => {
+  it("hovering then unmounting before the 4s label delay does not update state after teardown", () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { container, unmount } = render(
+      <GalleryRotator paths={["a.png", "b.png"]} alt="x" blur={false} autoRotate={false} />
+    );
+    fireEvent.mouseEnter(container.firstChild as Element);
+    unmount();
+
+    vi.advanceTimersByTime(4000);
+
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("Can't perform a React state update on an unmounted component")
+    );
+    errorSpy.mockRestore();
+    vi.useRealTimers();
+  });
+});

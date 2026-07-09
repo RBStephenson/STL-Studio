@@ -1,4 +1,4 @@
-import { request, BASE } from "./base";
+import { request, BASE, triggerBlobDownload } from "./base";
 import type { DriveStatus } from "./types";
 
 export const filesApi = {
@@ -32,11 +32,5 @@ export const downloadZip = async (fileIds: number[], zipName: string) => {
     body: JSON.stringify({ file_ids: fileIds, zip_name: zipName }),
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = zipName + ".zip";
-  a.click();
-  URL.revokeObjectURL(url);
+  triggerBlobDownload(await res.blob(), zipName + ".zip");
 };

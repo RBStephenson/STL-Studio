@@ -383,7 +383,17 @@ def _build_entry(
         if not isinstance(p, str) or not p or "://" in p:
             return False
         k = _key(p)
-        return k == cur_key or k.startswith(cur_prefix)
+        if k != cur_key and not k.startswith(cur_prefix):
+            return False
+        # Never carry a hidden-directory reference along as if it were a
+        # real gallery image (#903-follow-up) — e.g. a stale .manyfold
+        # derivative-cache path a pre-fix scan picked up. The scanner itself
+        # has stopped discovering these; carrying an already-stored one
+        # through a move would relocate the junk into the organized library
+        # instead of letting it fall away.
+        if any(part.startswith(".") for part in _canon(p).split("/")):
+            return False
+        return True
 
     seen_image_keys: set[str] = set()
     image_candidates: list[str] = []

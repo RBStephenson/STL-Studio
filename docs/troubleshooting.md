@@ -118,6 +118,13 @@ database lives in your user data folder (see
 updates. The app reads your STL folders; in Docker mode they're mounted
 **read-only**, so your original files are never modified.
 
+A scan or rescan only removes a model's gallery images, thumbnail, or the
+model itself when it can positively confirm the corresponding files are
+gone — a transient failure to read a folder (an external/network drive
+blipping mid-scan, a permission hiccup) is never treated as "these files no
+longer exist." Affected entries are simply left untouched until a later
+rescan can confirm one way or the other.
+
 For an extra safety net, use **Settings → Data Management → Download Backup** to
 save a snapshot of the catalog (see below).
 

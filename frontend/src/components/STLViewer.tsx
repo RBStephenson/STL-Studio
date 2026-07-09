@@ -233,6 +233,13 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured,
   );
   const controlsRef = useRef<TrackballControlsImpl | null>(null);
   const glRef = useRef<WebGLRenderer | null>(null);
+  // Stable handler identity (STUDIO-95) so the cleanup effect below can remove
+  // exactly the listener onCreated attached — an inline arrow function can't
+  // be passed to removeEventListener.
+  const onContextLost = useRef((e: Event) => e.preventDefault()).current;
+  useEffect(() => {
+    return () => glRef.current?.domElement.removeEventListener("webglcontextlost", onContextLost);
+  }, [onContextLost]);
 
   // Sync from external selection (file list → viewer): update state, unfold category, scroll picker.
   useEffect(() => {
@@ -384,9 +391,7 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured,
                 // restored, and rapid navigation between model pages exhausts
                 // the browser's WebGL context limit ("THREE.WebGLRenderer:
                 // Context Lost").
-                gl.domElement.addEventListener("webglcontextlost", (e) =>
-                  e.preventDefault()
-                );
+                gl.domElement.addEventListener("webglcontextlost", onContextLost);
               }}
             >
               <color attach="background" args={["#111318"]} />
