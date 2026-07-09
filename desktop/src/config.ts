@@ -52,9 +52,9 @@ export interface BackendExeLocation {
  *
  * Resolution order:
  *   1. `STL_BACKEND_EXE` override — used by devs / CI to point at a hand-built exe.
- *   2. Packaged: `<resourcesPath>/stl-library.exe`, where electron-builder's
+ *   2. Packaged: `<resourcesPath>/stl-studio.exe`, where electron-builder's
  *      `extraResources` copied the PyInstaller sidecar.
- *   3. Dev (`electron .`): `<repoRoot>/dist-standalone/stl-library.exe`.
+ *   3. Dev (`electron .`): `<repoRoot>/dist-standalone/stl-studio.exe`.
  */
 export function resolveBackendExe(loc: BackendExeLocation): string {
   const override = process.env.STL_BACKEND_EXE;
@@ -62,7 +62,7 @@ export function resolveBackendExe(loc: BackendExeLocation): string {
     return override.trim();
   }
   const exeName =
-    process.platform === "win32" ? "stl-library.exe" : "stl-library";
+    process.platform === "win32" ? "stl-studio.exe" : "stl-studio";
   if (loc.packaged) {
     return join(loc.resourcesPath, exeName);
   }
