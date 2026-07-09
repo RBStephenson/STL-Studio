@@ -412,6 +412,17 @@ class TestBrowseImages:
         resp = client.get("/files/browse-images", params={"path": "/etc"})
         assert resp.status_code == 403
 
+    def test_missing_path_outside_allowed_roots_returns_403_not_404(self, client, monkeypatch):
+        # The allowlist check must run before any exists()/is_dir() filesystem
+        # touch (STUDIO-84) — otherwise a caller can distinguish missing vs
+        # existing-but-not-allowed paths outside configured roots.
+        import app.routers.files as files_module
+        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: False)
+
+        resp = client.get("/files/browse-images", params={"path": "/etc/does-not-exist-xyz"})
+        assert resp.status_code == 403
+        # test_missing_path_returns_404 above already covers missing-but-inside-roots -> 404.
+
 
 # ---------------------------------------------------------------------------
 # /files/model-images (caching)

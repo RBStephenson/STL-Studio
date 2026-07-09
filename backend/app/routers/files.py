@@ -362,10 +362,10 @@ def browse_images(path: str = ""):
         path = str(Path.home())
 
     p = Path(path)
-    if not p.exists() or not p.is_dir():
-        raise HTTPException(status_code=404, detail="Folder not found")
     if not _is_safe_path(p):
         raise HTTPException(status_code=403, detail="Path not allowed")
+    if not p.exists() or not p.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found")
 
     parent = str(p.parent) if p.parent != p else None
 
