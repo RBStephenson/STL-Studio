@@ -221,6 +221,32 @@ def test_openai_path_refines_via_httpx(monkeypatch):
     assert {s["id"]: s for s in res.suggestions}[1]["part_type"] == "Base"
 
 
+def test_openai_path_caps_max_tokens(monkeypatch):
+    """A local model with nothing bounding its reply can run away generating
+    tokens until it hits the *server's* own context limit, minutes later,
+    with a truncated/unparseable response as the only result. max_tokens
+    must always be sent so a misbehaving model fails fast instead."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert captured["payload"]["max_tokens"] == ai._OPENAI_MAX_TOKENS
+
+
 def test_endpoint_anthropic_without_model_is_400(client, db):
     m = Model(name="No Model", folder_path="/lib/nm")
     db.add(m)

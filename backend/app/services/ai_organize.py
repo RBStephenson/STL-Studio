@@ -32,6 +32,14 @@ _DEFAULT_TIMEOUT = 10.0
 _ANTHROPIC_MAX_TOKENS = 4096
 _EFFORT_THINKING_BUDGET = {"low": 0, "medium": 4096, "high": 10000}
 
+# Same reasoning for the OpenAI-compatible (Ollama etc.) path: without an
+# explicit cap, a local model that gets stuck (repetition, a quantization that
+# doesn't respect response_format cleanly, ...) has nothing stopping it from
+# generating until it hits the *server's* own context limit — minutes later,
+# with a truncated, unparseable response as the only result. Bounding the
+# reply here means a misbehaving model fails fast instead of slow.
+_OPENAI_MAX_TOKENS = 2048
+
 
 # Matches the ``scheme://userinfo@`` prefix of a URL anywhere in a string, so we
 # can scrub credentials both from bare endpoint URLs and from URLs echoed inside
@@ -480,6 +488,7 @@ def _llm_refine_openai(
         ],
         "temperature": 0.1,
         "response_format": {"type": "json_object"},
+        "max_tokens": _OPENAI_MAX_TOKENS,
     }
 
     endpoint = f"{base_url}/v1/chat/completions"
