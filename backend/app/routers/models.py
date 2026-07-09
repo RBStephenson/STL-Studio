@@ -23,7 +23,7 @@ from app.schemas import (
     ModelUpdate, STLFileUpdate, BulkDeleteRequest, BulkDeleteResponse,
     AiOrganizeRequest, AiOrganizeResult, AiOrganizeSuggestion,
     AiOrganizeSuggestionPreview, AiOrganizePreviewResult,
-    AiOrganizeApplyRequest,
+    AiOrganizeApplyRequest, OtherFileDeleteRequest,
 )
 from app.services.path_guard import is_within_roots
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
@@ -846,6 +846,39 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
 
     model.updated_at = utcnow()
     sync_model_tags(model, db)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{model_id}/other-files")
+def delete_other_file(model_id: int, body: OtherFileDeleteRequest, db: Session = Depends(get_db)):
+    """Delete one entry from a model's other_files, on disk and in the DB (#880).
+
+    Best-effort on disk: a file that's already gone (e.g. removed outside the
+    app) still gets cleared from other_files rather than leaving a stale
+    listing behind — that mismatch is the actual bug this endpoint fixes.
+    """
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    other_files = model.other_files or []
+    if body.path not in other_files:
+        raise HTTPException(status_code=404, detail="File not found on this model")
+
+    roots = [os.path.realpath(r.path) for r in db.query(ScanRoot).all()]
+    if not is_within_roots(body.path, roots):
+        raise HTTPException(status_code=400, detail="File is outside known scan roots")
+
+    try:
+        os.remove(body.path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete file: {exc}")
+
+    model.other_files = [p for p in other_files if p != body.path]
+    model.updated_at = utcnow()
     db.commit()
     return {"ok": True}
 

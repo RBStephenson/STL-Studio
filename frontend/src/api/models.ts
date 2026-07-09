@@ -79,6 +79,12 @@ export const modelsApi = {
       `/models/${id}/images/refresh`,
       { method: "POST" },
     ),
+  deleteOtherFile: (id: number, path: string) =>
+    request<{ ok: boolean }>(`/models/${id}/other-files`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }),
   uploadGalleryImages: async (id: number, files: File[]) => {
     const form = new FormData();
     for (const file of files) form.append("files", file);
