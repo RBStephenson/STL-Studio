@@ -3,12 +3,12 @@
 # PyInstaller spec for STL Studio standalone build.
 #
 # Run from the PROJECT ROOT (not this directory):
-#   pyinstaller packaging/stl-library.spec
+#   pyinstaller packaging/stl-studio.spec
 #
 # The frontend must be built first:
 #   cd frontend && npm run build
 #
-# Output: dist/stl-library  (or dist/stl-library.exe on Windows)
+# Output: dist/stl-studio  (or dist/stl-studio.exe on Windows)
 
 from pathlib import Path
 
@@ -104,7 +104,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="stl-library",
+    name="stl-studio",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -30,8 +30,8 @@ Local web app for cataloguing, browsing, and managing an STL file library.
 ### Standalone (recommended for most users — no Docker needed)
 
 1. Go to the [Releases page](https://github.com/RBStephenson/STL-Inventory/releases) and download the file for your OS:
-   - **Windows**: `stl-library-windows.exe`
-   - **Linux**: `stl-library-linux`
+   - **Windows**: `stl-studio-windows.exe`
+   - **Linux**: `stl-studio-linux`
 
    For testing the newest successful `main` build before a versioned release,
    use the rolling `Main Build` prerelease on the same Releases page.
@@ -47,7 +47,7 @@ Your library database is stored in your user data folder and survives app update
 - **macOS**: `~/Library/Application Support/STL-Inventory/`
 - **Linux**: `~/.local/share/stl-inventory/`
 
-> **Linux note**: You may need to mark the binary as executable before running it: `chmod +x stl-library-linux`
+> **Linux note**: You may need to mark the binary as executable before running it: `chmod +x stl-studio-linux`
 
 ---
 
