@@ -561,6 +561,92 @@ class TestModelUpdate:
 
 
 # ---------------------------------------------------------------------------
+# DELETE /models/{id}/other-files (#880)
+# ---------------------------------------------------------------------------
+
+def _register_root(db, path) -> None:
+    from app.models import ScanRoot
+    db.add(ScanRoot(path=str(path), enabled=True))
+    db.commit()
+
+
+class TestDeleteOtherFile:
+    def test_deletes_file_from_disk_and_db(self, client, db, tmp_path):
+        _register_root(db, tmp_path)
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        doc = tmp_path / "datapackage.json"
+        doc.write_text("{}")
+        model.other_files = [str(doc)]
+        commit_all(db)
+
+        resp = client.request(
+            "DELETE", f"/models/{model.id}/other-files", json={"path": str(doc)},
+        )
+        assert resp.status_code == 200
+        assert not doc.exists()
+
+        detail = client.get(f"/models/{model.id}").json()
+        assert detail["other_files"] == []
+
+    def test_missing_file_on_disk_still_clears_the_db_entry(self, client, db, tmp_path):
+        """Regression: a file removed outside the app (or by a prior partial
+        operation) must not leave a stale entry that can never be cleared."""
+        _register_root(db, tmp_path)
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        gone = tmp_path / "datapackage.json"  # never created on disk
+        model.other_files = [str(gone)]
+        commit_all(db)
+
+        resp = client.request(
+            "DELETE", f"/models/{model.id}/other-files", json={"path": str(gone)},
+        )
+        assert resp.status_code == 200
+
+        detail = client.get(f"/models/{model.id}").json()
+        assert detail["other_files"] == []
+
+    def test_rejects_path_outside_known_roots(self, client, db, tmp_path):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        outside = tmp_path / "outside" / "datapackage.json"
+        (tmp_path / "outside").mkdir()
+        outside.write_text("{}")
+        model.other_files = [str(outside)]
+        commit_all(db)
+        # No scan root registered → guard rejects.
+
+        resp = client.request(
+            "DELETE", f"/models/{model.id}/other-files", json={"path": str(outside)},
+        )
+        assert resp.status_code == 400
+        assert outside.exists()  # untouched
+
+        detail = client.get(f"/models/{model.id}").json()
+        assert detail["other_files"] == [str(outside)]  # untouched
+
+    def test_rejects_path_not_on_this_model(self, client, db, tmp_path):
+        _register_root(db, tmp_path)
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        model.other_files = []
+        commit_all(db)
+
+        resp = client.request(
+            "DELETE", f"/models/{model.id}/other-files",
+            json={"path": str(tmp_path / "not-listed.json")},
+        )
+        assert resp.status_code == 404
+
+    def test_unknown_model_returns_404(self, client):
+        resp = client.request(
+            "DELETE", "/models/99999/other-files", json={"path": "/x/y.json"},
+        )
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # STL file part_type
 # ---------------------------------------------------------------------------
 

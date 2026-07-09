@@ -242,6 +242,12 @@ on each file in the model detail view. Files group into collapsible sections and
 the 3D viewer organises its part picker by category — useful for complex
 multi-part kits.
 
+**Other Files** lists a model's non-STL, non-image files (PDFs, datapackage.json,
+etc.) — click one to download it. Each entry has a delete icon that removes it
+both from disk and from the listing (with a confirmation first); if the file was
+already gone from disk (e.g. deleted outside the app), this still clears the
+stale listing.
+
 **AI Organize** (button on the model detail page, requires an AI API assigned
 under [Settings → AI & Integrations](#ai--integrations)) suggests a category
 and cleaned-up name for every STL file. Clicking it first asks you to pick a
