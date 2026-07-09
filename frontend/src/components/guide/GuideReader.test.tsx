@@ -235,7 +235,7 @@ describe("GuideReader", () => {
   it("scopes the per-guide head_style to .guide-reader", () => {
     const { container } = render(<GuideReader guide={GUIDE} />);
     const style = container.querySelector("style");
-    expect(style?.innerHTML).toContain(".guide-reader { --accent: #ff0000; }");
+    expect(style?.innerHTML).toContain(".guide-reader{ --accent: #ff0000; }");
     expect(style?.innerHTML).not.toContain(":root");
   });
 });

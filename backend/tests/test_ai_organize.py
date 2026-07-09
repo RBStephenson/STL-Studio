@@ -221,6 +221,32 @@ def test_openai_path_refines_via_httpx(monkeypatch):
     assert {s["id"]: s for s in res.suggestions}[1]["part_type"] == "Base"
 
 
+def test_openai_path_caps_max_tokens(monkeypatch):
+    """A local model with nothing bounding its reply can run away generating
+    tokens until it hits the *server's* own context limit, minutes later,
+    with a truncated/unparseable response as the only result. max_tokens
+    must always be sent so a misbehaving model fails fast instead."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert captured["payload"]["max_tokens"] == ai._OPENAI_MAX_TOKENS
+
+
 def test_endpoint_anthropic_without_model_is_400(client, db):
     m = Model(name="No Model", folder_path="/lib/nm")
     db.add(m)
@@ -396,6 +422,13 @@ def test_system_prompt_lists_the_canonical_categories():
     assert "Shoulder" not in ai._SYSTEM_PROMPT
 
 
+def test_full_is_a_canonical_category():
+    """"Full" (a single presupported/complete-figure file, as opposed to a
+    part broken out separately) is a first-class category, not just a
+    heuristic guess — must be selectable/snappable like any other."""
+    assert "Full" in ai.CANONICAL_PART_TYPES
+
+
 # --- Unit-based strategy (#878) ---
 
 def test_to_pascal_case_title_cases_each_word():
@@ -406,14 +439,97 @@ def test_to_pascal_case_title_cases_each_word():
     assert ai._to_pascal_case("  ogre   champion  ") == "Ogre Champion"
 
 
-def test_unit_strategy_skips_heuristic_pass(monkeypatch):
-    """Unlike "parts", "unit" has no keyword heuristic — a well-named file
-    that the parts heuristic would resolve on its own must still be sent to
-    the LLM as-is (no part_type/part_name pre-filled from heuristics)."""
-    files = [{"id": 1, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None}]
-    canned = json.dumps({"files": [
-        {"id": 1, "part_type": "royal guard 1", "part_name": "Sword", "sup_base_filename": None},
+# --- Unit strategy's grouped response format (#894-follow-up) ---
+# A unit's name is often several words ("Ogre Champion With Great Weapon") and
+# used to get repeated verbatim on every one of that unit's files — stated
+# once per group instead is a direct, unbounded-with-unit-size token win.
+
+def test_unit_system_prompt_has_no_sup_base_filename():
+    """Sup_ files are excluded from every candidate batch (both strategies),
+    so this field could only ever come back null — dead weight in both the
+    prompt and every response object. Dropped entirely from the unit prompt."""
+    assert "sup_base_filename" not in ai._UNIT_SYSTEM_PROMPT
+
+
+def test_parse_unit_suggestions_flattens_groups():
+    raw = json.dumps({
+        "units": [
+            {"name": "Ogre Champion", "members": [
+                {"id": 1, "part_name": "Head"},
+                {"id": 2, "part_name": "Weapon"},
+            ]},
+            {"name": "Royal Guard 1", "members": [
+                {"id": 3, "part_name": "Torso"},
+            ]},
+        ],
+        "unknown": [4],
+    })
+    outcome = ai._parse_unit_suggestions(raw, "test")
+
+    assert outcome.status == "ok"
+    by_id = {s["id"]: s for s in outcome.suggestions}
+    assert by_id[1] == {"id": 1, "part_type": "Ogre Champion", "part_name": "Head", "sup_base_filename": None}
+    assert by_id[2]["part_type"] == "Ogre Champion"
+    assert by_id[3]["part_type"] == "Royal Guard 1"
+    assert by_id[4] == {"id": 4, "part_type": None, "part_name": None, "sup_base_filename": None}
+
+
+def test_parse_unit_suggestions_falls_back_to_flat_format():
+    """A model that ignores the grouped format and replies in the older flat
+    {"files": [...]} shape anyway must still parse — cheap insurance against
+    a model that's simply more reliable with the shape it's seen more of in
+    training."""
+    raw = json.dumps({"files": [
+        {"id": 1, "part_type": "Ogre Champion", "part_name": "Head", "sup_base_filename": None},
     ]})
+    outcome = ai._parse_unit_suggestions(raw, "test")
+    assert outcome.status == "ok"
+    assert outcome.suggestions[0]["part_type"] == "Ogre Champion"
+
+
+def test_unit_strategy_end_to_end_with_grouped_response(monkeypatch):
+    """Full run() through the OpenAI-compatible path with a real grouped
+    response — Pascal-casing still applies to the flattened part_type."""
+    files = [
+        {"id": 1, "filename": "Royal_Guard_1_Head.stl", "part_type": None, "part_name": None},
+        {"id": 2, "filename": "Royal_Guard_1_Weapon.stl", "part_type": None, "part_name": None},
+    ]
+    canned = json.dumps({"units": [
+        {"name": "royal guard 1", "members": [
+            {"id": 1, "part_name": "Head"},
+            {"id": 2, "part_name": "Weapon"},
+        ]},
+    ], "unknown": []})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    by_id = {s["id"]: s for s in res.suggestions}
+    assert by_id[1]["part_type"] == "Royal Guard 1"
+    assert by_id[2]["part_type"] == "Royal Guard 1"
+    assert by_id[1]["part_name"] == "Head"
+    assert by_id[2]["part_name"] == "Weapon"
+
+
+def test_unit_strategy_skips_heuristic_pass(monkeypatch):
+    """Unlike "parts", "unit" has no keyword heuristic — and its prompt only
+    asks the model to group by filename, so the candidate sent is just
+    id/filename: no part_type/part_name key at all, heuristic-inferred or
+    otherwise (#894-follow-up: those would just be stale None values, pure
+    prompt bloat for a task that doesn't use them)."""
+    files = [{"id": 1, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"units": [
+        {"name": "royal guard 1", "members": [{"id": 1, "part_name": "Sword"}]},
+    ], "unknown": []})
     captured: dict = {}
 
     def _fake_post(url, **kwargs):
@@ -433,8 +549,8 @@ def test_unit_strategy_skips_heuristic_pass(monkeypatch):
     res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
 
     assert res.llm.status == "ok"
-    # No heuristic-inferred part_type ("Weapon") — sent exactly as stored (None).
-    assert captured["payload"][0]["part_type"] is None
+    # Candidate is just id/filename — no part_type/part_name key at all.
+    assert captured["payload"][0] == {"id": 1, "filename": "Sword_of_Truth.stl"}
     assert captured["system"] == ai._UNIT_SYSTEM_PROMPT
 
 
@@ -510,7 +626,8 @@ def test_unit_strategy_batches_and_processes_every_file_past_the_cap(monkeypatch
 def test_unit_strategy_later_batch_is_told_the_earlier_batchs_unit_names(monkeypatch):
     """The second (and later) batch's prompt must mention unit names the
     first batch already established, so the LLM reuses them instead of
-    inventing a differently-spelled variant for the same physical unit."""
+    inventing a differently-spelled variant for the same physical unit.
+    Exercises the grouped response format end to end across batches."""
     n = ai._LLM_FILE_CAP + 1
     files = [
         {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
@@ -522,10 +639,9 @@ def test_unit_strategy_later_batch_is_told_the_earlier_batchs_unit_names(monkeyp
         content_text = kwargs["json"]["messages"][1]["content"]
         user_messages.append(content_text)
         payload = json.loads(content_text.split("\n\n")[-1])
-        content = json.dumps({"files": [
-            {"id": f["id"], "part_type": "Royal Guard 1", "part_name": None, "sup_base_filename": None}
-            for f in payload
-        ]})
+        content = json.dumps({"units": [
+            {"name": "Royal Guard 1", "members": [{"id": f["id"], "part_name": None} for f in payload]},
+        ], "unknown": []})
 
         class _Resp:
             status_code = 200
@@ -537,8 +653,11 @@ def test_unit_strategy_later_batch_is_told_the_earlier_batchs_unit_names(monkeyp
         return _Resp()
 
     monkeypatch.setattr(ai.httpx, "post", _fake_post)
-    ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
 
+    assert res.llm.status == "ok"
+    assert {s["id"] for s in res.suggestions} == set(range(n))
+    assert all(s["part_type"] == "Royal Guard 1" for s in res.suggestions)
     assert len(user_messages) == 2
     assert "Units already established" not in user_messages[0]
     assert "Royal Guard 1" in user_messages[1]

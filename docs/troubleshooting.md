@@ -3,6 +3,7 @@
 - [I added models to a creator but they don't show up](#i-added-models-to-a-creator-but-they-dont-show-up)
 - [A model has the wrong thumbnail](#a-model-has-the-wrong-thumbnail)
 - [A model has no thumbnail at all](#a-model-has-no-thumbnail-at-all)
+- [Images in a hidden folder aren't picked up](#images-in-a-hidden-folder-arent-picked-up)
 - [When should I rescan vs. run a full scan?](#when-should-i-rescan-vs-run-a-full-scan)
 - [A whole creator is missing or shows only one model](#a-whole-creator-is-missing-or-shows-only-one-model)
 - [Models are flagged "needs review"](#models-are-flagged-needs-review)
@@ -43,6 +44,14 @@ there genuinely aren't any images there, it can't show one. Options:
 
 - Use **Change image → From URL** to point at an online image.
 - Add an image file to the model's folder and rescan that creator.
+
+## Images in a hidden folder aren't picked up
+
+This is intentional. The scanner skips any dot-prefixed directory — hidden
+folders like `.git`, or similar caches other tools leave behind, are never
+treated as gallery images, STLs, or models of their own. If a model's folder
+already has stale entries from before this behavior existed, rescan that
+creator to drop them.
 
 ## When should I rescan vs. run a full scan?
 
@@ -108,6 +117,13 @@ database lives in your user data folder (see
 [Getting Started](getting-started.md#standalone-recommended)) and survives app
 updates. The app reads your STL folders; in Docker mode they're mounted
 **read-only**, so your original files are never modified.
+
+A scan or rescan only removes a model's gallery images, thumbnail, or the
+model itself when it can positively confirm the corresponding files are
+gone — a transient failure to read a folder (an external/network drive
+blipping mid-scan, a permission hiccup) is never treated as "these files no
+longer exist." Affected entries are simply left untouched until a later
+rescan can confirm one way or the other.
 
 For an extra safety net, use **Settings → Data Management → Download Backup** to
 save a snapshot of the catalog (see below).

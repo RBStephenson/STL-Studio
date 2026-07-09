@@ -5,7 +5,7 @@ import {
 } from "../../api/client";
 import ThinningReference from "./ThinningReference";
 import { AirbrushSkills, BrushSkills } from "./SkillsTabs";
-import { sanitize, sanitizeUrl, sanitizeCss } from "../../lib/sanitizeHtml";
+import { sanitize, sanitizeUrl, sanitizeCss, scopeCss } from "../../lib/sanitizeHtml";
 import "./guide-reader.css";
 import "./guide-print.css"; // @media print: expands all tabs, applies print.css (#262)
 
@@ -290,7 +290,7 @@ export default function GuideReader({ guide }: { guide: Guide }) {
   const pills = guide.paint_lines_used ?? [];
   const credit = guide.creator_credit;
   const scopedHeadStyle = guide.head_style
-    ? sanitizeCss(guide.head_style).replace(/:root/g, ".guide-reader")
+    ? scopeCss(sanitizeCss(guide.head_style))
     : "";
   const creditUrl = sanitizeUrl(credit?.url);
 
