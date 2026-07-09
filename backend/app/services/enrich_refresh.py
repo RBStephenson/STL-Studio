@@ -141,48 +141,86 @@ async def _do_refresh(
     }
 
 
+def _refresh_body(
+    job: JobHandle,
+    *,
+    creator_id: Optional[int],
+    model_ids: Optional[list[int]],
+    stale_days: Optional[int],
+    db: Optional[Session],
+) -> None:
+    """The refresh job body, shared by ``run_refresh`` (inline) and
+    ``start_refresh`` (backgrounded via the runner). Pass ``db`` to run against
+    a caller-owned session (tests); omitted, it opens and closes its own.
+
+    Runs as a single-key job on the shared runner (services/job_runner.py). The
+    runner records terminal DONE/ERROR state and the message-on-error; this body
+    only pushes the running message and progress counters.
+    """
+    job.update(
+        message="starting",
+        candidates=0, refreshed=0, failed=0, errors=0,
+    )
+    own_db = db is None
+    _db = db or SessionLocal()
+    try:
+        result = asyncio.run(_do_refresh(_db, creator_id, model_ids, stale_days))
+        job.update(
+            state=JobState.DONE,
+            message=(
+                f"done — {result['refreshed']} refreshed, "
+                f"{result['failed']} failed, {result['errors']} errors"
+            ),
+            **result,
+        )
+    except Exception as e:
+        # Mirror the message the UI showed before the runner owned terminal
+        # state; re-raise so the runner records ERROR + the error string.
+        job.update(message=f"error: {e}")
+        raise
+    finally:
+        if own_db:
+            _db.close()
+
+
 def run_refresh(
     creator_id: Optional[int] = None,
     model_ids: Optional[list[int]] = None,
     stale_days: Optional[int] = None,
     db: Optional[Session] = None,
 ) -> dict:
-    """Run a refresh to completion, updating the shared job status as it goes.
-
-    Blocking — callers that don't want to block the request thread run this in
-    a background thread (see the /enrich/refresh route) the same way
-    scan_all_roots is run from /scan/start. Pass ``db`` to run inline against a
-    caller-owned session (tests); omitted, it opens and closes its own.
-
-    Runs as a single-key job on the shared runner (services/job_runner.py). The
-    runner records terminal DONE/ERROR state and the message-on-error; this body
-    only pushes the running message and progress counters.
+    """Run a refresh to completion inline, updating the shared job status as it
+    goes. For direct/synchronous callers (tests, the same convention
+    scan_all_roots tests use) — bypasses the single-flight guard, matching
+    ``JobRunner.run_inline``'s contract. Production requests go through
+    ``start_refresh`` instead, which backgrounds the same body with
+    single-flight protection.
     """
-    def _body(job: JobHandle) -> None:
-        job.update(
-            message="starting",
-            candidates=0, refreshed=0, failed=0, errors=0,
-        )
-        own_db = db is None
-        _db = db or SessionLocal()
-        try:
-            result = asyncio.run(_do_refresh(_db, creator_id, model_ids, stale_days))
-            job.update(
-                state=JobState.DONE,
-                message=(
-                    f"done — {result['refreshed']} refreshed, "
-                    f"{result['failed']} failed, {result['errors']} errors"
-                ),
-                **result,
-            )
-        except Exception as e:
-            # Mirror the message the UI showed before the runner owned terminal
-            # state; re-raise so the runner records ERROR + the error string.
-            job.update(message=f"error: {e}")
-            raise
-        finally:
-            if own_db:
-                _db.close()
-
-    runner.run_inline(_JOB_KEY, _body)
+    runner.run_inline(
+        _JOB_KEY, _refresh_body,
+        creator_id=creator_id, model_ids=model_ids, stale_days=stale_days, db=db,
+    )
     return get_status()
+
+
+def start_refresh(
+    creator_id: Optional[int] = None,
+    model_ids: Optional[list[int]] = None,
+    stale_days: Optional[int] = None,
+) -> bool:
+    """Start a background refresh with single-flight protection (STUDIO-85).
+
+    ``runner.start`` registers the job (and takes the registry lock) before
+    returning, on the calling (request) thread — closing the race where the
+    router used to check ``get_status()["running"]`` and only then spawn a raw
+    thread whose body registered the job later. Two concurrent requests could
+    both see "not running" before either's job existed. Returns True if this
+    call started the job, False if one was already running (caller surfaces a
+    409).
+    """
+    handle = runner.start(
+        _JOB_KEY, _refresh_body,
+        single_flight=True,
+        creator_id=creator_id, model_ids=model_ids, stale_days=stale_days, db=None,
+    )
+    return handle is not None
