@@ -435,11 +435,16 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
    saved as a **source → library mapping**: every pack under that source inherits
    it, and the dropdown pre-fills (but stays editable) next time.
 4. **Enrich each pack** — expand a card to set **Creator, Character, Title, and
-   Tags**, then click **Import**. That ingests just that pack's folder as inbox
-   models, applies the metadata, and immediately moves that pack into the
-   destination library on disk (drift-checked, with undo) — no separate move
-   step. The **inbox** flag clears as the pack lands, and a progress bar shows
-   files moved while the move is in flight.
+   Tags**, or paste a **Source URL** and click **Fetch** to pull title, creator,
+   tags, and gallery images from a Gumroad/Cults3D/MyMiniFactory product page
+   (the store — `source_site` — is recorded too). Then click **Import**. That
+   ingests just that pack's folder as inbox models, downloads any fetched
+   gallery images into the pack folder (concurrently, so a slow/unreachable
+   image doesn't block the rest), applies the metadata, and immediately moves
+   that pack into the destination library on disk (drift-checked, with undo)
+   — no separate move step. The **inbox** flag clears as the pack lands, and a
+   progress bar shows what's happening at each stage (downloading images,
+   then moving files).
 5. **"Move N imported packs → {library}"** — a batch bar for moving every
    already-ingested-but-not-yet-moved pack under the current source in one go
    (e.g. after a Quick import).
