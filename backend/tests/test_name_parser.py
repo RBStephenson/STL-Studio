@@ -72,6 +72,12 @@ class TestTypeDetection:
         ("DnD", "dnd"),
         ("RPG", "rpg"),
         ("wargame", "wargame"),
+        ("garage kit", "garage kit"),
+        ("Garage Kits", "garage kit"),
+        ("GK", "garage kit"),
+        ("resin", "resin"),
+        ("maquette", "maquette"),
+        ("collectible", "collectible"),
     ])
     def test_type_keyword(self, word, expected_tag):
         sig = parse(f"Undead {word}")
@@ -80,6 +86,13 @@ class TestTypeDetection:
     def test_no_type_for_plain_name(self):
         sig = parse("Akuma")
         assert not sig.types
+
+    def test_garage_kit_does_not_regress_bare_kit(self):
+        # "garage kit" tags as its own type without losing the bare "kit" match
+        # elsewhere in a name that mentions both.
+        sig = parse("Model Kit Garage Kit")
+        assert "garage kit" in sig.types
+        assert "kit" in sig.types
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +120,16 @@ class TestModifierDetection:
     def test_pinup_modifier(self):
         sig = parse("Paladin Pin-Up")
         assert "pin-up" in sig.modifiers
+
+    @pytest.mark.parametrize("word,expected_tag", [
+        ("Deluxe", "deluxe"),
+        ("Exclusive", "exclusive"),
+        ("Limited Edition", "limited edition"),
+        ("Bonus", "bonus"),
+    ])
+    def test_edition_modifier(self, word, expected_tag):
+        sig = parse(f"Statue {word}")
+        assert expected_tag in sig.modifiers
 
 
 # ---------------------------------------------------------------------------
