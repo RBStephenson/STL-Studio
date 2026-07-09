@@ -4,10 +4,42 @@ The Anthropic client is monkeypatched at the `ai_organize.Anthropic` boundary
 (same pattern as the painting generator's tests); no live API call is made.
 """
 import json
+import logging
 import types
+
+import pytest
 
 import app.services.ai_organize as ai
 from app.models import Model, STLFile
+
+
+class _ListHandler(logging.Handler):
+    """Collects formatted log records in a list."""
+    def __init__(self):
+        super().__init__()
+        self.messages: list[str] = []
+
+    def emit(self, record):
+        self.messages.append(self.format(record))
+
+
+@pytest.fixture
+def ai_organize_logs():
+    """Capture ai_organize's log output directly on its own logger.
+
+    The app's `logging_config.configure_logging` deliberately sets
+    `propagate = False` on the top-level "app" logger (to avoid duplicate
+    lines with uvicorn's own root handler) — which also means pytest's
+    caplog, which listens via a handler on the *root* logger, never sees
+    anything the app logs. Attaching directly to ai_organize's own logger
+    sidesteps that entirely.
+    """
+    handler = _ListHandler()
+    ai._log.addHandler(handler)
+    try:
+        yield handler
+    finally:
+        ai._log.removeHandler(handler)
 
 
 def _resp(text: str):
@@ -485,6 +517,62 @@ def test_parse_unit_suggestions_falls_back_to_flat_format():
     outcome = ai._parse_unit_suggestions(raw, "test")
     assert outcome.status == "ok"
     assert outcome.suggestions[0]["part_type"] == "Ogre Champion"
+
+
+# --- Logging the actual reply on a parse failure (#894-follow-up) ---
+# "LLM returned non-JSON content" alone doesn't say whether the model
+# rambled prose, got stuck repeating itself, or was cut off mid-object by
+# max_tokens — seeing the raw reply is the only way to tell which, and it
+# must show up without needing DEBUG-level logging turned on.
+
+def test_non_json_reply_logs_the_raw_text(monkeypatch, ai_organize_logs):
+    garbage = "Sure! Here are the categorized files: " + "blah " * 20
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{"message": {"content": garbage}}]},
+        },
+    )())
+
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "error"
+    assert any("blah blah blah" in m for m in ai_organize_logs.messages)
+
+
+def test_malformed_files_field_logs_the_parsed_json(monkeypatch, ai_organize_logs):
+    """Valid JSON, wrong shape (files isn't a list) — same visibility need."""
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{"message": {
+                "content": json.dumps({"files": "not-a-list"}),
+            }}]},
+        },
+    )())
+
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "error"
+    assert any("not-a-list" in m for m in ai_organize_logs.messages)
+
+
+def test_malformed_unit_response_logs_the_parsed_json(monkeypatch, ai_organize_logs):
+    """Same check for the unit strategy's own malformed-shape branch."""
+    files = [{"id": 1, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None}]
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{"message": {
+                "content": json.dumps(["not", "a", "dict"]),
+            }}]},
+        },
+    )())
+
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "error"
+    assert any("not" in m and "dict" in m for m in ai_organize_logs.messages)
 
 
 def test_unit_strategy_end_to_end_with_grouped_response(monkeypatch):

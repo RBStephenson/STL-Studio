@@ -373,16 +373,27 @@ def _strip_json_fence(raw_text: str) -> str:
     return raw_text
 
 
+_RAW_RESPONSE_LOG_CAP = 1500  # chars — enough to see the failure shape without flooding logs
+
+
 def _load_llm_json(raw_text: str, source: str) -> tuple[Any, LlmOutcome | None]:
     """Strip an optional fence and parse JSON — shared by both response
     parsers. Returns ``(data, None)`` on success or ``(None, error_outcome)``
-    on failure."""
+    on failure.
+
+    On failure, the offending text is logged at WARNING (not DEBUG) —
+    "non-JSON content" alone doesn't say whether the model rambled prose,
+    got stuck repeating itself, or was simply cut off mid-object by
+    max_tokens; seeing the actual reply is the only way to tell which."""
     raw_text = _strip_json_fence(raw_text)
     try:
         return json.loads(raw_text), None
     except json.JSONDecodeError:
         detail = f"LLM returned non-JSON content from {source}"
-        _log.warning("ai_organize llm_error %s", detail)
+        _log.warning(
+            "ai_organize llm_error %s — raw reply (%d chars, showing up to %d): %r",
+            detail, len(raw_text), _RAW_RESPONSE_LOG_CAP, raw_text[:_RAW_RESPONSE_LOG_CAP],
+        )
         return None, LlmOutcome(status="error", detail=detail)
 
 
@@ -390,7 +401,10 @@ def _flat_suggestions_from_data(data: Any, source: str) -> LlmOutcome:
     """Extract the "parts"-strategy flat ``{"files": [...]}`` shape."""
     suggestions = data.get("files", []) if isinstance(data, dict) else []
     if not isinstance(suggestions, list):
-        _log.warning("ai_organize llm_error malformed 'files' field from %s", source)
+        _log.warning(
+            "ai_organize llm_error malformed 'files' field from %s — parsed JSON was: %s",
+            source, repr(data)[:_RAW_RESPONSE_LOG_CAP],
+        )
         return LlmOutcome(status="error",
                           detail=f"Malformed 'files' field in response from {source}")
 
@@ -434,7 +448,10 @@ def _parse_unit_suggestions(raw_text: str, source: str) -> LlmOutcome:
         return err
 
     if not isinstance(data, dict):
-        _log.warning("ai_organize llm_error malformed response from %s", source)
+        _log.warning(
+            "ai_organize llm_error malformed response from %s — parsed JSON was: %s",
+            source, repr(data)[:_RAW_RESPONSE_LOG_CAP],
+        )
         return LlmOutcome(status="error", detail=f"Malformed response from {source}")
 
     if "units" not in data and "files" in data:
