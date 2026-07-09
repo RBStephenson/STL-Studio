@@ -41,7 +41,7 @@ jobs:
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           # metadata-action lowercases the name, which GHCR requires.
           images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.service }}
