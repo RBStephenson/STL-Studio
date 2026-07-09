@@ -390,6 +390,125 @@ def test_unit_strategy_still_skipped_when_every_file_is_a_sup_variant():
     assert res.llm.status == "skipped"
 
 
+# --- Unit strategy: batching past _LLM_FILE_CAP (#884) ---
+
+def test_unit_strategy_batches_and_processes_every_file_past_the_cap(monkeypatch):
+    """Regression: a model with more than _LLM_FILE_CAP files used to have
+    everything past the cap silently dropped — no suggestion at all, since
+    unit strategy has no heuristic fallback to catch the rest."""
+    n = ai._LLM_FILE_CAP + 5  # forces exactly two batches
+    files = [
+        {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
+        for i in range(n)
+    ]
+    calls: list[list[dict]] = []
+
+    def _fake_post(url, **kwargs):
+        payload = json.loads(kwargs["json"]["messages"][1]["content"].split("\n\n")[-1])
+        calls.append(payload)
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": "royal guard 1", "part_name": None, "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    assert len(calls) == 2
+    assert len(calls[0]) == ai._LLM_FILE_CAP
+    assert len(calls[1]) == 5
+    # Every file got a suggestion — none silently dropped past the cap.
+    assert {s["id"] for s in res.suggestions} == set(range(n))
+    assert all(s["part_type"] == "Royal Guard 1" for s in res.suggestions)
+
+
+def test_unit_strategy_later_batch_is_told_the_earlier_batchs_unit_names(monkeypatch):
+    """The second (and later) batch's prompt must mention unit names the
+    first batch already established, so the LLM reuses them instead of
+    inventing a differently-spelled variant for the same physical unit."""
+    n = ai._LLM_FILE_CAP + 1
+    files = [
+        {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
+        for i in range(n)
+    ]
+    user_messages: list[str] = []
+
+    def _fake_post(url, **kwargs):
+        content_text = kwargs["json"]["messages"][1]["content"]
+        user_messages.append(content_text)
+        payload = json.loads(content_text.split("\n\n")[-1])
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": "Royal Guard 1", "part_name": None, "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert len(user_messages) == 2
+    assert "Units already established" not in user_messages[0]
+    assert "Royal Guard 1" in user_messages[1]
+    assert "Units already established" in user_messages[1]
+
+
+def test_unit_strategy_stops_and_reports_error_when_any_batch_fails(monkeypatch):
+    """success-via-API-or-nothing (#821) holds across the whole batched run:
+    if a later batch errors, the entire result is "error" — never a partial
+    mix of real suggestions from the first batch plus silence from the rest."""
+    n = ai._LLM_FILE_CAP + 3
+    files = [
+        {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
+        for i in range(n)
+    ]
+    call_count = 0
+
+    def _fake_post(url, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise ai.httpx.ConnectError("connection refused")
+        payload = json.loads(kwargs["json"]["messages"][1]["content"].split("\n\n")[-1])
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": "Royal Guard 1", "part_name": None, "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "error"
+    assert call_count == 2  # stopped after the failing batch — no further batches attempted
+    assert res.suggestions == []
+
+
 def test_endpoint_unit_strategy_skips_canonical_snap(client, db, monkeypatch):
     """A unit name is freeform — it must reach the client exactly as the LLM
     (Pascal-cased) returned it, never snapped toward a canonical part-type

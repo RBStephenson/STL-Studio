@@ -15,7 +15,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 from anthropic import Anthropic  # module symbol so tests can monkeypatch it
@@ -395,9 +395,15 @@ def _llm_refine_anthropic(
     timeout: float = _DEFAULT_TIMEOUT,
     effort: str | None = None,
     system_prompt: str = _SYSTEM_PROMPT,
+    user_prefix: str = "",
 ) -> LlmOutcome:
     """Refine via the Anthropic Messages API. Mirrors the OpenAI path's contract:
-    returns ``status="error"`` with a human-readable ``detail`` on any failure."""
+    returns ``status="error"`` with a human-readable ``detail`` on any failure.
+
+    ``user_prefix``, when given, is prepended (as plain text, before the JSON
+    file list) to the user turn — used by the unit strategy's batching to tell
+    a later batch which unit names earlier batches already established, so
+    the same unit doesn't get renamed across batches."""
     source = "Anthropic API"
     if not api_key:
         detail = "No API key configured for this Anthropic connection."
@@ -414,7 +420,7 @@ def _llm_refine_anthropic(
             "max_tokens": _ANTHROPIC_MAX_TOKENS,
             "system": system_prompt,
             "messages": [
-                {"role": "user", "content": json.dumps(files, ensure_ascii=False)},
+                {"role": "user", "content": user_prefix + json.dumps(files, ensure_ascii=False)},
             ],
         }
         budget = _EFFORT_THINKING_BUDGET.get((effort or "low"), 0)
@@ -444,6 +450,7 @@ def _llm_refine_openai(
     api_key: str,
     timeout: float = _DEFAULT_TIMEOUT,
     system_prompt: str = _SYSTEM_PROMPT,
+    user_prefix: str = "",
 ) -> LlmOutcome:
     """Call an OpenAI-compatible /v1/chat/completions endpoint (e.g. Ollama).
 
@@ -451,6 +458,8 @@ def _llm_refine_openai(
     ``detail``, and the caller falls back to the heuristic results. Errors are
     logged at WARNING (not INFO) with the endpoint and the underlying reason so
     connection refusals, timeouts, and HTTP errors are distinguishable in logs.
+
+    ``user_prefix``: see _llm_refine_anthropic — same purpose here.
     """
     import re as _re
     base_url = _re.sub(
@@ -467,7 +476,7 @@ def _llm_refine_openai(
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(files, ensure_ascii=False)},
+            {"role": "user", "content": user_prefix + json.dumps(files, ensure_ascii=False)},
         ],
         "temperature": 0.1,
         "response_format": {"type": "json_object"},
@@ -532,6 +541,56 @@ def _llm_refine_openai(
 # ---------------------------------------------------------------------------
 
 _LLM_FILE_CAP = 15   # max files sent to LLM per request
+
+
+def _run_unit_batches(
+    candidates: list[dict[str, Any]],
+    call_llm: Callable[[list[dict[str, Any]], str, str], LlmOutcome],
+) -> LlmOutcome:
+    """Send every unit-strategy candidate to the LLM in chunks of
+    _LLM_FILE_CAP, one call per chunk, instead of a single capped call that
+    silently drops everything past the first _LLM_FILE_CAP files (#884) — the
+    unit strategy has no heuristic fallback to catch what a single call
+    misses, unlike "parts".
+
+    Each chunk after the first is told which unit names earlier chunks
+    already established, so the same physical unit doesn't get renamed
+    differently across chunks. Success-via-API-or-nothing (#821) still holds
+    across the whole run: the first chunk that errors makes the entire
+    result "error", exactly as a single non-batched call would — never a mix
+    of some real suggestions and some silently missing.
+    """
+    all_suggestions: list[dict[str, Any]] = []
+    known_units: list[str] = []  # insertion order, for a stable/readable hint
+    total = len(candidates)
+
+    for start in range(0, total, _LLM_FILE_CAP):
+        chunk = candidates[start:start + _LLM_FILE_CAP]
+        prefix = ""
+        if known_units:
+            prefix = (
+                "Units already established from earlier files in this same "
+                "model (reuse one of these exactly — same spelling and "
+                "number — if a file below belongs to it): "
+                + ", ".join(known_units) + "\n\n"
+            )
+        _log_step(
+            "llm_batch", sending=len(chunk), of=total,
+            batch=start // _LLM_FILE_CAP + 1,
+        )
+        outcome = call_llm(chunk, _UNIT_SYSTEM_PROMPT, prefix)
+        if outcome.status != "ok":
+            return outcome
+        for s in outcome.suggestions:
+            pt = s.get("part_type")
+            if pt:
+                cased = _to_pascal_case(pt)
+                s["part_type"] = cased
+                if cased not in known_units:
+                    known_units.append(cased)
+        all_suggestions.extend(outcome.suggestions)
+
+    return LlmOutcome(status="ok", suggestions=all_suggestions)
 
 
 def run(
@@ -615,39 +674,49 @@ def run(
                 out["part_name"] = sug["part_name"]
             return out
 
-        candidates = [
+        all_candidates = [
             _with_heuristic(f) for f in files
             if not _is_sup(f["filename"])   # Sup_ files inherit; don't duplicate
-        ][:_LLM_FILE_CAP]
+        ]
 
-        if candidates:
-            _log_step("llm_batch", sending=len(candidates), of=len(files))
-            system_prompt = _UNIT_SYSTEM_PROMPT if strategy == "unit" else _SYSTEM_PROMPT
+        def _call_llm(chunk: list[dict[str, Any]], system_prompt: str, user_prefix: str = "") -> LlmOutcome:
             if api_type == "anthropic":
-                outcome = _llm_refine_anthropic(
-                    candidates, model, api_key, timeout, effort, system_prompt=system_prompt,
+                return _llm_refine_anthropic(
+                    chunk, model, api_key, timeout, effort,
+                    system_prompt=system_prompt, user_prefix=user_prefix,
                 )
-            else:
-                outcome = _llm_refine_openai(
-                    candidates, base_url, model, api_key, timeout=timeout, system_prompt=system_prompt,
-                )
-            for s in outcome.suggestions:
-                fid = s.get("id")
-                if not isinstance(fid, int):
-                    continue
-                existing = merged.get(fid, {"id": fid, "filename": "", "sup_base_filename": None})
-                if s.get("part_type") is not None:
-                    existing["part_type"] = (
-                        _to_pascal_case(s["part_type"]) if strategy == "unit" else s["part_type"]
-                    )
-                if s.get("part_name"):
-                    existing["part_name"] = s["part_name"]
-                if s.get("sup_base_filename"):
-                    existing["sup_base_filename"] = s["sup_base_filename"]
-                merged[fid] = existing
-        else:
+            return _llm_refine_openai(
+                chunk, base_url, model, api_key, timeout=timeout,
+                system_prompt=system_prompt, user_prefix=user_prefix,
+            )
+
+        if not all_candidates:
             outcome = LlmOutcome(status="skipped")
             _log_step("llm_skip", reason="no non-Sup files to send")
+        elif strategy == "unit":
+            # Batched (#884): a single _LLM_FILE_CAP-sized call would silently
+            # drop every file past the cap, since unit strategy has no
+            # heuristic fallback to catch the rest (unlike "parts" below).
+            outcome = _run_unit_batches(all_candidates, _call_llm)
+        else:
+            candidates = all_candidates[:_LLM_FILE_CAP]
+            _log_step("llm_batch", sending=len(candidates), of=len(files))
+            outcome = _call_llm(candidates, _SYSTEM_PROMPT)
+
+        for s in outcome.suggestions:
+            fid = s.get("id")
+            if not isinstance(fid, int):
+                continue
+            existing = merged.get(fid, {"id": fid, "filename": "", "sup_base_filename": None})
+            if s.get("part_type") is not None:
+                existing["part_type"] = (
+                    _to_pascal_case(s["part_type"]) if strategy == "unit" else s["part_type"]
+                )
+            if s.get("part_name"):
+                existing["part_name"] = s["part_name"]
+            if s.get("sup_base_filename"):
+                existing["sup_base_filename"] = s["sup_base_filename"]
+            merged[fid] = existing
 
     result = list(merged.values())
     _log_step("done", total_suggestions=len(result), llm_status=outcome.status)
