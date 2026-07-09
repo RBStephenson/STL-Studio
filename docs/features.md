@@ -263,7 +263,11 @@ strategy:
   helmet, weapon — gets that as its category, not "Head"/"Weapon"). There's no
   keyword pre-pass for this — it goes straight to the AI. Unit names are
   derived per model, so they aren't limited to the standard category list;
-  each one is title-cased for consistency across a unit's files.
+  each one is title-cased for consistency across a unit's files. Large kits
+  are sent to the AI in batches rather than one capped call, so every file
+  gets a suggestion, not just the first ~15 — later batches are told which
+  unit names earlier ones already settled on, so the same unit isn't renamed
+  partway through a big kit.
 
 Either way, review the suggestions in a modal before applying — nothing is
 written to a file until you confirm.
@@ -680,7 +684,13 @@ off to keep each segment's original casing and spacing.
   folder (e.g. a character-level "renders/" dir also used by sibling
   variants) are left in place, since moving those would break the path for
   the other models still pointing at them. Once every tracked file has moved
-  out, the now-empty source folder is removed.
+  out, the now-empty source folder is removed. If one of a model's tracked
+  images collides with an unrelated file already sitting at the destination
+  (e.g. leftover marketing art bundled with a download, or debris from an
+  earlier interrupted apply), that one image is skipped — logged, left where
+  it is — rather than failing the whole batch; an STL file collision still
+  aborts the batch exactly as before, since a wrong or missing STL is a real
+  problem, not an incidental extra image.
 - **Undo.** **Undo last apply** reverses the batch, skipping anything you've since
   edited or that now sits where a file would return.
 
