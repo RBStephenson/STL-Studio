@@ -69,4 +69,28 @@ describe("AiOrganizeReviewModal — success-via-API-or-nothing (#821)", () => {
     });
     expect(screen.queryByText("widget.stl")).not.toBeInTheDocument();
   });
+
+  it("category dropdown offers the same canonical categories as the app's Category combobox", () => {
+    // Regression: this modal used to have its own stale, mismatched category
+    // list ("Accessory", "Arm", "Leg", "Full", "Unknown", ...) instead of the
+    // canonical one — an edit made here could save a non-canonical value
+    // (e.g. "Accessory") that /ai-organize/apply writes verbatim, with no
+    // server-side re-normalization, producing a category the real Category
+    // combobox doesn't offer.
+    renderModal({
+      suggestions: [{ id: 1, filename: "widget.stl", part_type: "Accessories", part_name: "Widget", sup_of_id: null, sup_base_filename: null }],
+      llm_status: "ok",
+      llm_detail: null,
+    });
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((o) => o.value);
+
+    expect(optionValues).toContain("Accessories");
+    expect(optionValues).not.toContain("Accessory");
+    expect(optionValues).not.toContain("Full");
+    expect(optionValues).not.toContain("Unknown");
+    // A couple of real canonical categories the old stale list was missing.
+    expect(optionValues).toContain("Right Arm");
+    expect(optionValues).toContain("Torso");
+  });
 });

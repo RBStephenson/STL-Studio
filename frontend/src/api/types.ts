@@ -210,6 +210,26 @@ export interface ImportApplyStatus {
   result: ImportApplyResult | null;
 }
 
+export interface DownloadImagesResult {
+  downloaded: number;
+}
+
+export interface DownloadImagesStart {
+  // false = nothing to download — `result` is already final, no need to poll.
+  // true = a background job is running; poll importApi.downloadImagesStatus().
+  started: boolean;
+  result: DownloadImagesResult | null;
+}
+
+export interface DownloadImagesStatus {
+  running: boolean;
+  message: string;
+  downloaded: number;
+  total: number;
+  error: string | null;
+  result: DownloadImagesResult | null;
+}
+
 export interface DriveStatusRoot {
   path: string;
   enabled: boolean;
@@ -291,6 +311,11 @@ export interface AiOrganizeSettings {
   url: string;
   model: string;
 }
+
+// "parts" (default) categorizes by physical part type (Head, Weapon, ...).
+// "unit" groups by in-game unit/character instead (#878) — freeform, not
+// limited to the standard category list.
+export type AiOrganizeStrategy = "parts" | "unit";
 
 export interface AiOrganizeSuggestion {
   id: number;

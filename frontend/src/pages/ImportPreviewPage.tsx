@@ -17,12 +17,14 @@ interface CardFields {
   tags: string[];
   notes: string;
   sourceUrl: string;
+  sourceSite: string;
   collectionIds: number[];
   images: string[];
 }
 
 const EMPTY_FIELDS: CardFields = {
-  creator: "", character: "", title: "", tags: [], notes: "", sourceUrl: "", collectionIds: [], images: [],
+  creator: "", character: "", title: "", tags: [], notes: "", sourceUrl: "", sourceSite: "",
+  collectionIds: [], images: [],
 };
 
 function fieldsFromPack(p: ImportPreviewPack | undefined): CardFields {
@@ -34,6 +36,9 @@ function fieldsFromPack(p: ImportPreviewPack | undefined): CardFields {
     tags: p.tags ?? [],
     notes: p.notes ?? "",
     sourceUrl: p.source_url ?? "",
+    // ImportPreviewPack doesn't round-trip source_site (only set via a live
+    // scrape below, not persisted on the pack read path) — always starts blank.
+    sourceSite: "",
     collectionIds: [],
     images: [],
   };
@@ -68,6 +73,8 @@ export default function ImportPreviewPage() {
   // Apply-phase progress (files moved so far / total), separate from the
   // scan-phase progress above — populated while the background move job runs.
   const [applyProgress, setApplyProgress] = useState<Record<string, { moved: number; total: number }>>({});
+  // Image-download-phase progress (images downloaded so far / total).
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, { downloaded: number; total: number }>>({});
   const [fetching, setFetching] = useState<Record<string, boolean>>({});
 
   const [newColName, setNewColName] = useState("");
@@ -168,6 +175,7 @@ export default function ImportPreviewPage() {
         title: s.title || f.title,
         creator: s.creator_name || f.creator,
         sourceUrl: s.source_url || url,
+        sourceSite: s.source_site || f.sourceSite,
         tags: [...new Set([...f.tags, ...s.tags])],
         images: allImages,
       });
@@ -247,11 +255,31 @@ export default function ImportPreviewPage() {
       }, 1200);
     });
 
+  const waitForDownloadImages = (packPath: string) =>
+    new Promise<void>((resolve, reject) => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(async () => {
+        try {
+          const s = await api.import.downloadImagesStatus();
+          setDownloadProgress((m) => ({
+            ...m,
+            [packPath]: { downloaded: s.downloaded ?? 0, total: s.total ?? 0 },
+          }));
+          if (!s.running) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            if (s.error) reject(new Error(s.error));
+            else resolve();
+          }
+        } catch { /* transient — keep polling */ }
+      }, 1200);
+    });
+
   const importPack = async (entry: SourceContentsEntry) => {
     if (!libraryId) { toast("Pick a destination library first.", "error"); return; }
     setStatus((m) => ({ ...m, [entry.path]: "running" }));
     setProgress((m) => ({ ...m, [entry.path]: { models: 0, files: 0 } }));
     setApplyProgress((m) => ({ ...m, [entry.path]: { moved: 0, total: 0 } }));
+    setDownloadProgress((m) => ({ ...m, [entry.path]: { downloaded: 0, total: 0 } }));
     try {
       await api.import.scanFolder(entry.path);
       await waitForScan(entry.path);
@@ -264,18 +292,20 @@ export default function ImportPreviewPage() {
       // Download CDN gallery images into the pack folder before apply so they
       // travel to the library folder with the rest of the pack's files.
       if (f.images.length) {
-        await api.import.downloadImages(entry.path, f.images);
+        const dlStart = await api.import.downloadImages(entry.path, f.images);
+        if (dlStart.started) await waitForDownloadImages(entry.path);
       }
       if (ids.length) {
         const enrich: {
           creator_name?: string; character?: string; title?: string;
-          notes?: string; source_url?: string;
+          notes?: string; source_url?: string; source_site?: string;
         } = {};
         if (f.creator.trim()) enrich.creator_name = f.creator.trim();
         if (f.character.trim()) enrich.character = f.character.trim();
         if (f.title.trim()) enrich.title = f.title.trim();
         if (f.notes.trim()) enrich.notes = f.notes.trim();
         if (f.sourceUrl.trim()) enrich.source_url = f.sourceUrl.trim();
+        if (f.sourceSite.trim()) enrich.source_site = f.sourceSite.trim();
         if (Object.keys(enrich).length) await api.models.bulkEnrich(ids, enrich);
         if (f.tags.length) await api.models.bulkTag(ids, f.tags, []);
         // Collections need the post-ingest model ids, so they apply last (#458).
@@ -424,6 +454,7 @@ export default function ImportPreviewPage() {
           const st = status[c.path] ?? "idle";
           const prog = progress[c.path];
           const aProg = applyProgress[c.path];
+          const dProg = downloadProgress[c.path];
           const open = expanded[c.path] ?? false;
           return (
             <div key={c.path} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -433,6 +464,11 @@ export default function ImportPreviewPage() {
                     <div
                       className="h-full bg-indigo-500 transition-all"
                       style={{ width: `${Math.min(100, (aProg.moved / aProg.total) * 100)}%` }}
+                    />
+                  ) : dProg && dProg.total > 0 ? (
+                    <div
+                      className="h-full bg-indigo-500 transition-all"
+                      style={{ width: `${Math.min(100, (dProg.downloaded / dProg.total) * 100)}%` }}
                     />
                   ) : (
                     <div className="h-full bg-indigo-500 animate-pulse w-full" />
@@ -468,7 +504,13 @@ export default function ImportPreviewPage() {
                     Moving {aProg.moved}/{aProg.total} files
                   </span>
                 )}
-                {st === "running" && !(aProg && aProg.total > 0) && prog && (prog.models > 0 || prog.files > 0) && (
+                {st === "running" && !(aProg && aProg.total > 0) && dProg && dProg.total > 0 && (
+                  <span className="text-xs text-indigo-300 shrink-0 tabular-nums">
+                    Downloading {dProg.downloaded}/{dProg.total} images
+                  </span>
+                )}
+                {st === "running" && !(aProg && aProg.total > 0) && !(dProg && dProg.total > 0)
+                  && prog && (prog.models > 0 || prog.files > 0) && (
                   <span className="text-xs text-indigo-300 shrink-0 tabular-nums">
                     {prog.models}m / {prog.files}f
                   </span>
