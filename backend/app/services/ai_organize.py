@@ -551,8 +551,15 @@ def _llm_refine_anthropic(
     _log_step("llm_response", elapsed_s=round(time.monotonic() - t0, 1), status="ok")
     raw_text = _text_from_anthropic(resp)
     if not raw_text:
-        detail = f"Empty response from {source}"
-        _log.warning("ai_organize llm_error %s", detail)
+        # Mirrors the OpenAI path's empty-content diagnostic: stop_reason
+        # ("max_tokens" confirms it ran out of budget) plus the content block
+        # types actually returned (e.g. all "thinking", no "text") say why,
+        # even though max_tokens here already reserves headroom on top of the
+        # thinking budget specifically to avoid this (see kwargs above).
+        stop_reason = getattr(resp, "stop_reason", None)
+        block_types = [getattr(b, "type", None) for b in (getattr(resp, "content", []) or [])]
+        detail = f"Empty response from {source} (stop_reason={stop_reason!r})"
+        _log.warning("ai_organize llm_error %s — content block types: %s", detail, block_types)
         return LlmOutcome(status="error", detail=detail)
     return parser(raw_text, source)
 
@@ -597,6 +604,14 @@ def _llm_refine_openai(
         "temperature": 0.1,
         "response_format": {"type": "json_object"},
         "max_tokens": _OPENAI_MAX_TOKENS,
+        # Some locally-served models (DeepSeek-R1-style, QwQ, etc.) support an
+        # extended "thinking"/reasoning phase before the real answer. There's
+        # nothing to reason about for this task — it's filename pattern-
+        # matching — and a thinking model can spend its *entire* max_tokens
+        # budget on hidden reasoning and emit nothing into content at all
+        # (#903-follow-up: exactly this — 78s, status 200, empty content).
+        # Ignored by servers/models that don't recognize the field.
+        "think": False,
     }
 
     endpoint = f"{base_url}/v1/chat/completions"
@@ -626,12 +641,16 @@ def _llm_refine_openai(
     except httpx.RequestError as exc:
         return _request_error(exc)
 
-    if resp.status_code == 400 and "response_format" in resp.text:
-        payload.pop("response_format", None)
-        try:
-            resp = httpx.post(endpoint, json=payload, headers=headers, timeout=timeout)
-        except httpx.RequestError as exc:
-            return _request_error(exc)
+    # Retry once per optional field a strict server rejects outright (rather
+    # than just ignoring) — checked in sequence so a server that objects to
+    # both fields sheds each in turn instead of only ever trying the first.
+    for optional_key in ("response_format", "think"):
+        if resp.status_code == 400 and optional_key in payload and optional_key in resp.text:
+            payload.pop(optional_key, None)
+            try:
+                resp = httpx.post(endpoint, json=payload, headers=headers, timeout=timeout)
+            except httpx.RequestError as exc:
+                return _request_error(exc)
 
     elapsed = time.monotonic() - t0
     _log_step("llm_response", elapsed_s=round(elapsed, 1), status=resp.status_code)
@@ -643,11 +662,29 @@ def _llm_refine_openai(
         return LlmOutcome(status="error", detail=detail)
 
     try:
-        body      = resp.json()
-        raw_text: str = body["choices"][0]["message"]["content"].strip()
+        body    = resp.json()
+        choice  = body["choices"][0]
+        message = choice.get("message", {})
+        raw_text: str = (message.get("content") or "").strip()
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
         detail = f"Unexpected response shape from {log_endpoint}: {exc.__class__.__name__}"
         _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    if not raw_text:
+        # A model with a hidden "thinking"/reasoning phase can spend its
+        # entire max_tokens budget reasoning and never emit anything into
+        # content — the request still succeeds (status 200) with nothing to
+        # show for it. finish_reason == "length" confirms it ran out of
+        # budget rather than the model choosing to stop; the full message
+        # object surfaces a reasoning/thinking field the server may have put
+        # the content in instead, if there is one.
+        finish_reason = choice.get("finish_reason")
+        detail = f"Empty response content from {log_endpoint} (finish_reason={finish_reason!r})"
+        _log.warning(
+            "ai_organize llm_error %s — full message: %s",
+            detail, repr(message)[:_RAW_RESPONSE_LOG_CAP],
+        )
         return LlmOutcome(status="error", detail=detail)
 
     return parser(raw_text, log_endpoint)

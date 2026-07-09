@@ -130,6 +130,30 @@ def test_anthropic_effort_maps_to_thinking_budget(monkeypatch):
     assert "thinking" not in captured["create"]
 
 
+def test_anthropic_all_thinking_no_text_logs_stop_reason(monkeypatch, ai_organize_logs):
+    """Mirrors the OpenAI path's empty-content diagnostic: if the reply is
+    all "thinking" blocks and no "text" block, stop_reason plus the block
+    types actually returned must be visible to diagnose it."""
+    thinking_block = types.SimpleNamespace(type="thinking", text=None)
+    resp = types.SimpleNamespace(content=[thinking_block], stop_reason="max_tokens")
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        @property
+        def messages(self):
+            return types.SimpleNamespace(create=lambda **kw: resp)
+
+    monkeypatch.setattr(ai, "Anthropic", _Client)
+
+    res = ai.run(_UNRESOLVED, "", "claude-opus-4-8", "sk-ant-x", api_type="anthropic")
+
+    assert res.llm.status == "error"
+    assert "max_tokens" in res.llm.detail
+    assert any("thinking" in m for m in ai_organize_logs.messages)
+
+
 def test_endpoint_drives_anthropic_config(client, db, monkeypatch):
     """End-to-end: an assigned Anthropic config reaches the runner and returns
     suggestions with llm_status='ok'."""
@@ -277,6 +301,86 @@ def test_openai_path_caps_max_tokens(monkeypatch):
     ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
 
     assert captured["payload"]["max_tokens"] == ai._OPENAI_MAX_TOKENS
+
+
+def test_openai_path_disables_thinking(monkeypatch):
+    """Nothing to reason about for this task (filename pattern-matching) —
+    disabling it where the server supports the knob avoids a reasoning
+    model spending its whole max_tokens budget on hidden thinking and
+    emitting nothing into content at all (#903-follow-up)."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert captured["payload"]["think"] is False
+
+
+def test_openai_path_retries_without_think_on_400(monkeypatch):
+    """A strict server that rejects the unrecognized "think" field outright
+    (rather than just ignoring it) gets one retry with it stripped —
+    mirrors the existing response_format retry."""
+    calls: list[dict] = []
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        calls.append(dict(kwargs["json"]))  # snapshot — payload is mutated in place on retry
+
+        class _Resp:
+            def __init__(self, status_code, text, body=None):
+                self.status_code = status_code
+                self.is_success = status_code == 200
+                self.text = text
+                self._body = body
+
+            def json(self):
+                return self._body
+        if len(calls) == 1:
+            return _Resp(400, "unknown field: think")
+        return _Resp(200, "", {"choices": [{"message": {"content": content}}]})
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "ok"
+    assert len(calls) == 2
+    assert "think" in calls[0]
+    assert "think" not in calls[1]
+
+
+def test_openai_path_empty_content_logs_finish_reason_and_message(monkeypatch, ai_organize_logs):
+    """A reasoning model can spend its entire max_tokens budget "thinking"
+    and emit nothing into content — request still succeeds (status 200)
+    with nothing to show for it. finish_reason + the full message object
+    must be visible to diagnose this, not just a generic empty-reply error."""
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{
+                "finish_reason": "length",
+                "message": {"content": "", "reasoning_content": "Let me think about this..."},
+            }]},
+        },
+    )())
+
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "error"
+    assert "length" in res.llm.detail
+    assert any("reasoning_content" in m and "Let me think" in m for m in ai_organize_logs.messages)
 
 
 def test_endpoint_anthropic_without_model_is_400(client, db):
