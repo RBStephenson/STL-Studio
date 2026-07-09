@@ -181,10 +181,11 @@ def test_endpoint_returns_empty_suggestions_when_disabled(client, db):
 
 
 def test_endpoint_returns_empty_suggestions_when_skipped(client, db):
-    """A well-named file that heuristics fully resolve needs no AI call —
-    llm_status is 'skipped', and per #821 that still means zero suggestions,
-    not the heuristic guess presented as an AI result."""
-    m, f = _seeded_model(db, filename="Sword_of_Truth.stl")  # heuristics resolve this: Weapon
+    """A model made entirely of Sup_ (presupported) files has nothing to send
+    the AI — those files inherit their base file's category instead of being
+    sent themselves. llm_status is 'skipped', and per #821 that still means
+    zero suggestions, not the heuristic guess presented as an AI result."""
+    m, f = _seeded_model(db, filename="Sup_Sword.stl")
     cfg = client.post("/settings/ai-apis", json={
         "name": "Ollama", "api_type": "openai", "url": "http://x:11434", "model": "llama3",
     }).json()
@@ -235,3 +236,108 @@ def test_endpoint_anthropic_without_model_is_400(client, db):
     r = client.post(f"/models/{m.id}/ai-organize")
     assert r.status_code == 400
     assert "model" in r.json()["detail"].lower()
+
+
+# --- The AI is never skipped just because heuristics fully resolved a file ---
+
+def test_llm_still_called_when_heuristics_fully_resolve_the_file(monkeypatch):
+    """A well-named file that heuristics fully resolve (type AND name) must
+    still be sent to the AI — it may still be able to correct a wrong
+    heuristic guess or fix the name; "resolved" coverage of part_type alone
+    doesn't mean the suggestion is actually correct."""
+    resolved = [{"id": 1, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"files": [
+        {"id": 1, "part_type": "Weapon", "part_name": "Sword of Truth", "sup_base_filename": None},
+    ]})
+    captured: dict = {}
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = json.loads(kwargs["json"]["messages"][1]["content"])
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": canned}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(resolved, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "ok"
+    # The heuristic already resolved this file (Weapon/"Sword of Truth" from
+    # naming rules) — it was still sent to the LLM, not skipped.
+    assert captured["payload"][0]["id"] == 1
+
+
+def test_llm_receives_heuristic_suggestion_not_raw_none(monkeypatch):
+    """Candidates sent to the LLM carry the heuristic-computed part_type/
+    part_name (matching what the system prompt claims), not the original
+    (often null) stored values."""
+    files = [{"id": 1, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None}]
+    captured: dict = {}
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = json.loads(kwargs["json"]["messages"][1]["content"])
+        content = json.dumps({"files": []})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    sent = captured["payload"][0]
+    assert sent["part_type"] == "Weapon"  # heuristic-inferred, not None
+
+
+def test_skipped_only_when_every_file_is_a_sup_variant():
+    """The true 'skipped' case: nothing eligible to send at all."""
+    files = [{"id": 1, "filename": "Sup_Sword.stl", "part_type": None, "part_name": None}]
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai")
+    assert res.llm.status == "skipped"
+
+
+def test_system_prompt_lists_the_canonical_categories():
+    for cat in ai.CANONICAL_PART_TYPES:
+        assert cat in ai._SYSTEM_PROMPT
+    # And not the old, mismatched hardcoded list this replaced.
+    assert "Accessory," not in ai._SYSTEM_PROMPT
+    assert "Shoulder" not in ai._SYSTEM_PROMPT
+
+
+def test_ai_category_snaps_to_canonical_name_even_in_a_fresh_library(client, db, monkeypatch):
+    """No existing STLFile.part_type values are stored anywhere yet — the AI's
+    "Accessory" must still snap to the app's canonical "Accessories", not be
+    stored as an invented near-miss."""
+    m = Model(name="Fresh Library Model", folder_path="/lib/fresh")
+    db.add(m)
+    db.flush()
+    f = STLFile(model_id=m.id, filename="mystery_blob.stl", path="/lib/fresh/mystery_blob.stl")
+    db.add(f)
+    db.commit()
+
+    canned = json.dumps({"files": [
+        {"id": f.id, "part_type": "Accessory", "part_name": "Trinket", "sup_base_filename": None},
+    ]})
+    monkeypatch.setattr(ai, "Anthropic", _fake_anthropic(canned))
+
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Claude", "api_type": "anthropic", "model": "claude-opus-4-8", "effort": "low",
+    }).json()
+    client.post(f"/settings/ai-apis/{cfg['id']}/key", json={"key": "sk-ant-test"})
+    client.patch("/settings", json={"ai_organize_enabled": True, "ai_organize_api": cfg["id"]})
+
+    r = client.post(f"/models/{m.id}/ai-organize")
+    assert r.status_code == 200
+    body = r.json()
+    sug = {s["id"]: s for s in body["suggestions"]}
+    assert sug[f.id]["part_type"] == "Accessories"
