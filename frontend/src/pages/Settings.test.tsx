@@ -14,7 +14,7 @@ const goTab = async (label: RegExp | string) => {
   await userEvent.click(btn);
   // Wait for the tab to become active — navigate() + useEffect chain may span
   // two React render cycles, so we wait until the button reflects active state.
-  await waitFor(() => expect(btn).toHaveClass("border-indigo-500"));
+  await waitFor(() => expect(btn).toHaveClass("border-accent-start"));
 };
 
 vi.mock("../api/client", () => ({
