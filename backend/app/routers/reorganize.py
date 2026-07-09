@@ -108,11 +108,18 @@ def _build_and_persist(
     overrides: dict[int, dict] | None,
     inbox_source: str | None = None,
     slugify_title: bool = False,
+    slugify_all: bool | None = None,
 ) -> ReorganizePreviewResponse:
+    """``slugify_all=None`` (the Reorganize page's own callers) defers to the
+    persisted reorganize_slugify setting. A caller with its own, independent
+    naming contract — e.g. import-apply, which must not silently follow
+    whatever the Reorganize page's slug preference happens to be set to —
+    passes an explicit True/False instead."""
+    resolved_slugify_all = _slugify_all(db) if slugify_all is None else slugify_all
     try:
         manifest = reorganize.build_manifest(
             db, template, root_id, overrides, inbox_source,
-            slugify_title=slugify_title, slugify_all=_slugify_all(db),
+            slugify_title=slugify_title, slugify_all=resolved_slugify_all,
         )
     except ReorganizeTemplateError as e:
         raise HTTPException(status_code=400, detail=str(e))

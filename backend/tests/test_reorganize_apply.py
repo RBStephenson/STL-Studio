@@ -95,6 +95,25 @@ class TestApplyHappyPath:
         assert len(lines) == 1 and lines[0]["status"] == "done"
 
 
+class TestOnProgress:
+    """on_progress(moved, total) is purely additive — no callback means no
+    behavior change (covered above); with one, it must fire once per moved
+    file with an accurate running count (STUDIO-XX, import-apply progress bar)."""
+
+    def test_on_progress_called_once_per_file_with_accurate_counts(self, db, tmp_path, write_mode, client):
+        _root(db, tmp_path)
+        m1 = _seed(db, tmp_path, character="Joker", title="Bust")
+        m2 = _seed(db, tmp_path, character="Riddler", title="Cane")
+        mid = _preview(client)["manifest_id"]
+
+        calls: list[tuple[int, int]] = []
+        result = apply_manifest(
+            db, mid, [m1.id, m2.id], on_progress=lambda moved, total: calls.append((moved, total)),
+        )
+        assert result.moved_files == 2
+        assert calls == [(1, 2), (2, 2)]
+
+
 class TestInboxEndToEnd:
     """#428: an inbox model (outside every scan root) must be eligible in preview,
     move into the managed library on apply (clearing is_inbox), and return to its

@@ -46,10 +46,17 @@ def db(test_engine, monkeypatch):
     # so startup events (_migrate_schema, _seed_tag_index) use the test DB.
     import app.database as db_module
     import app.main as main_module
+    import app.routers.imports as imports_module
 
     monkeypatch.setattr(db_module, "engine", test_engine)
     monkeypatch.setattr(db_module, "SessionLocal", Session)
     monkeypatch.setattr(main_module, "engine", test_engine)
+    # import_apply's background job (app/routers/imports.py) opens its own
+    # session via a module-level `from app.database import SessionLocal` —
+    # that name was bound at import time, so patching app.database.SessionLocal
+    # alone doesn't reach it; the job would otherwise run against a stray,
+    # disconnected in-memory DB instead of this test's engine.
+    monkeypatch.setattr(imports_module, "SessionLocal", Session)
 
     session = Session()
     yield session

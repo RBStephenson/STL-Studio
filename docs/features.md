@@ -436,10 +436,13 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
    it, and the dropdown pre-fills (but stays editable) next time.
 4. **Enrich each pack** — expand a card to set **Creator, Character, Title, and
    Tags**, then click **Import**. That ingests just that pack's folder as inbox
-   models and applies the metadata.
-5. **Move them in** — a **"Move N imported packs → {library}"** bar files the
-   imported packs into the destination library on disk (drift-checked, with
-   undo). The **inbox** flag clears as each pack lands.
+   models, applies the metadata, and immediately moves that pack into the
+   destination library on disk (drift-checked, with undo) — no separate move
+   step. The **inbox** flag clears as the pack lands, and a progress bar shows
+   files moved while the move is in flight.
+5. **"Move N imported packs → {library}"** — a batch bar for moving every
+   already-ingested-but-not-yet-moved pack under the current source in one go
+   (e.g. after a Quick import).
 
 ### Notes
 
@@ -448,6 +451,10 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
   loose files → an `_Inbox` creator) — handy when you don't need per-pack review.
 - **Inbox flag** — un-filed imports are marked **inbox**; the Library's
   `?is_inbox=1` filter shows just these.
+- The **move** step follows the Reorganize page's slug-formatting setting
+  (**Settings → Library**) — with it on, an imported pack's creator/title
+  segments land already lowercase-and-hyphenated on disk, with no separate
+  manual Reorganize pass needed afterward.
 - The **move** step requires the **Reorganize Library** feature flag (**Settings →
   Library**, off by default) and a writable destination — Docker mounts are
   read-only, so moves are effectively standalone-only. Importing and enriching

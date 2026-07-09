@@ -1,6 +1,7 @@
 import { request } from "./base";
 import type {
-  ImportApplyResult,
+  ImportApplyStart,
+  ImportApplyStatus,
   ImportPreview,
   SourceContents,
   SourceMapping,
@@ -26,11 +27,12 @@ export const importApi = {
       body: JSON.stringify({ source_path, library_id }),
     }),
   apply: (source: string) =>
-    request<ImportApplyResult>("/import/apply", {
+    request<ImportApplyStart>("/import/apply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ source }),
     }),
+  applyStatus: () => request<ImportApplyStatus>("/import/apply/status"),
   downloadImages: (packPath: string, imageUrls: string[]) =>
     request<{ downloaded: number }>("/import/download-images", {
       method: "POST",
