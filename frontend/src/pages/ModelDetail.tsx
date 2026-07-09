@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw } from "lucide-react";
-import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult } from "../api/client";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw, Trash2 } from "lucide-react";
+import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult, AiOrganizeStrategy } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
+import AiOrganizeStrategyModal from "../components/AiOrganizeStrategyModal";
 import FindOnWeb from "../components/FindOnWeb";
 import ImagePicker from "../components/ImagePicker";
 import MetadataEditor from "../components/MetadataEditor";
@@ -119,6 +120,7 @@ export default function ModelDetail() {
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [aiOrganizing, setAiOrganizing] = useState(false);
   const [aiOrganizeResult, setAiOrganizeResult] = useState<AiOrganizePreviewResult | null>(null);
+  const [showAiOrganizeStrategy, setShowAiOrganizeStrategy] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
@@ -237,8 +239,16 @@ export default function ModelDetail() {
     }
   };
 
-  const runAiOrganize = async () => {
+  // Button click opens the strategy picker (#878) rather than calling the API
+  // directly — the actual call happens in runAiOrganize once a strategy is chosen.
+  const runAiOrganize = () => {
     if (!model || aiOrganizing) return;
+    setShowAiOrganizeStrategy(true);
+  };
+
+  const organizeWithStrategy = async (strategy: AiOrganizeStrategy) => {
+    if (!model) return;
+    setShowAiOrganizeStrategy(false);
     setAiOrganizing(true);
     try {
       // Always open the modal so the user sees WHY, whether that's a review
@@ -246,7 +256,7 @@ export default function ModelDetail() {
       // error) — AI Organize never silently substitutes heuristics for a
       // real AI result (#821), so an empty response is still feedback worth
       // surfacing, not a value to swallow into a toast.
-      setAiOrganizeResult(await api.models.aiOrganize(model.id));
+      setAiOrganizeResult(await api.models.aiOrganize(model.id, strategy));
     } catch (e) {
       toast(errMsg(e) || "AI organize failed", "error");
     } finally {
@@ -315,6 +325,25 @@ export default function ModelDetail() {
       load();
     } catch (e) {
       toast(errMsg(e) || "Couldn't clear the image — try again.", "error");
+    }
+  };
+
+  const deleteOtherFile = async (path: string) => {
+    if (!model) return;
+    const name = path.split(/[\\/]/).pop() ?? path;
+    const ok = await confirm({
+      title: "Delete this file?",
+      message: `"${name}" will be permanently deleted from disk.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await api.models.deleteOtherFile(model.id, path);
+      toast("File deleted.", "success");
+      load();
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't delete the file — try again.", "error");
     }
   };
 
@@ -753,10 +782,20 @@ export default function ModelDetail() {
                 {(model.other_files ?? []).map((fp) => {
                   const name = fp.split(/[\\/]/).pop() ?? fp;
                   return (
-                    <a key={fp} href={api.documentUrl(fp)} download={name} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-600 hover:bg-gray-800 text-xs text-gray-300 hover:text-gray-100 transition-colors">
-                      <FileBox size={12} className="shrink-0 text-gray-500" />
-                      <span className="truncate">{name}</span>
-                    </a>
+                    <div key={fp} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-600 hover:bg-gray-800 text-xs text-gray-300 transition-colors">
+                      <a href={api.documentUrl(fp)} download={name} className="flex items-center gap-2 flex-1 min-w-0 hover:text-gray-100">
+                        <FileBox size={12} className="shrink-0 text-gray-500" />
+                        <span className="truncate">{name}</span>
+                      </a>
+                      <button
+                        onClick={() => deleteOtherFile(fp)}
+                        className="shrink-0 p-1 rounded text-gray-600 hover:text-red-400 hover:bg-red-950/40 transition-colors"
+                        aria-label={`Delete ${name}`}
+                        title={`Delete ${name}`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -797,15 +836,27 @@ export default function ModelDetail() {
                 {(model.other_files ?? []).map((fp) => {
                   const name = fp.split(/[\\/]/).pop() ?? fp;
                   return (
-                    <a
+                    <div
                       key={fp}
-                      href={api.documentUrl(fp)}
-                      download={name}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-600 hover:bg-gray-800 text-xs text-gray-300 hover:text-gray-100 transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-600 hover:bg-gray-800 text-xs text-gray-300 transition-colors"
                     >
-                      <FileBox size={12} className="shrink-0 text-gray-500" />
-                      <span className="truncate">{name}</span>
-                    </a>
+                      <a
+                        href={api.documentUrl(fp)}
+                        download={name}
+                        className="flex items-center gap-2 flex-1 min-w-0 hover:text-gray-100"
+                      >
+                        <FileBox size={12} className="shrink-0 text-gray-500" />
+                        <span className="truncate">{name}</span>
+                      </a>
+                      <button
+                        onClick={() => deleteOtherFile(fp)}
+                        className="shrink-0 p-1 rounded text-gray-600 hover:text-red-400 hover:bg-red-950/40 transition-colors"
+                        aria-label={`Delete ${name}`}
+                        title={`Delete ${name}`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -899,6 +950,13 @@ export default function ModelDetail() {
           modelName={model.title || model.name}
           files={model.stl_files.map((f) => ({ ...f, part_type: partTypes[f.id] || f.part_type }))}
           onClose={() => setShowKitBuilder(false)}
+        />
+      )}
+
+      {showAiOrganizeStrategy && (
+        <AiOrganizeStrategyModal
+          onChoose={organizeWithStrategy}
+          onClose={() => setShowAiOrganizeStrategy(false)}
         />
       )}
 

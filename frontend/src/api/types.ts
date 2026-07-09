@@ -312,6 +312,11 @@ export interface AiOrganizeSettings {
   model: string;
 }
 
+// "parts" (default) categorizes by physical part type (Head, Weapon, ...).
+// "unit" groups by in-game unit/character instead (#878) — freeform, not
+// limited to the standard category list.
+export type AiOrganizeStrategy = "parts" | "unit";
+
 export interface AiOrganizeSuggestion {
   id: number;
   part_type: string | null;

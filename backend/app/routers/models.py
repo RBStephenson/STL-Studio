@@ -21,9 +21,9 @@ from app.models import Model, Creator, ModelTag, CollectionModel, ScanRoot, STLF
 from app.schemas import (
     ModelList, ModelRead, ModelDetail, CreatorRead, CreatorCreate,
     ModelUpdate, STLFileUpdate, BulkDeleteRequest, BulkDeleteResponse,
-    AiOrganizeResult, AiOrganizeSuggestion,
+    AiOrganizeRequest, AiOrganizeResult, AiOrganizeSuggestion,
     AiOrganizeSuggestionPreview, AiOrganizePreviewResult,
-    AiOrganizeApplyRequest,
+    AiOrganizeApplyRequest, OtherFileDeleteRequest,
 )
 from app.services.path_guard import is_within_roots
 from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
@@ -617,7 +617,7 @@ _LLM_STATUS_MESSAGES = {
 
 
 @router.post("/{model_id}/ai-organize", response_model=AiOrganizePreviewResult)
-def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
+def ai_organize_model(model_id: int, body: AiOrganizeRequest = AiOrganizeRequest(), db: Session = Depends(get_db)):
     """Call the AI organizer and return suggestions without writing to the DB.
 
     Suggestions are only returned when the AI call actually succeeded
@@ -625,6 +625,12 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     substituted, so the client can trust that a non-empty response means the
     AI genuinely ran (#821). The client reviews, optionally edits, then calls
     /ai-organize/apply.
+
+    ``body.strategy`` (#878): "parts" (default) categorizes by physical part
+    type, snapped to the canonical list below. "unit" groups by in-game
+    unit/character instead — those suggestions are freeform (already
+    Pascal-cased by the service) and skip the canonical-list snap, since
+    there's no fixed list of unit names to snap to.
     """
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
@@ -644,7 +650,8 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
     # Collect all category names AI suggestions should snap to: the app's
     # fixed canonical list (so a fresh library still gets clean names, not
     # just whatever's already stored) plus any custom categories already in
-    # this library (e.g. "Accessory" → "Accessories").
+    # this library (e.g. "Accessory" → "Accessories"). Unit-based suggestions
+    # are freeform and never snapped, so this list is unused for that strategy.
     existing_types: list[str] = sorted(set(ai_organize.CANONICAL_PART_TYPES) | {
         row[0] for row in
         db.query(STLFile.part_type).filter(STLFile.part_type.isnot(None)).distinct().all()
@@ -654,6 +661,7 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
         organize_result = ai_organize.run(
             file_dicts, org_cfg.url, org_cfg.model, org_cfg.api_key,
             timeout=org_cfg.timeout, api_type=org_cfg.api_type, effort=org_cfg.effort,
+            strategy=body.strategy,
         )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
@@ -667,9 +675,10 @@ def ai_organize_model(model_id: int, db: Session = Depends(get_db)):
         )
 
     raw = organize_result.suggestions
-    for s in raw:
-        if s.get("part_type"):
-            s["part_type"] = _normalize_type(s["part_type"], existing_types)
+    if body.strategy == "parts":
+        for s in raw:
+            if s.get("part_type"):
+                s["part_type"] = _normalize_type(s["part_type"], existing_types)
 
     previews: list[AiOrganizeSuggestionPreview] = []
     for s in raw:
@@ -837,6 +846,39 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
 
     model.updated_at = utcnow()
     sync_model_tags(model, db)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{model_id}/other-files")
+def delete_other_file(model_id: int, body: OtherFileDeleteRequest, db: Session = Depends(get_db)):
+    """Delete one entry from a model's other_files, on disk and in the DB (#880).
+
+    Best-effort on disk: a file that's already gone (e.g. removed outside the
+    app) still gets cleared from other_files rather than leaving a stale
+    listing behind — that mismatch is the actual bug this endpoint fixes.
+    """
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    other_files = model.other_files or []
+    if body.path not in other_files:
+        raise HTTPException(status_code=404, detail="File not found on this model")
+
+    roots = [os.path.realpath(r.path) for r in db.query(ScanRoot).all()]
+    if not is_within_roots(body.path, roots):
+        raise HTTPException(status_code=400, detail="File is outside known scan roots")
+
+    try:
+        os.remove(body.path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete file: {exc}")
+
+    model.other_files = [p for p in other_files if p != body.path]
+    model.updated_at = utcnow()
     db.commit()
     return {"ok": True}
 

@@ -242,15 +242,35 @@ on each file in the model detail view. Files group into collapsible sections and
 the 3D viewer organises its part picker by category — useful for complex
 multi-part kits.
 
+**Other Files** lists a model's non-STL, non-image files (PDFs, datapackage.json,
+etc.) — click one to download it. Each entry has a delete icon that removes it
+both from disk and from the listing (with a confirmation first); if the file was
+already gone from disk (e.g. deleted outside the app), this still clears the
+stale listing.
+
 **AI Organize** (button on the model detail page, requires an AI API assigned
-under [Settings → AI & Integrations](#ai--integrations)) suggests a part type
-and cleaned-up name for every STL file. Fast keyword-based naming rules run
-first, but the AI always runs too — even on files the naming rules already
-resolved — since it can still catch a wrong guess or a name the rules got
-half right. It only ever picks from the app's standard category list, so its
-suggestions land in the same categories the Category combobox offers. Review
-the suggestions in a modal before applying; nothing is written to a file
-until you confirm.
+under [Settings → AI & Integrations](#ai--integrations)) suggests a category
+and cleaned-up name for every STL file. Clicking it first asks you to pick a
+strategy:
+
+- **Parts-based** — the standard approach. Fast keyword-based naming rules run
+  first, but the AI always runs too — even on files the naming rules already
+  resolved — since it can still catch a wrong guess or a name the rules got
+  half right. It only ever picks from the app's standard category list, so its
+  suggestions land in the same categories the Category combobox offers.
+- **Unit-based** — groups files by the in-game unit or character they belong
+  to instead of by physical part (e.g. every file for "Royal Guard 1" — head,
+  helmet, weapon — gets that as its category, not "Head"/"Weapon"). There's no
+  keyword pre-pass for this — it goes straight to the AI. Unit names are
+  derived per model, so they aren't limited to the standard category list;
+  each one is title-cased for consistency across a unit's files. Large kits
+  are sent to the AI in batches rather than one capped call, so every file
+  gets a suggestion, not just the first ~15 — later batches are told which
+  unit names earlier ones already settled on, so the same unit isn't renamed
+  partway through a big kit.
+
+Either way, review the suggestions in a modal before applying — nothing is
+written to a file until you confirm.
 
 ## 3D viewer
 
@@ -664,7 +684,13 @@ off to keep each segment's original casing and spacing.
   folder (e.g. a character-level "renders/" dir also used by sibling
   variants) are left in place, since moving those would break the path for
   the other models still pointing at them. Once every tracked file has moved
-  out, the now-empty source folder is removed.
+  out, the now-empty source folder is removed. If one of a model's tracked
+  images collides with an unrelated file already sitting at the destination
+  (e.g. leftover marketing art bundled with a download, or debris from an
+  earlier interrupted apply), that one image is skipped — logged, left where
+  it is — rather than failing the whole batch; an STL file collision still
+  aborts the batch exactly as before, since a wrong or missing STL is a real
+  problem, not an incidental extra image.
 - **Undo.** **Undo last apply** reverses the batch, skipping anything you've since
   edited or that now sits where a file would return.
 
@@ -708,9 +734,10 @@ entry has:
 - **Timeout** — how long (in seconds) to wait for a response from this
   endpoint before giving up. Defaults to **10s**, which suits a local Ollama.
   A **remote** Ollama loading a model for the first time (a "cold start") can
-  take 30–90s or more, so raise this for remote endpoints — e.g. `60`. The
-  setting is per-connection, so a fast local API and a slow remote one can each
-  have their own value.
+  take much longer, especially for a large model on modest hardware, so raise
+  this for remote endpoints — up to **600s** (10 minutes). The setting is
+  per-connection, so a fast local API and a slow remote one can each have
+  their own value.
 - **API key** — stored encrypted server-side, using a separate encryption key
   (`STL_SECRET_KEY`, see [Docker configuration](docker.md#optional-environment-variables))
   so a leaked database alone doesn't expose it. For Ollama and similar local

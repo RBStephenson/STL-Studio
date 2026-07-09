@@ -97,6 +97,15 @@ def _allowed_roots() -> list[Path]:
             for (path,) in db.query(ScanRoot.path).filter(ScanRoot.enabled == True):
                 if path:
                     roots.append(Path(path))
+            # Inbox/import models are deliberately never registered as a scan
+            # root (scan_inbox_folder skips it on purpose), but their own
+            # folder_path is a directory the scanner has already walked and
+            # trusts — allow serving images from inside it so the Import
+            # Preview page can show real thumbnails instead of every request
+            # 403ing.
+            for (path,) in db.query(ModelDB.folder_path).filter(ModelDB.is_inbox == True).distinct():
+                if path:
+                    roots.append(Path(path))
         finally:
             db.close()
     except Exception:

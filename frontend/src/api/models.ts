@@ -2,6 +2,7 @@ import { request, BASE } from "./base";
 import type {
   AiOrganizePreviewResult,
   AiOrganizeResult,
+  AiOrganizeStrategy,
   AiOrganizeSuggestion,
   Creator,
   ModelDetail,
@@ -78,6 +79,12 @@ export const modelsApi = {
       `/models/${id}/images/refresh`,
       { method: "POST" },
     ),
+  deleteOtherFile: (id: number, path: string) =>
+    request<{ ok: boolean }>(`/models/${id}/other-files`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }),
   uploadGalleryImages: async (id: number, files: File[]) => {
     const form = new FormData();
     for (const file of files) form.append("files", file);
@@ -215,8 +222,12 @@ export const modelsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
-  aiOrganize: (modelId: number) =>
-    request<AiOrganizePreviewResult>(`/models/${modelId}/ai-organize`, { method: "POST" }),
+  aiOrganize: (modelId: number, strategy: AiOrganizeStrategy = "parts") =>
+    request<AiOrganizePreviewResult>(`/models/${modelId}/ai-organize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ strategy }),
+    }),
   aiOrganizeApply: (modelId: number, items: AiOrganizeSuggestion[]) =>
     request<AiOrganizeResult>(`/models/${modelId}/ai-organize/apply`, {
       method: "POST",

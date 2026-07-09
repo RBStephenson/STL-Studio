@@ -299,6 +299,88 @@ def test_llm_receives_heuristic_suggestion_not_raw_none(monkeypatch):
     assert sent["part_type"] == "Weapon"  # heuristic-inferred, not None
 
 
+# --- Dedupe scale/version variants before hitting the LLM ---
+
+def test_llm_dedupes_scale_variants_of_the_same_part(monkeypatch):
+    """Head_28mm.stl and Head_75mm.stl are the same physical part at
+    different scales — both clean to "Head" — so only one representative
+    should reach the LLM; its answer must still land on both ids."""
+    files = [
+        {"id": 1, "filename": "Head_28mm.stl", "part_type": None, "part_name": None},
+        {"id": 2, "filename": "Head_75mm.stl", "part_type": None, "part_name": None},
+        {"id": 3, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None},
+    ]
+    sent: list[list[dict]] = []
+
+    def _fake_post(url, **kwargs):
+        payload = json.loads(kwargs["json"]["messages"][1]["content"])
+        sent.append(payload)
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": f["part_type"], "part_name": "refined", "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "ok"
+    # 3 candidates collapsed to 2 — only one Head sent, not both scales.
+    assert len(sent) == 1
+    assert len(sent[0]) == 2
+
+    by_id = {s["id"]: s for s in res.suggestions}
+    assert by_id[1]["part_type"] == "Head"
+    assert by_id[2]["part_type"] == "Head"
+    assert by_id[1]["part_name"] == "refined"
+    assert by_id[2]["part_name"] == "refined"   # copied from the representative
+    assert by_id[3]["part_type"] == "Weapon"
+
+
+def test_llm_dedupe_preserved_across_unit_strategy_batches(monkeypatch):
+    """The same dedupe applies to the unit strategy's batched path."""
+    files = [
+        {"id": 1, "filename": "Royal_Guard_1_Head_28mm.stl", "part_type": None, "part_name": None},
+        {"id": 2, "filename": "Royal_Guard_1_Head_75mm.stl", "part_type": None, "part_name": None},
+    ]
+    sent: list[list[dict]] = []
+
+    def _fake_post(url, **kwargs):
+        content_text = kwargs["json"]["messages"][1]["content"]
+        payload = json.loads(content_text.split("\n\n")[-1])
+        sent.append(payload)
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": "royal guard 1", "part_name": None, "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    assert len(sent) == 1
+    assert len(sent[0]) == 1  # both scales collapsed to one representative
+    assert {s["id"] for s in res.suggestions} == {1, 2}
+    assert all(s["part_type"] == "Royal Guard 1" for s in res.suggestions)
+
+
 def test_skipped_only_when_every_file_is_a_sup_variant():
     """The true 'skipped' case: nothing eligible to send at all."""
     files = [{"id": 1, "filename": "Sup_Sword.stl", "part_type": None, "part_name": None}]
@@ -312,6 +394,251 @@ def test_system_prompt_lists_the_canonical_categories():
     # And not the old, mismatched hardcoded list this replaced.
     assert "Accessory," not in ai._SYSTEM_PROMPT
     assert "Shoulder" not in ai._SYSTEM_PROMPT
+
+
+# --- Unit-based strategy (#878) ---
+
+def test_to_pascal_case_title_cases_each_word():
+    assert ai._to_pascal_case("royal guard 1") == "Royal Guard 1"
+    assert ai._to_pascal_case("ROYAL GUARD 1") == "Royal Guard 1"
+    assert ai._to_pascal_case("Royal Guard 1") == "Royal Guard 1"
+    assert ai._to_pascal_case("royal_guard-1") == "Royal Guard 1"
+    assert ai._to_pascal_case("  ogre   champion  ") == "Ogre Champion"
+
+
+def test_unit_strategy_skips_heuristic_pass(monkeypatch):
+    """Unlike "parts", "unit" has no keyword heuristic — a well-named file
+    that the parts heuristic would resolve on its own must still be sent to
+    the LLM as-is (no part_type/part_name pre-filled from heuristics)."""
+    files = [{"id": 1, "filename": "Sword_of_Truth.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"files": [
+        {"id": 1, "part_type": "royal guard 1", "part_name": "Sword", "sup_base_filename": None},
+    ]})
+    captured: dict = {}
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = json.loads(kwargs["json"]["messages"][1]["content"])
+        captured["system"] = kwargs["json"]["messages"][0]["content"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": canned}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    # No heuristic-inferred part_type ("Weapon") — sent exactly as stored (None).
+    assert captured["payload"][0]["part_type"] is None
+    assert captured["system"] == ai._UNIT_SYSTEM_PROMPT
+
+
+def test_unit_strategy_pascal_cases_the_llm_suggestion(monkeypatch):
+    files = [{"id": 1, "filename": "Royal_Guard_1_Head_Female_1.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"files": [
+        {"id": 1, "part_type": "royal guard 1", "part_name": "Head Female", "sup_base_filename": None},
+    ]})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    assert {s["id"]: s for s in res.suggestions}[1]["part_type"] == "Royal Guard 1"
+
+
+def test_unit_strategy_still_skipped_when_every_file_is_a_sup_variant():
+    files = [{"id": 1, "filename": "Sup_Sword.stl", "part_type": None, "part_name": None}]
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+    assert res.llm.status == "skipped"
+
+
+# --- Unit strategy: batching past _LLM_FILE_CAP (#884) ---
+
+def test_unit_strategy_batches_and_processes_every_file_past_the_cap(monkeypatch):
+    """Regression: a model with more than _LLM_FILE_CAP files used to have
+    everything past the cap silently dropped — no suggestion at all, since
+    unit strategy has no heuristic fallback to catch the rest."""
+    n = ai._LLM_FILE_CAP + 5  # forces exactly two batches
+    files = [
+        {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
+        for i in range(n)
+    ]
+    calls: list[list[dict]] = []
+
+    def _fake_post(url, **kwargs):
+        payload = json.loads(kwargs["json"]["messages"][1]["content"].split("\n\n")[-1])
+        calls.append(payload)
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": "royal guard 1", "part_name": None, "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    assert len(calls) == 2
+    assert len(calls[0]) == ai._LLM_FILE_CAP
+    assert len(calls[1]) == 5
+    # Every file got a suggestion — none silently dropped past the cap.
+    assert {s["id"] for s in res.suggestions} == set(range(n))
+    assert all(s["part_type"] == "Royal Guard 1" for s in res.suggestions)
+
+
+def test_unit_strategy_later_batch_is_told_the_earlier_batchs_unit_names(monkeypatch):
+    """The second (and later) batch's prompt must mention unit names the
+    first batch already established, so the LLM reuses them instead of
+    inventing a differently-spelled variant for the same physical unit."""
+    n = ai._LLM_FILE_CAP + 1
+    files = [
+        {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
+        for i in range(n)
+    ]
+    user_messages: list[str] = []
+
+    def _fake_post(url, **kwargs):
+        content_text = kwargs["json"]["messages"][1]["content"]
+        user_messages.append(content_text)
+        payload = json.loads(content_text.split("\n\n")[-1])
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": "Royal Guard 1", "part_name": None, "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert len(user_messages) == 2
+    assert "Units already established" not in user_messages[0]
+    assert "Royal Guard 1" in user_messages[1]
+    assert "Units already established" in user_messages[1]
+
+
+def test_unit_strategy_stops_and_reports_error_when_any_batch_fails(monkeypatch):
+    """success-via-API-or-nothing (#821) holds across the whole batched run:
+    if a later batch errors, the entire result is "error" — never a partial
+    mix of real suggestions from the first batch plus silence from the rest."""
+    n = ai._LLM_FILE_CAP + 3
+    files = [
+        {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
+        for i in range(n)
+    ]
+    call_count = 0
+
+    def _fake_post(url, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise ai.httpx.ConnectError("connection refused")
+        payload = json.loads(kwargs["json"]["messages"][1]["content"].split("\n\n")[-1])
+        content = json.dumps({"files": [
+            {"id": f["id"], "part_type": "Royal Guard 1", "part_name": None, "sup_base_filename": None}
+            for f in payload
+        ]})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "error"
+    assert call_count == 2  # stopped after the failing batch — no further batches attempted
+    assert res.suggestions == []
+
+
+def test_endpoint_unit_strategy_skips_canonical_snap(client, db, monkeypatch):
+    """A unit name is freeform — it must reach the client exactly as the LLM
+    (Pascal-cased) returned it, never snapped toward a canonical part-type
+    category the way "parts" strategy suggestions are."""
+    m = Model(name="Royal Guard Squad", folder_path="/lib/royal-guard")
+    db.add(m)
+    db.flush()
+    f = STLFile(model_id=m.id, filename="Royal_Guard_1_Head_Female_1.stl",
+               path="/lib/royal-guard/Royal_Guard_1_Head_Female_1.stl")
+    db.add(f)
+    db.commit()
+
+    canned = json.dumps({"files": [
+        {"id": f.id, "part_type": "royal guard 1", "part_name": "Head Female", "sup_base_filename": None},
+    ]})
+    monkeypatch.setattr(ai, "Anthropic", _fake_anthropic(canned))
+
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Claude", "api_type": "anthropic", "model": "claude-opus-4-8", "effort": "low",
+    }).json()
+    client.post(f"/settings/ai-apis/{cfg['id']}/key", json={"key": "sk-ant-test"})
+    client.patch("/settings", json={"ai_organize_enabled": True, "ai_organize_api": cfg["id"]})
+
+    r = client.post(f"/models/{m.id}/ai-organize", json={"strategy": "unit"})
+    assert r.status_code == 200
+    body = r.json()
+    sug = {s["id"]: s for s in body["suggestions"]}
+    # Pascal-cased by the service, and NOT snapped to any canonical category.
+    assert sug[f.id]["part_type"] == "Royal Guard 1"
+
+
+def test_endpoint_defaults_to_parts_strategy_when_body_omitted(client, db, monkeypatch):
+    """Back-compat: a caller that sends no body (the old contract) still gets
+    parts-based behavior, unchanged."""
+    m = Model(name="Legacy Caller", folder_path="/lib/legacy")
+    db.add(m)
+    db.flush()
+    f = STLFile(model_id=m.id, filename="mystery_blob.stl", path="/lib/legacy/mystery_blob.stl")
+    db.add(f)
+    db.commit()
+
+    canned = json.dumps({"files": [
+        {"id": f.id, "part_type": "Weapon", "part_name": "Blade", "sup_base_filename": None},
+    ]})
+    monkeypatch.setattr(ai, "Anthropic", _fake_anthropic(canned))
+
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Claude", "api_type": "anthropic", "model": "claude-opus-4-8", "effort": "low",
+    }).json()
+    client.post(f"/settings/ai-apis/{cfg['id']}/key", json={"key": "sk-ant-test"})
+    client.patch("/settings", json={"ai_organize_enabled": True, "ai_organize_api": cfg["id"]})
+
+    r = client.post(f"/models/{m.id}/ai-organize")  # no body
+    assert r.status_code == 200
+    assert r.json()["suggestions"][0]["part_type"] == "Weapon"
 
 
 def test_ai_category_snaps_to_canonical_name_even_in_a_fresh_library(client, db, monkeypatch):
