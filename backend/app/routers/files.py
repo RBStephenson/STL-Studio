@@ -361,9 +361,11 @@ def browse_images(path: str = ""):
             }
         path = str(Path.home())
 
-    p = Path(path)
-    if not _is_safe_path(p):
+    try:
+        real = assert_within_roots(path, _allowed_roots())
+    except ValueError:
         raise HTTPException(status_code=403, detail="Path not allowed")
+    p = Path(real)
     if not p.exists() or not p.is_dir():
         raise HTTPException(status_code=404, detail="Folder not found")
 

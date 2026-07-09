@@ -2,6 +2,7 @@
 Tests for the /files endpoints: image serving, STL serving, zip download.
 """
 import io
+import os
 import zipfile
 from pathlib import Path
 import pytest
@@ -353,7 +354,10 @@ class TestBrowseImages:
     @pytest.fixture(autouse=True)
     def _allow_tmp(self, monkeypatch):
         import app.routers.files as files_module
-        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: True)
+        monkeypatch.setattr(
+            files_module, "assert_within_roots",
+            lambda path, roots: os.path.realpath(str(path)),
+        )
 
     def test_lists_subdirs_and_images(self, client, tmp_path):
         (tmp_path / "subfolder").mkdir()
@@ -407,7 +411,11 @@ class TestBrowseImages:
 
     def test_path_outside_allowed_roots_returns_403(self, client, monkeypatch):
         import app.routers.files as files_module
-        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: False)
+
+        def _deny(path, roots):
+            raise ValueError("outside roots")
+
+        monkeypatch.setattr(files_module, "assert_within_roots", _deny)
 
         resp = client.get("/files/browse-images", params={"path": "/etc"})
         assert resp.status_code == 403
@@ -417,7 +425,11 @@ class TestBrowseImages:
         # touch (STUDIO-84) — otherwise a caller can distinguish missing vs
         # existing-but-not-allowed paths outside configured roots.
         import app.routers.files as files_module
-        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: False)
+
+        def _deny(path, roots):
+            raise ValueError("outside roots")
+
+        monkeypatch.setattr(files_module, "assert_within_roots", _deny)
 
         resp = client.get("/files/browse-images", params={"path": "/etc/does-not-exist-xyz"})
         assert resp.status_code == 403
