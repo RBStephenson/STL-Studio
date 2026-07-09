@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefreshCw, Loader2 } from "lucide-react";
 import { useToast } from "../context/ToastContext";
 import { errMsg } from "../utils/err";
@@ -19,8 +19,11 @@ interface RefreshStatus extends RefreshResult {
 // library-wide re-fetch can take minutes — poll status until it's done.
 const POLL_INTERVAL_MS = 1000;
 
-async function pollUntilDone(): Promise<RefreshStatus> {
+// Returns null if `isMounted` goes false mid-poll (STUDIO-92) — the caller
+// then skips every state update instead of touching a gone component.
+async function pollUntilDone(isMounted: () => boolean): Promise<RefreshStatus | null> {
   for (;;) {
+    if (!isMounted()) return null;
     const r = await fetch("/api/enrich/refresh/status");
     if (!r.ok) throw new Error("Couldn't check refresh status");
     const status: RefreshStatus = await r.json();
@@ -54,6 +57,14 @@ export default function RefreshEnrich({ creatorId, scopeLabel, compact, onDone }
   const [running, setRunning] = useState(false);
   const { toast } = useToast();
 
+  // Guards every state update after an await (STUDIO-92) — a long refresh
+  // outlives the component if the user navigates away mid-poll.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   const run = async () => {
     const scopeText = staleDays === null
       ? "every model with a stored source URL"
@@ -76,12 +87,13 @@ export default function RefreshEnrich({ creatorId, scopeLabel, compact, onDone }
         }),
       });
       if (r.status === 409) {
-        toast("A refresh is already running — try again shortly.", "info");
+        if (mountedRef.current) toast("A refresh is already running — try again shortly.", "info");
         return;
       }
       if (!r.ok) throw new Error("Refresh failed");
 
-      const result = await pollUntilDone();
+      const result = await pollUntilDone(() => mountedRef.current);
+      if (!mountedRef.current || result === null) return; // unmounted mid-poll
 
       if (result.candidates === 0) {
         toast("Nothing to refresh — no matching models with a source URL.", "info");
@@ -95,9 +107,9 @@ export default function RefreshEnrich({ creatorId, scopeLabel, compact, onDone }
       }
       onDone?.(result);
     } catch (e) {
-      toast(errMsg(e) ?? "Refresh failed", "error");
+      if (mountedRef.current) toast(errMsg(e) ?? "Refresh failed", "error");
     } finally {
-      setRunning(false);
+      if (mountedRef.current) setRunning(false);
     }
   };
 

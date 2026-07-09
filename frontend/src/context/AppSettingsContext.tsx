@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { api, AppSettings, FilterPreset } from "../api/client";
 import { collectLegacyPreferences, clearLegacyPreferences } from "../utils/legacyPreferences";
+import { useToast } from "./ToastContext";
 
 // Mirrors the backend DEFAULTS in routers/settings.py — used until the
 // server responds, so gated UI stays hidden during the initial fetch.
@@ -37,6 +38,13 @@ const DEFAULTS: AppSettings = {
 
 interface AppSettingsContextValue {
   settings: AppSettings;
+  // True once the initial load has settled, success or failure (STUDIO-96) —
+  // lets a consumer distinguish "still loading defaults" from "server confirmed".
+  loaded: boolean;
+  // True if the initial load failed — `settings` is the hardcoded fallback,
+  // not server-confirmed, so gated behavior (NSFW visibility, page size, AI
+  // settings) may silently differ from what the user actually configured.
+  loadError: boolean;
   update: (patch: Partial<AppSettings>) => Promise<void>;
   // Atomic single-preset writes (#287): the server mutates the stored list, so
   // these can't clobber unrelated presets the way a whole-list PATCH could.
@@ -46,6 +54,8 @@ interface AppSettingsContextValue {
 
 const AppSettingsContext = createContext<AppSettingsContextValue>({
   settings: DEFAULTS,
+  loaded: false,
+  loadError: false,
   update: async () => {},
   upsertPreset: async () => {},
   deletePreset: async () => {},
@@ -53,6 +63,9 @@ const AppSettingsContext = createContext<AppSettingsContextValue>({
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULTS);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     api.settings
@@ -71,9 +84,17 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           clearLegacyPreferences();
           setSettings(server);
         }
+        setLoaded(true);
       })
-      .catch(() => {});
-  }, []);
+      .catch(() => {
+        setLoadError(true);
+        setLoaded(true);
+        toast(
+          "Couldn't load settings from the server — using defaults, which may not match what you've configured.",
+          "error",
+        );
+      });
+  }, [toast]);
 
   const update = async (patch: Partial<AppSettings>) => {
     setSettings(await api.settings.update(patch));
@@ -88,7 +109,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppSettingsContext.Provider value={{ settings, update, upsertPreset, deletePreset }}>
+    <AppSettingsContext.Provider value={{ settings, loaded, loadError, update, upsertPreset, deletePreset }}>
       {children}
     </AppSettingsContext.Provider>
   );

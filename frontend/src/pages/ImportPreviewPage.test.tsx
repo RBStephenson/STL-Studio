@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import ImportPreviewPage from "./ImportPreviewPage";
+import ImportPreviewPage, { ImageRotator } from "./ImportPreviewPage";
 
 vi.mock("../api/client", () => ({
   api: {
@@ -328,5 +328,24 @@ describe("ImportPreviewPage (#452 C2)", () => {
       () => expect(api.collections.bulkAddModels).toHaveBeenCalledWith(7, [1, 2]),
       { timeout: _WAIT }
     );
+  });
+});
+
+describe("ImageRotator fade-timer cleanup on unmount (STUDIO-95)", () => {
+  it("triggering a fade then unmounting does not update state after teardown", () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = render(<ImageRotator images={["a.png", "b.png"]} />);
+    fireEvent.click(screen.getByLabelText("Next image")); // starts the 200ms fade-out/in cycle
+
+    unmount();
+    vi.advanceTimersByTime(200);
+
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("Can't perform a React state update on an unmounted component")
+    );
+    errorSpy.mockRestore();
+    vi.useRealTimers();
   });
 });

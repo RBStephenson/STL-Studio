@@ -649,17 +649,22 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function ImageRotator({ images }: { images: string[] }) {
+export function ImageRotator({ images }: { images: string[] }) {
   const [idx, setIdx] = useState(0);
   const [fade, setFade] = useState(true);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tracks the pending fade-in timeout (STUDIO-95) — unstored setTimeout()s
+  // could still fire setState after a card collapsed mid-fade.
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleFadeIn = (after: () => void) => {
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    fadeTimerRef.current = setTimeout(() => { after(); setFade(true); }, 200);
+  };
 
   const goTo = (next: number) => {
     setFade(false);
-    setTimeout(() => {
-      setIdx(next);
-      setFade(true);
-    }, 200);
+    scheduleFadeIn(() => setIdx(next));
   };
 
   useEffect(() => {
@@ -668,11 +673,14 @@ function ImageRotator({ images }: { images: string[] }) {
       setIdx((i) => {
         const next = (i + 1) % images.length;
         setFade(false);
-        setTimeout(() => setFade(true), 200);
+        scheduleFadeIn(() => {});
         return next;
       });
     }, 5000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
   }, [images]);
 
   const prev = () => {
