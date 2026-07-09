@@ -72,7 +72,7 @@ describe("AiOrganizeReviewModal — success-via-API-or-nothing (#821)", () => {
 
   it("category dropdown offers the same canonical categories as the app's Category combobox", () => {
     // Regression: this modal used to have its own stale, mismatched category
-    // list ("Accessory", "Arm", "Leg", "Full", "Unknown", ...) instead of the
+    // list ("Accessory", "Arm", "Leg", "Unknown", ...) instead of the
     // canonical one — an edit made here could save a non-canonical value
     // (e.g. "Accessory") that /ai-organize/apply writes verbatim, with no
     // server-side re-normalization, producing a category the real Category
@@ -87,10 +87,12 @@ describe("AiOrganizeReviewModal — success-via-API-or-nothing (#821)", () => {
 
     expect(optionValues).toContain("Accessories");
     expect(optionValues).not.toContain("Accessory");
-    expect(optionValues).not.toContain("Full");
     expect(optionValues).not.toContain("Unknown");
     // A couple of real canonical categories the old stale list was missing.
     expect(optionValues).toContain("Right Arm");
     expect(optionValues).toContain("Torso");
+    // "Full" is itself a canonical category (a one-piece full-body sculpt) —
+    // not the old list's mismatch this test guards against.
+    expect(optionValues).toContain("Full");
   });
 });
