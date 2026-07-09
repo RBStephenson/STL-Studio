@@ -171,7 +171,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
 
       {/* Add new root */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">
           Add a Folder
         </h2>
         <div className="flex gap-2">
@@ -182,57 +182,57 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             onChange={(e) => setNewPath(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") addRoot(); }}
             placeholder="Full path to your STL folder…"
-            className="flex-1 bg-gray-900 border border-gray-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none font-mono"
+            className="flex-1 bg-panel border border-border focus:border-accent-start rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none font-mono"
           />
           <button
             onClick={() => setPicking(true)}
             title="Browse for a folder"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt2 text-sm transition-colors"
           >
             <FolderSearch size={15} />
             Browse…
           </button>
           <button
             onClick={() => newPath.trim() ? addRoot() : setPicking(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent-end hover:bg-accent-start text-white text-sm transition-colors"
           >
             <Plus size={15} />
             Add Folder
           </button>
         </div>
-        <p className="text-xs text-gray-600 mt-2">
-          Use <strong className="text-gray-500">Browse…</strong> to pick a folder, or type the full path. Subfolders are scanned automatically.
+        <p className="text-xs text-text-muted mt-2">
+          Use <strong className="text-text-secondary-alt">Browse…</strong> to pick a folder, or type the full path. Subfolders are scanned automatically.
         </p>
 
-        <div className="bg-gray-900/60 border border-gray-800 rounded-lg px-4 py-3 mt-4">
-          <p className="text-xs text-gray-400 mb-2">
-            A <strong className="text-gray-300">layout</strong> tells STL Studio how the folders
+        <div className="bg-panel/60 border border-border-subtle rounded-lg px-4 py-3 mt-4">
+          <p className="text-xs text-text-secondary mb-2">
+            A <strong className="text-text-primary-alt2">layout</strong> tells STL Studio how the folders
             above each model map to a <span className="text-indigo-300">creator</span> and{" "}
             <span className="text-emerald-300">tags</span>. Read each path left to right, one folder
-            per <code className="text-gray-500">/</code>:
+            per <code className="text-text-secondary-alt">/</code>:
           </p>
-          <div className="font-mono text-xs bg-gray-950 border border-gray-800 rounded px-3 py-2 mb-2 overflow-x-auto">
-            <span className="text-gray-500">D:\3D STLs\</span>
+          <div className="font-mono text-xs bg-panel-inset border border-border-subtle rounded px-3 py-2 mb-2 overflow-x-auto">
+            <span className="text-text-secondary-alt">D:\3D STLs\</span>
             <span className="text-emerald-300">Sci-Fi</span>
-            <span className="text-gray-600">\</span>
+            <span className="text-text-muted">\</span>
             <span className="text-indigo-300">Abe3D</span>
-            <span className="text-gray-600">\</span>
+            <span className="text-text-muted">\</span>
             <span className="text-amber-300">Space Marine</span>
-            <span className="text-gray-600">\model.stl</span>
+            <span className="text-text-muted">\model.stl</span>
           </div>
-          <p className="text-xs text-gray-500 leading-relaxed">
-            With the layout <code className="text-gray-400">{"{tag}/{creator}"}</code>, the example above
+          <p className="text-xs text-text-secondary-alt leading-relaxed">
+            With the layout <code className="text-text-secondary">{"{tag}/{creator}"}</code>, the example above
             tags the model <span className="text-emerald-300">Sci-Fi</span>, credits it to creator{" "}
             <span className="text-indigo-300">Abe3D</span>, and treats{" "}
             <span className="text-amber-300">Space Marine</span> as the model folder.
-            Tokens: <code className="text-gray-400">{"{creator}"}</code> (required, last level),{" "}
-            <code className="text-gray-400">{"{tag}"}</code> (tag with folder name),{" "}
-            <code className="text-gray-400">{"{ignore}"}</code> (skip a level).
+            Tokens: <code className="text-text-secondary">{"{creator}"}</code> (required, last level),{" "}
+            <code className="text-text-secondary">{"{tag}"}</code> (tag with folder name),{" "}
+            <code className="text-text-secondary">{"{ignore}"}</code> (skip a level).
           </p>
         </div>
 
         <div className="mt-4">
-          <label className="block text-xs text-gray-500 mb-1">Folder layout</label>
+          <label className="block text-xs text-text-secondary-alt mb-1">Folder layout</label>
           <div className="flex items-center gap-2">
             <input
               type="text"
@@ -240,9 +240,9 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
               onChange={(e) => setNewLayout(e.target.value)}
               spellCheck={false}
               placeholder="{creator}"
-              className="w-64 bg-gray-900 border border-gray-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none font-mono"
+              className="w-64 bg-panel border border-border focus:border-accent-start rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none font-mono"
             />
-            <span className={`text-xs truncate ${layoutPreview(newLayout) ? "text-gray-500" : "text-amber-400"}`}>
+            <span className={`text-xs truncate ${layoutPreview(newLayout) ? "text-text-secondary-alt" : "text-amber-400"}`}>
               {layoutPreview(newLayout) ?? "needs exactly one {creator}, as the last level"}
             </span>
           </div>
@@ -251,19 +251,19 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
 
       {/* Path examples */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">
           Path Examples
         </h2>
         <div className="flex flex-col gap-3">
           {Object.entries(PATH_EXAMPLES).map(([os, paths]) => (
             <div key={os}>
-              <p className="text-xs text-gray-500 mb-1">{os}</p>
+              <p className="text-xs text-text-secondary-alt mb-1">{os}</p>
               <div className="flex flex-col gap-1">
                 {paths.map((p) => (
                   <button
                     key={p}
                     onClick={() => { setNewPath(p); inputRef.current?.focus(); }}
-                    className="text-left text-xs font-mono text-gray-400 hover:text-indigo-300 bg-gray-900 border border-gray-800 hover:border-indigo-700 rounded px-3 py-1.5 transition-colors"
+                    className="text-left text-xs font-mono text-text-secondary hover:text-indigo-300 bg-panel border border-border-subtle hover:border-indigo-700 rounded px-3 py-1.5 transition-colors"
                   >
                     {p}
                   </button>
@@ -276,11 +276,11 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
 
       {/* Current roots */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
           <HardDrive size={14} /> Scan Locations
         </h2>
         {loading ? (
-          <p className="text-sm text-gray-600">Loading…</p>
+          <p className="text-sm text-text-muted">Loading…</p>
         ) : roots.length === 0 ? (
           <div className="bg-amber-950/40 border border-amber-800/60 rounded-lg px-4 py-3 text-sm text-amber-300">
             No drives configured yet. Add a folder path above to get started.
@@ -291,25 +291,25 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
               const layoutVal = layoutEdits[r.id] ?? r.layout;
               const preview = layoutPreview(layoutVal);
               return (
-                <div key={r.id} className="flex flex-col gap-2 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+                <div key={r.id} className="flex flex-col gap-2 bg-panel border border-border-subtle rounded-lg px-4 py-3">
                   <div className="flex items-center gap-3">
                     <HardDrive size={15} className="text-indigo-400 shrink-0" />
-                    <span className="text-sm text-gray-200 flex-1 truncate font-mono">{r.path}</span>
+                    <span className="text-sm text-text-primary-alt flex-1 truncate font-mono">{r.path}</span>
                     {r.last_scanned && (
-                      <span className="text-xs text-gray-600 shrink-0">
+                      <span className="text-xs text-text-muted shrink-0">
                         Last scanned {new Date(r.last_scanned).toLocaleDateString()}
                       </span>
                     )}
                     <button
                       onClick={() => removeRoot(r.id, r.path)}
-                      className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
+                      className="text-text-muted hover:text-red-400 transition-colors shrink-0"
                       title="Remove this drive"
                     >
                       <Trash2 size={15} />
                     </button>
                   </div>
                   <div className="flex items-center gap-2 pl-[27px]">
-                    <label className="text-xs text-gray-500 shrink-0">Layout</label>
+                    <label className="text-xs text-text-secondary-alt shrink-0">Layout</label>
                     <input
                       type="text"
                       value={layoutVal}
@@ -317,14 +317,14 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
                       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                       onBlur={() => saveLayout(r)}
                       spellCheck={false}
-                      className="w-56 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-xs text-white focus:outline-none font-mono"
+                      className="w-56 bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1 text-xs text-white focus:outline-none font-mono"
                     />
-                    <span className={`text-xs truncate ${preview ? "text-gray-600" : "text-amber-400"}`}>
+                    <span className={`text-xs truncate ${preview ? "text-text-muted" : "text-amber-400"}`}>
                       {preview ?? "needs exactly one {creator}, last"}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 pl-[27px]">
-                    <label className="text-xs text-gray-500 shrink-0">Library</label>
+                    <label className="text-xs text-text-secondary-alt shrink-0">Library</label>
                     <input
                       type="text"
                       value={nameEdits[r.id] ?? r.name ?? ""}
@@ -333,9 +333,9 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
                       onBlur={() => saveName(r)}
                       placeholder={r.path.split(/[\\/]/).filter(Boolean).pop() || "name"}
                       spellCheck={false}
-                      className="w-40 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                      className="w-40 bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1 text-xs text-white focus:outline-none"
                     />
-                    <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none ml-2">
+                    <label className="flex items-center gap-1.5 text-xs text-text-secondary cursor-pointer select-none ml-2">
                       <input
                         type="checkbox"
                         checked={r.is_writable}
@@ -345,7 +345,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
                       Import destination
                     </label>
                     <label
-                      className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none ml-2"
+                      className="flex items-center gap-1.5 text-xs text-text-secondary cursor-pointer select-none ml-2"
                       title="Treat every model inside a character folder as one variant group, instead of guessing groups from names. Rescan to apply."
                     >
                       <input
@@ -368,20 +368,20 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             onClick={reloadEnv}
             disabled={reloadingEnv}
             title="Re-read scan roots and drive mappings from the .env file"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt2 text-sm disabled:opacity-50 transition-colors"
           >
             <RefreshCw size={14} className={reloadingEnv ? "animate-spin" : ""} />
             Reload .env settings
           </button>
-          <span className="text-xs text-gray-600">
+          <span className="text-xs text-text-muted">
             Applies changes to scan roots and drive paths. Database location still needs a restart.
           </span>
         </div>
       </section>
 
       {/* Library tools */}
-      <section className="pt-6 border-t border-gray-800">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+      <section className="pt-6 border-t border-border-subtle">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
           <FolderTree size={14} /> Library Tools
         </h2>
 
@@ -393,8 +393,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             className="mt-0.5 accent-indigo-500"
           />
           <div>
-            <p className="text-sm text-gray-300">Enable Reorganize Library</p>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-sm text-text-primary-alt2">Enable Reorganize Library</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
               Off by default. When on, the Reorganize Library tool appears below and
               can move files on disk to match your template — including import moves.
               A read-only deployment (e.g. Docker mounts) still can't write regardless.
@@ -405,17 +405,17 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
         {settings.reorganize_enabled && (
         <Link
           to="/reorganize"
-          className="flex items-center gap-2 text-sm text-gray-300 hover:text-indigo-300 bg-gray-900 border border-gray-800 hover:border-indigo-700 rounded-lg px-4 py-3 self-start transition-colors w-fit"
+          className="flex items-center gap-2 text-sm text-text-primary-alt2 hover:text-indigo-300 bg-panel border border-border-subtle hover:border-indigo-700 rounded-lg px-4 py-3 self-start transition-colors w-fit"
         >
           <FolderTree size={15} className="text-indigo-400" />
           Reorganize Library
-          <span className="text-xs text-gray-600">— preview a tidy layout, resolve flags, then apply</span>
+          <span className="text-xs text-text-muted">— preview a tidy layout, resolve flags, then apply</span>
         </Link>
         )}
 
-        <div className="bg-gray-900/60 border border-gray-800 rounded-lg px-4 py-3 mt-4 flex flex-col gap-3">
+        <div className="bg-panel/60 border border-border-subtle rounded-lg px-4 py-3 mt-4 flex flex-col gap-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Destination template</label>
+            <label className="block text-xs text-text-secondary-alt mb-1">Destination template</label>
             <input
               type="text"
               value={templateEdit ?? settings.reorganize_template}
@@ -424,14 +424,14 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
               onBlur={saveReorganizeTemplate}
               placeholder="{creator}/{character}/{title}"
               spellCheck={false}
-              className="w-72 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none font-mono"
+              className="w-72 bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none font-mono"
             />
-            <p className="text-xs text-gray-600 mt-1">
+            <p className="text-xs text-text-muted mt-1">
               Used by Reorganize Library, new creator folders, and the "unorganized" flag on a model's page.
-              Tokens: <code className="text-gray-400">{"{creator}"}</code>,{" "}
-              <code className="text-gray-400">{"{character}"}</code>,{" "}
-              <code className="text-gray-400">{"{scale}"}</code>,{" "}
-              <code className="text-gray-400">{"{title}"}</code>.
+              Tokens: <code className="text-text-secondary">{"{creator}"}</code>,{" "}
+              <code className="text-text-secondary">{"{character}"}</code>,{" "}
+              <code className="text-text-secondary">{"{scale}"}</code>,{" "}
+              <code className="text-text-secondary">{"{title}"}</code>.
             </p>
           </div>
           <label className="flex items-start gap-3 cursor-pointer select-none">
@@ -442,10 +442,10 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
               className="mt-0.5 accent-indigo-500"
             />
             <div>
-              <p className="text-sm text-gray-300">Lowercase, hyphenated directory names</p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Renders every segment slug-style (e.g. <code className="text-gray-400">abe-3d</code> instead
-                of <code className="text-gray-400">Abe 3D</code>), matching how imported folders are named.
+              <p className="text-sm text-text-primary-alt2">Lowercase, hyphenated directory names</p>
+              <p className="text-xs text-text-secondary-alt mt-0.5">
+                Renders every segment slug-style (e.g. <code className="text-text-secondary">abe-3d</code> instead
+                of <code className="text-text-secondary">Abe 3D</code>), matching how imported folders are named.
                 Off keeps the original casing and spacing.
               </p>
             </div>

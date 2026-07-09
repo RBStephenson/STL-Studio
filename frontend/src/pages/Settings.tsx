@@ -57,18 +57,18 @@ export default function Settings() {
         Settings
         <HelpLink section="settings" label="About scan locations & data management" />
       </h1>
-      <p className="text-sm text-gray-500 mb-6">Configure your library, scanning rules, and integrations.</p>
+      <p className="text-sm text-text-secondary-alt mb-6">Configure your library, scanning rules, and integrations.</p>
 
       {/* Tab nav */}
-      <div className="flex gap-1 mb-8 border-b border-gray-800 flex-wrap">
+      <div className="flex gap-1 mb-8 border-b border-border-subtle flex-wrap">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => switchTab(tab.id)}
             className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors -mb-px ${
               active === tab.id
-                ? "border-indigo-500 text-white"
-                : "border-transparent text-gray-500 hover:text-gray-300"
+                ? "border-accent-start text-white"
+                : "border-transparent text-text-secondary-alt hover:text-text-primary-alt2"
             }`}
           >
             {tab.icon}

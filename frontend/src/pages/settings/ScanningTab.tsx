@@ -86,31 +86,31 @@ export default function ScanningTab() {
 
       {/* Ignore patterns */}
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1 flex items-center gap-1.5">
           <FolderSearch size={14} /> Scan Rules
           <HelpLink section="scan-rules" label="About scan rules" />
         </h2>
-        <p className="text-xs text-gray-600 mb-4">
-          Folders matching an <strong className="text-gray-500">ignore pattern</strong> (and everything
+        <p className="text-xs text-text-muted mb-4">
+          Folders matching an <strong className="text-text-secondary-alt">ignore pattern</strong> (and everything
           inside them) are skipped during scanning. Matching is case-insensitive against a folder's name
-          (e.g. <code className="text-gray-500">WIP</code>) or its full path (e.g.{" "}
-          <code className="text-gray-500">*/_archive/*</code>). Patterns take effect on the next scan;
+          (e.g. <code className="text-text-secondary-alt">WIP</code>) or its full path (e.g.{" "}
+          <code className="text-text-secondary-alt">*/_archive/*</code>). Patterns take effect on the next scan;
           any already-indexed models they now cover are removed.
         </p>
         <div className="flex flex-col gap-2 self-start" data-testid="ignore-patterns">
           {settings.scan_ignore_patterns.length === 0 && (
-            <p className="text-xs text-gray-600 italic">No ignore patterns yet.</p>
+            <p className="text-xs text-text-muted italic">No ignore patterns yet.</p>
           )}
           {settings.scan_ignore_patterns.map((pat) => (
             <div
               key={pat}
-              className="flex items-center justify-between gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 self-start min-w-[18rem]"
+              className="flex items-center justify-between gap-3 bg-panel border border-border-subtle rounded-lg px-4 py-2 self-start min-w-[18rem]"
             >
-              <code className="text-sm text-gray-200">{pat}</code>
+              <code className="text-sm text-text-primary-alt">{pat}</code>
               <button
                 onClick={() => removeIgnorePattern(pat)}
                 aria-label={`Remove ${pat}`}
-                className="text-gray-500 hover:text-red-400 transition-colors"
+                className="text-text-secondary-alt hover:text-red-400 transition-colors"
               >
                 <Trash2 size={14} />
               </button>
@@ -123,12 +123,12 @@ export default function ScanningTab() {
               onChange={(e) => setNewPattern(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addIgnorePattern(); } }}
               placeholder="e.g. WIP or */_archive/*"
-              className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-64"
+              className="bg-panel border border-border rounded px-3 py-1.5 text-sm text-text-primary-alt placeholder-gray-600 focus:outline-none focus:border-accent-start w-64"
             />
             <button
               onClick={addIgnorePattern}
               disabled={!newPattern.trim()}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-accent-end text-white hover:bg-accent-start disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <Plus size={14} /> Add
             </button>
@@ -138,33 +138,33 @@ export default function ScanningTab() {
 
       {/* Tag rules */}
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1">
           Tag Rules
         </h2>
-        <p className="text-xs text-gray-600 mb-4">
-          <strong className="text-gray-500">Tag rules</strong> add an auto-tag to any model whose
-          name contains a keyword — e.g. keyword <code className="text-gray-500">Aztec</code> →
-          tag <code className="text-gray-500">civ</code>. These add to the built-in tag detection and
+        <p className="text-xs text-text-muted mb-4">
+          <strong className="text-text-secondary-alt">Tag rules</strong> add an auto-tag to any model whose
+          name contains a keyword — e.g. keyword <code className="text-text-secondary-alt">Aztec</code> →
+          tag <code className="text-text-secondary-alt">civ</code>. These add to the built-in tag detection and
           apply on the next full scan; they don't affect how variants group.
         </p>
         <div className="flex flex-col gap-2 self-start" data-testid="tag-rules">
           {settings.scan_tag_rules.length === 0 && (
-            <p className="text-xs text-gray-600 italic">No tag rules yet.</p>
+            <p className="text-xs text-text-muted italic">No tag rules yet.</p>
           )}
           {settings.scan_tag_rules.map((r) => (
             <div
               key={`${r.keyword} ${r.tag}`}
-              className="flex items-center justify-between gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 self-start min-w-[18rem]"
+              className="flex items-center justify-between gap-3 bg-panel border border-border-subtle rounded-lg px-4 py-2 self-start min-w-[18rem]"
             >
-              <span className="text-sm text-gray-200">
+              <span className="text-sm text-text-primary-alt">
                 <code>{r.keyword}</code>
-                <span className="text-gray-600 mx-2">&rarr;</span>
+                <span className="text-text-muted mx-2">&rarr;</span>
                 <code className="text-indigo-300">{r.tag}</code>
               </span>
               <button
                 onClick={() => removeTagRule(r.keyword, r.tag)}
                 aria-label={`Remove ${r.keyword} to ${r.tag}`}
-                className="text-gray-500 hover:text-red-400 transition-colors"
+                className="text-text-secondary-alt hover:text-red-400 transition-colors"
               >
                 <Trash2 size={14} />
               </button>
@@ -177,21 +177,21 @@ export default function ScanningTab() {
               onChange={(e) => setNewKeyword(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTagRule(); } }}
               placeholder="keyword (e.g. Aztec)"
-              className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-44"
+              className="bg-panel border border-border rounded px-3 py-1.5 text-sm text-text-primary-alt placeholder-gray-600 focus:outline-none focus:border-accent-start w-44"
             />
-            <span className="text-gray-600">&rarr;</span>
+            <span className="text-text-muted">&rarr;</span>
             <input
               type="text"
               value={newTag}
               onChange={(e) => setNewTag(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTagRule(); } }}
               placeholder="tag (e.g. civ)"
-              className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-44"
+              className="bg-panel border border-border rounded px-3 py-1.5 text-sm text-text-primary-alt placeholder-gray-600 focus:outline-none focus:border-accent-start w-44"
             />
             <button
               onClick={addTagRule}
               disabled={!newKeyword.trim() || !newTag.trim()}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-accent-end text-white hover:bg-accent-start disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <Plus size={14} /> Add
             </button>
@@ -201,30 +201,30 @@ export default function ScanningTab() {
 
       {/* Parts folder names */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1">
           Parts Folder Names
         </h2>
-        <p className="text-xs text-gray-600 mb-4">
-          <strong className="text-gray-500">Parts folder names</strong> are exact folder names
-          treated as parts/structure (e.g. <code className="text-gray-500">Sprues</code>,{" "}
-          <code className="text-gray-500">Magnets</code>) — never indexed as their own model and
+        <p className="text-xs text-text-muted mb-4">
+          <strong className="text-text-secondary-alt">Parts folder names</strong> are exact folder names
+          treated as parts/structure (e.g. <code className="text-text-secondary-alt">Sprues</code>,{" "}
+          <code className="text-text-secondary-alt">Magnets</code>) — never indexed as their own model and
           never used to group variants. These add to the built-in names (Parts, Base, Supports…)
           and apply on the next full scan.
         </p>
         <div className="flex flex-col gap-2 self-start" data-testid="parts-names">
           {settings.scan_parts_names.length === 0 && (
-            <p className="text-xs text-gray-600 italic">No custom parts names yet.</p>
+            <p className="text-xs text-text-muted italic">No custom parts names yet.</p>
           )}
           {settings.scan_parts_names.map((name) => (
             <div
               key={name}
-              className="flex items-center justify-between gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2 self-start min-w-[18rem]"
+              className="flex items-center justify-between gap-3 bg-panel border border-border-subtle rounded-lg px-4 py-2 self-start min-w-[18rem]"
             >
-              <code className="text-sm text-gray-200">{name}</code>
+              <code className="text-sm text-text-primary-alt">{name}</code>
               <button
                 onClick={() => removePartsName(name)}
                 aria-label={`Remove ${name}`}
-                className="text-gray-500 hover:text-red-400 transition-colors"
+                className="text-text-secondary-alt hover:text-red-400 transition-colors"
               >
                 <Trash2 size={14} />
               </button>
@@ -237,12 +237,12 @@ export default function ScanningTab() {
               onChange={(e) => setNewPartsName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPartsName(); } }}
               placeholder="e.g. Sprues"
-              className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-64"
+              className="bg-panel border border-border rounded px-3 py-1.5 text-sm text-text-primary-alt placeholder-gray-600 focus:outline-none focus:border-accent-start w-64"
             />
             <button
               onClick={addPartsName}
               disabled={!newPartsName.trim()}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-sm rounded bg-accent-end text-white hover:bg-accent-start disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <Plus size={14} /> Add
             </button>
