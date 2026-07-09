@@ -4,6 +4,7 @@ Tests for the /models API endpoints.
 Covers: listing, search, variant grouping, variants endpoint,
         stats, bulk tag, model patch, STL file part_type.
 """
+import pytest
 from tests.conftest import make_creator, make_model, make_stl_file, make_variant_group
 from app.services.tag_sync import sync_model_tags
 
@@ -1295,6 +1296,33 @@ class TestSortByCreator:
         body = resp.json()
         assert body["prev_id"] is None  # first in creator order
         assert body["next_id"] is not None
+
+    def test_bounded_query_does_not_materialize_full_id_list(self, client, db, monkeypatch):
+        """#86: neighbors must resolve via a bounded LAG/LEAD query, not by pulling
+        every filtered ID into Python. Fail the test if that materialization path
+        (Query.all() on an id-only query) is ever invoked again."""
+        creator = make_creator(db)
+        models = [make_model(db, creator, name=f"m{i:02d}") for i in range(20)]
+        commit_all(db)
+
+        from sqlalchemy.orm import Query as SAQuery
+
+        original_all = SAQuery.all
+
+        def _guarded_all(self):
+            cols = getattr(self, "column_descriptions", [])
+            if len(cols) == 1 and cols[0].get("name") == "id":
+                pytest.fail("get_neighbors materialized the full filtered ID list")
+            return original_all(self)
+
+        monkeypatch.setattr(SAQuery, "all", _guarded_all)
+
+        mid = models[10]
+        resp = client.get(f"/models/{mid.id}/neighbors?group_variants=false")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["prev_id"] == models[9].id
+        assert body["next_id"] == models[11].id
 
 
 # ---------------------------------------------------------------------------

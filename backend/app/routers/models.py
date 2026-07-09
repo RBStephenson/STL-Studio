@@ -156,6 +156,17 @@ def _order_cols(sort: str) -> tuple:
         return (Model.character, Model.name)
 
 
+def _sort_order_cols(sort: str) -> tuple:
+    """Return the ORDER BY columns for `sort`, including the `creator` case.
+
+    Split out from `_apply_sort` so `get_neighbors` can feed the identical
+    column list into a LAG/LEAD `over(order_by=...)` window instead of
+    duplicating the sort-key logic (#86)."""
+    if sort == "creator":
+        return (Creator.name.is_(None), Creator.name, Model.character, Model.name)
+    return _order_cols(sort)
+
+
 def _apply_sort(q, sort: str):
     """Order a Model query by the given sort key, handling joins where needed.
 
@@ -166,10 +177,8 @@ def _apply_sort(q, sort: str):
     to the column-only `_order_cols`.
     """
     if sort == "creator":
-        return q.outerjoin(Creator, Model.creator_id == Creator.id).order_by(
-            Creator.name.is_(None), Creator.name, Model.character, Model.name
-        )
-    return q.order_by(*_order_cols(sort))
+        q = q.outerjoin(Creator, Model.creator_id == Creator.id)
+    return q.order_by(*_sort_order_cols(sort))
 
 
 # Representative precedence within a variant group, expressed as ORDER BY columns:
@@ -926,16 +935,28 @@ def get_neighbors(
         target_id = _resolve_group_rep(q, model_id)
         q = _collapse_variants(q)
 
-    ids = [row[0] for row in _apply_sort(q.with_entities(Model.id), sort).all()]
-    try:
-        idx = ids.index(target_id)
-    except ValueError:
+    # Bounded query (#86): let SQL compute the adjacent IDs via LAG/LEAD over the
+    # same ordering list_models uses, instead of materializing every filtered ID
+    # into Python and scanning for the target with .index(). Only ever returns
+    # the single row for target_id.
+    if sort == "creator":
+        q = q.outerjoin(Creator, Model.creator_id == Creator.id)
+    order_cols = _sort_order_cols(sort)
+    ranked = q.with_entities(
+        Model.id.label("id"),
+        func.lag(Model.id).over(order_by=order_cols).label("prev_id"),
+        func.lead(Model.id).over(order_by=order_cols).label("next_id"),
+    ).subquery()
+
+    row = (
+        db.query(ranked.c.prev_id, ranked.c.next_id)
+        .filter(ranked.c.id == target_id)
+        .first()
+    )
+    if row is None:
         return {"prev_id": None, "next_id": None}
 
-    return {
-        "prev_id": ids[idx - 1] if idx > 0 else None,
-        "next_id": ids[idx + 1] if idx < len(ids) - 1 else None,
-    }
+    return {"prev_id": row.prev_id, "next_id": row.next_id}
 
 
 @router.get("/{model_id}", response_model=ModelDetail)
