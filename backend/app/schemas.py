@@ -426,6 +426,24 @@ class ImportApplyResponse(BaseModel):
     undo_log: Optional[str] = None
 
 
+class ImportApplyStart(BaseModel):
+    """Immediate response to POST /import/apply. ``started=False`` means there
+    was nothing to move (no eligible files) — ``result`` is already final, no
+    need to poll. ``started=True`` means a background job is now running;
+    poll GET /import/apply/status for progress and the eventual result."""
+    started: bool
+    result: Optional[ImportApplyResponse] = None
+
+
+class ImportApplyStatus(BaseModel):
+    running: bool
+    message: str
+    moved_files: int = 0
+    total_files: int = 0
+    error: Optional[str] = None
+    result: Optional[ImportApplyResponse] = None
+
+
 class DownloadZipRequest(BaseModel):
     file_ids: list[int] = Field(..., max_length=500)
     zip_name: str = "kit-build"

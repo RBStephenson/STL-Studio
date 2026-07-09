@@ -4,7 +4,7 @@ import {
   Inbox, RefreshCw, ChevronDown, ChevronRight, Check, Loader2,
   AlertCircle, Package, ArrowLeft, Download, ChevronLeft, Plus,
 } from "lucide-react";
-import { api, Library, ImportPreviewPack, SourceContentsEntry, Collection } from "../api/client";
+import { api, Library, ImportPreviewPack, SourceContentsEntry, Collection, ImportApplyResult } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import TagInput from "../components/TagInput";
 
@@ -65,6 +65,9 @@ export default function ImportPreviewPage() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<Record<string, ImportStatus>>({});
   const [progress, setProgress] = useState<Record<string, { models: number; files: number }>>({});
+  // Apply-phase progress (files moved so far / total), separate from the
+  // scan-phase progress above — populated while the background move job runs.
+  const [applyProgress, setApplyProgress] = useState<Record<string, { moved: number; total: number }>>({});
   const [fetching, setFetching] = useState<Record<string, boolean>>({});
 
   const [newColName, setNewColName] = useState("");
@@ -224,10 +227,31 @@ export default function ImportPreviewPage() {
       }, 1200);
     });
 
+  const waitForApply = (packPath: string) =>
+    new Promise<ImportApplyResult>((resolve, reject) => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(async () => {
+        try {
+          const s = await api.import.applyStatus();
+          setApplyProgress((m) => ({
+            ...m,
+            [packPath]: { moved: s.moved_files ?? 0, total: s.total_files ?? 0 },
+          }));
+          if (!s.running) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            if (s.error) reject(new Error(s.error));
+            else if (s.result) resolve(s.result);
+            else reject(new Error("Import finished with no result"));
+          }
+        } catch { /* transient — keep polling */ }
+      }, 1200);
+    });
+
   const importPack = async (entry: SourceContentsEntry) => {
     if (!libraryId) { toast("Pick a destination library first.", "error"); return; }
     setStatus((m) => ({ ...m, [entry.path]: "running" }));
     setProgress((m) => ({ ...m, [entry.path]: { models: 0, files: 0 } }));
+    setApplyProgress((m) => ({ ...m, [entry.path]: { moved: 0, total: 0 } }));
     try {
       await api.import.scanFolder(entry.path);
       await waitForScan(entry.path);
@@ -258,7 +282,12 @@ export default function ImportPreviewPage() {
         for (const colId of f.collectionIds) await api.collections.bulkAddModels(colId, ids);
       }
       // Move the pack to the library immediately — no separate "Move to Library" step.
-      const res = await api.import.apply(source);
+      // Scoped to just this pack (not the whole import root) so a slow/still-
+      // pending sibling pack can never be swept into this move.
+      const start = await api.import.apply(entry.path);
+      const res: ImportApplyResult = start.started
+        ? await waitForApply(entry.path)
+        : start.result ?? { manifest_id: "", moved_models: 0, moved_files: 0, skipped: 0, ineligible: [], undo_log: null };
       const libraryName = libraries.find((l) => l.id === libraryId)?.name ?? "library";
       if (res.moved_models > 0) {
         toast(`"${entry.name}" imported into ${libraryName}.`, "success");
@@ -282,10 +311,12 @@ export default function ImportPreviewPage() {
   const applyAll = async () => {
     if (!libraryId) return;
     try {
-      await api.import.apply(source);
+      const start = await api.import.apply(source);
+      if (start.started) await waitForApply(source);
       const lib = libraries.find((l) => l.id === libraryId);
       toast(`Moved to ${lib?.name ?? "library"}.`, "success");
       setBatchCount(0);
+      await loadContents();
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : "Move failed — try again.", "error");
     }
@@ -392,12 +423,20 @@ export default function ImportPreviewPage() {
           const f = fields[c.path] ?? EMPTY_FIELDS;
           const st = status[c.path] ?? "idle";
           const prog = progress[c.path];
+          const aProg = applyProgress[c.path];
           const open = expanded[c.path] ?? false;
           return (
             <div key={c.path} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
               {st === "running" && (
                 <div className="h-1 w-full bg-gray-800 overflow-hidden">
-                  <div className="h-full bg-indigo-500 animate-pulse w-full" />
+                  {aProg && aProg.total > 0 ? (
+                    <div
+                      className="h-full bg-indigo-500 transition-all"
+                      style={{ width: `${Math.min(100, (aProg.moved / aProg.total) * 100)}%` }}
+                    />
+                  ) : (
+                    <div className="h-full bg-indigo-500 animate-pulse w-full" />
+                  )}
                 </div>
               )}
               <div className="flex items-center gap-3 px-4 py-3">
@@ -424,7 +463,12 @@ export default function ImportPreviewPage() {
                     <Check size={13} /> Imported
                   </span>
                 )}
-                {st === "running" && prog && (prog.models > 0 || prog.files > 0) && (
+                {st === "running" && aProg && aProg.total > 0 && (
+                  <span className="text-xs text-indigo-300 shrink-0 tabular-nums">
+                    Moving {aProg.moved}/{aProg.total} files
+                  </span>
+                )}
+                {st === "running" && !(aProg && aProg.total > 0) && prog && (prog.models > 0 || prog.files > 0) && (
                   <span className="text-xs text-indigo-300 shrink-0 tabular-nums">
                     {prog.models}m / {prog.files}f
                   </span>

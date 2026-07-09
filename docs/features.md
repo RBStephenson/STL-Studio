@@ -226,9 +226,10 @@ auto-unfolding collapsed sections as needed. Changing a part's category
 applies to every file linked to it (the base file and all its sups).
 
 The **part type** field is a combobox: start typing to filter a list of
-standard suggestions (Body, Head, Arm, Base, Weapon, etc.), or type any
-custom category name. The dropdown appears automatically and can be dismissed
-with Escape; pressing Enter or clicking away commits the value.
+standard suggestions (listed alphabetically), or type any custom category
+name. The dropdown appears automatically, opening above the field instead of
+below when there isn't room underneath, and can be dismissed with Escape;
+pressing Enter or clicking away commits the value.
 
 **Settings → Preferences → Horizontal parts layout** (on by default) swaps the
 two-column model detail page for a full-width, scrollable files table below the
@@ -240,6 +241,16 @@ in this mode since the table serves the same purpose.
 on each file in the model detail view. Files group into collapsible sections and
 the 3D viewer organises its part picker by category — useful for complex
 multi-part kits.
+
+**AI Organize** (button on the model detail page, requires an AI API assigned
+under [Settings → AI & Integrations](#ai--integrations)) suggests a part type
+and cleaned-up name for every STL file. Fast keyword-based naming rules run
+first, but the AI always runs too — even on files the naming rules already
+resolved — since it can still catch a wrong guess or a name the rules got
+half right. It only ever picks from the app's standard category list, so its
+suggestions land in the same categories the Category combobox offers. Review
+the suggestions in a modal before applying; nothing is written to a file
+until you confirm.
 
 ## 3D viewer
 
@@ -425,10 +436,13 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
    it, and the dropdown pre-fills (but stays editable) next time.
 4. **Enrich each pack** — expand a card to set **Creator, Character, Title, and
    Tags**, then click **Import**. That ingests just that pack's folder as inbox
-   models and applies the metadata.
-5. **Move them in** — a **"Move N imported packs → {library}"** bar files the
-   imported packs into the destination library on disk (drift-checked, with
-   undo). The **inbox** flag clears as each pack lands.
+   models, applies the metadata, and immediately moves that pack into the
+   destination library on disk (drift-checked, with undo) — no separate move
+   step. The **inbox** flag clears as the pack lands, and a progress bar shows
+   files moved while the move is in flight.
+5. **"Move N imported packs → {library}"** — a batch bar for moving every
+   already-ingested-but-not-yet-moved pack under the current source in one go
+   (e.g. after a Quick import).
 
 ### Notes
 
@@ -437,6 +451,10 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
   loose files → an `_Inbox` creator) — handy when you don't need per-pack review.
 - **Inbox flag** — un-filed imports are marked **inbox**; the Library's
   `?is_inbox=1` filter shows just these.
+- The **move** step follows the Reorganize page's slug-formatting setting
+  (**Settings → Library**) — with it on, an imported pack's creator/title
+  segments land already lowercase-and-hyphenated on disk, with no separate
+  manual Reorganize pass needed afterward.
 - The **move** step requires the **Reorganize Library** feature flag (**Settings →
   Library**, off by default) and a writable destination — Docker mounts are
   read-only, so moves are effectively standalone-only. Importing and enriching

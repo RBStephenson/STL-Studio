@@ -287,10 +287,16 @@ def apply_manifest(
     *,
     move_fn: MoveFn = _safe_move,
     stat_fn: StatFn = _stat,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> ApplyResult:
     """Execute the selected entries of a persisted manifest. See module docstring
     for the safety contract. Raises ApplyError (mapped to HTTP by the router) or
-    write_lock.LibraryBusy on contention."""
+    write_lock.LibraryBusy on contention.
+
+    ``on_progress(moved, total)``, when given, is called after each file moves
+    — purely additive, optional progress reporting for a caller that wants to
+    surface it (e.g. import-apply's background job); existing callers that
+    don't pass it see no behavior change."""
     if not reorganize_enabled(db):
         raise ApplyError(
             "Reorganize is disabled — enable it on the Library settings tab",
@@ -332,9 +338,11 @@ def apply_manifest(
         _verify_no_drift(selected, stat_fn, roots, src_roots=src_roots)
 
         log = _UndoLog(manifest_id)
+        moves = _ordered_moves(selected)
+        total = len(moves)
         moved = 0
         try:
-            for f in _ordered_moves(selected):
+            for f in moves:
                 # Source may be an inbox dir (outside scan roots); destination
                 # must always be within a scan root. The value the move operates
                 # on is now validated, not raw manifest data.
@@ -348,6 +356,8 @@ def apply_manifest(
                     kind=f.get("kind", "stl"), model_id=f.get("model_id"),
                 )
                 moved += 1
+                if on_progress is not None:
+                    on_progress(moved, total)
         except Exception as e:
             # 2a does not auto-undo: stop, keep the partial log for recovery, and
             # leave the DB untouched so the catalog isn't half-rewritten.
