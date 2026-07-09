@@ -46,10 +46,17 @@ def db(test_engine, monkeypatch):
     # so startup events (_migrate_schema, _seed_tag_index) use the test DB.
     import app.database as db_module
     import app.main as main_module
+    import app.routers.imports as imports_module
 
     monkeypatch.setattr(db_module, "engine", test_engine)
     monkeypatch.setattr(db_module, "SessionLocal", Session)
     monkeypatch.setattr(main_module, "engine", test_engine)
+    # import_apply's background job (app/routers/imports.py) opens its own
+    # session via a module-level `from app.database import SessionLocal` —
+    # that name was bound at import time, so patching app.database.SessionLocal
+    # alone doesn't reach it; the job would otherwise run against a stray,
+    # disconnected in-memory DB instead of this test's engine.
+    monkeypatch.setattr(imports_module, "SessionLocal", Session)
 
     session = Session()
     yield session
@@ -78,6 +85,20 @@ def make_creator(db, name="Test Creator") -> Creator:
     db.add(c)
     db.flush()
     return c
+
+
+def set_reorganize_enabled(db, enabled: bool) -> None:
+    """Set the `reorganize_enabled` feature-flag app-setting for tests.
+
+    Replaces the old `monkeypatch.setattr(settings, "reorganize_write_enabled")`
+    now that the write gate reads the DB flag."""
+    from app.models import AppSetting
+    row = db.get(AppSetting, "reorganize_enabled")
+    if row is None:
+        db.add(AppSetting(key="reorganize_enabled", value=enabled))
+    else:
+        row.value = enabled
+    db.commit()
 
 
 def make_model(

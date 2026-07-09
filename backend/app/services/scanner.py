@@ -898,7 +898,7 @@ def _walk_for_models(
     # model. This is what makes an opt-in split durable across rescans.
     is_creator_root = folder == creator_boundary or str(folder) in _pack_overrides
 
-    child_dirs = [d for d in sorted(folder.iterdir()) if d.is_dir()]
+    child_dirs = [d for d in sorted(folder.iterdir()) if d.is_dir() and not _is_hidden(d.name)]
     has_direct_stls = _has_stls(folder, recurse=False)
     any_child_stls = _any_child_has_stls_cached(child_dirs, stl_cache)
     has_any_stls = has_direct_stls or any_child_stls
@@ -1227,9 +1227,33 @@ def _merge_auto_tags(detected: list[str], layout_tags: list[str] | None) -> list
     return merged
 
 
+def _is_hidden(name: str) -> bool:
+    """True for dotfile/dot-directory names (.git, .DS_Store, …).
+
+    Other tools stash their own metadata/derivative caches in hidden folders
+    alongside real content — e.g. a resized-thumbnail cache nested several
+    levels deep. None of that should ever be treated as a model, an STL, or a
+    gallery image.
+    """
+    return name.startswith(".")
+
+
+def _has_hidden_ancestor(path: Path, within: Path) -> bool:
+    """True if any directory component between *within* and *path* is hidden."""
+    try:
+        parts = path.relative_to(within).parts
+    except ValueError:
+        return False
+    return any(_is_hidden(p) for p in parts[:-1])
+
+
 def _has_stls(folder: Path, recurse: bool = False) -> bool:
     if recurse:
-        return any(f.suffix.lower() in STL_EXTENSIONS for f in folder.rglob("*") if f.is_file())
+        return any(
+            f.suffix.lower() in STL_EXTENSIONS
+            for f in folder.rglob("*")
+            if f.is_file() and not _has_hidden_ancestor(f, folder)
+        )
     return any(f.suffix.lower() in STL_EXTENSIONS for f in folder.iterdir() if f.is_file())
 
 
@@ -1268,6 +1292,7 @@ def _image_files_recursive(folder: Path) -> list[Path]:
         return [
             img for img in sorted(folder.rglob("*"))
             if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS
+            and not _has_hidden_ancestor(img, folder)
         ]
     except (OSError, PermissionError):
         return []
@@ -1296,7 +1321,7 @@ def _collect_gallery_images(leaf: Path, boundary: Path,
             children = list(folder.iterdir())
         except (OSError, PermissionError):
             return []
-        subdirs = [c for c in children if c.is_dir()]
+        subdirs = [c for c in children if c.is_dir() and not _is_hidden(c.name)]
         found: list[Path] = []
 
         for sub in sorted(subdirs):
@@ -1365,6 +1390,46 @@ def _merge_scan_gallery_paths(
     return result
 
 
+def refresh_model_gallery(db: Session, model: Model) -> None:
+    """Re-sync one model's gallery images with what's actually on disk.
+
+    Reuses the same discovery/merge primitives a full or per-creator scan
+    applies to every model (_collect_gallery_images / _merge_scan_gallery_paths)
+    — just scoped to this one model, on demand, without touching naming, tags,
+    or STL indexing. Mutates the passed-in ORM object; the caller commits.
+    """
+    folder = Path(model.folder_path)
+    if not folder.exists():
+        return
+
+    creator_boundary: Path | None = None
+    creator = model.creator or (
+        db.query(Creator).filter(Creator.id == model.creator_id).first()
+        if model.creator_id else None
+    )
+    if creator:
+        for creator_dir, _tags, _grp in _creator_dirs_for(creator, db):
+            if _is_within_boundary(str(folder), creator_dir):
+                creator_boundary = creator_dir
+                break
+
+    boundary = creator_boundary or folder
+    gallery_images = _collect_gallery_images(folder, boundary=boundary, stl_cache={})
+
+    if not model.thumbnail_path and gallery_images:
+        model.thumbnail_path = str(gallery_images[0])
+
+    model.image_paths = _merge_scan_gallery_paths(
+        existing=model.image_paths or [],
+        discovered=[str(img) for img in gallery_images],
+        removed=model.removed_image_paths or [],
+        boundary=boundary,
+    )
+
+    if model.primary_image_path and model.primary_image_path not in model.image_paths:
+        model.primary_image_path = None
+
+
 def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
                     stl_cache: dict[str, bool] | None = None):
     """
@@ -1393,13 +1458,13 @@ def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
             children = list(folder.iterdir())
         except PermissionError:
             return None
-        subdirs = [c for c in children if c.is_dir()]
+        subdirs = [c for c in children if c.is_dir() and not _is_hidden(c.name)]
 
         # 1. PREFERRED subdirs first — rglob to handle nested layouts (e.g. Renders/Color/)
         for sub in sorted(subdirs):
             if sub.name.lower() in PREFERRED:
                 for img in sorted(sub.rglob("*")):
-                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS:
+                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS and not _has_hidden_ancestor(img, sub):
                         return img
 
         # 2. Direct image files at this level
@@ -1411,7 +1476,7 @@ def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
         for sub in sorted(subdirs):
             if sub.name.lower() not in PREFERRED and not _has_stls_cached(sub):
                 for img in sorted(sub.rglob("*")):
-                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS:
+                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS and not _has_hidden_ancestor(img, sub):
                         return img
 
         return None
@@ -1575,7 +1640,7 @@ def _inbox_scan(job: JobHandle, path: str, db: Session | None = None) -> None:
                 )
             else:
                 # Creator-structure layout: each immediate subdir with STLs is a creator
-                child_dirs = [d for d in sorted(inbox.iterdir()) if d.is_dir()]
+                child_dirs = [d for d in sorted(inbox.iterdir()) if d.is_dir() and not _is_hidden(d.name)]
                 creator_ids: dict[str, int] = {}
                 for child in child_dirs:
                     if _has_stls(child, recurse=True):

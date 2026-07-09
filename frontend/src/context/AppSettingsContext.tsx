@@ -29,6 +29,10 @@ const DEFAULTS: AppSettings = {
   ai_guides_api: null,
   ai_organize_api: null,
   log_level: "INFO",
+  reorganize_template: "",
+  reorganize_slugify: true,
+  reorganize_enabled: false,
+  collections_uniform_size: true,
 };
 
 interface AppSettingsContextValue {

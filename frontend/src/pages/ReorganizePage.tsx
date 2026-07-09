@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import type {
   ReorganizeEntry,
   ReorganizePreview,
@@ -63,7 +64,16 @@ function isResolvable(e: ReorganizeEntry): boolean {
 }
 
 export default function ReorganizePage() {
+  const { settings } = useAppSettings();
   const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
+  // Seed the field from the saved library setting once it's loaded (async),
+  // but only until the user starts typing their own one-off template.
+  const [templateTouched, setTemplateTouched] = useState(false);
+  useEffect(() => {
+    if (!templateTouched && settings.reorganize_template) {
+      setTemplate(settings.reorganize_template);
+    }
+  }, [settings.reorganize_template, templateTouched]);
   const [overrides, setOverrides] = useState<Record<number, ReorganizeOverride>>({});
   const [preview, setPreview] = useState<ReorganizePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -193,13 +203,14 @@ export default function ReorganizePage() {
         <input
           type="text"
           value={template}
-          onChange={(e) => setTemplate(e.target.value)}
+          onChange={(e) => { setTemplate(e.target.value); setTemplateTouched(true); }}
           className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
           aria-label="Destination template"
         />
         <div className="text-xs text-gray-500">
           Tokens: <code className="text-indigo-400">{"{creator}"}</code>{" "}
           <code className="text-indigo-400">{"{character}"}</code>{" "}
+          <code className="text-indigo-400">{"{scale}"}</code>{" "}
           <code className="text-indigo-400">{"{title}"}</code> — separate levels with <code>/</code>.
         </div>
         {error && <div className="text-sm text-rose-400">{error}</div>}
@@ -268,7 +279,7 @@ export default function ReorganizePage() {
                   {isOpen && (
                     <div className="px-3 pb-2 space-y-2 border-t border-gray-800 pt-2">
                       {e.files.map((f) => (
-                        <div key={f.stl_file_id} className="text-xs font-mono text-gray-500">
+                        <div key={f.current_path} className="text-xs font-mono text-gray-500">
                           <span className="text-gray-600">{f.current_path}</span>
                           <span className="text-gray-700"> → </span>
                           <span className="text-gray-400">{f.proposed_path}</span>
@@ -277,8 +288,8 @@ export default function ReorganizePage() {
                       {!e.eligible && isResolvable(e) && (
                         <div className="pt-2 border-t border-gray-800/60">
                           <div className="text-xs text-gray-400 mb-1">Resolve</div>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            {(["creator", "character", "title", "suffix"] as const).map((field) => (
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                            {(["creator", "character", "scale", "title", "suffix"] as const).map((field) => (
                               <input
                                 key={field}
                                 type="text"

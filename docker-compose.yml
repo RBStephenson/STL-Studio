@@ -19,7 +19,6 @@ services:
       - "${IMPORT_DIR:-/dev/null}:/import"
     environment:
       - DATABASE_URL=sqlite:////data/stl_inventory.db
-      - REORGANIZE_WRITE_ENABLED=true
       - STL_ROOTS=/mnt/drive1,/mnt/drive2
       - STL_DRIVE_1=${STL_DRIVE_1:-}
       - STL_DRIVE_2=${STL_DRIVE_2:-}
@@ -29,8 +28,8 @@ services:
       # - TRUSTED_HOSTS=stl.example.com
       # Encrypts stored API keys (AI/Cults3D/MMF). Without it, a generated key
       # lives only in memory and stored keys won't survive a restart — set a
-      # stable value to persist them (see docs/docker.md → STL_SECRET_KEY).
-      # - STL_SECRET_KEY=
+      # stable value in .env to persist them (see docs/docker.md → STL_SECRET_KEY).
+      - STL_SECRET_KEY=${STL_SECRET_KEY:-}
     # Allows the backend to reach services on the host (e.g. Ollama at localhost:11434).
     # host-gateway resolves to the host's IP as seen from the container's network.
     extra_hosts:

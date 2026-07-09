@@ -29,7 +29,17 @@ DEFAULTS = {
     "ai_guides_api": None,
     "ai_organize_api": None,
     "log_level": "INFO",
+    "reorganize_template": "",
+    "reorganize_slugify": True,
+    "reorganize_enabled": False,
+    "collections_uniform_size": True,
 }
+
+
+def test_reorganize_enabled_round_trips(client):
+    assert client.get("/settings").json()["reorganize_enabled"] is False
+    assert client.patch("/settings", json={"reorganize_enabled": True}).status_code == 200
+    assert client.get("/settings").json()["reorganize_enabled"] is True
 
 
 def test_ai_effort_round_trips_and_rejects_bad_value(client):

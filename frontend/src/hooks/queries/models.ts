@@ -7,6 +7,20 @@ import { api } from "../../api/client";
 import type { Creator, Model, ModelDetail, ModelList, ModelStats } from "../../api/client";
 import { queryKeys } from "./keys";
 
+export const QUEUED_MODELS_PARAMS = {
+  print_status: "queued",
+  sort: "queue",
+  group_variants: false,
+  page_size: 200,
+} as const;
+
+export const PRINTED_MODELS_PARAMS = {
+  print_status: "printed",
+  sort: "printed_at",
+  group_variants: false,
+  page_size: 60,
+} as const;
+
 // The Library grid list query. Keyed on the full param object so every filter/
 // page/sort permutation caches independently; TanStack guards stale responses,
 // replacing the old fetchIdRef counter. keepPreviousData keeps the current page
@@ -16,6 +30,14 @@ export function useLibraryModels(params: Record<string, string | number | boolea
     queryKey: queryKeys.models.list(params),
     queryFn: () => api.models.list(params),
   });
+}
+
+export function useQueuedModels() {
+  return useLibraryModels(QUEUED_MODELS_PARAMS);
+}
+
+export function useRecentlyPrintedModels() {
+  return useLibraryModels(PRINTED_MODELS_PARAMS);
 }
 
 export function useCreators() {

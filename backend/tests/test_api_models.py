@@ -561,6 +561,92 @@ class TestModelUpdate:
 
 
 # ---------------------------------------------------------------------------
+# DELETE /models/{id}/other-files (#880)
+# ---------------------------------------------------------------------------
+
+def _register_root(db, path) -> None:
+    from app.models import ScanRoot
+    db.add(ScanRoot(path=str(path), enabled=True))
+    db.commit()
+
+
+class TestDeleteOtherFile:
+    def test_deletes_file_from_disk_and_db(self, client, db, tmp_path):
+        _register_root(db, tmp_path)
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        doc = tmp_path / "datapackage.json"
+        doc.write_text("{}")
+        model.other_files = [str(doc)]
+        commit_all(db)
+
+        resp = client.request(
+            "DELETE", f"/models/{model.id}/other-files", json={"path": str(doc)},
+        )
+        assert resp.status_code == 200
+        assert not doc.exists()
+
+        detail = client.get(f"/models/{model.id}").json()
+        assert detail["other_files"] == []
+
+    def test_missing_file_on_disk_still_clears_the_db_entry(self, client, db, tmp_path):
+        """Regression: a file removed outside the app (or by a prior partial
+        operation) must not leave a stale entry that can never be cleared."""
+        _register_root(db, tmp_path)
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        gone = tmp_path / "datapackage.json"  # never created on disk
+        model.other_files = [str(gone)]
+        commit_all(db)
+
+        resp = client.request(
+            "DELETE", f"/models/{model.id}/other-files", json={"path": str(gone)},
+        )
+        assert resp.status_code == 200
+
+        detail = client.get(f"/models/{model.id}").json()
+        assert detail["other_files"] == []
+
+    def test_rejects_path_outside_known_roots(self, client, db, tmp_path):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        outside = tmp_path / "outside" / "datapackage.json"
+        (tmp_path / "outside").mkdir()
+        outside.write_text("{}")
+        model.other_files = [str(outside)]
+        commit_all(db)
+        # No scan root registered → guard rejects.
+
+        resp = client.request(
+            "DELETE", f"/models/{model.id}/other-files", json={"path": str(outside)},
+        )
+        assert resp.status_code == 400
+        assert outside.exists()  # untouched
+
+        detail = client.get(f"/models/{model.id}").json()
+        assert detail["other_files"] == [str(outside)]  # untouched
+
+    def test_rejects_path_not_on_this_model(self, client, db, tmp_path):
+        _register_root(db, tmp_path)
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        model.other_files = []
+        commit_all(db)
+
+        resp = client.request(
+            "DELETE", f"/models/{model.id}/other-files",
+            json={"path": str(tmp_path / "not-listed.json")},
+        )
+        assert resp.status_code == 404
+
+    def test_unknown_model_returns_404(self, client):
+        resp = client.request(
+            "DELETE", "/models/99999/other-files", json={"path": "/x/y.json"},
+        )
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # STL file part_type
 # ---------------------------------------------------------------------------
 
@@ -951,6 +1037,50 @@ class TestThumbnailUpload:
             files={"file": ("bad.txt", b"not an image", "text/plain")},
         )
         assert resp.status_code == 400
+
+    def test_upload_jpeg_uses_matching_extension(self, client, db):
+        """A non-PNG upload must be saved with its own extension, not mislabeled
+        .png — otherwise the stored bytes and the file's extension disagree."""
+        creator = make_creator(db)
+        model = make_model(db, creator, name="JpegUpload")
+        db.commit()
+
+        jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("photo.jpg", jpeg_bytes, "image/jpeg")},
+        )
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_path.endswith(".jpg")
+
+    def test_upload_gif_is_accepted(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="GifUpload")
+        db.commit()
+
+        gif_bytes = b"GIF89a" + b"\x00" * 16
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("anim.gif", gif_bytes, "image/gif")},
+        )
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.thumbnail_path.endswith(".gif")
+
+    def test_upload_rejects_oversized_file(self, client, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="TooBig")
+        db.commit()
+
+        oversized = b"\x89PNG\r\n\x1a\n" + b"\x00" * (15 * 1024 * 1024 + 1)
+        resp = client.post(
+            f"/models/{model.id}/thumbnail/upload",
+            files={"file": ("big.png", oversized, "image/png")},
+        )
+        assert resp.status_code == 413
 
 
 # ---------------------------------------------------------------------------

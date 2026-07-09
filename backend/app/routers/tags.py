@@ -151,10 +151,10 @@ def bulk_tag_models(body: BulkTagUpdate, db: Session = Depends(get_db)):
 
 @router.patch("/bulk/enrich")
 def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
-    """Set creator, title, notes, and/or source_url across multiple models in one
-    request. Any field omitted from the payload is left unchanged on each model.
-    Grouping (character/variant_group) is not editable here (#678 Phase 5) — use
-    the durable-group merge/split/patch endpoints instead."""
+    """Set creator, title, notes, source_url, and/or source_site across multiple
+    models in one request. Any field omitted from the payload is left unchanged
+    on each model. Grouping (character/variant_group) is not editable here
+    (#678 Phase 5) — use the durable-group merge/split/patch endpoints instead."""
     if not body.ids:
         raise HTTPException(status_code=400, detail="No model IDs provided")
     # Trim before validation: a whitespace-only creator_name is truthy but must
@@ -163,8 +163,8 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
     if body.creator_name is not None and not creator_name:
         raise HTTPException(status_code=400, detail="Creator name cannot be blank")
     if not any([
-        creator_name, body.title is not None,
-        body.notes is not None, body.source_url is not None,
+        creator_name, body.title is not None, body.notes is not None,
+        body.source_url is not None, body.source_site is not None,
     ]):
         raise HTTPException(status_code=400, detail="At least one field to update must be provided")
 
@@ -184,6 +184,8 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
             model.source_url = body.source_url.strip() or None
             if model.source_url:
                 propagate_source_url(db, model)
+        if body.source_site is not None:
+            model.source_site = body.source_site.strip() or None
         model.updated_at = utcnow()
     db.commit()
     return {"ok": True, "updated": len(models_to_update)}

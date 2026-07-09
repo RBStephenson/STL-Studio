@@ -15,8 +15,9 @@ mounts are wired and how to add or change them.
 
 ## Pre-built images
 
-Every release publishes backend and frontend images to the GitHub Container
-Registry (GHCR), so you don't have to build from source:
+Every successful `main` build and every release publishes backend and frontend
+images to the GitHub Container Registry (GHCR), so you don't have to build from
+source:
 
 - `ghcr.io/rbstephenson/stl-inventory-backend`
 - `ghcr.io/rbstephenson/stl-inventory-frontend`
@@ -25,7 +26,7 @@ Registry (GHCR), so you don't have to build from source:
 
 | Tag | Points at |
 |-----|-----------|
-| `latest` | the newest tagged release |
+| `latest` | the newest successful `main` build (moving, may be unstable) |
 | `1.2.3` / `1.2` / `1` | a specific release — pin `1.2.3` for reproducibility |
 | `main` | the latest commit on `main` (moving, may be unstable) |
 | `sha-<hash>` | one specific commit build |
@@ -325,19 +326,16 @@ It is **never written to a file** by the app. If unset, a key is generated in
 memory for that process's lifetime only — the app still works, but every
 restart forgets it, so anything encrypted with the old one becomes permanently
 undecryptable (you'd just re-enter your API keys). Set a stable value once to
-make your stored keys survive restarts/upgrades:
-
-```yaml
-services:
-  backend:
-    environment:
-      - STL_SECRET_KEY=your-generated-key-here
-```
-
-Generate one with:
+make your stored keys survive restarts/upgrades: generate one and add it to
+your `.env` — `docker-compose.yml` already picks it up from there, no compose
+edit needed:
 
 ```bash
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+```
+STL_SECRET_KEY=your-generated-key-here
 ```
 
 Keep this value itself somewhere safe (a password manager, alongside your

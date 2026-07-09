@@ -140,18 +140,43 @@ class _FakeResponse:
         pass
 
 
-class _FakeClient:
+class _FakeAsyncClient:
+    """Stands in for httpx.AsyncClient — download-images now fetches
+    concurrently on a background job thread (STUDIO-XX), so the mock must be
+    an async context manager with an async .get()."""
+
     def __init__(self, *args, **kwargs):
         pass
 
-    def __enter__(self):
+    async def __aenter__(self):
         return self
 
-    def __exit__(self, *args):
+    async def __aexit__(self, *args):
         return False
 
-    def get(self, url):
+    async def get(self, url):
         return _FakeResponse()
+
+
+def _download_and_wait(client, pack_path, image_urls, expected_status=200):
+    """POST /import/download-images and, if a background job started, block
+    until it finishes — mirrors _apply_and_wait in test_import_apply.py."""
+    from app.routers.imports import _DOWNLOAD_IMAGES_KEY
+    from app.services.job_runner import runner
+
+    r = client.post(
+        "/import/download-images",
+        json={"pack_path": pack_path, "image_urls": image_urls},
+    )
+    if r.status_code != expected_status:
+        return r.status_code, r.json()
+    body = r.json()
+    if not body["started"]:
+        return r.status_code, body["result"]
+    assert runner.wait(_DOWNLOAD_IMAGES_KEY, timeout=10), "download-images job did not finish"
+    status = client.get("/import/download-images/status").json()
+    assert not status["running"]
+    return r.status_code, status["result"]
 
 
 class TestDownloadImages:
@@ -167,17 +192,16 @@ class TestDownloadImages:
         """Images fetched from CDN URLs land in the pack folder. Mocks httpx so
         no network is touched."""
         import app.routers.imports as imports_module
-        monkeypatch.setattr(imports_module.httpx, "Client", _FakeClient)
+        monkeypatch.setattr(imports_module.httpx, "AsyncClient", _FakeAsyncClient)
         _register_root(db, tmp_path)
         pack = tmp_path / "pack"
         pack.mkdir()
 
-        resp = client.post(
-            "/import/download-images",
-            json={"pack_path": str(pack), "image_urls": ["http://cdn/a.png", "http://cdn/b.png"]},
+        status, result = _download_and_wait(
+            client, str(pack), ["http://cdn/a.png", "http://cdn/b.png"],
         )
-        assert resp.status_code == 200
-        assert resp.json()["downloaded"] == 2
+        assert status == 200, result
+        assert result["downloaded"] == 2
         assert len(list(pack.glob("gallery_*.png"))) == 2
 
     def test_rejects_path_outside_roots(self, client, db, tmp_path):
@@ -201,3 +225,36 @@ class TestDownloadImages:
             "/import/download-images", json={"pack_path": "  ", "image_urls": []}
         )
         assert resp.status_code == 400
+
+    def test_no_image_urls_returns_immediately_without_starting_a_job(self, client, db, tmp_path):
+        """No URLs to fetch — respond synchronously instead of starting a job
+        the poller would just see finish instantly."""
+        _register_root(db, tmp_path)
+        pack = tmp_path / "pack"
+        pack.mkdir()
+
+        resp = client.post(
+            "/import/download-images", json={"pack_path": str(pack), "image_urls": []},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["started"] is False
+        assert body["result"]["downloaded"] == 0
+
+    def test_concurrent_downloads_still_produce_correct_progress_and_count(
+        self, client, db, tmp_path, monkeypatch,
+    ):
+        """Regression guard for the move from a sequential loop to
+        asyncio.gather-based concurrency: every image is still accounted for
+        exactly once, with no double-count or lost update under concurrency."""
+        import app.routers.imports as imports_module
+        monkeypatch.setattr(imports_module.httpx, "AsyncClient", _FakeAsyncClient)
+        _register_root(db, tmp_path)
+        pack = tmp_path / "pack"
+        pack.mkdir()
+
+        urls = [f"http://cdn/{n}.png" for n in range(10)]
+        status, result = _download_and_wait(client, str(pack), urls)
+        assert status == 200, result
+        assert result["downloaded"] == 10
+        assert len(list(pack.glob("gallery_*.png"))) == 10

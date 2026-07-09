@@ -30,8 +30,11 @@ Local web app for cataloguing, browsing, and managing an STL file library.
 ### Standalone (recommended for most users — no Docker needed)
 
 1. Go to the [Releases page](https://github.com/RBStephenson/STL-Inventory/releases) and download the file for your OS:
-   - **Windows**: `stl-library-windows.exe`
-   - **Linux**: `stl-library-linux`
+   - **Windows**: `stl-studio-windows.exe`
+   - **Linux**: `stl-studio-linux`
+
+   For testing the newest successful `main` build before a versioned release,
+   use the rolling `Main Build` prerelease on the same Releases page.
 
 2. Run the file. Your browser will open automatically to `http://localhost:8484`.
 
@@ -44,7 +47,7 @@ Your library database is stored in your user data folder and survives app update
 - **macOS**: `~/Library/Application Support/STL-Inventory/`
 - **Linux**: `~/.local/share/stl-inventory/`
 
-> **Linux note**: You may need to mark the binary as executable before running it: `chmod +x stl-library-linux`
+> **Linux note**: You may need to mark the binary as executable before running it: `chmod +x stl-studio-linux`
 
 ---
 
@@ -74,7 +77,7 @@ Your library database is stored in your user data folder and survives app update
 > Settings page the way the standalone app can.
 
 > **Prefer not to build?** Pre-built `backend` and `frontend` images are
-> published to GHCR on every release — see
+> published to GHCR on every successful `main` build and every release — see
 > [docs/docker.md → Pre-built images](docs/docker.md#pre-built-images).
 
 ## Disk Structure Expected
@@ -108,7 +111,7 @@ A folder is only indexed as a model if it contains 3D files.
 ### Model Detail
 - View and edit tags, metadata, source URL, NSFW flag
 - **Inline tag editing** — add or remove tags directly from the detail view without opening the full edit form
-- Image picker for choosing the thumbnail from the model's folder
+- Image picker for choosing the thumbnail from the model's folder, a URL, or a direct upload
 - STL preview (3D viewer)
 - **Part labeling** — tag each STL file with a part category (head, right arm, base, weapon, etc.) using a free-text input with common suggestions
 
@@ -132,8 +135,17 @@ A folder is only indexed as a model if it contains 3D files.
 
 ### Collections
 - Group models into named sets independent of tags/creators (projects, wishlists, etc.)
-- Create / rename / delete from the Collections page; add a model from its detail panel, or bulk-add from the Library selection bar
+- Create (name, description, and cover image in one modal) / rename / delete from the Collections page; add a model from its detail panel, or bulk-add from the Library selection bar
 - Stored in the database and included in every backup
+
+### Creators
+- Add a creator manually — its library folder is created automatically — instead of waiting for a scan to find one
+- Per-creator rescan and storefront enrichment (see below)
+
+### Reorganize Library
+- Preview and apply a folder template (default `{creator}/{character}/{title}`, with optional `{scale}`) to tidy files on disk
+- Destination template and lowercase/hyphenated ("slug") formatting are saved settings, shared with manual creator-folder creation and the model detail page's "unorganized" indicator
+- A model's own gallery images move along with its STL files (shared/inherited images from a parent folder are left alone); the source folder is removed once it's empty
 
 ### Storefront Enrichment
 - Paste a Gumroad, Cults3D, MyMiniFactory, or Loot Studios creator URL
@@ -162,7 +174,7 @@ The **Paint Shelf** is always available in the nav. Enabling **Settings → Pain
 - **Libraries** — name a folder and tick **Import destination** in Settings; a source→library mapping is saved per source and inherited by its packs
 - **Move N imported packs → library** files them into the chosen library via the reorganize engine (drift-checked, with undo); the **inbox** flag clears as they land
 - **Quick import (whole folder)** keeps the original one-shot index; imported models are flagged **inbox** (`?is_inbox=1` filter)
-- The move step is standalone-only and needs write mode (Docker mounts are read-only); import + enrich work everywhere
+- The move step needs the **Reorganize Library** feature flag on (Settings → Library, off by default) and a writable destination — Docker mounts are read-only, so it's effectively standalone-only; import + enrich work everywhere
 
 ### Scan
 - **Parallel** — scans up to 4 creator directories concurrently for faster indexing on large libraries
@@ -178,6 +190,8 @@ The **Paint Shelf** is always available in the nav. Enabling **Settings → Pain
 - **Settings → Data Management** to back up, restore, or reset the catalog
 - **Download Backup** saves a consistent snapshot (`.db`) of your index — tags,
   favorites, and print queue
+- **Check Health** runs SQLite integrity validation; **Repair Database** snapshots
+  first, runs a conservative `REINDEX`, and verifies integrity again
 - **Restore** swaps in a validated backup (also how you migrate to a new
   machine); **Reset** wipes the index to empty
 - Backups only cover the index — your STL files on disk are never touched

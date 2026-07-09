@@ -6,6 +6,7 @@ import FolderPicker from "../../components/FolderPicker";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
 import { errMsg } from "../../utils/err";
+import { useAppSettings } from "../../context/AppSettingsContext";
 
 const LAYOUT_SAMPLES: Record<string, string> = {
   "{creator}": "Abe3D",
@@ -46,13 +47,27 @@ interface Props {
 
 export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
   const { success, error, flash } = useSettingsFlash();
+  const { settings, update } = useAppSettings();
   const [newPath, setNewPath] = useState("");
   const [newLayout, setNewLayout] = useState("{creator}");
   const [layoutEdits, setLayoutEdits] = useState<Record<number, string>>({});
   const [nameEdits, setNameEdits] = useState<Record<number, string>>({});
   const [picking, setPicking] = useState(false);
   const [reloadingEnv, setReloadingEnv] = useState(false);
+  const [templateEdit, setTemplateEdit] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const saveReorganizeTemplate = async () => {
+    const next = (templateEdit ?? settings.reorganize_template).trim();
+    if (next === settings.reorganize_template) { setTemplateEdit(null); return; }
+    try {
+      await update({ reorganize_template: next });
+      setTemplateEdit(null);
+      flash("Reorganize template updated", "ok");
+    } catch (e) {
+      flash(errMsg(e) || "Invalid reorganize template — check the format", "err");
+    }
+  };
 
   const addRoot = async (pathArg?: string) => {
     const path = (pathArg ?? newPath).trim();
@@ -369,6 +384,25 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
         <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
           <FolderTree size={14} /> Library Tools
         </h2>
+
+        <label className="flex items-start gap-3 cursor-pointer select-none mb-4">
+          <input
+            type="checkbox"
+            checked={settings.reorganize_enabled}
+            onChange={() => update({ reorganize_enabled: !settings.reorganize_enabled })}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-gray-300">Enable Reorganize Library</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Off by default. When on, the Reorganize Library tool appears below and
+              can move files on disk to match your template — including import moves.
+              A read-only deployment (e.g. Docker mounts) still can't write regardless.
+            </p>
+          </div>
+        </label>
+
+        {settings.reorganize_enabled && (
         <Link
           to="/reorganize"
           className="flex items-center gap-2 text-sm text-gray-300 hover:text-indigo-300 bg-gray-900 border border-gray-800 hover:border-indigo-700 rounded-lg px-4 py-3 self-start transition-colors w-fit"
@@ -377,6 +411,46 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           Reorganize Library
           <span className="text-xs text-gray-600">— preview a tidy layout, resolve flags, then apply</span>
         </Link>
+        )}
+
+        <div className="bg-gray-900/60 border border-gray-800 rounded-lg px-4 py-3 mt-4 flex flex-col gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Destination template</label>
+            <input
+              type="text"
+              value={templateEdit ?? settings.reorganize_template}
+              onChange={(e) => setTemplateEdit(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              onBlur={saveReorganizeTemplate}
+              placeholder="{creator}/{character}/{title}"
+              spellCheck={false}
+              className="w-72 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none font-mono"
+            />
+            <p className="text-xs text-gray-600 mt-1">
+              Used by Reorganize Library, new creator folders, and the "unorganized" flag on a model's page.
+              Tokens: <code className="text-gray-400">{"{creator}"}</code>,{" "}
+              <code className="text-gray-400">{"{character}"}</code>,{" "}
+              <code className="text-gray-400">{"{scale}"}</code>,{" "}
+              <code className="text-gray-400">{"{title}"}</code>.
+            </p>
+          </div>
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.reorganize_slugify}
+              onChange={() => update({ reorganize_slugify: !settings.reorganize_slugify })}
+              className="mt-0.5 accent-indigo-500"
+            />
+            <div>
+              <p className="text-sm text-gray-300">Lowercase, hyphenated directory names</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Renders every segment slug-style (e.g. <code className="text-gray-400">abe-3d</code> instead
+                of <code className="text-gray-400">Abe 3D</code>), matching how imported folders are named.
+                Off keeps the original casing and spacing.
+              </p>
+            </div>
+          </label>
+        </div>
       </section>
 
       {picking && (

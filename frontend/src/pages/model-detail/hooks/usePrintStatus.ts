@@ -4,8 +4,10 @@
 // failure, matching the original inline logic.
 
 import { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api, PrintStatus, ModelDetail as ModelDetailType } from "../../../api/client";
 import { useToast } from "../../../context/ToastContext";
+import { invalidateModelViews } from "../../../hooks/queries/invalidation";
 
 export interface UsePrintStatus {
   printStatus: PrintStatus;
@@ -16,6 +18,7 @@ export interface UsePrintStatus {
 
 export function usePrintStatus(model: ModelDetailType | null, modelId: number | undefined): UsePrintStatus {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [printStatus, setPrintStatus] = useState<PrintStatus>("none");
   const [printCount, setPrintCount] = useState(0);
 
@@ -37,6 +40,7 @@ export function usePrintStatus(model: ModelDetailType | null, modelId: number | 
     try {
       const res = await api.models.setPrintStatus(Number(modelId), next);
       setPrintCount(res.print_count);
+      invalidateModelViews(queryClient, { modelId, includeVariants: false });
     } catch {
       setPrintStatus(prev);
       setPrintCount(prevCount);
@@ -51,6 +55,7 @@ export function usePrintStatus(model: ModelDetailType | null, modelId: number | 
     try {
       const res = await api.models.setPrintStatus(Number(modelId), "none");
       setPrintCount(res.print_count);
+      invalidateModelViews(queryClient, { modelId, includeVariants: false });
     } catch {
       setPrintStatus(prev);
       setPrintCount(prevCount);

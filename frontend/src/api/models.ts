@@ -2,6 +2,7 @@ import { request, BASE } from "./base";
 import type {
   AiOrganizePreviewResult,
   AiOrganizeResult,
+  AiOrganizeStrategy,
   AiOrganizeSuggestion,
   Creator,
   ModelDetail,
@@ -23,6 +24,12 @@ export const modelsApi = {
   get: (id: number) => request<ModelDetail>(`/models/${id}`),
   stats: () => request<ModelStats>("/models/stats"),
   creators: () => request<Creator[]>("/models/creators/list"),
+  createCreator: (name: string, source_url?: string) =>
+    request<Creator>("/models/creators", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, source_url: source_url || null }),
+    }),
   tags: () => request<{ tag: string; count: number }[]>("/models/tags/all"),
   renameTag: (oldTag: string, newTag: string) =>
     request<{ ok: boolean; updated: number }>("/models/tags/rename", {
@@ -65,6 +72,29 @@ export const modelsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ thumbnail_path: null, thumbnail_url: null }),
     }),
+  // Re-syncs image_paths with what's actually in the model's folder — picks up
+  // files placed there manually, drops entries for files no longer on disk.
+  refreshGallery: (id: number) =>
+    request<{ ok: boolean; image_paths: string[]; thumbnail_path: string | null }>(
+      `/models/${id}/images/refresh`,
+      { method: "POST" },
+    ),
+  deleteOtherFile: (id: number, path: string) =>
+    request<{ ok: boolean }>(`/models/${id}/other-files`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }),
+  uploadGalleryImages: async (id: number, files: File[]) => {
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    const res = await fetch(`${BASE}/models/${id}/images/upload`, { method: "POST", body: form });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.detail ?? `${res.status} ${res.statusText}`);
+    }
+    return res.json() as Promise<{ ok: boolean; image_paths: string[]; thumbnail_path: string | null }>;
+  },
   setNSFW: (id: number, nsfw: boolean) =>
     request<{ ok: boolean }>(`/models/${id}`, {
       method: "PATCH",
@@ -119,7 +149,10 @@ export const modelsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids, needs_review }),
     }),
-  bulkEnrich: (ids: number[], fields: { creator_name?: string; title?: string; notes?: string; source_url?: string }) =>
+  bulkEnrich: (
+    ids: number[],
+    fields: { creator_name?: string; title?: string; notes?: string; source_url?: string; source_site?: string },
+  ) =>
     request<{ ok: boolean; updated: number }>("/models/bulk/enrich", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -189,8 +222,12 @@ export const modelsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
-  aiOrganize: (modelId: number) =>
-    request<AiOrganizePreviewResult>(`/models/${modelId}/ai-organize`, { method: "POST" }),
+  aiOrganize: (modelId: number, strategy: AiOrganizeStrategy = "parts") =>
+    request<AiOrganizePreviewResult>(`/models/${modelId}/ai-organize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ strategy }),
+    }),
   aiOrganizeApply: (modelId: number, items: AiOrganizeSuggestion[]) =>
     request<AiOrganizeResult>(`/models/${modelId}/ai-organize/apply`, {
       method: "POST",

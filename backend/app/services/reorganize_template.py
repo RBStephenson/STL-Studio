@@ -15,6 +15,7 @@ Reorganize grammar (levels separated by ``/``):
 
   ``{creator}``    the model's creator name
   ``{character}``  the model's character grouping
+  ``{scale}``      the scanner-detected scale tag
   ``{title}``      the model's title (falls back to its folder name)
 
 A template must contain at least one token, every ``{...}`` token must be a
@@ -27,10 +28,12 @@ import re
 
 CREATOR = "creator"
 CHARACTER = "character"
+SCALE = "scale"
 TITLE = "title"
 
 DEFAULT_TEMPLATE = "{creator}/{character}/{title}"
-_VALID_FIELDS = {CREATOR, CHARACTER, TITLE}
+VALID_FIELDS = (CREATOR, CHARACTER, SCALE, TITLE)
+_VALID_FIELDS = set(VALID_FIELDS)
 _TOKEN_RE = re.compile(r"\{(\w+)\}")
 
 
@@ -63,7 +66,7 @@ def parse_template(template: str | None) -> list[str]:
             if field.lower() not in _VALID_FIELDS:
                 raise ReorganizeTemplateError(
                     f"Unknown template field {{{field}}} — use "
-                    "{creator}, {character} or {title}"
+                    "{creator}, {character}, {scale} or {title}"
                 )
         # A stray unmatched brace is a malformed token, not a literal.
         if ("{" in _TOKEN_RE.sub("", seg)) or ("}" in _TOKEN_RE.sub("", seg)):
@@ -76,7 +79,7 @@ def parse_template(template: str | None) -> list[str]:
         raise ReorganizeTemplateError("Template is empty after parsing")
     if not found_token:
         raise ReorganizeTemplateError(
-            "Template must reference at least one of {creator}, {character} or {title}"
+            "Template must reference at least one of {creator}, {character}, {scale} or {title}"
         )
     return segments
 
