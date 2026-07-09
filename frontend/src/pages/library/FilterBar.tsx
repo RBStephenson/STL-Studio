@@ -6,7 +6,7 @@
 // URL-filter state comes from useLibraryFilters (passed as `filters`); preset
 // state stays in the page shell and is passed in.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Search, SlidersHorizontal, Tag, X, Bookmark, BookmarkPlus } from "lucide-react";
 import { FilterPreset } from "../../api/client";
 import { nextTagParams } from "../../utils/tagFilter";
@@ -90,8 +90,11 @@ export default function FilterBar({
   } = filters;
 
   const [tagSearch, setTagSearch] = useState("");
-  const visibleTags = allTags.filter(({ tag }) =>
-    !tagSearch || tag.includes(tagSearch.toLowerCase())
+  // Memoized (STUDIO-97): tag-heavy libraries were re-filtering + re-rendering
+  // every visible tag on every unrelated filter-bar state change.
+  const visibleTags = useMemo(
+    () => allTags.filter(({ tag }) => !tagSearch || tag.includes(tagSearch.toLowerCase())),
+    [allTags, tagSearch],
   );
 
   return (
