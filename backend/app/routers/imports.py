@@ -5,6 +5,7 @@ Children B/C/D extend it with the pack-grouped preview projection, scoped
 ingest, and batch apply. Module is named `imports` because `import` is a
 reserved word.
 """
+import asyncio
 import logging
 import os
 import shutil
@@ -25,7 +26,7 @@ from app.models import ImportSourceMapping, Model, ScanRoot, STLFile
 from app.routers.reorganize import _build_and_persist, _slugify_all
 from app.routers.scan import _bootstrap_roots, _configured_roots
 from app.schemas import (
-    DownloadImagesRequest,
+    DownloadImagesRequest, DownloadImagesResult, DownloadImagesStart, DownloadImagesStatus,
     ImportApplyIneligible, ImportApplyRequest, ImportApplyResponse,
     ImportApplyStart, ImportApplyStatus,
     ImportPreviewPack, ImportPreviewResponse, InboxScanRequest,
@@ -42,6 +43,12 @@ from app.services.thumbnails import CONTENT_TYPE_EXT, IMAGE_EXTS
 # the write lock apply_manifest already holds; this just lets one apply be
 # tracked/polled at a time, mirroring scanner.py's _SCAN_KEY.
 _IMPORT_APPLY_KEY = "import_apply"
+
+# Same pattern for the gallery-image download step: one download at a time,
+# tracked/polled through the shared job runner.
+_DOWNLOAD_IMAGES_KEY = "download_images"
+_DOWNLOAD_CONCURRENCY = 6
+_DOWNLOAD_IMAGE_TIMEOUT = 10.0
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -347,10 +354,76 @@ def _image_ext(url: str, content_type: str) -> str:
     return suffix if suffix in IMAGE_EXTS else ".jpg"
 
 
-@router.post("/download-images")
+async def _download_images_async(handle: JobHandle, pack_dir_str: str, urls: list[str]) -> int:
+    """Fetch every URL into pack_dir concurrently (bounded), reporting progress
+    on handle after each one finishes. Returns the count actually written.
+
+    Concurrent + a short per-image timeout, replacing a fully sequential loop
+    with a 30s-per-image timeout — a couple of slow/unreachable CDN URLs used
+    to serialize into minutes of dead time with zero feedback to the UI."""
+    pack_dir = Path(pack_dir_str)
+    total = len(urls)
+    downloaded = 0
+    done = 0
+    lock = asyncio.Lock()
+    sem = asyncio.Semaphore(_DOWNLOAD_CONCURRENCY)
+
+    async def fetch_one(client: httpx.AsyncClient, n: int, url: str) -> None:
+        nonlocal downloaded, done
+        async with sem:
+            try:
+                r = await client.get(url)
+                r.raise_for_status()
+                ct = r.headers.get("content-type", "").split(";")[0].strip().lower()
+                if ct in ("image/svg+xml", "text/html", "application/json"):
+                    logger.warning("gallery image %d skipped — unsupported content-type %r", n, ct)
+                    return
+                ext = _image_ext(url, ct)
+                # Guard: ext must be a known-safe image extension — reject anything
+                # that could escape the filename (e.g. a crafted URL suffix).
+                if ext not in IMAGE_EXTS:
+                    logger.warning("gallery image %d skipped — unexpected ext %r", n, ext)
+                    return
+                dest = pack_dir / f"gallery_{n:02d}{ext}"
+                dest.write_bytes(r.content)
+                async with lock:
+                    downloaded += 1
+            except Exception as e:
+                logger.warning("gallery image %d download failed: %s", n, e)
+            finally:
+                async with lock:
+                    done += 1
+                    handle.update(
+                        message=f"Downloading images ({done}/{total})",
+                        downloaded=downloaded, total=total,
+                    )
+
+    async with httpx.AsyncClient(
+        timeout=_DOWNLOAD_IMAGE_TIMEOUT, follow_redirects=True,
+        headers={"User-Agent": "STL-Inventory/1.0"},
+    ) as client:
+        await asyncio.gather(*(fetch_one(client, n, url) for n, url in enumerate(urls)))
+    return downloaded
+
+
+def _run_download_images_job(handle: JobHandle, pack_dir_str: str, urls: list[str]) -> None:
+    """Background body for POST /import/download-images. Runs its own asyncio
+    event loop on this job's dedicated thread (JobRunner threads are plain
+    sync callables) so the fetches above can run concurrently."""
+    downloaded = asyncio.run(_download_images_async(handle, pack_dir_str, urls))
+    handle.update(
+        state=JobState.DONE,
+        message=f"done — {downloaded} image(s)",
+        result=DownloadImagesResult(downloaded=downloaded).model_dump(),
+    )
+
+
+@router.post("/download-images", response_model=DownloadImagesStart)
 def download_images(body: DownloadImagesRequest, db: Session = Depends(get_db)):
     """Download CDN image URLs into the pack folder so they travel with the pack
-    during apply. Called from the import UI after enrichment, before apply."""
+    during apply. Called from the import UI after enrichment, before apply.
+    Runs as a background job (mirroring /import/apply) — poll
+    GET /import/download-images/status for progress and the eventual result."""
     raw_pack_path = body.pack_path.strip()
     if not raw_pack_path:
         raise HTTPException(status_code=400, detail="pack_path is required")
@@ -366,29 +439,33 @@ def download_images(body: DownloadImagesRequest, db: Session = Depends(get_db)):
     if not pack_dir.is_dir():
         raise HTTPException(status_code=404, detail="Pack folder not found")
 
-    downloaded = 0
-    with httpx.Client(timeout=30, follow_redirects=True,
-                      headers={"User-Agent": "STL-Inventory/1.0"}) as client:
-        for n, url in enumerate(body.image_urls[:30]):  # cap at 30 images
-            try:
-                r = client.get(url)
-                r.raise_for_status()
-                ct = r.headers.get("content-type", "").split(";")[0].strip().lower()
-                if ct in ("image/svg+xml", "text/html", "application/json"):
-                    logger.warning("gallery image %d skipped — unsupported content-type %r", n, ct)
-                    continue
-                ext = _image_ext(url, ct)
-                # Guard: ext must be a known-safe image extension — reject anything
-                # that could escape the filename (e.g. a crafted URL suffix).
-                if ext not in IMAGE_EXTS:
-                    logger.warning("gallery image %d skipped — unexpected ext %r", n, ext)
-                    continue
-                dest = pack_dir / f"gallery_{n:02d}{ext}"
-                dest.write_bytes(r.content)
-                downloaded += 1
-            except Exception as e:
-                logger.warning("gallery image %d download failed: %s", n, e)
-    return {"downloaded": downloaded}
+    urls = body.image_urls[:30]  # cap at 30 images
+    if not urls:
+        return DownloadImagesStart(started=False, result=DownloadImagesResult(downloaded=0))
+
+    handle = runner.start(
+        _DOWNLOAD_IMAGES_KEY, _run_download_images_job, single_flight=True,
+        pack_dir_str=pack_dir_str, urls=urls,
+    )
+    if handle is None:
+        raise HTTPException(status_code=409, detail="An image download is already in progress.")
+    return DownloadImagesStart(started=True)
+
+
+@router.get("/download-images/status", response_model=DownloadImagesStatus)
+def download_images_status():
+    """Poll target for the job POST /import/download-images starts."""
+    payload = runner.status(_DOWNLOAD_IMAGES_KEY)
+    prog = payload["progress"]
+    result = prog.get("result")
+    return DownloadImagesStatus(
+        running=payload["state"] == JobState.RUNNING.value,
+        message=payload["message"] or "idle",
+        downloaded=prog.get("downloaded", 0),
+        total=prog.get("total", 0),
+        error=payload["error"],
+        result=DownloadImagesResult(**result) if result else None,
+    )
 
 
 def _move_non_stl_files(

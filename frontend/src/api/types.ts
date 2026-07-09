@@ -210,6 +210,26 @@ export interface ImportApplyStatus {
   result: ImportApplyResult | null;
 }
 
+export interface DownloadImagesResult {
+  downloaded: number;
+}
+
+export interface DownloadImagesStart {
+  // false = nothing to download — `result` is already final, no need to poll.
+  // true = a background job is running; poll importApi.downloadImagesStatus().
+  started: boolean;
+  result: DownloadImagesResult | null;
+}
+
+export interface DownloadImagesStatus {
+  running: boolean;
+  message: string;
+  downloaded: number;
+  total: number;
+  error: string | null;
+  result: DownloadImagesResult | null;
+}
+
 export interface DriveStatusRoot {
   path: string;
   enabled: boolean;

@@ -1,5 +1,7 @@
 import { request } from "./base";
 import type {
+  DownloadImagesStart,
+  DownloadImagesStatus,
   ImportApplyStart,
   ImportApplyStatus,
   ImportPreview,
@@ -34,9 +36,10 @@ export const importApi = {
     }),
   applyStatus: () => request<ImportApplyStatus>("/import/apply/status"),
   downloadImages: (packPath: string, imageUrls: string[]) =>
-    request<{ downloaded: number }>("/import/download-images", {
+    request<DownloadImagesStart>("/import/download-images", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pack_path: packPath, image_urls: imageUrls }),
     }),
+  downloadImagesStatus: () => request<DownloadImagesStatus>("/import/download-images/status"),
 };
