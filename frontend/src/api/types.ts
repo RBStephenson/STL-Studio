@@ -194,6 +194,22 @@ export interface ImportApplyResult {
   undo_log: string | null;
 }
 
+export interface ImportApplyStart {
+  // false = nothing to move — `result` is already final, no need to poll.
+  // true = a background job is running; poll importApi.applyStatus().
+  started: boolean;
+  result: ImportApplyResult | null;
+}
+
+export interface ImportApplyStatus {
+  running: boolean;
+  message: string;
+  moved_files: number;
+  total_files: number;
+  error: string | null;
+  result: ImportApplyResult | null;
+}
+
 export interface DriveStatusRoot {
   path: string;
   enabled: boolean;

@@ -425,10 +425,13 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
    it, and the dropdown pre-fills (but stays editable) next time.
 4. **Enrich each pack** — expand a card to set **Creator, Character, Title, and
    Tags**, then click **Import**. That ingests just that pack's folder as inbox
-   models and applies the metadata.
-5. **Move them in** — a **"Move N imported packs → {library}"** bar files the
-   imported packs into the destination library on disk (drift-checked, with
-   undo). The **inbox** flag clears as each pack lands.
+   models, applies the metadata, and immediately moves that pack into the
+   destination library on disk (drift-checked, with undo) — no separate move
+   step. The **inbox** flag clears as the pack lands, and a progress bar shows
+   files moved while the move is in flight.
+5. **"Move N imported packs → {library}"** — a batch bar for moving every
+   already-ingested-but-not-yet-moved pack under the current source in one go
+   (e.g. after a Quick import).
 
 ### Notes
 
