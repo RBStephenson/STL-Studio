@@ -75,6 +75,34 @@ class TestPreviewHappyPath:
         assert entry["escapes_scan_root"] is False
 
 
+class TestHiddenDirImagesExcluded:
+    def test_image_inside_hidden_directory_never_becomes_a_move_entry(self, client, db, tmp_path):
+        """A stale image_paths reference into a hidden directory (e.g. a
+        .manyfold derivative-thumbnail cache another tool left behind, from
+        before the scanner started skipping them) must never be treated as
+        a real gallery image to carry through a move — that would relocate
+        the junk into the organized library instead of letting it fall away
+        (#903-follow-up)."""
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path)
+        folder = tmp_path / "Abe3D" / "Joker" / "Bust"
+        hidden = folder / ".manyfold" / "derivatives"
+        hidden.mkdir(parents=True)
+        stale = hidden / "carousel.jpg"
+        stale.write_bytes(b"\x89PNG\r\n\x1a\n")
+        # A real, legitimate gallery image too, to prove it's still included.
+        real = folder / "cover.jpg"
+        real.write_bytes(b"\x89PNG\r\n\x1a\n")
+        m.image_paths = [str(stale), str(real)]
+        db.commit()
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        image_sources = [f["current_path"] for f in entry["files"] if f["kind"] == "image"]
+
+        assert not any(".manyfold" in p for p in image_sources)
+        assert any(p.endswith("cover.jpg") for p in image_sources)
+
+
 class TestSentinels:
     def test_missing_character_is_unclassifiable_and_ineligible(self, client, db, tmp_path):
         _root(db, tmp_path)

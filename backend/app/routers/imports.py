@@ -515,9 +515,22 @@ def _move_non_stl_files(
             except OSError as e:
                 logger.warning("Could not move %r → %r: %s", src, dst, e)
 
+    old_boundary = Path(old_folder)
     for m in models:
-        if new_images:
-            m.image_paths = new_images
+        # Merge rather than "only overwrite if we moved something new": a
+        # model whose old_folder held nothing but hidden-directory junk
+        # (e.g. a stale .manyfold cache — #903-follow-up) got an empty
+        # new_images, so `if new_images:` never fired and those stale
+        # image_paths entries — still pointing at the now-emptied old
+        # folder — survived indefinitely. The merge drops anything within
+        # old_folder that wasn't rediscovered while preserving paths that
+        # live elsewhere (manually-added images, remote URLs, etc.).
+        m.image_paths = scanner._merge_scan_gallery_paths(
+            existing=m.image_paths or [],
+            discovered=new_images,
+            removed=m.removed_image_paths or [],
+            boundary=old_boundary,
+        )
         if new_others:
             m.other_files = new_others
         # Remap thumbnail_path if it pointed into the old folder (stale after move).

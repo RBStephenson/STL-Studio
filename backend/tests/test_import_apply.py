@@ -403,3 +403,35 @@ class TestImportApplyCleansUpNonStlFiles:
         # The stray collision folder is untouched — cleanup must not have
         # dumped the image there instead.
         assert not (dest_dir / "cover.jpg").exists()
+
+    def test_stale_hidden_dir_reference_dropped_even_with_no_new_images(
+        self, client, db, tmp_path, write_mode,
+    ):
+        """A model whose image_paths already references a file inside a
+        hidden directory (e.g. a leftover .manyfold derivative cache from
+        before the scanner started skipping them, #903-follow-up) must lose
+        that reference on apply — even when there's no real image to
+        replace it with. The move loop's walk already skips hidden
+        directories, so new_images ends up empty; the old `if new_images:`
+        guard meant image_paths was never touched at all in that case,
+        letting the stale reference survive indefinitely."""
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
+        hidden = pack / ".manyfold" / "derivatives"
+        hidden.mkdir(parents=True)
+        (hidden / "carousel.jpg").write_bytes(b"\x89PNG\r\n\x1a\n")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+        # Simulate the stale pre-fix state: an earlier scan picked up the
+        # hidden-dir file before the scanner started skipping them.
+        m.image_paths = [str(hidden / "carousel.jpg")]
+        db.commit()
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+
+        db.refresh(m)
+        assert m.image_paths == []
