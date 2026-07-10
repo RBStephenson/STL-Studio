@@ -58,7 +58,7 @@ function CollectionCard({
     <>
       <div className="relative group/card">
         {renaming ? (
-          <div className="bg-gray-900 border border-indigo-500 rounded-lg p-4 flex flex-col gap-2">
+          <div className="bg-panel border border-accent-start rounded-lg p-4 flex flex-col gap-2">
             <input
               ref={nameRef}
               autoFocus
@@ -67,7 +67,7 @@ function CollectionCard({
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel(); }}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-panel-secondary border border-border rounded px-2 py-1 text-sm text-text-primary focus:outline-none focus:border-accent-start"
             />
             <textarea
               rows={5}
@@ -75,18 +75,18 @@ function CollectionCard({
               value={draftDesc}
               onChange={(e) => setDraftDesc(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Escape") cancel(); }}
-              className="w-full resize-none bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 placeholder:text-gray-600 focus:outline-none focus:border-indigo-500"
+              className="w-full resize-none bg-panel-secondary border border-border rounded px-2 py-1 text-sm text-text-primary-alt2 placeholder:text-text-muted focus:outline-none focus:border-accent-start"
             />
             <div className="flex gap-1.5">
               <button
                 onClick={commit}
-                className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs text-white"
+                className="flex items-center gap-1 px-2 py-1 rounded bg-accent-end hover:bg-accent-start text-xs text-white"
               >
                 <Check size={11} /> Save
               </button>
               <button
                 onClick={cancel}
-                className="flex items-center gap-1 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs text-gray-400"
+                className="flex items-center gap-1 px-2 py-1 rounded bg-panel-secondary hover:bg-panel-secondary text-xs text-text-secondary"
               >
                 <X size={11} /> Cancel
               </button>
@@ -95,7 +95,7 @@ function CollectionCard({
         ) : (
           <Link
             to={`/collections/${col.id}`}
-            className={`relative bg-gray-900 border border-gray-800 rounded-lg overflow-hidden flex flex-col hover:border-indigo-500 transition-colors block ${
+            className={`relative bg-panel border border-border-subtle rounded-lg overflow-hidden flex flex-col hover:border-accent-start transition-colors block ${
               bigBox ? "aspect-[4/3]" : ""
             }`}
           >
@@ -109,27 +109,27 @@ function CollectionCard({
                 className="absolute inset-0 w-full h-full object-cover"
               />
             ) : bigBox ? (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-700">
+              <div className="absolute inset-0 flex items-center justify-center text-text-muted-alt">
                 <FolderOpen size={32} />
               </div>
             ) : (
-              <div className="h-12 flex items-center justify-center text-gray-700">
+              <div className="h-12 flex items-center justify-center text-text-muted-alt">
                 <FolderOpen size={24} />
               </div>
             )}
 
             {/* Solid footer — always opaque so text is legible over any cover image */}
-            <div className={`${bigBox ? "absolute inset-x-0 bottom-0" : ""} px-3 py-2.5 bg-gray-900 border-t border-gray-800`}>
-              <p className="font-medium text-gray-100 text-sm leading-snug truncate">{col.name}</p>
+            <div className={`${bigBox ? "absolute inset-x-0 bottom-0" : ""} px-3 py-2.5 bg-panel border-t border-border-subtle`}>
+              <p className="font-medium text-text-primary text-sm leading-snug truncate">{col.name}</p>
               {col.description && (
                 <p
-                  className="text-xs text-gray-400 truncate"
+                  className="text-xs text-text-secondary truncate"
                   title={col.description}
                 >
                   {col.description}
                 </p>
               )}
-              <p className="text-xs text-gray-500 mt-0.5">{col.model_count} model{col.model_count !== 1 ? "s" : ""}</p>
+              <p className="text-xs text-text-secondary-alt mt-0.5">{col.model_count} model{col.model_count !== 1 ? "s" : ""}</p>
             </div>
           </Link>
         )}
@@ -139,21 +139,21 @@ function CollectionCard({
             <button
               onClick={(e) => { e.preventDefault(); setPickerOpen(true); }}
               title="Set cover image"
-              className="p-1.5 rounded bg-gray-800/90 hover:bg-gray-700 text-gray-400 hover:text-gray-200 border border-transparent hover:border-gray-600"
+              className="p-1.5 rounded bg-panel-secondary/90 hover:bg-panel-secondary text-text-secondary hover:text-text-primary-alt border border-transparent hover:border-border-divider"
             >
               <ImagePlus size={13} />
             </button>
             <button
               onClick={startRename}
               title="Rename collection"
-              className="p-1.5 rounded bg-gray-800/90 hover:bg-gray-700 text-gray-600 hover:text-gray-300 border border-transparent hover:border-gray-600"
+              className="p-1.5 rounded bg-panel-secondary/90 hover:bg-panel-secondary text-text-muted hover:text-text-primary-alt2 border border-transparent hover:border-border-divider"
             >
               <Pencil size={13} />
             </button>
             <button
               onClick={(e) => onDelete(e, col)}
               title="Delete collection"
-              className="p-1.5 rounded bg-gray-800/90 hover:bg-red-950 text-gray-600 hover:text-red-400 border border-transparent hover:border-red-800"
+              className="p-1.5 rounded bg-panel-secondary/90 hover:bg-red-950 text-text-muted hover:text-red-400 border border-transparent hover:border-red-800"
             >
               <Trash2 size={13} />
             </button>
@@ -216,11 +216,11 @@ export default function Collections() {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <FolderOpen size={20} className="text-indigo-400" />
-          <h1 className="text-2xl font-bold text-gray-100">Collections</h1>
+          <h1 className="text-2xl font-bold text-text-primary">Collections</h1>
         </div>
         <button
           onClick={() => setCreating(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-accent-end hover:bg-accent-start text-sm transition-colors"
         >
           <Plus size={14} />
           New Collection
@@ -236,7 +236,7 @@ export default function Collections() {
       )}
 
       {collections.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-gray-600">
+        <div className="flex flex-col items-center justify-center py-24 text-text-muted">
           <FolderOpen size={48} />
           <p className="mt-3">No collections yet</p>
         </div>
