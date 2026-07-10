@@ -225,6 +225,12 @@ the corresponding button in the part picker stay in sync in both directions,
 auto-unfolding collapsed sections as needed. Changing a part's category
 applies to every file linked to it (the base file and all its sups).
 
+Clicking the link icon to attach a sup opens a searchable picker: it lists
+each candidate by its **part name** (falling back to the filename if a file
+has none set) with the filename shown underneath for reference, and typing
+filters the list by either — much faster than scanning a plain dropdown of
+raw filenames on a kit with dozens of parts.
+
 The **part type** field is a combobox: start typing to filter a list of
 standard suggestions (listed alphabetically), or type any custom category
 name. The dropdown appears automatically, opening above the field instead of
