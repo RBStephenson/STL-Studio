@@ -30,6 +30,31 @@ const renderPage = () => render(<MemoryRouter><TagsPage /></MemoryRouter>);
 describe("TagsPage (#165)", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
+  it("shows the shared error state on load failure, with a working Retry", async () => {
+    vi.mocked(api.models.tags).mockRejectedValueOnce(new Error("Server unreachable"));
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Server unreachable");
+    expect(screen.getByText("Couldn't load tags")).toBeInTheDocument();
+
+    vi.mocked(api.models.tags).mockResolvedValueOnce(TAGS);
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    await waitFor(() => expect(screen.getByText("figure")).toBeInTheDocument());
+  });
+
+  it("shows the loading skeleton while pending, then swaps to real content", async () => {
+    let resolveTags!: (v: typeof TAGS) => void;
+    vi.mocked(api.models.tags).mockReturnValueOnce(new Promise((resolve) => { resolveTags = resolve; }));
+    renderPage();
+
+    expect(screen.getByTestId("tags-loading-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText("figure")).toBeNull();
+
+    resolveTags(TAGS);
+    await waitFor(() => expect(screen.getByText("figure")).toBeInTheDocument());
+    expect(screen.queryByTestId("tags-loading-skeleton")).toBeNull();
+  });
+
   it("loads and displays tags with counts", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("figure")).toBeInTheDocument());

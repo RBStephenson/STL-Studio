@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import PaintShelfPage, { ColorChip } from "./PaintShelfPage";
@@ -79,6 +79,35 @@ describe("ColorChip", () => {
 
 describe("PaintShelfPage", () => {
   beforeEach(() => { vi.clearAllMocks(); });
+
+  it("shows the dashed empty-state panel with an Add-paint CTA when the shelf has no paints", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.painting.paints.list).mockResolvedValueOnce({ total: 0, page: 1, page_size: 48, items: [] });
+    renderPage();
+
+    expect(await screen.findByText("Your shelf is empty")).toBeInTheDocument();
+    expect(screen.getByText(/Import CSV with a PaintRack export/)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
+
+    const addButtons = screen.getAllByRole("button", { name: /add paint/i });
+    expect(addButtons).toHaveLength(2); // header CTA + empty-state CTA
+    await userEvent.click(addButtons[1]);
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument(); // add-paint form mounted
+  });
+
+  it("shows a distinct 'no match' empty state when filters exclude everything", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.painting.paints.list).mockResolvedValueOnce({ total: 0, page: 1, page_size: 48, items: [] });
+    renderPage();
+    await screen.findByText("Your shelf is empty");
+
+    vi.mocked(api.painting.paints.list).mockResolvedValueOnce({ total: 0, page: 1, page_size: 48, items: [] });
+    fireEvent.change(screen.getByPlaceholderText("Search name or code…"), { target: { value: "zzz" } });
+
+    expect(await screen.findByText("No paints match")).toBeInTheDocument();
+    // Only the header CTA remains — the empty-state CTA is filter-scoped, not shown for "no match".
+    expect(screen.getAllByRole("button", { name: /add paint/i })).toHaveLength(1);
+  });
 
   it("shows the shared error state on a list-fetch failure, with a working Retry", async () => {
     const { api } = await import("../api/client");

@@ -98,10 +98,12 @@ describe("ModelDetail error handling (#221)", () => {
     await waitFor(() => expect(screen.getByText("Model not found.")).toBeInTheDocument());
   });
 
-  it("shows a retry affordance (not 'not found') on a network/5xx failure", async () => {
+  it("shows the shared error state (not 'not found') on a network/5xx failure", async () => {
     get.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     renderAt();
     await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't load this model")).toBeInTheDocument();
     expect(screen.queryByText("Model not found.")).not.toBeInTheDocument();
 
     // Retry refetches and renders the model.

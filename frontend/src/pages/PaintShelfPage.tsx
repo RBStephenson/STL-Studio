@@ -432,8 +432,43 @@ export default function PaintShelfPage() {
         <ErrorState title="Couldn't load the paint shelf" message={listError} onRetry={fetchPaints} />
       )}
 
+      {!listError && !loading && paints.length === 0 && (
+        (() => {
+          const filtered = q || brandId || lineId || finish || ownedParam;
+          return (
+            <div
+              className="flex flex-col items-center text-center rounded-[14px] border border-dashed px-8 py-16"
+              style={{ borderColor: "#1e2027", background: "#0e0f13" }}
+            >
+              <div
+                className="flex items-center justify-center w-14 h-14 rounded-full mb-4"
+                style={{ background: "#26163a" }}
+              >
+                <Palette size={22} strokeWidth={1.6} style={{ color: "var(--color-status-fuchsia)" }} />
+              </div>
+              <p className="text-base font-bold text-text-primary-alt mb-2">
+                {filtered ? "No paints match" : "Your shelf is empty"}
+              </p>
+              <p className="text-[13px] leading-relaxed text-text-secondary-alt max-w-[320px] mb-6">
+                {filtered
+                  ? "Try adjusting or clearing your filters."
+                  : "Add a paint, or use Import CSV with a PaintRack export."}
+              </p>
+              {!filtered && (
+                <button
+                  onClick={() => setFormMode("add")}
+                  className="btn-cta inline-flex items-center gap-1.5 text-white text-sm px-4 py-2 rounded"
+                >
+                  <Plus size={15} /> Add paint
+                </button>
+              )}
+            </div>
+          );
+        })()
+      )}
+
       {/* Table */}
-      {!listError && (
+      {!listError && !(!loading && paints.length === 0) && (
       <div className="bg-panel border border-border-subtle rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -451,10 +486,10 @@ export default function PaintShelfPage() {
             {paints.map((p) => {
               const lineInfo = lineById.get(p.paint_line_id);
               return (
-                <tr key={p.id} className="border-b border-gray-850 last:border-0 hover:bg-gray-850/50 group">
+                <tr key={p.id} className="border-b border-border-subtle last:border-0 hover:bg-panel-secondary/50 group">
                   <td className="px-4 py-2"><ColorChip hex={p.hex} /></td>
                   <td className="px-2 py-2 font-mono text-xs text-text-secondary">{p.code}</td>
-                  <td className="px-2 py-2 text-text-primary">{p.name}</td>
+                  <td className="px-2 py-2 text-text-primary-alt">{p.name}</td>
                   <td className="px-2 py-2 text-text-secondary-alt text-xs">
                     {lineInfo ? `${lineInfo.brand} — ${lineInfo.line}` : "—"}
                   </td>
@@ -475,15 +510,6 @@ export default function PaintShelfPage() {
                 </tr>
               );
             })}
-            {!loading && paints.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-sm text-text-muted">
-                  {total === 0 && !q && !brandId && !lineId && !finish && !ownedParam
-                    ? "Your shelf is empty — add a paint, or use Import CSV with a PaintRack export."
-                    : "No paints match the current filters."}
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>

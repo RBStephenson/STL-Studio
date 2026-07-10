@@ -45,6 +45,29 @@ describe("GuidesPage", () => {
     expect(screen.queryByText("published")).toBeNull();              // published shows no badge
   });
 
+  it("shows the loading skeleton while pending, then swaps to real content", async () => {
+    const { api } = await import("../api/client");
+    let resolveList!: (v: Awaited<ReturnType<typeof api.painting.guides.list>>) => void;
+    vi.mocked(api.painting.guides.list).mockReturnValueOnce(
+      new Promise((resolve) => { resolveList = resolve; })
+    );
+    renderPage();
+
+    expect(screen.getByTestId("guides-loading-skeleton")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /RoboCop/ })).toBeNull();
+
+    resolveList({
+      total: 2, page: 1, page_size: 200,
+      items: [
+        { id: 1, slug: "robocop", title: "RoboCop", category_id: null, series_id: null,
+          model_id: null, scale: "1:6", status: "published", franchise: "RoboCop",
+          technique_tags: ["TMM"], paint_lines_used: [], updated_at: null, published_at: null },
+      ],
+    });
+    expect(await screen.findByRole("link", { name: /RoboCop/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("guides-loading-skeleton")).toBeNull();
+  });
+
   it("shows an empty state when there are no guides", async () => {
     const { api } = await import("../api/client");
     vi.mocked(api.painting.guides.list).mockResolvedValueOnce({

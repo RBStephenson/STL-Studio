@@ -221,19 +221,59 @@ describe("GuideSpineEditor", () => {
     expect(step.mix_components).toEqual([]); // paintless + nameless → dropped
   });
 
-  it("adds a new tab", async () => {
+  it("adds a new tab and switches the sidebar selection to it", async () => {
     const onSave = vi.fn();
     render(<GuideSpineEditor initialTabs={[oneTab()]} onSave={onSave} onCancel={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /add tab/i }));
-    const names = screen.getAllByPlaceholderText("Tab name *");
-    expect(names).toHaveLength(2);
+    // Sidebar now lists two tabs; the middle column shows only the new (active) one.
+    expect(screen.getAllByPlaceholderText("Tab name *")).toHaveLength(1);
+    expect(screen.getByRole("navigation", { name: /guide content tabs/i })).toBeInTheDocument();
 
     // New tab has no name → save is blocked.
     await userEvent.click(screen.getByRole("button", { name: "Save content" }));
     expect(onSave).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(/tab needs a name/i);
-    // sanity: the first tab still shows its step
+
+    // Switching back to the first tab still shows its step.
+    await userEvent.click(screen.getByRole("button", { name: /^skin/i }));
     expect(screen.getByDisplayValue("Basecoat")).toBeInTheDocument();
+  });
+
+  it("shows step counts per tab in the sidebar and marks only the active one aria-current", async () => {
+    const skin = oneTab();
+    const other: GuideTab = {
+      ...oneTab(), id: 2, name: "Metals", section: { heading: "Metallics", intro: null },
+      phases: [{
+        id: 2, label: "Base", subtab_key: null, sort_order: 0,
+        steps: [
+          { id: 3, title: "Prime", technique_tag: "airbrush", technique_label: null, body: null,
+            value_intent: null, tip: null, warning: null, ratio_box: null, sort_order: 0,
+            swatches: [], mix_components: [] },
+          { id: 4, title: "Wash", technique_tag: "wash", technique_label: null, body: null,
+            value_intent: null, tip: null, warning: null, ratio_box: null, sort_order: 1,
+            swatches: [], mix_components: [] },
+        ],
+      }],
+    } as unknown as GuideTab;
+
+    render(<GuideSpineEditor initialTabs={[skin, other]} onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    const skinTabBtn = screen.getByRole("button", { name: /^skin/i });
+    const metalsTabBtn = screen.getByRole("button", { name: /^metals/i });
+    expect(skinTabBtn).toHaveAttribute("aria-current", "page");
+    expect(metalsTabBtn).not.toHaveAttribute("aria-current");
+    expect(skinTabBtn).toHaveTextContent("1 step");
+    expect(metalsTabBtn).toHaveTextContent("2 steps");
+
+    // Only the active (Skin) tab's steps render in the middle column.
+    expect(screen.getByDisplayValue("Basecoat")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Prime")).toBeNull();
+
+    await userEvent.click(metalsTabBtn);
+    expect(metalsTabBtn).toHaveAttribute("aria-current", "page");
+    expect(skinTabBtn).not.toHaveAttribute("aria-current");
+    expect(screen.getByDisplayValue("Prime")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Basecoat")).toBeNull();
   });
 });

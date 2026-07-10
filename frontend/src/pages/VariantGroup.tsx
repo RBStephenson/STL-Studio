@@ -18,6 +18,7 @@ import { measureGridColumns } from "../utils/libraryKeys";
 import { reorderedIds } from "../utils/reorderList";
 import { useLibraryKeyboard } from "../hooks/useLibraryKeyboard";
 import { errMsg } from "../utils/err";
+import ErrorState from "../components/ErrorState";
 
 // Shared write paths for every group op (#678): move resolves (or creates) the
 // target durable group and merges ids into it; remove splits ids out of the
@@ -388,6 +389,7 @@ export default function VariantGroup() {
   const { toast } = useToast();
   const [variants, setVariants] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   // Tracks whether the group has ever been populated, so emptying it via
   // bulk ops navigates back — but the initial empty render does not.
@@ -398,9 +400,10 @@ export default function VariantGroup() {
   const groupId = searchParams.get("gid") ? Number(searchParams.get("gid")) : null;
   const from = (location.state as { from?: string } | null)?.from ?? "/";
 
-  useEffect(() => {
+  const loadVariants = useCallback(() => {
     if (!numCreatorId || !decodedCharacter) return;
     setLoading(true);
+    setLoadError(null);
     setSelected(new Set());
     hadVariants.current = false;
     api.models
@@ -409,8 +412,11 @@ export default function VariantGroup() {
         setVariants(data.items);
         if (data.items.length > 0) hadVariants.current = true;
       })
+      .catch((e) => setLoadError(errMsg(e) || "Could not load this variant group."))
       .finally(() => setLoading(false));
   }, [numCreatorId, decodedCharacter, groupId]);
+
+  useEffect(() => { loadVariants(); }, [loadVariants]);
 
   const reloadVariants = useCallback(() => {
     if (!numCreatorId || !decodedCharacter) return;
@@ -768,8 +774,24 @@ export default function VariantGroup() {
 
       {loading ? (
         <div className="flex justify-center py-24 text-text-secondary-alt text-sm">Loading…</div>
+      ) : loadError ? (
+        <ErrorState title="Couldn't load this variant group" message={loadError} onRetry={loadVariants} />
       ) : variants.length === 0 ? (
-        <div className="flex justify-center py-24 text-text-secondary-alt text-sm">No variants found.</div>
+        <div
+          className="flex flex-col items-center text-center rounded-[14px] border border-dashed px-8 py-16"
+          style={{ borderColor: "#1e2027", background: "#0e0f13" }}
+        >
+          <div
+            className="flex items-center justify-center w-14 h-14 rounded-full mb-4"
+            style={{ background: "#26163a" }}
+          >
+            <Layers size={22} strokeWidth={1.6} style={{ color: "var(--color-status-fuchsia)" }} />
+          </div>
+          <p className="text-base font-bold text-text-primary-alt mb-2">No variants found</p>
+          <p className="text-[13px] leading-relaxed text-text-secondary-alt max-w-[320px]">
+            This group has no variants — they may have been moved or removed elsewhere.
+          </p>
+        </div>
       ) : (
         <DndContext
           sensors={dndSensors}

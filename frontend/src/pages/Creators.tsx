@@ -6,6 +6,8 @@ import StorefrontEnrich from "../components/StorefrontEnrich";
 import RefreshEnrich from "../components/RefreshEnrich";
 import CreateCreatorModal from "../components/CreateCreatorModal";
 import { useToast } from "../context/ToastContext";
+import ErrorState from "../components/ErrorState";
+import { errMsg } from "../utils/err";
 
 export default function Creators() {
   const [creators, setCreators] = useState<Creator[]>([]);
@@ -14,9 +16,18 @@ export default function Creators() {
   const [scanningId, setScanningId] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState<"name" | "models">("name");
   const [adding, setAdding] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const loadCreators = () => api.models.creators().then(setCreators).catch(() => {});
+  const loadCreators = () => {
+    setLoading(true);
+    setLoadError(null);
+    return api.models.creators()
+      .then(setCreators)
+      .catch((e) => setLoadError(errMsg(e) || "Could not load creators."))
+      .finally(() => setLoading(false));
+  };
   useEffect(() => { loadCreators(); }, []);
 
   const onCreated = (creator: Creator) => {
@@ -106,6 +117,11 @@ export default function Creators() {
         </div>
       )}
 
+      {loading ? (
+        <div className="flex justify-center py-24 text-text-secondary-alt text-sm">Loading…</div>
+      ) : loadError ? (
+        <ErrorState title="Couldn't load creators" message={loadError} onRetry={loadCreators} />
+      ) : (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {filtered.map((c) => (
           <div
@@ -149,6 +165,7 @@ export default function Creators() {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }

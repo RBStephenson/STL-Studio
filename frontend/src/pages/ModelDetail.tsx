@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, Trash2 } from "lucide-react";
 import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult, AiOrganizeStrategy } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
 import AiOrganizeStrategyModal from "../components/AiOrganizeStrategyModal";
@@ -18,6 +18,7 @@ import { useConfirm } from "../context/ConfirmContext";
 import { queryKeys } from "../hooks/queries/keys";
 import { invalidateModelViews } from "../hooks/queries/invalidation";
 import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
+import ErrorState from "../components/ErrorState";
 import { useModelGuideId } from "../hooks/queries/guides";
 import { useModelTags } from "./model-detail/hooks/useModelTags";
 import { usePartEditing } from "./model-detail/hooks/usePartEditing";
@@ -415,14 +416,12 @@ export default function ModelDetail() {
   if (loading) return <div className="p-8 text-text-secondary-alt animate-pulse">Loading…</div>;
   if (loadError === "network") {
     return (
-      <div className="p-8 flex flex-col items-start gap-3 text-text-secondary">
-        <p>Couldn't load this model — check your connection and try again.</p>
-        <button
-          onClick={load}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-accent-end hover:bg-accent-start text-sm text-white transition-colors"
-        >
-          <RefreshCw size={14} /> Retry
-        </button>
+      <div className="p-8">
+        <ErrorState
+          title="Couldn't load this model"
+          message="Check your connection and try again."
+          onRetry={load}
+        />
       </div>
     );
   }

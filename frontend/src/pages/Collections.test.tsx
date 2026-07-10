@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 const mockState = vi.hoisted(() => ({
@@ -25,6 +26,23 @@ vi.mock("../context/ToastContext", () => ({ useToast: () => ({ toast: vi.fn() })
 import Collections from "./Collections";
 
 const renderPage = () => render(<MemoryRouter><Collections /></MemoryRouter>);
+
+describe("Collections error state", () => {
+  it("shows the shared error state on load failure, with a working Retry", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.collections.list).mockRejectedValueOnce(new Error("Server unreachable"));
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Server unreachable");
+    expect(screen.getByText("Couldn't load collections")).toBeInTheDocument();
+
+    vi.mocked(api.collections.list).mockResolvedValueOnce([
+      { id: 1, name: "With Cover", description: null, cover_image_path: "cover.jpg", model_count: 2, created_at: "" },
+    ]);
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByRole("link", { name: /With Cover/ })).toBeInTheDocument();
+  });
+});
 
 describe("Collections card sizing", () => {
   it("gives a no-cover collection the same big box as a cover one when uniform size is on", async () => {
