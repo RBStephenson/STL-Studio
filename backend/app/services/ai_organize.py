@@ -452,6 +452,30 @@ def _to_pascal_case(s: str) -> str:
     return " ".join(w.capitalize() for w in words)
 
 
+def _prefix_unit_name(unit: str, part_name: str) -> str:
+    """Compose a unit-strategy file's final part_name as "<unit> <part>".
+
+    The prompt deliberately asks for a bare physical-part label per file
+    (e.g. "Base", "Right Arm") rather than repeating the unit name on every
+    one — that was the whole point of the grouped response format (#894-
+    follow-up): shorter completions, one name stated once per group. But
+    part_name is the label actually shown for a file wherever part_type
+    (the unit name here, not a category) isn't also displayed alongside it —
+    "Base" on its own is ambiguous the moment a model has more than one unit
+    with a base. Prefixing here, once, at the point suggestions are finalized
+    keeps the prompt's token savings while making the applied name
+    unambiguous on its own (#941).
+
+    Guards against double-prefixing a part_name a model returned already
+    including the unit name despite the prompt asking it not to.
+    """
+    if not part_name:
+        return part_name
+    if part_name.lower().startswith(unit.lower()):
+        return part_name
+    return f"{unit} {part_name}"
+
+
 def _strip_json_fence(raw_text: str) -> str:
     """Strip an optional ```json ... ``` fence some models wrap replies in."""
     if raw_text.startswith("```"):
@@ -1105,7 +1129,10 @@ def run(
                     _to_pascal_case(s["part_type"]) if strategy == "unit" else s["part_type"]
                 )
             if s.get("part_name"):
-                existing["part_name"] = s["part_name"]
+                part_name = s["part_name"]
+                if strategy == "unit" and existing.get("part_type"):
+                    part_name = _prefix_unit_name(existing["part_type"], part_name)
+                existing["part_name"] = part_name
             if s.get("sup_base_filename"):
                 existing["sup_base_filename"] = s["sup_base_filename"]
             merged[fid] = existing
