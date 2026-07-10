@@ -273,7 +273,10 @@ On a local model via an OpenAI-compatible endpoint (Ollama, etc.), requests use
 schema-constrained output and an explicit instruction against extended
 reasoning — local "thinking"-style models can otherwise spend their whole
 response budget on hidden reasoning and never produce an answer, or drift
-into inventing their own JSON shape instead of the one requested.
+into inventing their own JSON shape instead of the one requested. A reply
+that's almost-but-not-quite valid JSON (a stray trailing comma, prose wrapped
+around an otherwise-good object) gets one best-effort repair attempt before
+being treated as a failure.
 
 Either way, review the suggestions in a modal before applying — nothing is
 written to a file until you confirm.
