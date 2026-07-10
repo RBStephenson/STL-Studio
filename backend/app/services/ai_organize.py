@@ -452,6 +452,30 @@ def _to_pascal_case(s: str) -> str:
     return " ".join(w.capitalize() for w in words)
 
 
+def _prefix_unit_name(unit: str, part_name: str) -> str:
+    """Compose a unit-strategy file's final part_name as "<unit> <part>".
+
+    The prompt deliberately asks for a bare physical-part label per file
+    (e.g. "Base", "Right Arm") rather than repeating the unit name on every
+    one — that was the whole point of the grouped response format (#894-
+    follow-up): shorter completions, one name stated once per group. But
+    part_name is the label actually shown for a file wherever part_type
+    (the unit name here, not a category) isn't also displayed alongside it —
+    "Base" on its own is ambiguous the moment a model has more than one unit
+    with a base. Prefixing here, once, at the point suggestions are finalized
+    keeps the prompt's token savings while making the applied name
+    unambiguous on its own (#941).
+
+    Guards against double-prefixing a part_name a model returned already
+    including the unit name despite the prompt asking it not to.
+    """
+    if not part_name:
+        return part_name
+    if part_name.lower().startswith(unit.lower()):
+        return part_name
+    return f"{unit} {part_name}"
+
+
 def _strip_json_fence(raw_text: str) -> str:
     """Strip an optional ```json ... ``` fence some models wrap replies in."""
     if raw_text.startswith("```"):
@@ -700,6 +724,7 @@ def _llm_refine_openai(
     user_prefix: str = "",
     parser: Callable[[str, str], LlmOutcome] = _parse_suggestions,
     response_schema: dict[str, Any] | None = None,
+    disable_reasoning: bool = True,
 ) -> LlmOutcome:
     """Call an OpenAI-compatible /v1/chat/completions endpoint (e.g. Ollama).
 
@@ -718,6 +743,14 @@ def _llm_refine_openai(
     follows the prompt's written format instructions, which a model can
     drift away from (e.g. inventing its own key names) even while still
     producing well-formed JSON. Falls back to ``"json_object"`` when omitted.
+
+    ``disable_reasoning`` (#939-follow-up, default True): sends "think": false
+    and "reasoning_effort": "none" to suppress a thinking-capable model's
+    hidden reasoning phase, since there's nothing to reason about for this
+    task. Configurable per AiApiConfig (opt-in reasoning) because forcing it
+    off is a call-time choice, not a hardcoded one — some deployments may
+    want the model's own judgment on ambiguous names badly enough to accept
+    the added latency and max_tokens risk that comes with it.
     """
     import re as _re
     base_url = _re.sub(
@@ -744,15 +777,25 @@ def _llm_refine_openai(
         "temperature": 0.1,
         "response_format": response_format,
         "max_tokens": _OPENAI_MAX_TOKENS,
-        # Some locally-served models (DeepSeek-R1-style, QwQ, etc.) support an
-        # extended "thinking"/reasoning phase before the real answer. There's
-        # nothing to reason about for this task — it's filename pattern-
-        # matching — and a thinking model can spend its *entire* max_tokens
-        # budget on hidden reasoning and emit nothing into content at all
-        # (#903-follow-up: exactly this — 78s, status 200, empty content).
-        # Ignored by servers/models that don't recognize the field.
-        "think": False,
     }
+    if disable_reasoning:
+        # Some locally-served models (DeepSeek-R1-style, QwQ, Gemma reasoning
+        # variants, etc.) support an extended "thinking"/reasoning phase
+        # before the real answer. There's nothing to reason about for this
+        # task — it's filename pattern-matching — and a thinking model can
+        # spend its *entire* max_tokens budget on hidden reasoning and emit
+        # nothing into content at all (#903-follow-up: exactly this — 78s,
+        # status 200, empty content).
+        #
+        # "think" is the native Ollama /api/chat field — it is NOT read by
+        # Ollama's OpenAI-compatible /v1/chat/completions endpoint at all
+        # (ollama/ollama#15288), so kept here only in case some other
+        # OpenAI-compatible server (llama.cpp, etc.) honors it. The field
+        # this endpoint actually reads is "reasoning_effort" (ollama/ollama
+        # #14820); "none" is the documented value to disable thinking.
+        # Ignored by servers/models that don't recognize either field.
+        payload["think"] = False
+        payload["reasoning_effort"] = "none"
 
     endpoint = f"{base_url}/v1/chat/completions"
     # Credential-safe form for logs and surfaced error messages.
@@ -784,7 +827,7 @@ def _llm_refine_openai(
     # Retry once per optional field a strict server rejects outright (rather
     # than just ignoring) — checked in sequence so a server that objects to
     # both fields sheds each in turn instead of only ever trying the first.
-    for optional_key in ("response_format", "think"):
+    for optional_key in ("response_format", "think", "reasoning_effort"):
         if resp.status_code == 400 and optional_key in payload and optional_key in resp.text:
             payload.pop(optional_key, None)
             try:
@@ -849,12 +892,13 @@ _UNIT_LLM_FILE_CAP = 5
 def _run_unit_batches(
     candidates: list[dict[str, Any]],
     call_llm: Callable[[list[dict[str, Any]], str, str], LlmOutcome],
+    batch_size: int = _UNIT_LLM_FILE_CAP,
 ) -> LlmOutcome:
     """Send every unit-strategy candidate to the LLM in chunks of
-    _UNIT_LLM_FILE_CAP, one call per chunk, instead of a single capped call
-    that silently drops everything past the first cap's worth of files
-    (#884) — the unit strategy has no heuristic fallback to catch what a
-    single call misses, unlike "parts".
+    ``batch_size`` (defaults to _UNIT_LLM_FILE_CAP), one call per chunk,
+    instead of a single capped call that silently drops everything past the
+    first cap's worth of files (#884) — the unit strategy has no heuristic
+    fallback to catch what a single call misses, unlike "parts".
 
     Each chunk after the first is told which unit names earlier chunks
     already established, so the same physical unit doesn't get renamed
@@ -867,8 +911,8 @@ def _run_unit_batches(
     known_units: list[str] = []  # insertion order, for a stable/readable hint
     total = len(candidates)
 
-    for start in range(0, total, _UNIT_LLM_FILE_CAP):
-        chunk = candidates[start:start + _UNIT_LLM_FILE_CAP]
+    for start in range(0, total, batch_size):
+        chunk = candidates[start:start + batch_size]
         prefix = ""
         if known_units:
             prefix = (
@@ -879,7 +923,7 @@ def _run_unit_batches(
             )
         _log_step(
             "llm_batch", sending=len(chunk), of=total,
-            batch=start // _UNIT_LLM_FILE_CAP + 1,
+            batch=start // batch_size + 1,
         )
         outcome = call_llm(chunk, _UNIT_SYSTEM_PROMPT, prefix)
         if outcome.status != "ok":
@@ -905,6 +949,8 @@ def run(
     api_type: str = "openai",
     effort: str | None = None,
     strategy: str = "parts",
+    batch_size: int | None = None,
+    reasoning_enabled: bool = False,
 ) -> OrganizeResult:
     """Return merged suggestions plus the outcome of the optional LLM pass.
 
@@ -942,6 +988,20 @@ def run(
     at ``base_url``, e.g. Ollama) or "anthropic" (the Anthropic Messages API,
     which needs no URL but requires ``api_key``; ``effort`` maps to a thinking
     budget).
+
+    ``batch_size``, when given, overrides the per-request file cap for
+    whichever strategy runs (_LLM_FILE_CAP for "parts", _UNIT_LLM_FILE_CAP for
+    "unit") — configurable per AiApiConfig so a fast/reliable endpoint can send
+    more files per call and a slow/flaky one can send fewer. ``None`` keeps
+    the built-in defaults.
+
+    ``reasoning_enabled`` (OpenAI-compatible path only, #939-follow-up):
+    defaults to False, which actively suppresses a thinking-capable model's
+    hidden reasoning phase (see _llm_refine_openai's ``disable_reasoning``).
+    Set True to let the model reason before answering — off by default
+    because reasoning adds latency and risks the exact empty-content failure
+    the suppression exists to avoid, for a task (filename pattern-matching)
+    that gains little from it.
     """
     # An Anthropic config carries no URL; an OpenAI-compatible one needs one.
     llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
@@ -1027,7 +1087,7 @@ def run(
             return _llm_refine_openai(
                 chunk, base_url, model, api_key, timeout=timeout,
                 system_prompt=system_prompt, user_prefix=user_prefix, parser=parser,
-                response_schema=response_schema,
+                response_schema=response_schema, disable_reasoning=not reasoning_enabled,
             )
 
         if not representatives:
@@ -1037,9 +1097,12 @@ def run(
             # Batched (#884): a single _LLM_FILE_CAP-sized call would silently
             # drop every file past the cap, since unit strategy has no
             # heuristic fallback to catch the rest (unlike "parts" below).
-            outcome = _run_unit_batches(representatives, _call_llm)
+            outcome = _run_unit_batches(
+                representatives, _call_llm,
+                batch_size=batch_size or _UNIT_LLM_FILE_CAP,
+            )
         else:
-            candidates = representatives[:_LLM_FILE_CAP]
+            candidates = representatives[:(batch_size or _LLM_FILE_CAP)]
             _log_step("llm_batch", sending=len(candidates), of=len(files))
             outcome = _call_llm(candidates, _SYSTEM_PROMPT)
 
@@ -1066,7 +1129,10 @@ def run(
                     _to_pascal_case(s["part_type"]) if strategy == "unit" else s["part_type"]
                 )
             if s.get("part_name"):
-                existing["part_name"] = s["part_name"]
+                part_name = s["part_name"]
+                if strategy == "unit" and existing.get("part_type"):
+                    part_name = _prefix_unit_name(existing["part_type"], part_name)
+                existing["part_name"] = part_name
             if s.get("sup_base_filename"):
                 existing["sup_base_filename"] = s["sup_base_filename"]
             merged[fid] = existing

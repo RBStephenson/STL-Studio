@@ -329,6 +329,122 @@ def test_openai_path_disables_thinking(monkeypatch):
     assert captured["payload"]["think"] is False
 
 
+def test_openai_path_disables_reasoning_effort(monkeypatch):
+    """"think" is the native Ollama /api/chat field and is NOT read by the
+    OpenAI-compatible /v1/chat/completions endpoint at all (ollama/ollama
+    #15288) — the field that endpoint actually reads is "reasoning_effort",
+    with "none" as the documented value to disable thinking (ollama/ollama
+    #14820). Without this, "think": false alone is a silent no-op against
+    the exact endpoint we call, and the #903 empty-content bug can recur on
+    any model whose reasoning Ollama routes through this mechanism."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert captured["payload"]["reasoning_effort"] == "none"
+
+
+def test_openai_path_retries_without_reasoning_effort_on_400(monkeypatch):
+    """A strict server that rejects the unrecognized "reasoning_effort" field
+    outright gets one retry with it stripped — mirrors the existing
+    response_format/think retries."""
+    calls: list[dict] = []
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        calls.append(dict(kwargs["json"]))
+
+        class _Resp:
+            def __init__(self, status_code, text, body=None):
+                self.status_code = status_code
+                self.is_success = status_code == 200
+                self.text = text
+                self._body = body
+
+            def json(self):
+                return self._body
+        if len(calls) == 1:
+            return _Resp(400, "unknown field: reasoning_effort")
+        return _Resp(200, "", {"choices": [{"message": {"content": content}}]})
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "ok"
+    assert len(calls) == 2
+    assert "reasoning_effort" in calls[0]
+    assert "reasoning_effort" not in calls[1]
+
+
+def test_run_reasoning_enabled_omits_the_suppression_fields(monkeypatch):
+    """reasoning_enabled=True (opt-in via AiApiConfig, #939-follow-up) skips
+    both "think": false and "reasoning_effort": "none" entirely, letting a
+    thinking-capable model reason before answering instead of forcing it off."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(
+        _UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai",
+        reasoning_enabled=True,
+    )
+
+    assert "think" not in captured["payload"]
+    assert "reasoning_effort" not in captured["payload"]
+
+
+def test_run_reasoning_disabled_by_default(monkeypatch):
+    """Default (no reasoning_enabled passed) keeps the existing suppression —
+    a caller that hasn't set up the new config field must not silently start
+    letting models reason."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert captured["payload"]["think"] is False
+    assert captured["payload"]["reasoning_effort"] == "none"
+
+
 def test_both_system_prompts_instruct_against_reasoning():
     """A model whose chat template reasons unconditionally, ignoring the
     "think": False API field entirely, will often still respect a plain-
@@ -840,8 +956,72 @@ def test_unit_strategy_end_to_end_with_grouped_response(monkeypatch):
     by_id = {s["id"]: s for s in res.suggestions}
     assert by_id[1]["part_type"] == "Royal Guard 1"
     assert by_id[2]["part_type"] == "Royal Guard 1"
-    assert by_id[1]["part_name"] == "Head"
-    assert by_id[2]["part_name"] == "Weapon"
+    # part_name is prefixed with the unit name (#941) so it's unambiguous
+    # wherever it's shown without part_type alongside it — the LLM's bare
+    # "Head" alone doesn't say which unit's head it is.
+    assert by_id[1]["part_name"] == "Royal Guard 1 Head"
+    assert by_id[2]["part_name"] == "Royal Guard 1 Weapon"
+
+
+def test_prefix_unit_name_composes_unit_and_part():
+    assert ai._prefix_unit_name("Royal Guard 1", "Head") == "Royal Guard 1 Head"
+
+
+def test_prefix_unit_name_avoids_double_prefixing():
+    """A model that ignores the prompt's "bare part label" instruction and
+    includes the unit name anyway must not get it prefixed twice."""
+    assert ai._prefix_unit_name("Royal Guard 1", "Royal Guard 1 Head") == "Royal Guard 1 Head"
+    # Case-insensitive: the model's casing may not match _to_pascal_case's.
+    assert ai._prefix_unit_name("Royal Guard 1", "royal guard 1 head") == "royal guard 1 head"
+
+
+def test_prefix_unit_name_passes_through_empty():
+    assert ai._prefix_unit_name("Royal Guard 1", "") == ""
+
+
+def test_unit_strategy_run_does_not_double_prefix_when_llm_already_included_unit_name(monkeypatch):
+    """End-to-end guard: if the LLM's part_name already starts with the unit
+    name despite the prompt, run() must not prefix it a second time."""
+    files = [{"id": 1, "filename": "Royal_Guard_1_Head.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"units": [
+        {"name": "Royal Guard 1", "members": [{"id": 1, "part_name": "Royal Guard 1 Head"}]},
+    ], "unknown": []})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.suggestions[0]["part_name"] == "Royal Guard 1 Head"
+
+
+def test_parts_strategy_part_name_is_not_prefixed(monkeypatch):
+    """The unit-name prefix is a unit-strategy-only behavior — "parts"
+    strategy's part_name (already just a category-scoped label like "Blade")
+    must pass through unchanged."""
+    files = [{"id": 1, "filename": "mystery_blob.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"files": [
+        {"id": 1, "part_type": "Weapon", "part_name": "Blade", "sup_base_filename": None},
+    ]})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="parts")
+
+    assert res.suggestions[0]["part_name"] == "Blade"
 
 
 def test_unit_strategy_skips_heuristic_pass(monkeypatch):
@@ -1025,6 +1205,79 @@ def test_unit_strategy_stops_and_reports_error_when_any_batch_fails(monkeypatch)
     assert res.llm.status == "error"
     assert call_count == 2  # stopped after the failing batch — no further batches attempted
     assert res.suggestions == []
+
+
+def test_run_batch_size_overrides_unit_cap(monkeypatch):
+    """A per-connection batch_size overrides _UNIT_LLM_FILE_CAP so a
+    fast/reliable endpoint can be configured to send more files per call."""
+    override = ai._UNIT_LLM_FILE_CAP + 3
+    n = override + 1  # forces exactly two batches at the override size
+    files = [
+        {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
+        for i in range(n)
+    ]
+    calls: list[list[dict]] = []
+
+    def _fake_post(url, **kwargs):
+        payload = json.loads(kwargs["json"]["messages"][1]["content"].split("\n\n")[-1])
+        calls.append(payload)
+        content = json.dumps({"units": [
+            {"name": "Royal Guard 1", "members": [{"id": f["id"], "part_name": None} for f in payload]},
+        ], "unknown": []})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    res = ai.run(
+        files, "http://ollama:11434", "llama3", "", api_type="openai",
+        strategy="unit", batch_size=override,
+    )
+
+    assert res.llm.status == "ok"
+    assert len(calls) == 2
+    assert len(calls[0]) == override
+    assert len(calls[1]) == 1
+
+
+def test_run_batch_size_overrides_parts_cap(monkeypatch):
+    """A per-connection batch_size overrides _LLM_FILE_CAP for the "parts"
+    strategy's single, un-batched call."""
+    override = ai._LLM_FILE_CAP - 5
+    n = ai._LLM_FILE_CAP  # more than the override, fewer than the built-in cap
+    files = [
+        {"id": i, "filename": f"Part_{i}.stl", "part_type": None, "part_name": None}
+        for i in range(n)
+    ]
+    captured: dict = {}
+
+    def _fake_post(url, **kwargs):
+        payload = kwargs["json"]["messages"][1]["content"]
+        captured["sent"] = json.loads(payload)
+        content = json.dumps({"files": []})
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(
+        files, "http://ollama:11434", "llama3", "", api_type="openai",
+        strategy="parts", batch_size=override,
+    )
+
+    assert len(captured["sent"]) == override
 
 
 def test_endpoint_unit_strategy_skips_canonical_snap(client, db, monkeypatch):

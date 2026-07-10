@@ -58,3 +58,53 @@ def test_update_without_key_field_leaves_existing_key_untouched(client):
     assert body["key_set"] is True
     assert body["key_hint"] == "…inal"
     assert body["request_timeout"] == 30
+
+
+def test_create_defaults_batch_size_to_null(client):
+    r = client.post("/settings/ai-apis", json={
+        "name": "Ollama Local", "api_type": "openai", "url": "http://localhost:11434",
+    })
+    assert r.json()["batch_size"] is None
+
+
+def test_create_and_update_batch_size(client):
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Ollama Local", "api_type": "openai", "url": "http://localhost:11434",
+        "batch_size": 10,
+    }).json()
+    assert cfg["batch_size"] == 10
+
+    r = client.patch(f"/settings/ai-apis/{cfg['id']}", json={"batch_size": 20})
+    assert r.json()["batch_size"] == 20
+
+
+def test_batch_size_out_of_range_is_rejected(client):
+    r = client.post("/settings/ai-apis", json={
+        "name": "Ollama Local", "api_type": "openai", "url": "http://localhost:11434",
+        "batch_size": 0,
+    })
+    assert r.status_code == 422
+
+    r = client.post("/settings/ai-apis", json={
+        "name": "Ollama Local", "api_type": "openai", "url": "http://localhost:11434",
+        "batch_size": 51,
+    })
+    assert r.status_code == 422
+
+
+def test_reasoning_enabled_defaults_to_false(client):
+    r = client.post("/settings/ai-apis", json={
+        "name": "Ollama Local", "api_type": "openai", "url": "http://localhost:11434",
+    })
+    assert r.json()["reasoning_enabled"] is False
+
+
+def test_create_and_update_reasoning_enabled(client):
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Ollama Local", "api_type": "openai", "url": "http://localhost:11434",
+        "reasoning_enabled": True,
+    }).json()
+    assert cfg["reasoning_enabled"] is True
+
+    r = client.patch(f"/settings/ai-apis/{cfg['id']}", json={"reasoning_enabled": False})
+    assert r.json()["reasoning_enabled"] is False
