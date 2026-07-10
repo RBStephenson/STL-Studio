@@ -27,6 +27,13 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     } catch { /* ignore */ }
     throw new ApiError(res.status, detail || `${res.status} ${res.statusText}`);
   }
+  // 204 No Content has no body by definition (several DELETE endpoints use
+  // it) — parsing an empty body as JSON throws. Every other success status
+  // here always carries a JSON body, so this is the one case worth a check
+  // rather than a broader "is the body actually empty" probe.
+  if (res.status === 204) {
+    return undefined as T;
+  }
   return res.json();
 }
 
