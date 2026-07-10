@@ -41,6 +41,19 @@ function renderPage() {
   );
 }
 
+describe("VariantGroup empty state", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("shows the dashed empty-state panel when the group has zero variants on initial load", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.models.variants).mockResolvedValueOnce({ items: [] } as unknown as Awaited<ReturnType<typeof api.models.variants>>);
+    renderPage();
+
+    expect(await screen.findByText("No variants found")).toBeInTheDocument();
+    expect(screen.getByText(/moved or removed elsewhere/)).toBeInTheDocument();
+  });
+});
+
 describe("VariantGroup error state", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 

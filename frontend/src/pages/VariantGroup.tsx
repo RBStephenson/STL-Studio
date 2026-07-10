@@ -777,7 +777,21 @@ export default function VariantGroup() {
       ) : loadError ? (
         <ErrorState title="Couldn't load this variant group" message={loadError} onRetry={loadVariants} />
       ) : variants.length === 0 ? (
-        <div className="flex justify-center py-24 text-text-secondary-alt text-sm">No variants found.</div>
+        <div
+          className="flex flex-col items-center text-center rounded-[14px] border border-dashed px-8 py-16"
+          style={{ borderColor: "#1e2027", background: "#0e0f13" }}
+        >
+          <div
+            className="flex items-center justify-center w-14 h-14 rounded-full mb-4"
+            style={{ background: "#26163a" }}
+          >
+            <Layers size={22} strokeWidth={1.6} style={{ color: "var(--color-status-fuchsia)" }} />
+          </div>
+          <p className="text-base font-bold text-text-primary-alt mb-2">No variants found</p>
+          <p className="text-[13px] leading-relaxed text-text-secondary-alt max-w-[320px]">
+            This group has no variants — they may have been moved or removed elsewhere.
+          </p>
+        </div>
       ) : (
         <DndContext
           sensors={dndSensors}

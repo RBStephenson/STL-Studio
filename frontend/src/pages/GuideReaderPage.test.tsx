@@ -57,6 +57,19 @@ function renderAt(id: string) {
 describe("GuideReaderPage", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
+  it("shows a dashed empty-content state when a guide has no tabs, with a link to the content editor", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.painting.guides.get).mockResolvedValueOnce({ ...GUIDE, tabs: [] });
+    renderAt("1");
+
+    expect(await screen.findByText("This guide has no content yet")).toBeInTheDocument();
+    // Header always has an "Edit content" link; the empty-state CTA adds a second.
+    const links = screen.getAllByRole("link", { name: /edit content/i });
+    expect(links).toHaveLength(2);
+    links.forEach((l) => expect(l).toHaveAttribute("href", "/painting/guides/1/content"));
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
   it("renders the guide and a Print button that triggers window.print (#262)", async () => {
     const printSpy = vi.spyOn(window, "print").mockImplementation(() => {});
     renderAt("1");
