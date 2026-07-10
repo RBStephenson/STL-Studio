@@ -486,10 +486,10 @@ export default function PaintShelfPage() {
             {paints.map((p) => {
               const lineInfo = lineById.get(p.paint_line_id);
               return (
-                <tr key={p.id} className="border-b border-gray-850 last:border-0 hover:bg-gray-850/50 group">
+                <tr key={p.id} className="border-b border-border-subtle last:border-0 hover:bg-panel-secondary/50 group">
                   <td className="px-4 py-2"><ColorChip hex={p.hex} /></td>
                   <td className="px-2 py-2 font-mono text-xs text-text-secondary">{p.code}</td>
-                  <td className="px-2 py-2 text-text-primary">{p.name}</td>
+                  <td className="px-2 py-2 text-text-primary-alt">{p.name}</td>
                   <td className="px-2 py-2 text-text-secondary-alt text-xs">
                     {lineInfo ? `${lineInfo.brand} — ${lineInfo.line}` : "—"}
                   </td>
