@@ -1063,6 +1063,79 @@ def test_parts_strategy_part_name_is_not_prefixed(monkeypatch):
     assert res.suggestions[0]["part_name"] == "Blade"
 
 
+# --- Every file leaves organize with a real part_name, never empty (#947) ---
+# The STL files table shows a dimmed, filename-derived placeholder for an
+# empty part_name — but it's only ever a placeholder, never actually saved.
+# run() now guarantees a real value gets filled in from the filename whenever
+# nothing else (heuristics, the LLM) resolved one.
+
+def test_unit_strategy_unknown_file_gets_auto_derived_name(monkeypatch):
+    """A file the LLM couldn't confidently assign a unit to lands in
+    "unknown" with no part_name at all — previously left permanently empty.
+    Falls back to the same filename-derived name the UI would otherwise only
+    ever show as a placeholder."""
+    files = [{"id": 1, "filename": "Feathers.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"units": [], "unknown": [1]})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    assert res.suggestions[0]["part_name"] == "Feathers"
+
+
+def test_auto_derived_name_does_not_override_an_existing_one(monkeypatch):
+    """The fallback only fills a genuinely empty part_name — it must not
+    clobber whatever heuristics/the LLM already resolved."""
+    files = [{"id": 1, "filename": "Feathers.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"files": [
+        {"id": 1, "part_type": "Accessories", "part_name": "Plume", "sup_base_filename": None},
+    ]})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="parts")
+
+    assert res.suggestions[0]["part_name"] == "Plume"
+
+
+def test_auto_derived_name_skips_a_file_whose_clean_name_is_empty(monkeypatch):
+    """A filename with nothing left after cleanup (e.g. all separators, no
+    actual words) has no reasonable auto-derived name to fall back to —
+    left as-is rather than saving an empty string."""
+    files = [{"id": 1, "filename": "____.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"units": [], "unknown": [1]})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.llm.status == "ok"
+    assert not res.suggestions[0].get("part_name")
+
+
 def test_unit_strategy_skips_heuristic_pass(monkeypatch):
     """Unlike "parts", "unit" has no keyword heuristic — and its prompt only
     asks the model to group by filename, so the candidate sent is just

@@ -213,7 +213,14 @@ const SECTIONS: Section[] = [
           <li>
             <strong>Settings → Preferences → Horizontal parts layout</strong> swaps
             the two-column page for a full-width scrollable files table — handy for
-            models with a lot of parts.
+            models with a lot of parts. Check one or more rows to reveal a{" "}
+            <strong>Recategorize to…</strong> dropdown in the toolbar — offering the
+            standard categories plus any custom category already used on this
+            model — to bulk-move several files into a category at once.
+          </li>
+          <li>
+            Files and categories sort numerically where a name has an embedded
+            number, so "Body 2" comes before "Body 10" instead of after it.
           </li>
           <li><strong>Download all</strong> files as a zip, or open the <strong>Kit Builder</strong>.</li>
           <li>

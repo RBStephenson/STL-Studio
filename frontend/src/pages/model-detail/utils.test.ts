@@ -5,6 +5,7 @@ import {
   buildAlphaBand,
   groupAlphabetically,
   buildFileHierarchy,
+  naturalCompare,
   parseLibraryOrigin,
   PART_TYPE_SUGGESTIONS,
 } from "./utils";
@@ -80,6 +81,28 @@ describe("buildFileHierarchy", () => {
     ];
     const result = buildFileHierarchy(files);
     expect(result).toEqual([{ file: files[0], depth: 0 }]);
+  });
+
+  it("orders embedded numbers naturally instead of lexicographically (Body_2 before Body_10)", () => {
+    const files = [
+      { id: 1, filename: "Quetzlgor_Body_1.stl", sup_of_id: null },
+      { id: 2, filename: "Quetzlgor_Body_10.stl", sup_of_id: null },
+      { id: 3, filename: "Quetzlgor_Body_11.stl", sup_of_id: null },
+      { id: 4, filename: "Quetzlgor_Body_2.stl", sup_of_id: null },
+    ];
+    const result = buildFileHierarchy(files);
+    expect(result.map((r) => r.file.id)).toEqual([1, 4, 2, 3]);
+  });
+});
+
+describe("naturalCompare", () => {
+  it("treats an embedded digit run as a single number", () => {
+    const sorted = ["Body_10", "Body_2", "Body_1", "Body_11"].sort(naturalCompare);
+    expect(sorted).toEqual(["Body_1", "Body_2", "Body_10", "Body_11"]);
+  });
+
+  it("is case-insensitive, matching the previous localeCompare behavior", () => {
+    expect(naturalCompare("apple", "Banana")).toBeLessThan(0);
   });
 });
 

@@ -431,6 +431,12 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
             stl = db.get(STLFile, f["stl_file_id"])
             if stl is not None:
                 stl.path = f["proposed_path"]
+                # Keep filename in sync with path's basename — normally a
+                # no-op (the proposed filename only ever changes directory
+                # segments), but slugify_filenames (#946) can rename the
+                # leaf filename itself, which would otherwise leave this
+                # column stale/mismatched with the actual file on disk.
+                stl.filename = os.path.basename(f["proposed_path"])
 
         old_dir = _entry_source_dir(entry)
         new_dir = entry["proposed_dir"]
@@ -656,6 +662,7 @@ def _repath_db_undo(
         if stl is None:
             continue
         stl.path = frm
+        stl.filename = os.path.basename(frm)
         model = db.get(Model, stl.model_id)
         if model is not None:
             model.folder_path = _parent(frm)

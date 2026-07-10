@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 let settings: Record<string, boolean>;
 beforeEach(() => {
@@ -55,6 +55,8 @@ const renderTable = (props: Partial<React.ComponentProps<typeof StlFilesTable>> 
     runAiOrganize: vi.fn(),
     downloadingAll: false,
     downloadAllFiles: vi.fn(),
+    downloadingSelected: false,
+    downloadSelectedFiles: vi.fn(),
     onOpenKitBuilder: vi.fn(),
     ...props,
   };
@@ -117,5 +119,86 @@ describe("StlFilesTable", () => {
     expect(downloadAllFiles).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /Kit Builder/ }));
     expect(onOpenKitBuilder).toHaveBeenCalled();
+  });
+
+  it("hides Download selected until a row is checked, then wires it with the checked ids", () => {
+    const downloadSelectedFiles = vi.fn();
+    renderTable({ downloadSelectedFiles });
+    expect(screen.queryByRole("button", { name: /Download selected/ })).not.toBeInTheDocument();
+
+    // Row checkboxes: index 0 is "select all" in the header.
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[1]);
+
+    const button = screen.getByRole("button", { name: /Download selected \(1\)/ });
+    fireEvent.click(button);
+    expect(downloadSelectedFiles).toHaveBeenCalledWith([1]);
+  });
+
+  it("selects every file via the header checkbox", () => {
+    const downloadSelectedFiles = vi.fn();
+    renderTable({ downloadSelectedFiles });
+    const [selectAll] = screen.getAllByRole("checkbox");
+    fireEvent.click(selectAll);
+    fireEvent.click(screen.getByRole("button", { name: /Download selected \(2\)/ }));
+    expect(downloadSelectedFiles).toHaveBeenCalledWith([1, 2]);
+  });
+
+  it("shows a drag grip per row when part categories are enabled", () => {
+    settings.part_categories_enabled = true;
+    renderTable({
+      groupedStlFiles: { labeled: [["Arms", [model.stl_files[0]]]], unlabeled: [model.stl_files[1]] },
+    });
+    expect(screen.getAllByTitle("Drag onto a category to assign it").length).toBe(2);
+  });
+
+  it("hides the drag grip when part categories are disabled", () => {
+    renderTable();
+    expect(screen.queryByTitle("Drag onto a category to assign it")).not.toBeInTheDocument();
+  });
+
+  it("hides the recategorize dropdown until a row is checked, and offers standard plus this model's used categories", () => {
+    settings.part_categories_enabled = true;
+    renderTable({
+      groupedStlFiles: { labeled: [["Quetzlgor", [model.stl_files[0]]]], unlabeled: [model.stl_files[1]] },
+    });
+    expect(screen.queryByText("Recategorize to…")).not.toBeInTheDocument();
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[1]);
+
+    expect(screen.getByText("Recategorize to…")).toBeInTheDocument();
+    // Standard suggestion...
+    expect(screen.getByRole("option", { name: "Head" })).toBeInTheDocument();
+    // ...and this model's own custom category, both offered together.
+    expect(screen.getByRole("option", { name: "Quetzlgor" })).toBeInTheDocument();
+  });
+
+  it("hides the recategorize dropdown entirely when part categories are disabled", () => {
+    renderTable();
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[1]);
+    expect(screen.queryByText("Recategorize to…")).not.toBeInTheDocument();
+  });
+
+  it("recategorizes every checked file and clears the selection on pick", async () => {
+    const savePartType = vi.fn().mockResolvedValue(undefined);
+    const downloadSelectedFiles = vi.fn();
+    settings.part_categories_enabled = true;
+    renderTable({ savePartType, downloadSelectedFiles, groupedStlFiles: { labeled: [], unlabeled: model.stl_files } });
+
+    const [selectAll] = screen.getAllByRole("checkbox");
+    fireEvent.click(selectAll);
+    expect(screen.getByRole("button", { name: /Download selected \(2\)/ })).toBeInTheDocument();
+
+    const dropdown = screen.getByText("Recategorize to…").closest("select")!;
+    fireEvent.change(dropdown, { target: { value: "Head" } });
+
+    expect(savePartType).toHaveBeenCalledWith(1, "Head");
+    expect(savePartType).toHaveBeenCalledWith(2, "Head");
+    // Selection cleared afterward — the download-selected button disappears.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Download selected/ })).not.toBeInTheDocument()
+    );
   });
 });

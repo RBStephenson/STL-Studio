@@ -235,7 +235,14 @@ pressing Enter or clicking away commits the value.
 two-column model detail page for a full-width, scrollable files table below the
 main grid (with **Collections**, **Location**, and **Other Files** moved into the
 right column) — handy for models with a lot of parts. The part picker is hidden
-in this mode since the table serves the same purpose.
+in this mode since the table serves the same purpose. Checking one or more rows
+shows a **Recategorize to…** dropdown in the toolbar (next to Download
+selected) — offering the standard category suggestions plus any custom
+category already used on this model — so you can move several files into a
+category in one action instead of editing each row's Category field by hand.
+
+Files and categories in both layouts sort numerically where a name has an
+embedded number, so "Body 2" sorts before "Body 10" instead of after it.
 
 **Settings → Preferences → Enable part categories** turns on the Category field
 on each file in the model detail view. Files group into collapsible sections and
