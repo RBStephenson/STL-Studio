@@ -399,6 +399,11 @@ _SUPPORT_FORMAT = re.compile(
     re.I,
 )
 
+# "#1234"-style release/post-number marker, with or without digits (a bare
+# trailing "#" survives on its own too — \d* covers zero digits). Matched as
+# one unit so no stray "#" is left behind once the number is gone.
+_RELEASE_MARKER = re.compile(r"#\s*\d*")
+
 # Comma-style scale notation ("1,12", "1,4") used by some creators in place of "1:12".
 _SCALE_COMMA = re.compile(r"(?<!\d)1\s*,\s*\d{1,2}(?!\d)")
 
@@ -447,6 +452,11 @@ def character_key(name: str, creator_name: str | None = None) -> str:
     # fire — names like "AleCask_32mm_UnSupported" glue tokens together with "_",
     # which is a regex word char and would otherwise defeat every boundary.
     spaced = re.sub(r"[_\-]+", " ", name)
+    # Patreon-style "#1234" release/post-number markers (Cast N Play and similar
+    # storefronts tag folders with their post ID) — strip the marker as one unit.
+    # Left to _VARIANT_JUNK's bare \d+ below, only the digits would be removed,
+    # leaving a stray "#" behind since punctuation isn't part of that token regex.
+    spaced = _RELEASE_MARKER.sub(" ", spaced)
     spaced = _SCALE_COMMA.sub(" ", spaced)
     base = _strip_signal_tokens(spaced)
     base = _SUPPORT_FORMAT.sub(" ", base)
