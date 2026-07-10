@@ -11,6 +11,7 @@ import pytest
 
 import app.services.ai_organize as ai
 from app.models import Model, STLFile
+from app.routers.models import _normalize_type
 
 
 class _ListHandler(logging.Handler):
@@ -1476,3 +1477,65 @@ def test_ai_category_snaps_to_canonical_name_even_in_a_fresh_library(client, db,
     body = r.json()
     sug = {s["id"]: s for s in body["suggestions"]}
     assert sug[f.id]["part_type"] == "Accessories"
+
+
+def test_ai_category_snaps_to_canonical_even_when_a_stale_non_canonical_value_already_exists(client, db, monkeypatch):
+    """Regression (#963): a prior mistake (some other file already stored as
+    part_type "Hand", before this normalization existed) must not "shadow"
+    the real canonical match. Without prioritizing the canonical list, the
+    AI's "Hand" suggestion would exact-match the stale "Hand" already sitting
+    in the DB and never reach the singular/plural check that maps it to the
+    canonical "Hands"."""
+    m = Model(name="Stale Category Model", folder_path="/lib/stale")
+    db.add(m)
+    db.flush()
+    poisoned = STLFile(model_id=m.id, filename="already_hand.stl",
+                        path="/lib/stale/already_hand.stl", part_type="Hand")
+    target = STLFile(model_id=m.id, filename="hand_r.stl", path="/lib/stale/hand_r.stl")
+    db.add_all([poisoned, target])
+    db.commit()
+
+    canned = json.dumps({"files": [
+        {"id": target.id, "part_type": "Hand", "part_name": "Right Hand", "sup_base_filename": None},
+    ]})
+    monkeypatch.setattr(ai, "Anthropic", _fake_anthropic(canned))
+
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Claude", "api_type": "anthropic", "model": "claude-opus-4-8", "effort": "low",
+    }).json()
+    client.post(f"/settings/ai-apis/{cfg['id']}/key", json={"key": "sk-ant-test"})
+    client.patch("/settings", json={"ai_organize_enabled": True, "ai_organize_api": cfg["id"]})
+
+    r = client.post(f"/models/{m.id}/ai-organize")
+    assert r.status_code == 200
+    sug = {s["id"]: s for s in r.json()["suggestions"]}
+    assert sug[target.id]["part_type"] == "Hands"
+
+
+class TestNormalizeType:
+    """Direct unit coverage for _normalize_type (#963) — the endpoint tests
+    above exercise it end to end; these pin down the priority order itself."""
+
+    def test_exact_match_passthrough(self):
+        assert _normalize_type("Weapon", ["Weapon", "Head"]) == "Weapon"
+
+    def test_singular_snaps_to_canonical_plural(self):
+        assert _normalize_type("Hand", ["Hands"]) == "Hands"
+
+    def test_singular_snaps_to_canonical_plural_via_es(self):
+        assert _normalize_type("Accessory", ai.CANONICAL_PART_TYPES) == "Accessories"
+
+    def test_canonical_match_wins_over_a_stale_exact_match_already_in_db(self):
+        # "Hand" is already sitting in `existing` (a prior mistake) — it must
+        # not shadow the real canonical "Hands" match.
+        existing = sorted(set(ai.CANONICAL_PART_TYPES) | {"Hand"})
+        assert _normalize_type("Hand", existing) == "Hands"
+
+    def test_genuinely_custom_category_still_passes_through(self):
+        # Not canonical, not a fuzzy variant of anything canonical — a real
+        # user-defined category must survive normalization unchanged.
+        existing = sorted(set(ai.CANONICAL_PART_TYPES) | {"Trophy Base"})
+        assert _normalize_type("Trophy Base", existing) == "Trophy Base"
+
+    def test_no_existing_categories_returns_suggestion_unchanged(self):
+        assert _normalize_type("Anything", []) == "Anything"

@@ -95,4 +95,17 @@ describe("AiOrganizeReviewModal — success-via-API-or-nothing (#821)", () => {
     // not the old list's mismatch this test guards against.
     expect(optionValues).toContain("Full");
   });
+
+  it("lists category options alphabetically, not in PART_TYPE_SUGGESTIONS's grouped-by-body-part order", () => {
+    renderModal({
+      suggestions: [{ id: 1, filename: "widget.stl", part_type: "Weapon", part_name: "Widget", sup_of_id: null, sup_base_filename: null }],
+      llm_status: "ok",
+      llm_detail: null,
+    });
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    // First option is the blank "—" placeholder; the rest must be sorted.
+    const categoryOptions = Array.from(select.options).map((o) => o.value).slice(1);
+    const sorted = [...categoryOptions].sort((a, b) => a.localeCompare(b));
+    expect(categoryOptions).toEqual(sorted);
+  });
 });
