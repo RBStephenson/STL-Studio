@@ -979,6 +979,22 @@ def test_prefix_unit_name_passes_through_empty():
     assert ai._prefix_unit_name("Royal Guard 1", "") == ""
 
 
+def test_prefix_unit_name_drops_redundant_part_name():
+    """A single-file "unit" commonly gets a part_name that's just the unit
+    name's own distinguishing word — naive concatenation produced "Escaraba
+    Flamer Flamer" (#942-follow-up). The unit name alone already says
+    everything the part_name would add, so it's used as-is."""
+    assert ai._prefix_unit_name("Escaraba Flamer", "Flamer") == "Escaraba Flamer"
+
+
+def test_prefix_unit_name_drops_redundant_part_name_regardless_of_spacing():
+    """Redundancy is checked on normalized (punctuation/whitespace-stripped)
+    text, so "Leftarm" in the unit name still matches "Left Arm" in
+    part_name — the concatenation bug this guards against isn't limited to
+    exact-spelling duplicates."""
+    assert ai._prefix_unit_name("Escaraba Leftarm 1", "Left Arm") == "Escaraba Leftarm 1"
+
+
 def test_unit_strategy_run_does_not_double_prefix_when_llm_already_included_unit_name(monkeypatch):
     """End-to-end guard: if the LLM's part_name already starts with the unit
     name despite the prompt, run() must not prefix it a second time."""
@@ -999,6 +1015,29 @@ def test_unit_strategy_run_does_not_double_prefix_when_llm_already_included_unit
     res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
 
     assert res.suggestions[0]["part_name"] == "Royal Guard 1 Head"
+
+
+def test_unit_strategy_run_drops_redundant_single_file_unit_part_name(monkeypatch):
+    """End-to-end regression (#942-follow-up): a single-file "unit" whose
+    part_name is just the unit name's own distinguishing word must not come
+    back as "Escaraba Flamer Flamer"."""
+    files = [{"id": 1, "filename": "Escaraba_Flamer.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"units": [
+        {"name": "Escaraba Flamer", "members": [{"id": 1, "part_name": "Flamer"}]},
+    ], "unknown": []})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.suggestions[0]["part_name"] == "Escaraba Flamer"
 
 
 def test_parts_strategy_part_name_is_not_prefixed(monkeypatch):
