@@ -365,19 +365,19 @@ export default function ImportPreviewPage() {
     <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-text-primary flex items-center gap-2">
             <Inbox size={22} className="text-indigo-400" />
             Import Preview
           </h1>
-          <p className="mt-1 text-sm text-gray-400">
+          <p className="mt-1 text-sm text-text-secondary">
             Review packs, fill in metadata, and click Import to move each pack into your library.
           </p>
-          {source && <p className="mt-1 text-xs font-mono text-gray-600 truncate">{source}</p>}
+          {source && <p className="mt-1 text-xs font-mono text-text-muted truncate">{source}</p>}
         </div>
         <button
           onClick={loadContents}
           disabled={scanning || configLoading}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium transition-colors shrink-0"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent-end hover:bg-accent-start disabled:opacity-50 text-white text-sm font-medium transition-colors shrink-0"
         >
           <RefreshCw size={14} className={scanning ? "animate-spin" : ""} />
           {hasScanned ? "Refresh" : "Scan for New Files"}
@@ -385,13 +385,13 @@ export default function ImportPreviewPage() {
       </div>
 
       {/* Destination library (source-level, inherited by all packs) */}
-      <div className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
-        <label htmlFor="lib" className="text-sm text-gray-400 shrink-0">Library</label>
+      <div className="flex items-center gap-3 bg-panel border border-border-subtle rounded-lg px-4 py-3">
+        <label htmlFor="lib" className="text-sm text-text-secondary shrink-0">Library</label>
         <select
           id="lib"
           value={libraryId ?? ""}
           onChange={(e) => e.target.value && chooseLibrary(Number(e.target.value))}
-          className="flex-1 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2.5 py-1.5 text-sm text-gray-100 focus:outline-none"
+          className="flex-1 bg-panel-inset border border-border focus:border-accent-start rounded px-2.5 py-1.5 text-sm text-text-primary focus:outline-none"
         >
           <option value="" disabled>Select a destination library…</option>
           {libraries.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -406,12 +406,12 @@ export default function ImportPreviewPage() {
       {batchLib && (
         <div className="flex items-center gap-3 bg-indigo-950/40 border border-indigo-800/60 rounded-lg px-4 py-3">
           <Package size={16} className="text-indigo-400 shrink-0" />
-          <span className="flex-1 text-sm text-gray-300">
+          <span className="flex-1 text-sm text-text-primary-alt2">
             {batchCount} pack{batchCount !== 1 ? "s" : ""} already imported — ready to move
           </span>
           <button
             onClick={applyAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors shrink-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-end hover:bg-accent-start text-white text-sm font-medium transition-colors shrink-0"
           >
             Move to {batchLib.name}
           </button>
@@ -425,25 +425,25 @@ export default function ImportPreviewPage() {
       )}
 
       {configLoading && (
-        <div className="flex items-center gap-2 text-sm text-gray-400">
+        <div className="flex items-center gap-2 text-sm text-text-secondary">
           <Loader2 size={16} className="animate-spin text-indigo-400" /> Loading…
         </div>
       )}
 
       {scanning && (
-        <div className="flex items-center gap-2 text-sm text-gray-400">
+        <div className="flex items-center gap-2 text-sm text-text-secondary">
           <Loader2 size={16} className="animate-spin text-indigo-400" /> Scanning for packs…
         </div>
       )}
 
       {!configLoading && !hasScanned && !error && (
-        <div className="text-sm text-gray-500 bg-gray-900 border border-gray-800 rounded-lg px-4 py-10 text-center space-y-2">
-          <p>Click <strong className="text-gray-300">Scan for New Files</strong> to find packs ready to import.</p>
+        <div className="text-sm text-text-secondary-alt bg-panel border border-border-subtle rounded-lg px-4 py-10 text-center space-y-2">
+          <p>Click <strong className="text-text-primary-alt2">Scan for New Files</strong> to find packs ready to import.</p>
         </div>
       )}
 
       {hasScanned && !scanning && !error && cards.length === 0 && (
-        <div className="text-sm text-gray-500 bg-gray-900 border border-gray-800 rounded-lg px-4 py-8 text-center">
+        <div className="text-sm text-text-secondary-alt bg-panel border border-border-subtle rounded-lg px-4 py-8 text-center">
           No packs found in this folder.
         </div>
       )}
@@ -457,42 +457,42 @@ export default function ImportPreviewPage() {
           const dProg = downloadProgress[c.path];
           const open = expanded[c.path] ?? false;
           return (
-            <div key={c.path} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <div key={c.path} className="bg-panel border border-border-subtle rounded-xl overflow-hidden">
               {st === "running" && (
-                <div className="h-1 w-full bg-gray-800 overflow-hidden">
+                <div className="h-1 w-full bg-panel-secondary overflow-hidden">
                   {aProg && aProg.total > 0 ? (
                     <div
-                      className="h-full bg-indigo-500 transition-all"
+                      className="h-full bg-accent-start transition-all"
                       style={{ width: `${Math.min(100, (aProg.moved / aProg.total) * 100)}%` }}
                     />
                   ) : dProg && dProg.total > 0 ? (
                     <div
-                      className="h-full bg-indigo-500 transition-all"
+                      className="h-full bg-accent-start transition-all"
                       style={{ width: `${Math.min(100, (dProg.downloaded / dProg.total) * 100)}%` }}
                     />
                   ) : (
-                    <div className="h-full bg-indigo-500 animate-pulse w-full" />
+                    <div className="h-full bg-accent-start animate-pulse w-full" />
                   )}
                 </div>
               )}
               <div className="flex items-center gap-3 px-4 py-3">
                 <button
                   onClick={() => setExpanded((m) => ({ ...m, [c.path]: !open }))}
-                  className="text-gray-500 hover:text-gray-300 shrink-0"
+                  className="text-text-secondary-alt hover:text-text-primary-alt2 shrink-0"
                   aria-label={open ? "Collapse" : "Expand"}
                 >
                   {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </button>
                 <Package size={16} className="text-indigo-400 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-100 truncate">{c.name}</div>
-                  <div className="text-xs font-mono text-gray-600 truncate">{c.path}</div>
+                  <div className="text-sm font-medium text-text-primary truncate">{c.name}</div>
+                  <div className="text-xs font-mono text-text-muted truncate">{c.path}</div>
                 </div>
-                <span className="text-xs text-gray-500 shrink-0 tabular-nums" data-testid="pack-file-count">
+                <span className="text-xs text-text-secondary-alt shrink-0 tabular-nums" data-testid="pack-file-count">
                   {c.file_count} {c.file_count === 1 ? "file" : "files"}
                 </span>
                 {c.already_imported && st === "idle" && (
-                  <span className="text-xs text-gray-500 shrink-0">imported</span>
+                  <span className="text-xs text-text-secondary-alt shrink-0">imported</span>
                 )}
                 {st === "done" && (
                   <span className="flex items-center gap-1 text-xs text-green-400 shrink-0">
@@ -518,7 +518,7 @@ export default function ImportPreviewPage() {
                 <button
                   onClick={() => importPack(c)}
                   disabled={st === "running" || !libraryId}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-medium transition-colors shrink-0"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-end hover:bg-accent-start disabled:opacity-40 text-white text-sm font-medium transition-colors shrink-0"
                 >
                   {st === "running"
                     ? <><Loader2 size={13} className="animate-spin" /> Importing…</>
@@ -527,24 +527,24 @@ export default function ImportPreviewPage() {
               </div>
 
               {open && (
-                <div className="border-t border-gray-800 px-4 py-3 space-y-3">
+                <div className="border-t border-border-subtle px-4 py-3 space-y-3">
                   {f.images.length > 0 && <ImageRotator images={f.images} />}
                   <div className="grid grid-cols-2 gap-3">
                   <Field label="Creator">
                     <input value={f.creator} placeholder="Creator name"
                       onChange={(e) => setField(c.path, { creator: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none" />
+                      className="w-full bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1 text-sm text-text-primary placeholder-gray-600 focus:outline-none" />
                   </Field>
                   <Field label="Character / Group">
                     <input value={f.character} placeholder="Character or group"
                       onChange={(e) => setField(c.path, { character: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none" />
+                      className="w-full bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1 text-sm text-text-primary placeholder-gray-600 focus:outline-none" />
                   </Field>
                   <div className="col-span-2">
                     <Field label="Title">
                       <input value={f.title} placeholder="Title"
                         onChange={(e) => setField(c.path, { title: e.target.value })}
-                        className="w-full bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none" />
+                        className="w-full bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1 text-sm text-text-primary placeholder-gray-600 focus:outline-none" />
                     </Field>
                   </div>
                   <div className="col-span-2">
@@ -557,12 +557,12 @@ export default function ImportPreviewPage() {
                       <div className="flex gap-2">
                         <input value={f.sourceUrl} placeholder="https://…" type="url"
                           onChange={(e) => setField(c.path, { sourceUrl: e.target.value })}
-                          className="flex-1 bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none" />
+                          className="flex-1 bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1 text-sm text-text-primary placeholder-gray-600 focus:outline-none" />
                         <button
                           onClick={() => fetchMeta(c.path)}
                           disabled={!f.sourceUrl.trim() || fetching[c.path]}
                           title="Fetch metadata from this URL"
-                          className="flex items-center gap-1 text-xs px-2 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 disabled:opacity-50 shrink-0"
+                          className="flex items-center gap-1 text-xs px-2 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt disabled:opacity-50 shrink-0"
                         >
                           {fetching[c.path] ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
                           Fetch
@@ -574,7 +574,7 @@ export default function ImportPreviewPage() {
                     <Field label="Notes">
                       <textarea value={f.notes} placeholder="Notes about this pack…" rows={2}
                         onChange={(e) => setField(c.path, { notes: e.target.value })}
-                        className="w-full bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-sm text-gray-100 placeholder-gray-600 focus:outline-none resize-y" />
+                        className="w-full bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1 text-sm text-text-primary placeholder-gray-600 focus:outline-none resize-y" />
                     </Field>
                   </div>
                   <div className="col-span-2">
@@ -593,8 +593,8 @@ export default function ImportPreviewPage() {
                               aria-pressed={on}
                               className={`text-xs px-2 py-1 rounded border transition-colors ${
                                 on
-                                  ? "bg-indigo-600/30 border-indigo-500 text-indigo-200"
-                                  : "bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-400"
+                                  ? "bg-accent-end/30 border-accent-start text-indigo-200"
+                                  : "bg-panel-secondary hover:bg-panel-secondary border-border text-text-secondary"
                               }`}
                             >
                               {col.name}
@@ -602,7 +602,7 @@ export default function ImportPreviewPage() {
                           );
                         })}
                         {collections.length === 0 && (
-                          <span className="text-xs text-gray-600 italic">No collections yet.</span>
+                          <span className="text-xs text-text-muted italic">No collections yet.</span>
                         )}
                       </div>
                       {/* Inline create */}
@@ -613,12 +613,12 @@ export default function ImportPreviewPage() {
                           onChange={(e) => setNewColName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); createCollection(); } }}
                           placeholder="New collection…"
-                          className="bg-gray-950 border border-gray-700 focus:border-indigo-500 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none w-40"
+                          className="bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1 text-xs text-text-primary-alt placeholder-gray-600 focus:outline-none w-40"
                         />
                         <button
                           onClick={createCollection}
                           disabled={!newColName.trim() || creatingCol}
-                          className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 disabled:opacity-40 transition-colors"
+                          className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt2 disabled:opacity-40 transition-colors"
                         >
                           <Plus size={11} /> Create
                         </button>
@@ -633,7 +633,7 @@ export default function ImportPreviewPage() {
         })}
       </div>}
 
-      <Link to="/import" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-300">
+      <Link to="/import" className="inline-flex items-center gap-1.5 text-sm text-text-secondary-alt hover:text-text-primary-alt2">
         <ArrowLeft size={14} /> Choose a different folder
       </Link>
     </div>
@@ -643,7 +643,7 @@ export default function ImportPreviewPage() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</label>
+      <label className="text-xs font-medium text-text-secondary-alt uppercase tracking-wider">{label}</label>
       {children}
     </div>
   );
@@ -694,7 +694,7 @@ export function ImageRotator({ images }: { images: string[] }) {
   };
 
   return (
-    <div className="relative w-full rounded-lg overflow-hidden bg-gray-950 border border-gray-800" style={{ aspectRatio: "16/9" }}>
+    <div className="relative w-full rounded-lg overflow-hidden bg-panel-inset border border-border-subtle" style={{ aspectRatio: "16/9" }}>
       <img
         key={idx}
         src={images[idx]}
