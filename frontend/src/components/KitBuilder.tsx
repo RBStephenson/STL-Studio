@@ -78,16 +78,16 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
   const categorizedCount = [...groups.keys()].filter((k) => k !== "__none__").length;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-gray-950/95 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex flex-col bg-panel-inset/95 backdrop-blur-sm">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 shrink-0">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border-subtle shrink-0">
         <div className="flex items-center gap-2">
           <Wrench size={18} className="text-indigo-400" />
           <h2 className="text-lg font-semibold text-white">Kit Builder</h2>
           <HelpLink section="kit-builder" label="How the Kit Builder works" />
-          <span className="text-gray-500 text-sm">— {modelName}</span>
+          <span className="text-text-secondary-alt text-sm">— {modelName}</span>
         </div>
-        <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
+        <button onClick={onClose} className="text-text-secondary-alt hover:text-white transition-colors">
           <X size={20} />
         </button>
       </div>
@@ -96,14 +96,14 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
       <div className="flex flex-1 overflow-hidden">
 
         {/* Part selector */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 border-r border-gray-800">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 border-r border-border-subtle">
           {[...groups.entries()].map(([key, groupFiles]) => {
             const label = key === "__none__" ? "Uncategorized" : key.replace(/\b\w/g, (c) => c.toUpperCase());
             return (
               <div key={key}>
                 <div className="flex items-center gap-2 mb-2">
-                  <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">{label}</h3>
-                  <span className="text-xs text-gray-600">{groupFiles.length} file{groupFiles.length !== 1 ? "s" : ""}</span>
+                  <h3 className="text-sm font-semibold text-text-primary-alt2 uppercase tracking-wider">{label}</h3>
+                  <span className="text-xs text-text-muted">{groupFiles.length} file{groupFiles.length !== 1 ? "s" : ""}</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {groupFiles.map((f) => {
@@ -118,10 +118,10 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
                         title={f.filename}
                         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm transition-all ${
                           isSelected
-                            ? "bg-indigo-600 border-indigo-500 text-white"
+                            ? "bg-accent-end border-accent-start text-white"
                             : isHovered
-                            ? "bg-gray-800 border-indigo-400/50 text-gray-200"
-                            : "bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                            ? "bg-panel-secondary border-indigo-400/50 text-text-primary-alt"
+                            : "bg-panel border-border text-text-secondary hover:border-border-divider hover:text-text-primary-alt"
                         }`}
                       >
                         {isSelected && <Check size={12} strokeWidth={3} />}
@@ -135,7 +135,7 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
           })}
 
           {files.length === 0 && (
-            <p className="text-gray-600 text-sm py-8 text-center">No STL files found for this model.</p>
+            <p className="text-text-muted text-sm py-8 text-center">No STL files found for this model.</p>
           )}
         </div>
 
@@ -143,7 +143,7 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
         <div className="w-[42%] flex flex-col shrink-0">
           {displayedFile ? (
             <Suspense fallback={
-              <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
+              <div className="flex-1 flex items-center justify-center text-text-secondary-alt text-sm">
                 Loading viewer…
               </div>
             }>
@@ -155,7 +155,7 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
               />
             </Suspense>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-gray-600">
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
               <Box size={40} strokeWidth={1} />
               <p className="text-sm">Click a part to preview it here</p>
             </div>
@@ -164,19 +164,19 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
       </div>
 
       {/* Build summary — sticky footer */}
-      <div className="shrink-0 border-t border-gray-800 bg-gray-900 px-6 py-4">
+      <div className="shrink-0 border-t border-border-subtle bg-panel px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-gray-500 mb-1">
+            <p className="text-xs text-text-secondary-alt mb-1">
               {selectedFiles.length} selected
               {categorizedCount > 0 && ` · ${categorizedCount} part type${categorizedCount !== 1 ? "s" : ""}`}
             </p>
             {selectedFiles.length > 0 ? (
-              <p className="text-sm text-gray-300 truncate">
+              <p className="text-sm text-text-primary-alt2 truncate">
                 {selectedFiles.map((f) => f.filename).join(" · ")}
               </p>
             ) : (
-              <p className="text-sm text-gray-600 italic">
+              <p className="text-sm text-text-muted italic">
                 Click parts above to build your selection
               </p>
             )}
@@ -185,7 +185,7 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
             {selectedFiles.length > 0 && (
               <button
                 onClick={() => setSelection({})}
-                className="px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-sm text-gray-400 hover:text-white transition-colors"
+                className="px-3 py-1.5 rounded bg-panel-secondary border border-border text-sm text-text-secondary hover:text-white transition-colors"
               >
                 Clear
               </button>
@@ -193,7 +193,7 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
             <button
               onClick={copyToClipboard}
               disabled={selectedFiles.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 border border-gray-700 hover:border-gray-500 disabled:opacity-40 disabled:cursor-not-allowed text-gray-300 text-sm transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-panel-secondary border border-border hover:border-border-divider disabled:opacity-40 disabled:cursor-not-allowed text-text-primary-alt2 text-sm transition-colors"
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
               {copied ? "Copied!" : "Copy list"}
@@ -201,7 +201,7 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
             <button
               onClick={downloadZip}
               disabled={selectedFiles.length === 0 || downloading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-accent-end hover:bg-accent-start disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm transition-colors"
             >
               <Download size={14} />
               {downloading ? "Zipping…" : "Download zip"}
