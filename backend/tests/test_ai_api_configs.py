@@ -90,3 +90,21 @@ def test_batch_size_out_of_range_is_rejected(client):
         "batch_size": 51,
     })
     assert r.status_code == 422
+
+
+def test_reasoning_enabled_defaults_to_false(client):
+    r = client.post("/settings/ai-apis", json={
+        "name": "Ollama Local", "api_type": "openai", "url": "http://localhost:11434",
+    })
+    assert r.json()["reasoning_enabled"] is False
+
+
+def test_create_and_update_reasoning_enabled(client):
+    cfg = client.post("/settings/ai-apis", json={
+        "name": "Ollama Local", "api_type": "openai", "url": "http://localhost:11434",
+        "reasoning_enabled": True,
+    }).json()
+    assert cfg["reasoning_enabled"] is True
+
+    r = client.patch(f"/settings/ai-apis/{cfg['id']}", json={"reasoning_enabled": False})
+    assert r.json()["reasoning_enabled"] is False

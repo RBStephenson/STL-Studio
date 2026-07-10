@@ -390,6 +390,61 @@ def test_openai_path_retries_without_reasoning_effort_on_400(monkeypatch):
     assert "reasoning_effort" not in calls[1]
 
 
+def test_run_reasoning_enabled_omits_the_suppression_fields(monkeypatch):
+    """reasoning_enabled=True (opt-in via AiApiConfig, #939-follow-up) skips
+    both "think": false and "reasoning_effort": "none" entirely, letting a
+    thinking-capable model reason before answering instead of forcing it off."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(
+        _UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai",
+        reasoning_enabled=True,
+    )
+
+    assert "think" not in captured["payload"]
+    assert "reasoning_effort" not in captured["payload"]
+
+
+def test_run_reasoning_disabled_by_default(monkeypatch):
+    """Default (no reasoning_enabled passed) keeps the existing suppression —
+    a caller that hasn't set up the new config field must not silently start
+    letting models reason."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert captured["payload"]["think"] is False
+    assert captured["payload"]["reasoning_effort"] == "none"
+
+
 def test_both_system_prompts_instruct_against_reasoning():
     """A model whose chat template reasons unconditionally, ignoring the
     "think": False API field entirely, will often still respect a plain-

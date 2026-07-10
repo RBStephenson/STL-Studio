@@ -18,6 +18,7 @@ interface DraftConfig {
   effort: string;
   request_timeout: number;
   batch_size: number | null;
+  reasoning_enabled: boolean;
   api_key: string;
 }
 
@@ -29,6 +30,7 @@ const EMPTY_DRAFT: DraftConfig = {
   effort: "low",
   request_timeout: 10,
   batch_size: null,
+  reasoning_enabled: false,
   api_key: "",
 };
 
@@ -207,6 +209,25 @@ function ConfigForm({
         />
       </div>
 
+      {/* OpenAI-specific: reasoning toggle. Off by default — this is the
+          setting that suppresses a thinking-capable model's hidden reasoning
+          phase (#939). Letting the model reason is opt-in since it's slower
+          and, for a task this mechanical, adds risk without much upside. */}
+      {draft.api_type === "openai" && (
+        <label
+          className="flex items-center gap-2 cursor-pointer select-none w-fit"
+          title="Lets the model think before answering instead of skipping straight to a result. This can make organizing noticeably slower, and a model that reasons at length may run out of its response budget before it ever writes the answer."
+        >
+          <input
+            type="checkbox"
+            checked={draft.reasoning_enabled}
+            onChange={(e) => onChange({ reasoning_enabled: e.target.checked })}
+            className="accent-indigo-500 w-4 h-4"
+          />
+          <span className="text-sm text-text-primary-alt2">Allow model reasoning</span>
+        </label>
+      )}
+
       {/* API Key */}
       <div>
         <label className="block text-xs text-text-secondary mb-1">
@@ -277,6 +298,7 @@ function ConfigCard({
     effort: config.effort ?? "low",
     request_timeout: config.request_timeout ?? 10,
     batch_size: config.batch_size ?? null,
+    reasoning_enabled: config.reasoning_enabled ?? false,
     api_key: "",
   });
   const [modelList, setModelList] = useState<string[]>([]);
@@ -313,6 +335,7 @@ function ConfigCard({
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
         request_timeout: draft.request_timeout,
         batch_size: draft.batch_size,
+        reasoning_enabled: draft.api_type === "openai" ? draft.reasoning_enabled : false,
         ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
       });
       setLocalConfig(updated);
@@ -367,6 +390,7 @@ function ConfigCard({
             {localConfig.effort && localConfig.api_type === "anthropic" && <span>effort: {localConfig.effort}</span>}
             <span>timeout: {localConfig.request_timeout}s</span>
             {localConfig.batch_size != null && <span>batch: {localConfig.batch_size}</span>}
+            {localConfig.api_type === "openai" && localConfig.reasoning_enabled && <span>reasoning: on</span>}
             <span>{localConfig.key_set ? `Key ••••${localConfig.key_hint?.replace(/^…/, "")}` : "No key"}</span>
           </div>
         </div>
@@ -461,6 +485,7 @@ function AddConfigCard({
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
         request_timeout: draft.request_timeout,
         batch_size: draft.batch_size,
+        reasoning_enabled: draft.api_type === "openai" ? draft.reasoning_enabled : false,
         ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
       });
       flash(`"${created.name}" added`, "ok");

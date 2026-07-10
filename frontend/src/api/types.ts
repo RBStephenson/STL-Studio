@@ -301,6 +301,8 @@ export interface AiApiConfig {
   request_timeout: number;
   // Max files per AI Organize LLM request/batch. null = service default.
   batch_size: number | null;
+  // OpenAI-compatible only: let the model reason before answering. Default false.
+  reasoning_enabled: boolean;
   key_set: boolean;
   key_hint: string | null;
 }

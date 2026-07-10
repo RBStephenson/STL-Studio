@@ -663,6 +663,7 @@ def _llm_refine_openai(
     user_prefix: str = "",
     parser: Callable[[str, str], LlmOutcome] = _parse_suggestions,
     response_schema: dict[str, Any] | None = None,
+    disable_reasoning: bool = True,
 ) -> LlmOutcome:
     """Call an OpenAI-compatible /v1/chat/completions endpoint (e.g. Ollama).
 
@@ -681,6 +682,14 @@ def _llm_refine_openai(
     follows the prompt's written format instructions, which a model can
     drift away from (e.g. inventing its own key names) even while still
     producing well-formed JSON. Falls back to ``"json_object"`` when omitted.
+
+    ``disable_reasoning`` (#939-follow-up, default True): sends "think": false
+    and "reasoning_effort": "none" to suppress a thinking-capable model's
+    hidden reasoning phase, since there's nothing to reason about for this
+    task. Configurable per AiApiConfig (opt-in reasoning) because forcing it
+    off is a call-time choice, not a hardcoded one — some deployments may
+    want the model's own judgment on ambiguous names badly enough to accept
+    the added latency and max_tokens risk that comes with it.
     """
     import re as _re
     base_url = _re.sub(
@@ -707,6 +716,8 @@ def _llm_refine_openai(
         "temperature": 0.1,
         "response_format": response_format,
         "max_tokens": _OPENAI_MAX_TOKENS,
+    }
+    if disable_reasoning:
         # Some locally-served models (DeepSeek-R1-style, QwQ, Gemma reasoning
         # variants, etc.) support an extended "thinking"/reasoning phase
         # before the real answer. There's nothing to reason about for this
@@ -722,9 +733,8 @@ def _llm_refine_openai(
         # this endpoint actually reads is "reasoning_effort" (ollama/ollama
         # #14820); "none" is the documented value to disable thinking.
         # Ignored by servers/models that don't recognize either field.
-        "think": False,
-        "reasoning_effort": "none",
-    }
+        payload["think"] = False
+        payload["reasoning_effort"] = "none"
 
     endpoint = f"{base_url}/v1/chat/completions"
     # Credential-safe form for logs and surfaced error messages.
@@ -879,6 +889,7 @@ def run(
     effort: str | None = None,
     strategy: str = "parts",
     batch_size: int | None = None,
+    reasoning_enabled: bool = False,
 ) -> OrganizeResult:
     """Return merged suggestions plus the outcome of the optional LLM pass.
 
@@ -922,6 +933,14 @@ def run(
     "unit") — configurable per AiApiConfig so a fast/reliable endpoint can send
     more files per call and a slow/flaky one can send fewer. ``None`` keeps
     the built-in defaults.
+
+    ``reasoning_enabled`` (OpenAI-compatible path only, #939-follow-up):
+    defaults to False, which actively suppresses a thinking-capable model's
+    hidden reasoning phase (see _llm_refine_openai's ``disable_reasoning``).
+    Set True to let the model reason before answering — off by default
+    because reasoning adds latency and risks the exact empty-content failure
+    the suppression exists to avoid, for a task (filename pattern-matching)
+    that gains little from it.
     """
     # An Anthropic config carries no URL; an OpenAI-compatible one needs one.
     llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
@@ -1007,7 +1026,7 @@ def run(
             return _llm_refine_openai(
                 chunk, base_url, model, api_key, timeout=timeout,
                 system_prompt=system_prompt, user_prefix=user_prefix, parser=parser,
-                response_schema=response_schema,
+                response_schema=response_schema, disable_reasoning=not reasoning_enabled,
             )
 
         if not representatives:

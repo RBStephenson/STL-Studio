@@ -325,6 +325,11 @@ class AiApiConfig(Base):
     # Tunable per connection since a fast/reliable endpoint can safely take
     # bigger batches than a slow local one prone to running out of max_tokens.
     batch_size = Column(Integer, nullable=True)
+    # OpenAI-compatible connections only: let the model reason before
+    # answering instead of actively suppressing it. Off by default — a
+    # thinking phase adds latency and, worse, risks the model burning its
+    # whole max_tokens budget on hidden reasoning and returning nothing (#903).
+    reasoning_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at = Column(DateTime, default=utcnow)
 
 
