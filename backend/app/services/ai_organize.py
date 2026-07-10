@@ -38,7 +38,16 @@ _EFFORT_THINKING_BUDGET = {"low": 0, "medium": 4096, "high": 10000}
 # generating until it hits the *server's* own context limit — minutes later,
 # with a truncated, unparseable response as the only result. Bounding the
 # reply here means a misbehaving model fails fast instead of slow.
-_OPENAI_MAX_TOKENS = 2048
+#
+# 2048 was too thin in practice: a model that emits hidden reasoning into its
+# own field (rather than the visible "thinking" block the "think": False
+# toggle below is meant to suppress — some model tags don't honor that toggle
+# at all) can burn the *entire* budget mid-thought and never reach the actual
+# JSON answer, returning HTTP 200 with empty content and finish_reason
+# "length". Sized to roughly match the Anthropic path's headroom (4096 base,
+# up to +10000 for extended thinking) instead of assuming a well-behaved model
+# needs only a couple hundred tokens for this task.
+_OPENAI_MAX_TOKENS = 8192
 
 
 # Matches the ``scheme://userinfo@`` prefix of a URL anywhere in a string, so we
