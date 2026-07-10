@@ -23,7 +23,7 @@ import { api, ModelDetail as ModelDetailType } from "../../../api/client";
 import { PartTypeCombo } from "../../../components/PartTypeCombo";
 import { useAppSettings } from "../../../context/AppSettingsContext";
 import type { ViewMode } from "../utils";
-import { PART_TYPE_SUGGESTIONS, toPascalCase, autoPartName, buildFileHierarchy } from "../utils";
+import { PART_TYPE_SUGGESTIONS, toPascalCase, autoPartName, buildFileHierarchy, naturalCompare } from "../utils";
 
 type StlFiles = ModelDetailType["stl_files"];
 type StlFile = StlFiles[number];
@@ -142,7 +142,7 @@ function DraggableFileRow({
               <option value="" disabled>Link sup…</option>
               {allFiles
                 .filter((sf) => sf.id !== f.id)
-                .sort((a, b) => a.filename.localeCompare(b.filename))
+                .sort((a, b) => naturalCompare(a.filename, b.filename))
                 .map((sf) => {
                   const alreadyHere = sf.sup_of_id === f.id;
                   const linkedElsewhere = sf.sup_of_id != null && !alreadyHere;
@@ -278,6 +278,20 @@ export default function StlFilesTable({
     savePartType(fileId, category);
   };
 
+  // Standard suggestions plus whatever categories this model already uses
+  // (groupedStlFiles.labeled keys are the persisted, Pascal-cased part_type
+  // values in use) — deduped and alphabetized, so a bulk recategorize offers
+  // both without the user having to retype a custom category by hand.
+  const recategorizeOptions = [...new Set([
+    ...PART_TYPE_SUGGESTIONS,
+    ...groupedStlFiles.labeled.map(([cat]) => cat),
+  ])].sort(naturalCompare);
+
+  const recategorizeSelected = async (category: string) => {
+    await Promise.all([...selectedIds].map((id) => savePartType(id, category)));
+    setSelectedIds(new Set());
+  };
+
   const renderRow = (f: StlFile, depth: 0 | 1) => {
     const isSup = depth === 1;
     const isBase = !isSup && !supFileIds.has(f.id);
@@ -331,13 +345,15 @@ export default function StlFilesTable({
             Files ({model.stl_files.length})
           </h3>
           <div className="flex gap-2">
-            {settings.ai_organize_enabled && (
-              <button onClick={runAiOrganize} disabled={aiOrganizing} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-violet-950 border border-border hover:border-violet-600 disabled:opacity-40 text-xs text-text-secondary hover:text-violet-300 transition-colors">
-                {aiOrganizing
-                  ? <Loader2 size={12} className="animate-spin" />
-                  : <Wand2 size={12} />}
-                {aiOrganizing ? "Organizing…" : "AI Organize"}
-              </button>
+            {selectedIds.size > 0 && settings.part_categories_enabled && (
+              <select
+                defaultValue=""
+                onChange={(e) => { if (e.target.value) { recategorizeSelected(e.target.value); e.target.value = ""; } }}
+                className="bg-panel-secondary border border-border hover:border-border-divider rounded px-2.5 py-1 text-xs text-text-secondary hover:text-text-primary-alt focus:outline-none focus:border-accent-start transition-colors"
+              >
+                <option value="" disabled>Recategorize to…</option>
+                {recategorizeOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
             )}
             {selectedIds.size > 0 && (
               <button
@@ -347,6 +363,14 @@ export default function StlFilesTable({
               >
                 <FolderDown size={12} />
                 {downloadingSelected ? "Zipping…" : `Download selected (${selectedIds.size})`}
+              </button>
+            )}
+            {settings.ai_organize_enabled && (
+              <button onClick={runAiOrganize} disabled={aiOrganizing} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-violet-950 border border-border hover:border-violet-600 disabled:opacity-40 text-xs text-text-secondary hover:text-violet-300 transition-colors">
+                {aiOrganizing
+                  ? <Loader2 size={12} className="animate-spin" />
+                  : <Wand2 size={12} />}
+                {aiOrganizing ? "Organizing…" : "AI Organize"}
               </button>
             )}
             <button onClick={downloadAllFiles} disabled={downloadingAll} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border hover:border-border-divider disabled:opacity-40 text-xs text-text-secondary hover:text-text-primary-alt transition-colors">
