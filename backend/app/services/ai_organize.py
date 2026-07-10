@@ -464,11 +464,34 @@ def _strip_json_fence(raw_text: str) -> str:
 
 _RAW_RESPONSE_LOG_CAP = 1500  # chars — enough to see the failure shape without flooding logs
 
+_TRAILING_COMMA_RE = re.compile(r",(\s*[\]}])")
+
+
+def _repair_json(raw_text: str) -> str:
+    """Best-effort fix-ups for the common ways an LLM's JSON is *almost*
+    valid (#928-follow-up): a trailing comma before a closing bracket, or
+    stray prose wrapped around the object despite being told to return only
+    JSON. Deliberately narrow — not a general JSON repair tool — since a more
+    aggressive fixer risks silently producing plausible-looking but wrong
+    data instead of surfacing the failure. Truncated JSON (cut off by
+    max_tokens) is out of scope here; that's already caught upstream by the
+    empty-content/finish_reason check, not this path."""
+    text = raw_text.strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start:end + 1]
+    return _TRAILING_COMMA_RE.sub(r"\1", text)
+
 
 def _load_llm_json(raw_text: str, source: str) -> tuple[Any, LlmOutcome | None]:
     """Strip an optional fence and parse JSON — shared by both response
     parsers. Returns ``(data, None)`` on success or ``(None, error_outcome)``
     on failure.
+
+    A first parse failure gets one retry against a best-effort repaired
+    version (see _repair_json) before giving up — cheap insurance against an
+    otherwise-good reply with one stray syntax slip (#928-follow-up).
 
     On failure, the offending text is logged at WARNING (not DEBUG) —
     "non-JSON content" alone doesn't say whether the model rambled prose,
@@ -478,12 +501,26 @@ def _load_llm_json(raw_text: str, source: str) -> tuple[Any, LlmOutcome | None]:
     try:
         return json.loads(raw_text), None
     except json.JSONDecodeError:
-        detail = f"LLM returned non-JSON content from {source}"
-        _log.warning(
-            "ai_organize llm_error %s — raw reply (%d chars, showing up to %d): %r",
-            detail, len(raw_text), _RAW_RESPONSE_LOG_CAP, raw_text[:_RAW_RESPONSE_LOG_CAP],
-        )
-        return None, LlmOutcome(status="error", detail=detail)
+        pass
+
+    repaired = _repair_json(raw_text)
+    if repaired != raw_text:
+        try:
+            data = json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+        else:
+            _log.info(
+                "ai_organize llm_repaired recovered malformed-but-close JSON from %s", source,
+            )
+            return data, None
+
+    detail = f"LLM returned non-JSON content from {source}"
+    _log.warning(
+        "ai_organize llm_error %s — raw reply (%d chars, showing up to %d): %r",
+        detail, len(raw_text), _RAW_RESPONSE_LOG_CAP, raw_text[:_RAW_RESPONSE_LOG_CAP],
+    )
+    return None, LlmOutcome(status="error", detail=detail)
 
 
 def _flat_suggestions_from_data(data: Any, source: str) -> LlmOutcome:
