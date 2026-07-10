@@ -160,6 +160,17 @@ found files, it doesn't remove ones whose path changed. A per-creator rescan
 doesn't need this: it already fully reindexes that creator's files from
 scratch every time.
 
+A related, separate one-time issue: a folder-naming bug (fixed in #959) could
+leave a model's **name** ending in a stray `#` (stripped from a Patreon-style
+`#1234` release marker in the folder name, e.g. `Cold Giant#4521` →
+`Cold Giant#`). That fix only applies to names derived from here on — it
+doesn't touch names already saved with the bug. If you have models named like
+that, `backend/scripts/cleanup_hash_suffix_names.py` is a one-time repair
+script: dry-run by default (prints what it would rename, changes nothing),
+`--apply` to actually update. Run it inside the backend container:
+`docker exec stl-studio-backend-1 python -m scripts.cleanup_hash_suffix_names`
+(add `--apply` once the dry-run output looks right).
+
 ## Incremental scanning
 
 A full scan is **incremental**: folders whose modification time hasn't changed
