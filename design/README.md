@@ -3,6 +3,44 @@
 ## Overview
 A refined visual/interaction pass over STL Studio (a local 3D-print-model library manager). Recreates every major screen from the existing React/Tailwind codebase (`frontend/`) in a tighter, more premium dark theme, and adds a few new interactive patterns (sidebar collapse, view-state switchers, sticky pagination).
 
+## ⚠️ New Since Last Handoff
+This package supersedes the previous drop. Same 20 screens, but with these additions layered in — implement these on top of anything already built from the prior version:
+
+- **Complete Content/Loading/Empty/Error state coverage**: every screen with a state-view switcher now has all four states wired and rendered (previously several only had 2-3). Added **Empty** to Paint Shelf, Guide Reader, Variant Group. Added **Error** to Guides, Tags, Triage, Queue, Collections, Creators, Model Detail, Paint Shelf, Variant Group, Guide Reader (red-tinted dashed panel, `border:1px dashed rgba(244,63,94,.3)`, `background:#160c10`, alert-circle icon, heading + explanation + "Retry" CTA — matches the pre-existing pattern on Library/Import). Added **Loading** to Queue, Tags, Guides, Triage (shimmering skeletons using the shared `stl-shimmer` animation). When wiring to real data, map each pill state to query status: `content` → `isSuccess && data.length`, `loading` → `isPending`, `empty` → `isSuccess && !data.length`, `error` → `isError`.
+- **Settings — reorganized navigation**: replaced the 6-tab horizontal underline nav with a left sidebar (210px rail, sticky) and consolidated to 5 groups: **General** (library page size, "New" badge window, NSFW toggle — moved out of the old grab-bag Preferences tab), **Library & Scanning** (folders, scan locations, reorganize tool, scan rules, tag rules — merges the old separate Library + Scanning tabs), **Features** (Painting Guides toggle + Image Gallery settings — replaces the old single-item Painting tab), **AI & Automation** (unchanged content, renamed from "AI & Integrations"), **Data** (unchanged). Sidebar items: `padding:9px 12px`, active state `background:#1c1e2e`, `border-left:2px solid #6366f1`, `border-radius:0 8px 8px 0`, text `#f4f4f6` active / `#8b8f9c` inactive. Recreate as a `settingsTab` state value driving both the active sidebar item and the rendered panel, same as before — just re-keyed (`general`/`library`/`features`/`ai`/`data`).
+- **Guide Content Editor — sidebar tab nav for content spine**: the content-spine editor (left side of the 2-column layout) changed from a stacked-accordion list (all tabs expanded, all steps visible at once) to a 3-column layout: a narrow left sidebar (200px) listing spine tabs by name + step count (same active-state sidebar styling as Settings — `border-left:2px solid #6366f1`, `background:#1c1e2e` when active), a middle column showing only the **selected** tab's steps for editing, and the live preview sticky on the right (unchanged). Add an `activeSpineTab` (index) state to drive which tab's steps render in the middle column.
+
+- **Focus-visible accessibility ring** (global, all screens): added
+  ```css
+  button:focus-visible, a:focus-visible, [role="button"]:focus-visible,
+  [role="tab"]:focus-visible, .stl-chip:focus-visible, .stl-card:focus-visible {
+    outline: 2px solid #6366f1; outline-offset: 2px; border-radius: 6px;
+  }
+  ```
+  Covers every interactive primitive across the app: nav buttons, tab controls, filter/tag chips, and library/creator/collection cards. Recreate as a shared Tailwind utility (e.g. `focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 focus-visible:rounded-md`) applied wherever these primitives are rendered — not a one-off. Keyboard-only (mouse clicks should not show the ring), so keep it on `:focus-visible`, not `:focus`.
+
+- **Guide Reader — Loading state** (new pill option next to existing Content/Empty switcher, top-right of the hero gradient): a full skeleton recreation of the reading view, still inside the same violet-to-dark gradient hero background:
+  - Hero: 120×11px pill (category label), 60%-width×24px block (title), 75%-width×12px block (subtitle), 35%-width×11px block (byline) — all `rgba(255,255,255,.08)` (or `.06` for the lighter two), centered, `border-radius:4–6px`.
+  - Paint-lines bar: 4 skeleton pill chips, 110×24px, `background:#1a1c22`, `border-radius:999px`, in the same flex row the real paint pills occupy.
+  - Tabs row: 5 skeleton bars, 70×14px, `#1a1c22`, sitting on the same bottom-border divider as real tabs.
+  - Value-map row: 4 columns, each a 44px-tall swatch block + a short label bar underneath, `#1a1c22`.
+  - Step list: 3 skeleton step cards, each with a left border rule (`2px solid #1a1c22`) and stacked bars for step label/title/two description lines.
+  - A single `stl-shimmer` sweep (`@keyframes stl-shimmer { 0%{translateX(-100%)} 100%{translateX(100%)} }`, 1.4s linear infinite, diagonal `100deg` gradient highlight) runs across the whole panel via one absolutely-positioned overlay div — not per-block — so the shine passes over hero, pills, tabs, chips, and steps together. Wire the pill switcher to real `isPending`/`isSuccess` query state; the skeleton block counts (4 pills, 5 tabs, 4 chips, 3 steps) are placeholders and can be dynamic once wired to data.
+
+- **Guides (list) — Empty state** (new pill option alongside existing Content/Loading switcher): dashed-border panel replacing the card grid —
+  - Container: `border:1px dashed #1e2027; border-radius:14px; background:#0e0f13; padding:64px 32px;`, centered column, text-center.
+  - 56×56px circular icon badge, `background:#26163a`, containing a fuchsia (`#e879f9`) paint-brush/wand icon (stroke-width 1.6).
+  - Heading "No painting guides yet" — 16px/700/`#e5e6ea`.
+  - Body copy (13px/`#6b7080`, 1.6 line-height, max-width 320px): explains guides are step-by-step with paint swatches pulled from the shelf.
+  - Primary CTA button ("New guide" or similar), same gradient-CTA treatment (`stl-cta` class: indigo gradient, lift+glow on hover) used elsewhere in the app.
+  Wire to the real `data.length === 0` condition on the guides list query.
+
+- **NSFW toggle badge** (nav bar, all content-bearing screens — Guide Reader, Guides, Help, Reorganize Library, Tags, etc.): outlined pill, right-aligned in the nav, `border:1px solid #202329; background:#181a20; color:#6b7080; font-size:13px; padding:7px 13px; border-radius:8px`, reading "NSFW Off". Should reflect and toggle the existing NSFW content-filter setting (already present in Settings/Preferences) — clicking it should flip state and label (e.g. "NSFW On" with an accent color) rather than being static chrome.
+
+- **Triage — keyboard hint row** (bottom of the review card, below Back/Skip/Looks Good buttons): inline hint using a styled `<kbd>` element — `background:#1c1e26; border:1px solid #1c1e24; padding:2px 7px; border-radius:5px; font-family:monospace; font-size:11.5px; color:#dcdde2` — reading "→ / Space" followed by plain text "dismiss (looks fine)". Pattern should extend to the other keyboard shortcuts on this screen (Back/Skip) using the same `<kbd>` treatment for consistency, bound to the page's real keydown handlers.
+
+Everything else (screens, layout, tokens, prior interaction notes below) is unchanged from the previous handoff.
+
 ## About the Design Files
 The bundled file (`STL Library.dc.html`) is a **design reference built in HTML** — a single scrollable canvas containing every screen as a static/lightly-interactive mockup, created with inline styles and a small custom templating runtime (not React). It is **not production code** — do not copy its markup or "component" structure into the app. The task is to **recreate this visual design in the existing frontend codebase** (React + TypeScript + Tailwind CSS, using Vite), matching the codebase's existing patterns: functional components, Tailwind utility classes (not inline styles), the existing `api` client, TanStack Query hooks, and React Router.
 
