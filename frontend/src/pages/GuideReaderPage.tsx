@@ -130,7 +130,30 @@ export default function GuideReaderPage() {
           <ErrorState title="Couldn't load this guide" message={error} onRetry={load} />
         </div>
       )}
-      {guide && <GuideReader guide={guide} />}
+      {guide && guide.tabs.length === 0 && (
+        <div
+          className="max-w-5xl mx-auto px-4 py-16 flex flex-col items-center text-center rounded-[14px] border border-dashed"
+          style={{ borderColor: "#1e2027", background: "#0e0f13" }}
+        >
+          <div
+            className="flex items-center justify-center w-14 h-14 rounded-full mb-4"
+            style={{ background: "#26163a" }}
+          >
+            <ListTree size={22} strokeWidth={1.6} style={{ color: "var(--color-status-fuchsia)" }} />
+          </div>
+          <p className="text-base font-bold text-text-primary-alt mb-2">This guide has no content yet</p>
+          <p className="text-[13px] leading-relaxed text-text-secondary-alt max-w-[320px] mb-6">
+            Add tabs and steps in the content editor to build out the painting recipe.
+          </p>
+          <Link
+            to={`/painting/guides/${guide.id}/content`}
+            className="btn-cta inline-flex items-center gap-1.5 text-white text-sm px-4 py-2 rounded"
+          >
+            <ListTree size={15} /> Edit content
+          </Link>
+        </div>
+      )}
+      {guide && guide.tabs.length > 0 && <GuideReader guide={guide} />}
     </div>
   );
 }
