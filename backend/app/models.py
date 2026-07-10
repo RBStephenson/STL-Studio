@@ -320,6 +320,16 @@ class AiApiConfig(Base):
     # Ollama box loading a model cold) can take far longer than a local one, so
     # this is tunable per config rather than a single global. Default 10s.
     request_timeout = Column(Integer, nullable=False, default=10, server_default="10")
+    # Max files sent to the LLM per AI Organize request/batch. None = use the
+    # service's built-in defaults (ai_organize._LLM_FILE_CAP / _UNIT_LLM_FILE_CAP).
+    # Tunable per connection since a fast/reliable endpoint can safely take
+    # bigger batches than a slow local one prone to running out of max_tokens.
+    batch_size = Column(Integer, nullable=True)
+    # OpenAI-compatible connections only: let the model reason before
+    # answering instead of actively suppressing it. Off by default — a
+    # thinking phase adds latency and, worse, risks the model burning its
+    # whole max_tokens budget on hidden reasoning and returning nothing (#903).
+    reasoning_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at = Column(DateTime, default=utcnow)
 
 
