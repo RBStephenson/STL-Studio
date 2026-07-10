@@ -11,7 +11,7 @@ interface Stat {
 }
 
 const TONE_CLASS: Record<Stat["tone"], string> = {
-  neutral: "bg-gray-800 border-gray-700 text-gray-200",
+  neutral: "bg-panel-secondary border-border text-text-primary-alt",
   good: "bg-green-950 border-green-800 text-green-300",
   warn: "bg-yellow-950 border-yellow-800 text-yellow-300",
   bad: "bg-orange-950 border-orange-800 text-orange-300",
