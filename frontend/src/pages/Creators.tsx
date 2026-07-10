@@ -59,19 +59,19 @@ export default function Creators() {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <Users size={20} className="text-indigo-400" />
-          <h1 className="text-2xl font-bold text-gray-100">Creators</h1>
-          <span className="text-sm text-gray-500 ml-1">({creators.length})</span>
+          <h1 className="text-2xl font-bold text-text-primary">Creators</h1>
+          <span className="text-sm text-text-secondary-alt ml-1">({creators.length})</span>
         </div>
         <div className="flex items-center gap-2">
           <RefreshEnrich scopeLabel="your whole library" />
-          <div className="flex rounded border border-gray-700 overflow-hidden text-xs">
+          <div className="flex rounded border border-border overflow-hidden text-xs">
             <button
               onClick={() => setSortBy("name")}
-              className={`px-3 py-1.5 transition-colors ${sortBy === "name" ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-gray-100 hover:bg-gray-800"}`}
+              className={`px-3 py-1.5 transition-colors ${sortBy === "name" ? "bg-accent-end text-white" : "text-text-secondary hover:text-text-primary hover:bg-panel-secondary"}`}
             >A–Z</button>
             <button
               onClick={() => setSortBy("models")}
-              className={`px-3 py-1.5 transition-colors ${sortBy === "models" ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-gray-100 hover:bg-gray-800"}`}
+              className={`px-3 py-1.5 transition-colors ${sortBy === "models" ? "bg-accent-end text-white" : "text-text-secondary hover:text-text-primary hover:bg-panel-secondary"}`}
             >Most models</button>
           </div>
           <input
@@ -79,11 +79,11 @@ export default function Creators() {
             placeholder="Search creators…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 w-48"
+            className="bg-panel border border-border rounded px-3 py-1.5 text-sm text-text-primary placeholder-gray-600 focus:outline-none focus:border-accent-start w-48"
           />
           <button
             onClick={() => setAdding(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt2 text-sm transition-colors"
             title="Add a creator without waiting for a scan to find one"
           >
             <Plus size={14} /> Add Creator
@@ -110,26 +110,26 @@ export default function Creators() {
         {filtered.map((c) => (
           <div
             key={c.id}
-            className={`group bg-gray-900 border rounded-lg overflow-hidden flex flex-col transition-colors ${
-              enriching?.id === c.id ? "border-indigo-500" : "border-gray-800 hover:border-indigo-500"
+            className={`group bg-panel border rounded-lg overflow-hidden flex flex-col transition-colors ${
+              enriching?.id === c.id ? "border-accent-start" : "border-border-subtle hover:border-accent-start"
             }`}
           >
             <Link
               to={`/?creator_id=${c.id}`}
-              className="flex-1 p-4 flex flex-col gap-1 hover:bg-gray-800/50 transition-colors"
+              className="flex-1 p-4 flex flex-col gap-1 hover:bg-panel-secondary/50 transition-colors"
               title={`Browse ${c.name}'s models`}
             >
-              <span className="font-medium text-gray-100 truncate group-hover:text-indigo-300 transition-colors">
+              <span className="font-medium text-text-primary truncate group-hover:text-indigo-300 transition-colors">
                 {c.name}
               </span>
-              <span className="text-xs text-gray-500">{c.model_count} models →</span>
+              <span className="text-xs text-text-secondary-alt">{c.model_count} models →</span>
             </Link>
-            <div className="flex border-t border-gray-800 divide-x divide-gray-800">
+            <div className="flex border-t border-border-subtle divide-x divide-gray-800">
               <button
                 onClick={() => rescan(c)}
                 disabled={scanningId !== null}
                 title={scanningId !== null ? "A scan is already running" : `Rescan ${c.name}`}
-                className="flex-1 flex items-center justify-center gap-1 text-xs text-gray-600 hover:text-emerald-400 transition-colors px-2 py-2 hover:bg-gray-800/30 disabled:opacity-40 disabled:hover:text-gray-600 disabled:hover:bg-transparent"
+                className="flex-1 flex items-center justify-center gap-1 text-xs text-text-muted hover:text-emerald-400 transition-colors px-2 py-2 hover:bg-panel-secondary/30 disabled:opacity-40 disabled:hover:text-text-muted disabled:hover:bg-transparent"
               >
                 {scanningId === c.id
                   ? <><Loader2 size={11} className="animate-spin" /> Scanning…</>
@@ -138,7 +138,7 @@ export default function Creators() {
               </button>
               <button
                 onClick={() => setEnriching(enriching?.id === c.id ? null : c)}
-                className="flex-1 flex items-center justify-center gap-1 text-xs text-gray-600 hover:text-indigo-400 transition-colors px-2 py-2 hover:bg-gray-800/30"
+                className="flex-1 flex items-center justify-center gap-1 text-xs text-text-muted hover:text-indigo-400 transition-colors px-2 py-2 hover:bg-panel-secondary/30"
               >
                 {enriching?.id === c.id
                   ? <><X size={11} /> Close</>
