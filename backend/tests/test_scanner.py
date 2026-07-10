@@ -1183,6 +1183,103 @@ class TestPruneStalePaths:
         assert "orphan" in {m.name for m in db.query(Model).all()}
 
 
+class TestPruneStaleStlFiles:
+    """_index_stl_files only ever adds rows by exact path — a file renamed
+    outside the app (e.g. a bulk lowercase/hyphenate pass) leaves its old
+    STLFile row behind forever, pointing at a path that no longer exists,
+    even though the model's folder is fine and the file is right there under
+    its new name. _prune_stale_stl_files is the cleanup for that."""
+
+    def _model_with_files(self, db, creator, name, folder: Path, stale_count: int = 1, live_count: int = 1):
+        m = Model(name=name, folder_path=str(folder), creator_id=creator.id)
+        db.add(m)
+        db.flush()
+        folder.mkdir(parents=True, exist_ok=True)
+        for i in range(live_count):
+            fname = f"live_{i}.stl"
+            (folder / fname).write_bytes(b"solid x\nendsolid x\n")
+            db.add(STLFile(model_id=m.id, path=str(folder / fname), filename=fname))
+        for i in range(stale_count):
+            # Recorded path never created on disk — simulates a file that's
+            # since been renamed/removed outside the app.
+            db.add(STLFile(model_id=m.id, path=str(folder / f"Stale_Old_Name_{i}.stl"), filename=f"Stale_Old_Name_{i}.stl"))
+        db.commit()
+        return m
+
+    def test_stale_row_removed_live_row_kept(self, db, tmp_path):
+        creator = make_creator(db, "Creator")
+        self._model_with_files(db, creator, "m", tmp_path / "m", stale_count=1, live_count=1)
+
+        removed = scanner._prune_stale_stl_files(db, [str(tmp_path)])
+
+        assert removed == 1
+        paths = {f.path for f in db.query(STLFile).all()}
+        assert len(paths) == 1
+        assert "live_0.stl" in list(paths)[0]
+
+    def test_model_with_no_stale_rows_untouched(self, db, tmp_path):
+        creator = make_creator(db, "Creator")
+        self._model_with_files(db, creator, "m", tmp_path / "m", stale_count=0, live_count=2)
+
+        assert scanner._prune_stale_stl_files(db, [str(tmp_path)]) == 0
+        assert db.query(STLFile).count() == 2
+
+    def test_detached_mount_prunes_nothing(self, db, tmp_path):
+        """Mirrors _prune_stale_paths: no available roots (mount detached) must
+        protect every row, even ones that would otherwise look stale."""
+        creator = make_creator(db, "Creator")
+        self._model_with_files(db, creator, "m", tmp_path / "m", stale_count=2, live_count=1)
+
+        assert scanner._prune_stale_stl_files(db, []) == 0
+        assert db.query(STLFile).count() == 3
+
+    def test_model_whose_own_folder_is_missing_is_skipped(self, db, tmp_path):
+        """A model with no folder at all is _prune_stale_paths's job, not this
+        one — pruning its STL rows here too would just be redundant work on
+        data about to be cascade-deleted anyway, so this prune leaves it alone."""
+        creator = make_creator(db, "Creator")
+        folder = tmp_path / "gone"
+        m = Model(name="m", folder_path=str(folder), creator_id=creator.id)
+        db.add(m)
+        db.flush()
+        db.add(STLFile(model_id=m.id, path=str(folder / "a.stl"), filename="a.stl"))
+        db.commit()
+
+        assert scanner._prune_stale_stl_files(db, [str(tmp_path)]) == 0
+        assert db.query(STLFile).count() == 1
+
+    def test_protected_creator_untouched(self, db, tmp_path):
+        creator = make_creator(db, "Creator")
+        m = self._model_with_files(db, creator, "m", tmp_path / "m", stale_count=1, live_count=1)
+
+        removed = scanner._prune_stale_stl_files(db, [str(tmp_path)], protected_creator_ids={creator.id})
+
+        assert removed == 0
+        assert db.query(STLFile).filter(STLFile.model_id == m.id).count() == 2
+
+    def test_models_outside_any_online_root_untouched(self, db, tmp_path):
+        creator = make_creator(db, "Creator")
+        online = tmp_path / "online"
+        self._model_with_files(db, creator, "in_root", online / "m", stale_count=1, live_count=1)
+        elsewhere = tmp_path / "elsewhere"
+        self._model_with_files(db, creator, "outside", elsewhere / "m", stale_count=1, live_count=1)
+
+        removed = scanner._prune_stale_stl_files(db, [str(online)])
+
+        assert removed == 1
+        # The outside-root model's stale row survives untouched.
+        outside_model = db.query(Model).filter(Model.name == "outside").one()
+        assert db.query(STLFile).filter(STLFile.model_id == outside_model.id).count() == 2
+
+    def test_safety_cap_blocks_mass_delete(self, db, tmp_path):
+        creator = make_creator(db, "Creator")
+        # 1 live + 3 stale = 75% stale, above the shared 50% cap.
+        self._model_with_files(db, creator, "m", tmp_path / "m", stale_count=3, live_count=1)
+
+        assert scanner._prune_stale_stl_files(db, [str(tmp_path)]) == 0
+        assert db.query(STLFile).count() == 4
+
+
 class TestScanAllRootsMountGate:
     """The gate lives in scan_all_roots: only roots confirmed online may feed the
     destructive prunes. _scan_root and the prunes are stubbed so we can assert the

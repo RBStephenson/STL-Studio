@@ -150,6 +150,16 @@ never flagged, and the flag is cleared automatically once a model is confirmed.
 
 Only one scan runs at a time — starting one while another is running is blocked.
 
+A full scan also cleans up file records left behind by a rename done outside
+the app (e.g. a bulk lowercase/hyphenate pass run directly on disk): any STL
+file record whose path no longer resolves, in a model folder that's otherwise
+still present, is removed. Without this, [Reorganize](features.md#reorganize-library)
+would keep reporting that model as having "missing files" indefinitely — the
+old record never goes away on its own, since indexing only ever adds newly
+found files, it doesn't remove ones whose path changed. A per-creator rescan
+doesn't need this: it already fully reindexes that creator's files from
+scratch every time.
+
 ## Incremental scanning
 
 A full scan is **incremental**: folders whose modification time hasn't changed
