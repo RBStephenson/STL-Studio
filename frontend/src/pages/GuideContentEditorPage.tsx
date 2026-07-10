@@ -66,13 +66,13 @@ export default function GuideContentEditorPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <Link to={`/painting/guides/${id}`} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 mb-4">
+      <Link to={`/painting/guides/${id}`} className="inline-flex items-center gap-1 text-xs text-text-secondary-alt hover:text-text-primary-alt2 mb-4">
         <ArrowLeft size={14} /> Back to guide
       </Link>
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white mb-1">Edit content</h1>
-          {guide && <p className="text-sm text-gray-500">{guide.title}</p>}
+          {guide && <p className="text-sm text-text-secondary-alt">{guide.title}</p>}
         </div>
         {!loading && !loadError && guide && (
           <div className="flex items-center gap-2 shrink-0">
@@ -87,7 +87,7 @@ export default function GuideContentEditorPage() {
               type="button"
               onClick={() => setShowPreview((v) => !v)}
               aria-pressed={showPreview}
-              className="hidden lg:inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2.5 py-1.5"
+              className="hidden lg:inline-flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary-alt border border-border rounded px-2.5 py-1.5"
             >
               {showPreview ? <EyeOff size={15} /> : <Eye size={15} />}
               {showPreview ? "Hide preview" : "Show preview"}
@@ -96,13 +96,13 @@ export default function GuideContentEditorPage() {
         )}
       </div>
 
-      {loading && <p className="text-sm text-gray-500">Loading…</p>}
+      {loading && <p className="text-sm text-text-secondary-alt">Loading…</p>}
       {loadError && <p role="alert" className="text-sm text-rose-400">{loadError}</p>}
 
       {!loading && !loadError && guide && (
         <div className="mb-4 space-y-4">
-          <details className="border border-gray-800 rounded-lg" data-testid="reference-image-section">
-            <summary className="cursor-pointer text-sm text-gray-300 px-4 py-2.5">
+          <details className="border border-border-subtle rounded-lg" data-testid="reference-image-section">
+            <summary className="cursor-pointer text-sm text-text-primary-alt2 px-4 py-2.5">
               Reference image
               {guide.reference_image_id !== null && <span className="text-xs text-emerald-400 ml-2">attached</span>}
             </summary>
@@ -130,8 +130,8 @@ export default function GuideContentEditorPage() {
           />
           {showPreview && (
             <div className="hidden lg:block lg:sticky lg:top-6 mt-6 lg:mt-0">
-              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">Live preview</div>
-              <div className="border border-gray-800 rounded-lg overflow-auto max-h-[calc(100vh-7rem)]">
+              <div className="text-[11px] uppercase tracking-wide text-text-secondary-alt mb-2">Live preview</div>
+              <div className="border border-border-subtle rounded-lg overflow-auto max-h-[calc(100vh-7rem)]">
                 <GuideReader guide={{ ...guide, tabs: previewTabs ?? guide.tabs }} />
               </div>
             </div>
