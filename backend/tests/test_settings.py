@@ -31,6 +31,7 @@ DEFAULTS = {
     "log_level": "INFO",
     "reorganize_template": "",
     "reorganize_slugify": True,
+    "reorganize_slugify_filenames": False,
     "reorganize_enabled": False,
     "collections_uniform_size": True,
 }

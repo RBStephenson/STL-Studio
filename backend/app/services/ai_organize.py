@@ -1164,6 +1164,32 @@ def run(
                 existing["sup_base_filename"] = s["sup_base_filename"]
             merged[fid] = existing
 
+    # Guarantee every file leaves organize with a real part_name, never just
+    # the filename-derived placeholder the STL files table shows (dimmed) for
+    # an empty one (#947). A file can reach here still nameless for several
+    # reasons — heuristics/LLM judged no change needed while a name was
+    # already missing, the LLM omitted the file from its response entirely,
+    # or it landed in "unknown" — this closes all of them in one place rather
+    # than chasing each upstream cause individually. Only fills a genuinely
+    # empty name; anything already set (by heuristics, the LLM, or a prior
+    # save) is left untouched.
+    #
+    # Skipped entirely on "error": success-via-API-or-nothing (#821) requires
+    # an errored run to return zero suggestions, never a partial mix — this
+    # loop must not manufacture suggestions out of an otherwise-empty result.
+    if outcome.status != "error":
+        for f in files:
+            fid = f["id"]
+            current_name = (merged.get(fid) or {}).get("part_name") or f.get("part_name")
+            if current_name:
+                continue
+            auto_name = _clean_name(f["filename"])
+            if not auto_name:
+                continue
+            if fid not in merged:
+                merged[fid] = {"id": fid, "sup_base_filename": None}
+            merged[fid]["part_name"] = auto_name
+
     result = list(merged.values())
     _log_step("done", total_suggestions=len(result), llm_status=outcome.status)
     return OrganizeResult(suggestions=result, llm=outcome)

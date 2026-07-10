@@ -4,6 +4,7 @@ from app.services.path_sanitize import (
     MAX_PATH_LEN,
     path_over_length,
     sanitize_segment,
+    slug_filename,
 )
 
 
@@ -65,3 +66,20 @@ class TestPathOverLength:
 
     def test_over_limit(self):
         assert path_over_length("C:/" + "a" * MAX_PATH_LEN)
+
+
+class TestSlugFilename:
+    def test_slugs_stem_preserves_extension(self):
+        assert slug_filename("Cold Giant last time hollowed.stl") == "cold-giant-last-time-hollowed.stl"
+
+    def test_extension_lowercased(self):
+        assert slug_filename("Model.STL") == "model.stl"
+
+    def test_multiple_dots_uses_last_as_extension_boundary(self):
+        assert slug_filename("Model.v2.stl") == "model-v2.stl"
+
+    def test_no_extension_slugs_in_full(self):
+        assert slug_filename("README") == "readme"
+
+    def test_accents_stripped(self):
+        assert slug_filename("Pokémon.stl") == "pokemon.stl"

@@ -45,3 +45,23 @@ describe("LibraryTab reorganize feature flag", () => {
     expect(updateMock).toHaveBeenCalledWith({ reorganize_enabled: true });
   });
 });
+
+describe("LibraryTab filename slugify setting", () => {
+  beforeEach(() => {
+    settings = mkSettings();
+    vi.clearAllMocks();
+  });
+
+  it("toggling it on persists reorganize_slugify_filenames=true", async () => {
+    settings = mkSettings({ reorganize_slugify_filenames: false });
+    renderTab();
+    await userEvent.click(screen.getByRole("checkbox", { name: /lowercase, hyphenated filenames/i }));
+    expect(updateMock).toHaveBeenCalledWith({ reorganize_slugify_filenames: true });
+  });
+
+  it("reflects an already-on setting as checked", () => {
+    settings = mkSettings({ reorganize_slugify_filenames: true });
+    renderTab();
+    expect(screen.getByRole("checkbox", { name: /lowercase, hyphenated filenames/i })).toBeChecked();
+  });
+});

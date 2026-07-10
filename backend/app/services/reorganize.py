@@ -24,7 +24,7 @@ from app.models import (
     PackOverride,
     ScanRoot,
 )
-from app.services.path_sanitize import path_over_length, sanitize_segment
+from app.services.path_sanitize import path_over_length, sanitize_segment, slug_filename
 from app.services.reorganize_template import VALID_FIELDS, parse_template, render_segments
 
 UNKNOWN_CREATOR = "_Unknown Creator"
@@ -153,6 +153,7 @@ def build_manifest(
     slugify_title: bool = False,
     slugify_all: bool = False,
     model_ids: list[int] | None = None,
+    slugify_filenames: bool = False,
 ) -> Manifest:
     """Build the reorganize preview manifest. Raises ReorganizeTemplateError on
     a malformed template (caller maps to 4xx).
@@ -166,7 +167,13 @@ def build_manifest(
     ``slugify_all`` renders every segment lowercase/hyphenated (import-style),
     overriding the narrower ``slugify_title`` (title-only) used by inbox import.
     ``model_ids``, when given, restricts the built entries to those models —
-    the collision/overlap passes then only run over that subset."""
+    the collision/overlap passes then only run over that subset.
+
+    ``slugify_filenames`` (#946) additionally renders each STL's own filename
+    lowercase/hyphenated (e.g. "Cold Giant.stl" -> "cold-giant.stl") — a
+    separate, independent toggle from ``slugify_all``/``slugify_title``, which
+    only ever touch directory segments. Gallery image filenames are left
+    untouched; this only applies to STL files."""
     overrides = overrides or {}
     segments = parse_template(template)
     canonical_template = "/".join(segments)
@@ -247,7 +254,8 @@ def build_manifest(
         entries.append(_build_entry(m, segments, root_keys, pack_paths,
                                     overrides.get(m.id), _dest_for(m),
                                     slugify_title=slugify_title,
-                                    slugify_all=slugify_all))
+                                    slugify_all=slugify_all,
+                                    slugify_filenames=slugify_filenames))
 
     _detect_collisions(entries)
     _detect_overlaps(entries)
@@ -263,6 +271,7 @@ def _build_entry(
     dest_root: str | None = None,
     slugify_title: bool = False,
     slugify_all: bool = False,
+    slugify_filenames: bool = False,
 ) -> Entry:
     # User resolutions (Phase 2c) take precedence over model metadata and clear
     # the corresponding 'missing' flag.
@@ -354,10 +363,13 @@ def _build_entry(
         is_symlink = is_symlink or link
         missing_files_on_disk = missing_files_on_disk or is_missing
         src_dirs.add(_key(_parent(f.path)))
+        dest_filename = f.filename or os.path.basename(f.path or "")
+        if slugify_filenames and dest_filename:
+            dest_filename = slug_filename(dest_filename)
         files.append(FileMove(
             stl_file_id=f.id,
             current_path=_canon(f.path),
-            proposed_path=_canon(proposed_dir + "/" + (f.filename or os.path.basename(f.path or ""))),
+            proposed_path=_canon(proposed_dir + "/" + dest_filename),
             size_bytes=size,
             mtime_ns=mtime_ns,
             content_hash=None,
@@ -439,6 +451,17 @@ def _build_entry(
             escapes = True
 
     kind = _classify_kind(current_dir, proposed_dir)
+    # A directory classified "in_place" can still have STL files that need
+    # renaming (slugify_filenames on) — the frontend treats "in_place" as
+    # nothing-to-do and excludes it from selection entirely, so a filename-only
+    # change must not be reported as "in_place" or it would never get applied.
+    # "rename" already means "no directory move needed, just a leaf name
+    # change" for the directory-classification case above; reusing it here
+    # covers the file-level equivalent with the same meaning.
+    if kind == "in_place" and any(
+        f.kind == "stl" and _key(f.current_path) != _key(f.proposed_path) for f in files
+    ):
+        kind = "rename"
 
     unclassifiable = bool(missing)
     eligible = not (

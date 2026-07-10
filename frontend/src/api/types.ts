@@ -280,6 +280,9 @@ export interface AppSettings {
   // lowercase/hyphenated (import-style) rather than case-preserving.
   reorganize_template: string;
   reorganize_slugify: boolean;
+  // Independent of reorganize_slugify (directory segments only): also renders
+  // each STL's own filename lowercase/hyphenated on reorganize/import-apply.
+  reorganize_slugify_filenames: boolean;
   // Feature flag: gates the Reorganize Library feature end-to-end (UI + the
   // destructive apply/undo writes). Off by default; toggled on the Library tab.
   reorganize_enabled: boolean;

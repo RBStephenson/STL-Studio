@@ -554,6 +554,11 @@ class AppSettingsRead(BaseModel):
     # lowercase/hyphenated (import-style) rather than case-preserving.
     reorganize_template: str = ""
     reorganize_slugify: bool = True
+    # Independent of reorganize_slugify (directory segments only): also
+    # renders each STL's own filename lowercase/hyphenated on reorganize and
+    # import-apply. Off by default — renaming files on disk is a bigger step
+    # than renaming directories, so this is opt-in.
+    reorganize_slugify_filenames: bool = False
     # Feature flag: gates the Library reorganize feature end-to-end — the UI
     # (nav link, /reorganize route/page) AND the destructive apply/undo writes.
     # Default off; toggled from the Library settings tab. Retires the old
@@ -599,6 +604,7 @@ class AppSettingsUpdate(BaseModel):
     log_level: Optional[str] = Field(None, pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
     reorganize_template: Optional[str] = Field(None, max_length=500)
     reorganize_slugify: Optional[bool] = None
+    reorganize_slugify_filenames: Optional[bool] = None
     reorganize_enabled: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
 

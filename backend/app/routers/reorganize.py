@@ -92,6 +92,15 @@ def _slugify_all(db: Session) -> bool:
     return bool(row.value) if row is not None else True
 
 
+def _slugify_filenames(db: Session) -> bool:
+    """Whether each STL's own filename also renders lowercase/hyphenated
+    (independent of _slugify_all, which only touches directory segments).
+    Defaults off (matches AppSettingsRead.reorganize_slugify_filenames) — an
+    opt-in, since it renames files on disk, not just directories."""
+    row = db.get(AppSetting, "reorganize_slugify_filenames")
+    return bool(row.value) if row is not None else False
+
+
 def _stored_template(db: Session, template: str | None) -> str | None:
     """An explicit template wins; otherwise fall back to the persisted setting
     (build_manifest itself falls back further to the built-in default)."""
@@ -109,17 +118,24 @@ def _build_and_persist(
     inbox_source: str | None = None,
     slugify_title: bool = False,
     slugify_all: bool | None = None,
+    slugify_filenames: bool | None = None,
 ) -> ReorganizePreviewResponse:
     """``slugify_all=None`` (the Reorganize page's own callers) defers to the
     persisted reorganize_slugify setting. A caller with its own, independent
     naming contract — e.g. import-apply, which must not silently follow
     whatever the Reorganize page's slug preference happens to be set to —
-    passes an explicit True/False instead."""
+    passes an explicit True/False instead. ``slugify_filenames`` follows the
+    same None-defers-to-setting convention, backed by its own independent
+    reorganize_slugify_filenames setting."""
     resolved_slugify_all = _slugify_all(db) if slugify_all is None else slugify_all
+    resolved_slugify_filenames = (
+        _slugify_filenames(db) if slugify_filenames is None else slugify_filenames
+    )
     try:
         manifest = reorganize.build_manifest(
             db, template, root_id, overrides, inbox_source,
             slugify_title=slugify_title, slugify_all=resolved_slugify_all,
+            slugify_filenames=resolved_slugify_filenames,
         )
     except ReorganizeTemplateError as e:
         raise HTTPException(status_code=400, detail=str(e))
