@@ -301,15 +301,15 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
       // Without this, mouse-selecting text in the inline rename input starts a
       // link-drag and drops the URL into the field instead of selecting text.
       draggable={false}
-      className={`group bg-gray-900 rounded-lg overflow-hidden border transition-colors flex flex-col h-full ${
+      className={`group bg-panel rounded-lg overflow-hidden border transition-colors flex flex-col h-full ${
         selected
-          ? "border-indigo-500 ring-1 ring-indigo-500/50"
+          ? "border-accent-start ring-1 ring-indigo-500/50"
           : focused
           ? "border-indigo-400 ring-2 ring-indigo-400"
-          : "border-gray-800 hover:border-indigo-500"
+          : "border-border-subtle hover:border-accent-start"
       }`}
     >
-      <div className="aspect-square bg-gray-800 relative overflow-hidden">
+      <div className="aspect-square bg-panel-secondary relative overflow-hidden">
         {cardImageUrl ? (
           <img
             src={cardImageUrl}
@@ -329,7 +329,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
         ) : (
           // Same treatment as the empty state on Model Detail's image panel
           // (ImageColumn.tsx) — one placeholder look across the app.
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center text-gray-700">
+          <div className="w-full h-full bg-panel flex items-center justify-center text-text-muted-alt">
             <Package size={48} />
           </div>
         )}
@@ -352,7 +352,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
         <button
           onClick={toggleNSFW}
           title={nsfw ? "Mark as SFW" : "Mark as NSFW"}
-          className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 hover:bg-black/90 text-xs px-2 py-0.5 rounded border border-gray-600 text-gray-300 hover:text-white"
+          className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 hover:bg-black/90 text-xs px-2 py-0.5 rounded border border-border-divider text-text-primary-alt2 hover:text-white"
         >
           {nsfw ? "SFW" : "NSFW"}
         </button>
@@ -363,7 +363,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             onClick={handleSelect}
             className={`absolute top-2 left-2 z-10 w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer transition-all ${
               selected
-                ? "bg-indigo-500 border-indigo-400 opacity-100"
+                ? "bg-accent-start border-indigo-400 opacity-100"
                 : "bg-black/60 border-gray-400 opacity-0 group-hover:opacity-100"
             }`}
           >
@@ -374,7 +374,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
         {/* Badges — offset right of checkbox when selectable */}
         <div className={`absolute top-2 flex flex-col gap-1 ${onSelect ? "left-9" : "left-2"}`}>
           {isNew && (
-            <span className="flex items-center gap-1 bg-indigo-500/90 text-white text-xs px-1.5 py-0.5 rounded font-medium">
+            <span className="flex items-center gap-1 bg-accent-start/90 text-white text-xs px-1.5 py-0.5 rounded font-medium">
               <Sparkles size={10} />
               New
             </span>
@@ -388,7 +388,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
           {isGroup && (
             <span
               title={groupExplain}
-              className="flex items-center gap-1 bg-indigo-600/90 text-white text-xs px-1.5 py-0.5 rounded font-medium"
+              className="flex items-center gap-1 bg-accent-end/90 text-white text-xs px-1.5 py-0.5 rounded font-medium"
             >
               <Layers size={10} />
               {variantCount} variants
@@ -407,7 +407,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
 
         <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
           {model.source_site && (
-            <span className="bg-black/70 text-xs px-1.5 py-0.5 rounded text-gray-300">
+            <span className="bg-black/70 text-xs px-1.5 py-0.5 rounded text-text-primary-alt2">
               {SITE_LABELS[model.source_site] ?? model.source_site}
             </span>
           )}
@@ -427,7 +427,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
                   ? "text-amber-400 opacity-100"
                   : printStatus === "printed"
                   ? "text-emerald-400 opacity-100"
-                  : "text-gray-400 opacity-0 group-hover:opacity-100"
+                  : "text-text-secondary opacity-0 group-hover:opacity-100"
               }`}
             >
               <Printer size={13} />
@@ -438,7 +438,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
               className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
                 favorite
                   ? "text-yellow-400 opacity-100"
-                  : "text-gray-400 hover:text-yellow-300 opacity-0 group-hover:opacity-100"
+                  : "text-text-secondary hover:text-yellow-300 opacity-0 group-hover:opacity-100"
               }`}
             >
               <Star size={13} fill={favorite ? "currentColor" : "none"} />
@@ -449,7 +449,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
               className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
                 excludedView
                   ? "text-emerald-400 opacity-100 hover:text-emerald-300"
-                  : "text-gray-400 hover:text-red-300 opacity-0 group-hover:opacity-100"
+                  : "text-text-secondary hover:text-red-300 opacity-0 group-hover:opacity-100"
               }`}
             >
               {excludedView ? <RotateCcw size={13} /> : <EyeOff size={13} />}
@@ -476,11 +476,11 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             }}
             onBlur={commitRename}
             aria-label={isGroup ? "Rename group" : "Rename model"}
-            className="text-sm font-medium bg-gray-800 border border-indigo-500 rounded px-1 py-0.5 text-gray-100 focus:outline-none"
+            className="text-sm font-medium bg-panel-secondary border border-accent-start rounded px-1 py-0.5 text-text-primary focus:outline-none"
           />
         ) : (
           <p
-            className="text-sm font-medium truncate text-gray-100"
+            className="text-sm font-medium truncate text-text-primary"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); startRename(); }}
             title={isGroup ? "Double-click to rename this group" : "Double-click to rename"}
@@ -495,14 +495,14 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
               <span
                 title="Print-support status"
                 className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                  SUPPORT_STATUS_STYLE[attrs.support_status] ?? "bg-gray-800 text-gray-400"
+                  SUPPORT_STATUS_STYLE[attrs.support_status] ?? "bg-panel-secondary text-text-secondary"
                 }`}
               >
                 {SUPPORT_STATUS_LABEL[attrs.support_status] ?? attrs.support_status}
               </span>
             )}
             {secondaryAttrs.map((a) => (
-              <span key={a} className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 capitalize">
+              <span key={a} className="text-xs px-1.5 py-0.5 rounded bg-panel-secondary text-text-secondary capitalize">
                 {a}
               </span>
             ))}
@@ -515,7 +515,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
               <span
                 key={tag}
                 className={`text-xs px-1.5 py-0.5 rounded ${
-                  TAG_COLORS[tag] ?? "bg-gray-800 text-gray-400"
+                  TAG_COLORS[tag] ?? "bg-panel-secondary text-text-secondary"
                 }`}
               >
                 {tag}
@@ -531,7 +531,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
           </div>
           <div className="flex items-center gap-1.5 ml-auto">
             {model.like_count != null && (
-              <span title="Likes on the source site" className="flex items-center gap-0.5 text-xs text-gray-500">
+              <span title="Likes on the source site" className="flex items-center gap-0.5 text-xs text-text-secondary-alt">
                 <Heart size={11} fill="currentColor" />
                 {model.like_count.toLocaleString()}
               </span>
@@ -544,7 +544,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
               className={`p-1 rounded transition-all ${
                 popoverOpen
                   ? "text-indigo-400 bg-indigo-900/40 opacity-100"
-                  : "text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  : "text-text-muted hover:text-text-primary-alt2 opacity-0 group-hover:opacity-100 focus:opacity-100"
               }`}
             >
               <MoreHorizontal size={13} />

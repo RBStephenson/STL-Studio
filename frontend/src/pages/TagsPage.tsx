@@ -124,26 +124,26 @@ export default function TagsPage() {
           <h1 className="text-2xl font-bold text-white">Tag Management</h1>
           <HelpLink section="tags" />
         </div>
-        <span className="text-sm text-gray-500">{tags.length} tags</span>
+        <span className="text-sm text-text-secondary-alt">{tags.length} tags</span>
       </div>
 
       <div className="relative mb-4">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary-alt pointer-events-none" />
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Filter tags…"
-          className="w-full pl-8 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+          className="w-full pl-8 pr-3 py-2 bg-panel-secondary border border-border rounded-lg text-sm text-text-primary placeholder-gray-600 focus:outline-none focus:border-accent-start"
         />
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 size={24} className="text-gray-500 animate-spin" />
+          <Loader2 size={24} className="text-text-secondary-alt animate-spin" />
         </div>
       ) : filtered.length === 0 ? (
-        <p className="text-center text-gray-500 py-16">
+        <p className="text-center text-text-secondary-alt py-16">
           {search ? `No tags match "${search}"` : "No tags found."}
         </p>
       ) : (
@@ -157,12 +157,12 @@ export default function TagsPage() {
             return (
               <div
                 key={row.tag}
-                className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3"
+                className="bg-panel border border-border-subtle rounded-lg px-4 py-3"
               >
                 {/* Main row */}
                 <div className="flex items-center gap-3">
-                  <span className="flex-1 font-mono text-sm text-gray-200">{row.tag}</span>
-                  <span className="text-xs text-gray-500 tabular-nums w-16 text-right">
+                  <span className="flex-1 font-mono text-sm text-text-primary-alt">{row.tag}</span>
+                  <span className="text-xs text-text-secondary-alt tabular-nums w-16 text-right">
                     {row.count} {row.count === 1 ? "model" : "models"}
                   </span>
                   <div className="flex items-center gap-1 shrink-0">
@@ -171,7 +171,7 @@ export default function TagsPage() {
                       title="Rename"
                       aria-label={`Rename tag ${row.tag}`}
                       className={`p-1.5 rounded transition-colors ${
-                        isRenaming ? "text-indigo-400 bg-indigo-900/30" : "text-gray-500 hover:text-indigo-300 hover:bg-gray-800"
+                        isRenaming ? "text-indigo-400 bg-indigo-900/30" : "text-text-secondary-alt hover:text-indigo-300 hover:bg-panel-secondary"
                       }`}
                     >
                       <Pencil size={13} />
@@ -181,7 +181,7 @@ export default function TagsPage() {
                       title="Merge into another tag"
                       aria-label={`Merge tag ${row.tag}`}
                       className={`p-1.5 rounded transition-colors ${
-                        isMerging ? "text-amber-400 bg-amber-900/20" : "text-gray-500 hover:text-amber-300 hover:bg-gray-800"
+                        isMerging ? "text-amber-400 bg-amber-900/20" : "text-text-secondary-alt hover:text-amber-300 hover:bg-panel-secondary"
                       }`}
                     >
                       <GitMerge size={13} />
@@ -191,7 +191,7 @@ export default function TagsPage() {
                       disabled={isDeleting}
                       title="Delete"
                       aria-label={`Delete tag ${row.tag}`}
-                      className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors disabled:opacity-40"
+                      className="p-1.5 rounded text-text-secondary-alt hover:text-red-400 hover:bg-panel-secondary transition-colors disabled:opacity-40"
                     >
                       {isDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                     </button>
@@ -211,17 +211,17 @@ export default function TagsPage() {
                       }}
                       autoFocus
                       placeholder="New tag name…"
-                      className="flex-1 bg-gray-800 border border-gray-600 rounded px-2.5 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                      className="flex-1 bg-panel-secondary border border-border-divider rounded px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent-start"
                     />
                     <button
                       onClick={() => submitRename(row.tag)}
                       disabled={renameSaving || !renameValue.trim()}
                       aria-label="Confirm rename"
-                      className="p-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 transition-colors"
+                      className="p-1.5 rounded bg-accent-end hover:bg-accent-start text-white disabled:opacity-40 transition-colors"
                     >
                       {renameSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
                     </button>
-                    <button onClick={cancelRename} aria-label="Cancel rename" className="p-1.5 rounded text-gray-500 hover:text-gray-200 transition-colors">
+                    <button onClick={cancelRename} aria-label="Cancel rename" className="p-1.5 rounded text-text-secondary-alt hover:text-text-primary-alt transition-colors">
                       <X size={13} />
                     </button>
                   </div>
@@ -233,7 +233,7 @@ export default function TagsPage() {
                     <select
                       value={mergeTarget}
                       onChange={(e) => setMergeTarget(e.target.value)}
-                      className="flex-1 bg-gray-800 border border-gray-600 rounded px-2.5 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-amber-500"
+                      className="flex-1 bg-panel-secondary border border-border-divider rounded px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-amber-500"
                     >
                       <option value="">Merge into…</option>
                       {otherTags.map((t) => (
@@ -248,7 +248,7 @@ export default function TagsPage() {
                     >
                       {mergeSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
                     </button>
-                    <button onClick={cancelMerge} aria-label="Cancel merge" className="p-1.5 rounded text-gray-500 hover:text-gray-200 transition-colors">
+                    <button onClick={cancelMerge} aria-label="Cancel merge" className="p-1.5 rounded text-text-secondary-alt hover:text-text-primary-alt transition-colors">
                       <X size={13} />
                     </button>
                   </div>

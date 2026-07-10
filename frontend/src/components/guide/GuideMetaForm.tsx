@@ -140,8 +140,8 @@ export default function GuideMetaForm({
     });
   };
 
-  const field = "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none";
-  const labelCls = "block text-xs font-medium text-gray-400 mb-1";
+  const field = "w-full bg-panel border border-border rounded px-3 py-2 text-sm text-text-primary focus:border-indigo-600 focus:outline-none";
+  const labelCls = "block text-xs font-medium text-text-secondary mb-1";
 
   return (
     <form
@@ -227,8 +227,8 @@ export default function GuideMetaForm({
         <textarea id="guide-philosophy" rows={3} className={field} value={philosophy} onChange={(e) => setPhilosophy(e.target.value)} />
       </div>
 
-      <fieldset className="border border-gray-800 rounded p-3">
-        <legend className="text-xs font-medium text-gray-400 px-1">Creator credit</legend>
+      <fieldset className="border border-border-subtle rounded p-3">
+        <legend className="text-xs font-medium text-text-secondary px-1">Creator credit</legend>
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <label className={labelCls} htmlFor="credit-name">Name</label>
@@ -249,9 +249,9 @@ export default function GuideMetaForm({
         <label className={labelCls} htmlFor="guide-tag-draft">Technique tags</label>
         <div className="flex flex-wrap gap-1.5 mb-2">
           {tags.map((t) => (
-            <span key={t} className="inline-flex items-center gap-1 text-xs bg-gray-800 border border-gray-700 rounded px-2 py-0.5 text-gray-200">
+            <span key={t} className="inline-flex items-center gap-1 text-xs bg-panel-secondary border border-border rounded px-2 py-0.5 text-text-primary-alt">
               #{t}
-              <button type="button" aria-label={`Remove ${t}`} onClick={() => setTags(tags.filter((x) => x !== t))} className="text-gray-500 hover:text-rose-400">
+              <button type="button" aria-label={`Remove ${t}`} onClick={() => setTags(tags.filter((x) => x !== t))} className="text-text-secondary-alt hover:text-rose-400">
                 <X size={12} />
               </button>
             </span>
@@ -271,9 +271,9 @@ export default function GuideMetaForm({
         <label className={labelCls} htmlFor="guide-line-draft">Paint lines used</label>
         <div className="flex flex-wrap gap-1.5 mb-2">
           {lines.map((l) => (
-            <span key={l.name} className="inline-flex items-center gap-1 text-xs bg-gray-800 border border-gray-700 rounded px-2 py-0.5 text-gray-200">
+            <span key={l.name} className="inline-flex items-center gap-1 text-xs bg-panel-secondary border border-border rounded px-2 py-0.5 text-text-primary-alt">
               {l.name}
-              <button type="button" aria-label={`Remove ${l.name}`} onClick={() => setLines(lines.filter((x) => x.name !== l.name))} className="text-gray-500 hover:text-rose-400">
+              <button type="button" aria-label={`Remove ${l.name}`} onClick={() => setLines(lines.filter((x) => x.name !== l.name))} className="text-text-secondary-alt hover:text-rose-400">
                 <X size={12} />
               </button>
             </span>
@@ -289,12 +289,12 @@ export default function GuideMetaForm({
         />
       </div>
 
-      <details className="border border-gray-800 rounded">
-        <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-300">
+      <details className="border border-border-subtle rounded">
+        <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-text-primary-alt2">
           Theme
         </summary>
         <div className="px-3 pb-3 pt-1">
-          <p className="text-xs text-gray-500 mb-3">
+          <p className="text-xs text-text-secondary-alt mb-3">
             Customize this guide's colors. Leave fields blank to inherit the
             default theme from Settings.
           </p>
@@ -306,7 +306,7 @@ export default function GuideMetaForm({
         <button
           type="submit"
           disabled={busy}
-          className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 bg-accent-end hover:bg-accent-start text-white text-sm px-4 py-2 rounded transition-colors disabled:opacity-50"
         >
           {submitLabel}
         </button>
@@ -314,7 +314,7 @@ export default function GuideMetaForm({
           type="button"
           onClick={onCancel}
           disabled={busy}
-          className="text-sm text-gray-400 hover:text-gray-200 px-3 py-2"
+          className="text-sm text-text-secondary hover:text-text-primary-alt px-3 py-2"
         >
           Cancel
         </button>

@@ -54,7 +54,7 @@ export default function TagsPanel({
           />
           <button
             onClick={onDoneEditing}
-            className="text-xs text-gray-500 hover:text-gray-300 w-fit"
+            className="text-xs text-text-secondary-alt hover:text-text-primary-alt2 w-fit"
           >
             Done
           </button>
@@ -65,7 +65,7 @@ export default function TagsPanel({
             <Link
               key={tag}
               to={`/?tag=${encodeURIComponent(tag)}`}
-              className="flex items-center gap-1 text-xs bg-gray-800 text-gray-400 hover:bg-indigo-950 hover:text-indigo-300 hover:border-indigo-700 border border-transparent px-2 py-1 rounded-full transition-colors"
+              className="flex items-center gap-1 text-xs bg-panel-secondary text-text-secondary hover:bg-indigo-950 hover:text-indigo-300 hover:border-indigo-700 border border-transparent px-2 py-1 rounded-full transition-colors"
             >
               <Tag size={10} />
               {tag}
@@ -74,7 +74,7 @@ export default function TagsPanel({
           <button
             onClick={onOpenEditor}
             title="Add or remove tags"
-            className="flex items-center gap-1 text-xs text-gray-500 hover:text-indigo-300 border border-dashed border-gray-700 hover:border-indigo-700 px-2 py-1 rounded-full transition-colors"
+            className="flex items-center gap-1 text-xs text-text-secondary-alt hover:text-indigo-300 border border-dashed border-border hover:border-indigo-700 px-2 py-1 rounded-full transition-colors"
           >
             <Plus size={10} />
             {tags.length > 0 ? "Edit tags" : "Add tag"}
@@ -86,34 +86,34 @@ export default function TagsPanel({
           (suppressed tags survive rescans), click label to browse */}
       {visibleAutoTags.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <p className="text-xs text-gray-600">Auto-detected · click + to add as tag · × to remove · click label to browse</p>
+          <p className="text-xs text-text-muted">Auto-detected · click + to add as tag · × to remove · click label to browse</p>
           <div className="flex flex-wrap gap-1.5">
             {visibleAutoTags.map((tag) => {
               const already = tags.includes(tag);
               return (
-                <div key={tag} className="flex items-center rounded-full border overflow-hidden border-gray-700">
+                <div key={tag} className="flex items-center rounded-full border overflow-hidden border-border">
                   <button
                     onClick={() => onAdd(tag)}
                     disabled={already}
                     title={already ? "Already a tag" : "Add as user tag"}
-                    className={`flex items-center px-1.5 py-0.5 text-xs border-r border-gray-700 transition-colors ${
+                    className={`flex items-center px-1.5 py-0.5 text-xs border-r border-border transition-colors ${
                       already
                         ? "bg-indigo-900/30 text-indigo-500 cursor-default"
-                        : "bg-gray-800/60 text-gray-500 hover:bg-indigo-950 hover:text-indigo-400"
+                        : "bg-panel-secondary/60 text-text-secondary-alt hover:bg-indigo-950 hover:text-indigo-400"
                     }`}
                   >
                     {already ? <Tag size={9} /> : <Plus size={9} />}
                   </button>
                   <Link
                     to={`/?tag=${encodeURIComponent(tag)}`}
-                    className="flex items-center px-2 py-0.5 text-xs bg-gray-800/60 text-gray-500 hover:bg-indigo-950 hover:text-indigo-300 transition-colors"
+                    className="flex items-center px-2 py-0.5 text-xs bg-panel-secondary/60 text-text-secondary-alt hover:bg-indigo-950 hover:text-indigo-300 transition-colors"
                   >
                     {tag}
                   </Link>
                   <button
                     onClick={() => onSuppress(tag)}
                     title="Remove this auto-detected tag"
-                    className="flex items-center px-1.5 py-0.5 text-xs border-l border-gray-700 bg-gray-800/60 text-gray-600 hover:bg-rose-950 hover:text-rose-400 transition-colors"
+                    className="flex items-center px-1.5 py-0.5 text-xs border-l border-border bg-panel-secondary/60 text-text-muted hover:bg-rose-950 hover:text-rose-400 transition-colors"
                   >
                     <X size={9} />
                   </button>
@@ -131,7 +131,7 @@ export default function TagsPanel({
         <div className="flex flex-col gap-1.5">
           <button
             onClick={onToggleHidden}
-            className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-400 transition-colors w-fit"
+            className="flex items-center gap-1 text-xs text-text-muted hover:text-text-secondary transition-colors w-fit"
           >
             {showHiddenTags ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             {hidden.length} hidden auto-{hidden.length === 1 ? "tag" : "tags"}
@@ -143,7 +143,7 @@ export default function TagsPanel({
                   key={tag}
                   onClick={() => onRestore(tag)}
                   title="Restore this auto-detected tag"
-                  className="flex items-center gap-1 rounded-full border border-gray-800 px-2 py-0.5 text-xs bg-gray-900/60 text-gray-600 line-through hover:no-underline hover:border-emerald-800 hover:bg-emerald-950 hover:text-emerald-400 transition-colors"
+                  className="flex items-center gap-1 rounded-full border border-border-subtle px-2 py-0.5 text-xs bg-panel/60 text-text-muted line-through hover:no-underline hover:border-emerald-800 hover:bg-emerald-950 hover:text-emerald-400 transition-colors"
                 >
                   <Plus size={9} />
                   {tag}

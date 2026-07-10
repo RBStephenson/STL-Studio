@@ -58,7 +58,7 @@ export default function GuideEditorPage() {
     <div className="max-w-3xl mx-auto px-4 py-8">
       <Link
         to={isNew ? "/painting/guides" : `/painting/guides/${id}`}
-        className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 mb-4"
+        className="inline-flex items-center gap-1 text-xs text-text-secondary-alt hover:text-text-primary-alt2 mb-4"
       >
         <ArrowLeft size={14} /> {isNew ? "All guides" : "Back to guide"}
       </Link>
@@ -66,7 +66,7 @@ export default function GuideEditorPage() {
         {isNew ? "New guide" : "Edit guide"}
       </h1>
 
-      {loading && <p className="text-sm text-gray-500">Loading…</p>}
+      {loading && <p className="text-sm text-text-secondary-alt">Loading…</p>}
       {loadError && <p role="alert" className="text-sm text-rose-400">{loadError}</p>}
 
       {!loading && !loadError && (

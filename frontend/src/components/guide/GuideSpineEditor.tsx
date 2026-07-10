@@ -222,18 +222,18 @@ function move<T>(arr: T[], i: number, dir: -1 | 1): T[] {
 const removeAt = <T,>(arr: T[], i: number) => arr.filter((_, idx) => idx !== i);
 const replaceAt = <T,>(arr: T[], i: number, v: T) => arr.map((x, idx) => (idx === i ? v : x));
 
-const field = "w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none";
-const labelCls = "block text-[11px] font-medium text-gray-500 mb-0.5";
-const gripCls = "cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-400 touch-none flex-shrink-0 p-0.5";
+const field = "w-full bg-panel border border-border rounded px-2 py-1 text-sm text-text-primary focus:border-indigo-600 focus:outline-none";
+const labelCls = "block text-[11px] font-medium text-text-secondary-alt mb-0.5";
+const gripCls = "cursor-grab active:cursor-grabbing text-text-muted hover:text-text-secondary touch-none flex-shrink-0 p-0.5";
 
 interface RowControls { onUp: () => void; onDown: () => void; onRemove: () => void; removeLabel: string; }
 
 function RowButtons({ onUp, onDown, onRemove, removeLabel }: RowControls) {
   return (
     <div className="flex items-center gap-1">
-      <button type="button" aria-label="Move up" onClick={onUp} className="text-gray-500 hover:text-gray-200"><ChevronUp size={15} /></button>
-      <button type="button" aria-label="Move down" onClick={onDown} className="text-gray-500 hover:text-gray-200"><ChevronDown size={15} /></button>
-      <button type="button" aria-label={removeLabel} onClick={onRemove} className="text-gray-500 hover:text-rose-400"><Trash2 size={14} /></button>
+      <button type="button" aria-label="Move up" onClick={onUp} className="text-text-secondary-alt hover:text-text-primary-alt"><ChevronUp size={15} /></button>
+      <button type="button" aria-label="Move down" onClick={onDown} className="text-text-secondary-alt hover:text-text-primary-alt"><ChevronDown size={15} /></button>
+      <button type="button" aria-label={removeLabel} onClick={onRemove} className="text-text-secondary-alt hover:text-rose-400"><Trash2 size={14} /></button>
     </div>
   );
 }
@@ -289,12 +289,12 @@ function SwatchRow({ value, onChange, dragHandle, ...ctl }: { value: DraftSwatch
       )}
       <input
         aria-label="Value %" type="number" min={0} max={100} placeholder="val%"
-        className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:border-indigo-600 focus:outline-none"
+        className="w-16 bg-panel border border-border rounded px-2 py-1 text-xs text-text-primary focus:border-indigo-600 focus:outline-none"
         value={value.value_pct} onChange={(e) => onChange({ ...value, value_pct: e.target.value })}
       />
       <input
         aria-label="Role label" placeholder="role (e.g. base, highlight)"
-        className="flex-1 min-w-[8rem] bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:border-indigo-600 focus:outline-none"
+        className="flex-1 min-w-[8rem] bg-panel border border-border rounded px-2 py-1 text-xs text-text-primary focus:border-indigo-600 focus:outline-none"
         value={value.role_label} onChange={(e) => onChange({ ...value, role_label: e.target.value })}
       />
       <RowButtons {...ctl} />
@@ -320,10 +320,10 @@ function MixCompRow({ value, onChange, onRemove }: { value: DraftMixComp; onChan
       )}
       <input
         aria-label="Parts" type="number" min={1} step="any" placeholder="parts"
-        className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:border-indigo-600 focus:outline-none"
+        className="w-16 bg-panel border border-border rounded px-2 py-1 text-xs text-text-primary focus:border-indigo-600 focus:outline-none"
         value={value.parts} onChange={(e) => onChange({ ...value, parts: e.target.value })}
       />
-      <button type="button" aria-label="Remove mix component" onClick={onRemove} className="text-gray-500 hover:text-rose-400"><Trash2 size={14} /></button>
+      <button type="button" aria-label="Remove mix component" onClick={onRemove} className="text-text-secondary-alt hover:text-rose-400"><Trash2 size={14} /></button>
     </div>
   );
 }
@@ -338,7 +338,7 @@ function MixEditor({ value, onChange }: { value: DraftMixComp[]; onChange: (v: D
   return (
     <div className="space-y-1.5">
       <label className={labelCls}>
-        Mix {value.length >= 2 && ratio && <span className="text-gray-600">(ratio {ratio})</span>}
+        Mix {value.length >= 2 && ratio && <span className="text-text-muted">(ratio {ratio})</span>}
       </label>
       {value.map((m, i) => (
         <MixCompRow
@@ -376,7 +376,7 @@ function StepEditor({ value, onChange, anchorId, dragHandle, ...ctl }: { value: 
 
   return (
     // `id` is the jump-to-node target for validation flags (#489).
-    <div id={anchorId} className="border border-gray-800 rounded p-3 bg-gray-950/40 space-y-2 scroll-mt-6">
+    <div id={anchorId} className="border border-border-subtle rounded p-3 bg-panel-inset/40 space-y-2 scroll-mt-6">
       <div className="flex items-start gap-2">
         {dragHandle}
         <input aria-label="Step title" placeholder="Step title *" className={field} value={value.title} onChange={(e) => set({ title: e.target.value })} />
@@ -452,13 +452,13 @@ function PhaseEditor({ value, onChange, tabIndex, phaseIndex, dragHandle, ...ctl
   };
 
   return (
-    <div className="border border-gray-800 rounded p-3 bg-gray-900/40 space-y-2">
+    <div className="border border-border-subtle rounded p-3 bg-panel/40 space-y-2">
       <div className="flex items-center gap-2">
         {dragHandle}
         <input aria-label="Phase label" placeholder="Phase label (optional)" className={field} value={value.label} onChange={(e) => set({ label: e.target.value })} />
         <RowButtons {...ctl} />
       </div>
-      <div className="space-y-2 pl-2 border-l border-gray-800">
+      <div className="space-y-2 pl-2 border-l border-border-subtle">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onStepDragEnd}>
           <SortableContext items={value.steps.map((s) => s._key)} strategy={verticalListSortingStrategy}>
             {value.steps.map((s, i) => (
@@ -504,7 +504,7 @@ function TabEditor({ value, onChange, tabIndex, dragHandle, ...ctl }: { value: D
   };
 
   return (
-    <div className="border border-gray-700 rounded-lg p-3 bg-gray-900 space-y-3">
+    <div className="border border-border rounded-lg p-3 bg-panel space-y-3">
       <div className="flex items-center gap-2">
         {dragHandle}
         <input aria-label="Tab name" placeholder="Tab name *" className={`${field} font-medium`} value={value.name} onChange={(e) => set({ name: e.target.value })} />
@@ -514,7 +514,7 @@ function TabEditor({ value, onChange, tabIndex, dragHandle, ...ctl }: { value: D
         <div><label className={labelCls}>Section heading</label><input className={field} value={value.heading} onChange={(e) => set({ heading: e.target.value })} /></div>
         <div><label className={labelCls}>Section intro</label><input className={field} value={value.intro} onChange={(e) => set({ intro: e.target.value })} /></div>
       </div>
-      <div className="space-y-2 pl-2 border-l border-gray-700">
+      <div className="space-y-2 pl-2 border-l border-border">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onPhaseDragEnd}>
           <SortableContext items={value.phases.map((p) => p._key)} strategy={verticalListSortingStrategy}>
             {value.phases.map((p, i) => (
@@ -622,17 +622,17 @@ export default function GuideSpineEditor({ initialTabs, busy, error, onSave, onC
       <button
         type="button"
         onClick={() => setTabs((cur) => [...cur, { _key: nextKey(), name: "", dom_id: "", heading: "", intro: "", phases: [] }])}
-        className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+        className="inline-flex items-center gap-1.5 bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt text-sm px-3 py-1.5 rounded transition-colors"
       >
         <Plus size={15} /> Add tab
       </button>
 
       <div className="flex items-center gap-2 pt-2">
         <button type="button" onClick={save} disabled={busy}
-          className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded transition-colors disabled:opacity-50">
+          className="inline-flex items-center gap-1.5 bg-accent-end hover:bg-accent-start text-white text-sm px-4 py-2 rounded transition-colors disabled:opacity-50">
           Save content
         </button>
-        <button type="button" onClick={onCancel} disabled={busy} className="text-sm text-gray-400 hover:text-gray-200 px-3 py-2">Cancel</button>
+        <button type="button" onClick={onCancel} disabled={busy} className="text-sm text-text-secondary hover:text-text-primary-alt px-3 py-2">Cancel</button>
       </div>
     </div>
   );

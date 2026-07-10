@@ -81,16 +81,16 @@ export default function ReferenceImageUpload({
           <img
             src={api.painting.guides.referenceImageUrl(guideId, referenceImageId)}
             alt="Reference"
-            className="max-h-48 rounded-lg border border-gray-700 object-contain"
+            className="max-h-48 rounded-lg border border-border object-contain"
           />
           {busy && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
-              <Loader2 size={20} className="animate-spin text-gray-200" />
+              <Loader2 size={20} className="animate-spin text-text-primary-alt" />
             </div>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-1.5 text-xs text-gray-300 border border-gray-700 rounded px-2.5 py-1.5 cursor-pointer hover:border-indigo-600">
+          <label className="inline-flex items-center gap-1.5 text-xs text-text-primary-alt2 border border-border rounded px-2.5 py-1.5 cursor-pointer hover:border-indigo-600">
             <RefreshCw size={13} /> Replace
             <input
               type="file"
@@ -121,12 +121,12 @@ export default function ReferenceImageUpload({
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
       className={`flex flex-col items-center gap-2 border border-dashed rounded-lg px-6 py-6 text-center transition-colors ${
-        busy ? "opacity-60 border-gray-700" : "cursor-pointer"
-      } ${dragOver ? "border-indigo-500 bg-indigo-950/30" : "border-gray-700 hover:border-indigo-600"}`}
+        busy ? "opacity-60 border-border" : "cursor-pointer"
+      } ${dragOver ? "border-accent-start bg-indigo-950/30" : "border-border hover:border-indigo-600"}`}
     >
       {busy ? <Loader2 size={20} className="animate-spin text-indigo-400" /> : <ImagePlus size={20} className="text-indigo-400" />}
-      <span className="text-sm text-gray-300">{busy ? "Uploading…" : "Choose or drop a reference image"}</span>
-      <span className="text-xs text-gray-600">PNG, JPEG, WebP, or GIF — up to 10 MB</span>
+      <span className="text-sm text-text-primary-alt2">{busy ? "Uploading…" : "Choose or drop a reference image"}</span>
+      <span className="text-xs text-text-muted">PNG, JPEG, WebP, or GIF — up to 10 MB</span>
       <input
         type="file"
         accept={ACCEPT}
