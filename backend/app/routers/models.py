@@ -592,20 +592,15 @@ def _load_organize_config(db) -> "_OrganizeConfig":
     )
 
 
-def _normalize_type(suggested: str, existing: list[str]) -> str:
-    """Snap a suggested category to the closest existing one.
-
-    Handles case differences and singular/plural variants so the AI's "Accessory"
-    maps to an existing "Accessories" (and vice-versa) rather than creating a
-    duplicate category with a slightly different name.
-    """
-    if not existing:
-        return suggested
+def _snap_within(suggested: str, cats: list[str]) -> str | None:
+    """Exact (case-insensitive) match, then singular/plural fuzzy match,
+    against a single candidate list — shared by both passes in
+    _normalize_type below."""
     low = suggested.lower()
-    for cat in existing:
+    for cat in cats:
         if cat.lower() == low:
             return cat
-    for cat in existing:
+    for cat in cats:
         cl = cat.lower()
         if cl == low + "s" or cl == low + "es":
             return cat
@@ -615,7 +610,30 @@ def _normalize_type(suggested: str, existing: list[str]) -> str:
             return cat
         if cl.endswith("y") and low == cl[:-1] + "ies":
             return cat
-    return suggested
+    return None
+
+
+def _normalize_type(suggested: str, existing: list[str]) -> str:
+    """Snap a suggested category to the closest existing one.
+
+    Handles case differences and singular/plural variants so the AI's "Accessory"
+    maps to an existing "Accessories" (and vice-versa) rather than creating a
+    duplicate category with a slightly different name.
+
+    Canonical categories (ai_organize.CANONICAL_PART_TYPES) are checked
+    before any other already-in-DB category (#963): a stale, non-canonical
+    value left behind by an earlier bug — e.g. "Hand" applied before this
+    normalization existed — must never "shadow" the real canonical match
+    ("Hands") just because it happens to already be sitting in the database.
+    Without this split, "Hand" would exact-match itself in `existing` and
+    never reach the singular/plural check that maps it to "Hands".
+    """
+    if not existing:
+        return suggested
+    canonical_hit = _snap_within(suggested, ai_organize.CANONICAL_PART_TYPES)
+    if canonical_hit:
+        return canonical_hit
+    return _snap_within(suggested, existing) or suggested
 
 
 # User-facing copy for LLM outcomes that aren't a technical error (which
