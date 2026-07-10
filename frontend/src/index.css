@@ -63,6 +63,19 @@
     border-color: var(--color-accent-start);
     box-shadow: var(--shadow-focus-ring);
   }
+
+  /* Keyboard-only focus ring for interactive primitives (design/README.md
+     "New Since Last Handoff" — Focus-visible accessibility ring). Covers nav
+     buttons, tabs, chips, and cards without per-component classes, since
+     those primitives are all rendered as <button>/<a>/role="tab" elements. */
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  [role="tab"]:focus-visible {
+    outline: 2px solid var(--color-accent-start);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
 }
 
 /* Global micro-interaction utilities (design/README.md Micro-interactions
