@@ -956,8 +956,72 @@ def test_unit_strategy_end_to_end_with_grouped_response(monkeypatch):
     by_id = {s["id"]: s for s in res.suggestions}
     assert by_id[1]["part_type"] == "Royal Guard 1"
     assert by_id[2]["part_type"] == "Royal Guard 1"
-    assert by_id[1]["part_name"] == "Head"
-    assert by_id[2]["part_name"] == "Weapon"
+    # part_name is prefixed with the unit name (#941) so it's unambiguous
+    # wherever it's shown without part_type alongside it — the LLM's bare
+    # "Head" alone doesn't say which unit's head it is.
+    assert by_id[1]["part_name"] == "Royal Guard 1 Head"
+    assert by_id[2]["part_name"] == "Royal Guard 1 Weapon"
+
+
+def test_prefix_unit_name_composes_unit_and_part():
+    assert ai._prefix_unit_name("Royal Guard 1", "Head") == "Royal Guard 1 Head"
+
+
+def test_prefix_unit_name_avoids_double_prefixing():
+    """A model that ignores the prompt's "bare part label" instruction and
+    includes the unit name anyway must not get it prefixed twice."""
+    assert ai._prefix_unit_name("Royal Guard 1", "Royal Guard 1 Head") == "Royal Guard 1 Head"
+    # Case-insensitive: the model's casing may not match _to_pascal_case's.
+    assert ai._prefix_unit_name("Royal Guard 1", "royal guard 1 head") == "royal guard 1 head"
+
+
+def test_prefix_unit_name_passes_through_empty():
+    assert ai._prefix_unit_name("Royal Guard 1", "") == ""
+
+
+def test_unit_strategy_run_does_not_double_prefix_when_llm_already_included_unit_name(monkeypatch):
+    """End-to-end guard: if the LLM's part_name already starts with the unit
+    name despite the prompt, run() must not prefix it a second time."""
+    files = [{"id": 1, "filename": "Royal_Guard_1_Head.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"units": [
+        {"name": "Royal Guard 1", "members": [{"id": 1, "part_name": "Royal Guard 1 Head"}]},
+    ], "unknown": []})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    assert res.suggestions[0]["part_name"] == "Royal Guard 1 Head"
+
+
+def test_parts_strategy_part_name_is_not_prefixed(monkeypatch):
+    """The unit-name prefix is a unit-strategy-only behavior — "parts"
+    strategy's part_name (already just a category-scoped label like "Blade")
+    must pass through unchanged."""
+    files = [{"id": 1, "filename": "mystery_blob.stl", "part_type": None, "part_name": None}]
+    canned = json.dumps({"files": [
+        {"id": 1, "part_type": "Weapon", "part_name": "Blade", "sup_base_filename": None},
+    ]})
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": canned}}]}
+
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: _Resp())
+    res = ai.run(files, "http://ollama:11434", "llama3", "", api_type="openai", strategy="parts")
+
+    assert res.suggestions[0]["part_name"] == "Blade"
 
 
 def test_unit_strategy_skips_heuristic_pass(monkeypatch):
