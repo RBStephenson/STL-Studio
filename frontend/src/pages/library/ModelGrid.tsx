@@ -42,7 +42,7 @@ function DraggableCard({ model, draggingCreatorId, children }: {
     <div
       ref={setRefs}
       className={`relative group/drag rounded-lg transition-shadow ${isDragging ? "opacity-40" : ""} ${
-        validTarget ? "ring-2 ring-indigo-400" : ""
+        validTarget ? "ring-2 ring-accent-start" : ""
       }`}
     >
       <button
@@ -52,7 +52,7 @@ function DraggableCard({ model, draggingCreatorId, children }: {
           ? "Drag onto another card to merge these groups"
           : "Drag onto another model to group them as variants"}
         aria-label={isGroup ? "Drag to merge group" : "Drag to group"}
-        className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 hover:bg-black/90 text-gray-300 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/drag:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-400 outline-none transition-opacity"
+        className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 hover:bg-black/90 text-text-primary-alt2 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/drag:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent-start outline-none transition-opacity"
       >
         <GripVertical size={14} />
       </button>
@@ -115,9 +115,9 @@ export default function ModelGrid(props: ModelGridProps) {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         {Array.from({ length: 24 }).map((_, i) => (
-          <div key={i} className="aspect-square bg-gray-900 rounded-lg animate-pulse" />
+          <div key={i} className="aspect-square bg-panel rounded-lg animate-pulse" />
         ))}
       </div>
     );
@@ -125,7 +125,7 @@ export default function ModelGrid(props: ModelGridProps) {
 
   if (models.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-gray-600">
+      <div className="flex flex-col items-center justify-center py-24 text-text-muted">
         <p className="text-lg">No models found</p>
         <p className="text-sm mt-1">Try scanning your library or adjusting filters</p>
       </div>
@@ -134,7 +134,7 @@ export default function ModelGrid(props: ModelGridProps) {
 
   if (!dndEnabled) {
     return (
-      <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         <CardGrid {...props} />
       </div>
     );
@@ -149,7 +149,7 @@ export default function ModelGrid(props: ModelGridProps) {
       onDragEnd={onDragEnd}
       onDragCancel={onDragCancel}
     >
-      <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         {models.map((m, i) => (
           <DraggableCard key={m.id} model={m} draggingCreatorId={draggingModel?.creator_id ?? null}>
             <ModelCard
@@ -172,22 +172,22 @@ export default function ModelGrid(props: ModelGridProps) {
             ? api.fileUrl(draggingModel.thumbnail_path)
             : draggingModel.thumbnail_url;
           return (
-            <div className="relative w-32 rounded-lg overflow-hidden border-2 border-indigo-400 bg-gray-900 shadow-2xl shadow-black/60 rotate-2">
+            <div className="relative w-32 rounded-lg overflow-hidden border-2 border-accent-start bg-panel shadow-2xl shadow-black/60 rotate-2">
               {dragCount > 1 && (
-                <div className="absolute -top-2 -right-2 z-10 min-w-[1.5rem] px-1.5 py-0.5 rounded-full bg-indigo-500 text-white text-xs font-semibold text-center shadow-lg">
+                <div className="absolute -top-2 -right-2 z-10 min-w-[1.5rem] px-1.5 py-0.5 rounded-full bg-accent-start text-white text-xs font-semibold text-center shadow-lg">
                   {dragCount}
                 </div>
               )}
-              <div className="aspect-square bg-gray-800">
+              <div className="aspect-square bg-panel-secondary">
                 {thumb ? (
                   <img src={thumb} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-gray-600">
+                  <div className="w-full h-full flex items-center justify-center text-text-muted">
                     <Package size={32} />
                   </div>
                 )}
               </div>
-              <p className="p-1.5 text-xs font-medium truncate text-gray-100">
+              <p className="p-1.5 text-xs font-medium truncate text-text-primary">
                 {dragCount > 1
                   ? `Grouping ${dragCount} models…`
                   : draggingModel.title || draggingModel.name}

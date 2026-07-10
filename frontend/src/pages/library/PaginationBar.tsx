@@ -12,12 +12,12 @@ interface PaginationBarProps {
   className?: string;
 }
 
-export default function PaginationBar({ page, totalPages, onPage, className = "mt-8" }: PaginationBarProps) {
+export default function PaginationBar({ page, totalPages, onPage, className = "sticky bottom-4 mt-8" }: PaginationBarProps) {
   const [draft, setDraft] = useState(String(page));
 
   useEffect(() => { setDraft(String(page)); }, [page]);
 
-  const btnCls = "px-3 py-1.5 rounded bg-gray-900 border border-gray-700 text-sm disabled:opacity-40 hover:border-gray-500 transition-colors";
+  const btnCls = "px-4 py-2 rounded-lg bg-panel-inset border border-border-divider text-sm text-text-secondary disabled:opacity-40 hover:text-text-primary transition-colors";
 
   function commit(raw: string) {
     const n = parseInt(raw, 10);
@@ -25,9 +25,10 @@ export default function PaginationBar({ page, totalPages, onPage, className = "m
   }
 
   return (
-    <div className={`flex items-center justify-center gap-2 ${className}`}>
+    <div className={`z-10 flex items-center justify-center gap-2.5 w-fit mx-auto px-3 py-2.5 rounded-xl border border-border-subtle bg-panel-inset/85 backdrop-blur shadow-page-frame ${className}`}>
       <button onClick={() => onPage(page - 1)} disabled={page === 1} className={btnCls}>Prev</button>
-      <div className="flex items-center gap-1.5 text-sm text-gray-400">
+      <div className="flex items-center gap-1.5 text-sm text-text-muted">
+        <span>Page</span>
         <input
           type="text"
           inputMode="numeric"
@@ -35,7 +36,7 @@ export default function PaginationBar({ page, totalPages, onPage, className = "m
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => commit(draft)}
           onKeyDown={(e) => { if (e.key === "Enter") { commit(draft); (e.target as HTMLInputElement).blur(); } }}
-          className="w-12 text-center rounded bg-gray-900 border border-gray-600 py-1 text-sm text-white focus:outline-none focus:border-indigo-500"
+          className="w-12 text-center rounded bg-panel-secondary border border-border-divider py-1 text-sm text-text-primary focus:outline-none focus:border-accent-start"
         />
         <span>/ {totalPages}</span>
       </div>
