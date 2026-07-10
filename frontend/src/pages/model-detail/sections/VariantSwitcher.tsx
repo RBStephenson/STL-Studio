@@ -32,7 +32,7 @@ export default function VariantSwitcher({
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs text-gray-600 flex items-center gap-1.5">
+      <p className="text-xs text-text-muted flex items-center gap-1.5">
         <Layers size={12} className="text-indigo-400" />
         {variants.length} variants of {model.variant_group?.label ?? model.character}
       </p>
@@ -58,11 +58,11 @@ export default function VariantSwitcher({
               title={v.title || v.name}
               className={`relative shrink-0 w-20 rounded-lg overflow-hidden border-2 transition-colors ${
                 isCurrent
-                  ? "border-indigo-500"
-                  : "border-gray-800 hover:border-gray-600"
+                  ? "border-accent-start"
+                  : "border-border-subtle hover:border-border-divider"
               }`}
             >
-              <div className="aspect-square bg-gray-800">
+              <div className="aspect-square bg-panel-secondary">
                 {vThumb ? (
                   <img
                     src={vThumb}
@@ -70,7 +70,7 @@ export default function VariantSwitcher({
                     className={`w-full h-full object-cover ${vBlurred ? "blur-lg" : ""}`}
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-gray-700">
+                  <div className="w-full h-full flex items-center justify-center text-text-muted-alt">
                     <Package size={20} />
                   </div>
                 )}
@@ -94,7 +94,7 @@ export default function VariantSwitcher({
                   )}
                 </div>
               )}
-              <p className="px-1 py-0.5 text-[10px] leading-tight text-gray-400 truncate">
+              <p className="px-1 py-0.5 text-[10px] leading-tight text-text-secondary truncate">
                 {v.title || v.name}
               </p>
             </Link>
