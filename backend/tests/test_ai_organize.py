@@ -689,6 +689,72 @@ def test_parse_unit_suggestions_falls_back_to_flat_format():
     assert outcome.suggestions[0]["part_type"] == "Ogre Champion"
 
 
+# --- Best-effort JSON repair on a parse failure (#928-follow-up) ---
+# Cheap insurance against an otherwise-good reply with one stray syntax
+# slip — a trailing comma, or prose wrapped around an otherwise-valid object
+# despite being told to return only JSON.
+
+def test_repairs_trailing_comma_before_closing_bracket():
+    assert ai._repair_json('{"files": [{"id": 1},]}') == '{"files": [{"id": 1}]}'
+    assert ai._repair_json('{"files": [{"id": 1, "part_type": "Head",}]}') == \
+        '{"files": [{"id": 1, "part_type": "Head"}]}'
+
+
+def test_repairs_prose_wrapped_around_the_json_object():
+    wrapped = 'Sure, here you go:\n{"files": [{"id": 1}]}\nHope that helps!'
+    assert ai._repair_json(wrapped) == '{"files": [{"id": 1}]}'
+
+
+def test_trailing_comma_reply_recovers_instead_of_erroring(monkeypatch):
+    """The actual end-to-end path: a reply that would otherwise fail
+    json.loads outright recovers via the repair pass and returns real
+    suggestions, not an error."""
+    content = '{"files": [{"id": 1, "part_type": "Weapon", "part_name": "Sword", "sup_base_filename": null},]}'
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{"message": {"content": content}}]},
+        },
+    )())
+
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "ok"
+    assert {s["id"]: s for s in res.suggestions}[1]["part_type"] == "Weapon"
+
+
+def test_repair_logs_recovery_at_info_level(monkeypatch, ai_organize_logs):
+    content = '{"files": [{"id": 1, "part_type": "Weapon", "part_name": "Sword", "sup_base_filename": null},]}'
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{"message": {"content": content}}]},
+        },
+    )())
+
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert any("llm_repaired" in m for m in ai_organize_logs.messages)
+
+
+def test_repair_does_not_mask_genuinely_truncated_json(monkeypatch, ai_organize_logs):
+    """Truncated mid-object JSON (cut off by max_tokens) isn't something the
+    narrow repair pass can recover — must still report the original error,
+    not silently swallow it or return partial/wrong data."""
+    truncated = '{"files": [{"id": 1, "part_type": "Wea'
+    monkeypatch.setattr(ai.httpx, "post", lambda *a, **k: type(
+        "R", (), {
+            "status_code": 200, "is_success": True, "text": "",
+            "json": lambda self: {"choices": [{"message": {"content": truncated}}]},
+        },
+    )())
+
+    res = ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai")
+
+    assert res.llm.status == "error"
+    assert not any("llm_repaired" in m for m in ai_organize_logs.messages)
+
+
 # --- Logging the actual reply on a parse failure (#894-follow-up) ---
 # "LLM returned non-JSON content" alone doesn't say whether the model
 # rambled prose, got stuck repeating itself, or was cut off mid-object by
