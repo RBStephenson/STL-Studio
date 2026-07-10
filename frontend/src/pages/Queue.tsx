@@ -47,7 +47,7 @@ function SortableCard({ model, onMutate, selected, onSelect }: {
         {...listeners}
         title="Drag to reorder"
         aria-label="Drag to reorder"
-        className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 hover:bg-black/90 text-gray-300 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/drag:opacity-100 transition-opacity"
+        className="absolute bottom-2 left-2 z-20 p-1 rounded bg-black/60 hover:bg-black/90 text-text-primary-alt2 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/drag:opacity-100 transition-opacity"
       >
         <GripVertical size={14} />
       </button>
@@ -116,11 +116,11 @@ export default function Queue() {
     <div className="p-6">
       <div className="flex items-center gap-2 mb-2">
         <Printer size={20} className="text-sky-400" />
-        <h1 className="text-2xl font-bold text-gray-100">Print Queue</h1>
-        <span className="text-sm text-gray-500 ml-1">({queued.length})</span>
+        <h1 className="text-2xl font-bold text-text-primary">Print Queue</h1>
+        <span className="text-sm text-text-secondary-alt ml-1">({queued.length})</span>
       </div>
       {queued.length > 1 && (
-        <p className="text-xs text-gray-500 mb-6">
+        <p className="text-xs text-text-secondary-alt mb-6">
           Drag the handle to set your print order. Favorites always stay on top.
         </p>
       )}
@@ -128,11 +128,11 @@ export default function Queue() {
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="aspect-square bg-gray-900 rounded-lg animate-pulse" />
+            <div key={i} className="aspect-square bg-panel rounded-lg animate-pulse" />
           ))}
         </div>
       ) : queued.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-600">
+        <div className="flex flex-col items-center justify-center py-20 text-text-muted">
           <Printer size={40} className="mb-3 opacity-40" />
           <p className="text-lg">Nothing queued to print</p>
           <p className="text-sm mt-1">Add models to the queue from any model's card or detail page</p>
@@ -163,10 +163,10 @@ export default function Queue() {
       {/* Recently printed */}
       {printed.length > 0 && (
         <div className="mt-12">
-          <div className="flex items-center gap-2 mb-4 pb-2 border-b border-gray-800">
+          <div className="flex items-center gap-2 mb-4 pb-2 border-b border-border-subtle">
             <History size={16} className="text-emerald-400" />
-            <h2 className="text-lg font-semibold text-gray-200">Recently Printed</h2>
-            <span className="text-sm text-gray-500">({printed.length})</span>
+            <h2 className="text-lg font-semibold text-text-primary-alt">Recently Printed</h2>
+            <span className="text-sm text-text-secondary-alt">({printed.length})</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 opacity-75">
             {printed.map((m) => (
