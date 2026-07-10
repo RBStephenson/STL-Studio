@@ -107,6 +107,22 @@ describe("GuideReaderPage", () => {
     expect(link).toHaveAttribute("href", "/models/42");
   });
 
+  it("shows the loading skeleton while the guide is being fetched, then swaps to the reader (#new-since-last-handoff)", async () => {
+    const { api } = await import("../api/client");
+    let resolveGet!: (g: typeof GUIDE) => void;
+    vi.mocked(api.painting.guides.get).mockReturnValueOnce(
+      new Promise((resolve) => { resolveGet = resolve; })
+    );
+    renderAt("1");
+
+    expect(screen.getByTestId("guide-reader-skeleton")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: /RoboCop/ })).toBeNull();
+
+    resolveGet(GUIDE);
+    expect(await screen.findByRole("heading", { level: 1, name: /RoboCop/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("guide-reader-skeleton")).toBeNull();
+  });
+
   it("surfaces a load error", async () => {
     const { api } = await import("../api/client");
     vi.mocked(api.painting.guides.get).mockRejectedValueOnce(new Error("boom"));
