@@ -9,7 +9,7 @@ import {
 /** A keyboard key, styled like the hints elsewhere in the app. */
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="bg-gray-800 px-1.5 py-0.5 rounded border border-gray-700 font-mono text-xs text-gray-300">
+    <kbd className="bg-panel-secondary px-1.5 py-0.5 rounded border border-border font-mono text-xs text-text-primary-alt2">
       {children}
     </kbd>
   );
@@ -39,7 +39,7 @@ const SECTIONS: Section[] = [
           <li>Click <strong>Scan Library</strong>. The first scan can take a few minutes for a large collection — models appear as they're found.</li>
           <li>Browse the <strong>Library</strong>, filter to what you want, and start tagging and queueing prints.</li>
         </ol>
-        <p className="text-gray-500">
+        <p className="text-text-secondary-alt">
           Everything runs locally. Your library never leaves your machine.
         </p>
       </>
@@ -177,7 +177,7 @@ const SECTIONS: Section[] = [
             <strong>×</strong> to remove the model from the group.
           </li>
         </ul>
-        <p className="text-gray-500">
+        <p className="text-text-secondary-alt">
           Grouping is durable — it applies immediately (no rescan needed) and a future rescan
           never undoes it. Removing a model from a group keeps it out of auto-grouping until
           you merge it into a group again.
@@ -257,7 +257,7 @@ const SECTIONS: Section[] = [
           <li><strong>From URL</strong> — paste any image URL; the image is downloaded and stored locally, so it keeps working even when the site blocks hot-linking.</li>
           <li><strong>Clear</strong> — remove the thumbnail entirely.</li>
         </ul>
-        <p className="text-gray-500">
+        <p className="text-text-secondary-alt">
           To clear an image fast without opening the dialog, use{" "}
           <strong>Clear image</strong> in a card's <strong>⋯ quick-assign</strong> menu, or the{" "}
           <strong>Clear image</strong> button next to <strong>Change image</strong> on the model page.
@@ -469,7 +469,7 @@ const SECTIONS: Section[] = [
             filter shows them).
           </li>
         </ul>
-        <p className="text-gray-500">
+        <p className="text-text-secondary-alt">
           Like <a href="#reorganize">Reorganize</a>, the move step is{" "}
           <strong>standalone-only</strong> (Docker mounts are read-only) and needs write
           mode; importing and enriching work everywhere.
@@ -521,7 +521,7 @@ const SECTIONS: Section[] = [
           typos like <code>MPA-12</code> are caught with a clear message instead of
           polluting the shelf.
         </p>
-        <p className="font-medium text-gray-200">PaintRack CSV import &amp; export</p>
+        <p className="font-medium text-text-primary-alt">PaintRack CSV import &amp; export</p>
         <p>
           The import/export uses the CSV format from{" "}
           <a href="https://www.courageousoctopus.com/" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 underline">PaintRack</a>{" "}
@@ -556,7 +556,7 @@ const SECTIONS: Section[] = [
           (like real PaintRack exports) import exactly as before, and an empty color
           cell never clears a swatch you've already set.
         </p>
-        <p className="font-medium text-gray-200">Painting guides</p>
+        <p className="font-medium text-text-primary-alt">Painting guides</p>
         <p>
           The <strong>Guides</strong> page lists your guides; open one to read it
           in-app — a tabbed, step-by-step recipe with value maps, numbered steps,
@@ -671,7 +671,7 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>The scanner expects roughly this shape, but it's flexible about depth:</p>
-        <pre className="not-prose bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs font-mono text-gray-400 overflow-x-auto">{`<scan root>/
+        <pre className="not-prose bg-panel-inset border border-border-subtle rounded-lg p-3 text-xs font-mono text-text-secondary overflow-x-auto">{`<scan root>/
   <Creator>/              ← top-level folder = a creator
     <Character>/          ← optional grouping
       Renders/            ← preview images
@@ -718,7 +718,7 @@ const SECTIONS: Section[] = [
             built-ins (Parts, Base, Supports…).
           </li>
         </ul>
-        <p className="text-gray-500">
+        <p className="text-text-secondary-alt">
           A safety cap prevents an over-broad ignore pattern from wiping your library: if a
           single scan would remove more than half your models, the cleanup is skipped and
           logged instead.
@@ -754,7 +754,11 @@ const SECTIONS: Section[] = [
           to <code>/reorganize</code>) tidies your files on disk to match a folder
           template — by default <code>{"{creator}/{character}/{title}"}</code>.
         </p>
-        <p className="font-medium text-gray-200">How it works</p>
+        <p>
+          Templates can also include <code>{"{scale}"}</code>, using scanner-detected
+          scale tags like <code>1:6</code> or <code>75mm</code>.
+        </p>
+        <p className="font-medium text-text-primary-alt">How it works</p>
         <ul>
           <li>
             <strong>Preview first.</strong> The page shows a per-model plan: which
@@ -789,7 +793,7 @@ const SECTIONS: Section[] = [
           <em>Unclassifiable</em>, <em>Blocked</em>, <em>Already In Place</em>) let
           you focus on what needs attention.
         </p>
-        <p className="text-gray-500">
+        <p className="text-text-secondary-alt">
           Apply moves real files on disk.{" "}
           <strong>Standalone-only</strong> — it is disabled in the Docker build where
           library mounts are read-only. Back up your library (and your database) before
@@ -800,7 +804,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: "backup",
-    title: "Backup, restore & reset",
+    title: "Backup, restore, repair & reset",
     icon: Database,
     body: (
       <>
@@ -810,13 +814,16 @@ const SECTIONS: Section[] = [
           <strong>your STL files on disk are never modified.</strong>
         </p>
         <ul>
+          <li><strong>Check Health</strong> runs SQLite's integrity check without changing the database.</li>
+          <li><strong>Repair Database</strong> snapshots the database, runs a conservative <code>REINDEX</code>, and verifies integrity again. It can fix index-only corruption; deeper corruption still needs a clean backup or manual recovery.</li>
           <li><strong>Download Backup</strong> — saves a timestamped <code>.db</code> snapshot of your tags, favorites, and print queue. It's the only way to recover them if something goes wrong.</li>
           <li><strong>Restore from Backup…</strong> — replace your current library with a previously downloaded <code>.db</code>. This is also how you migrate to a new machine. The file is validated first.</li>
           <li><strong>Delete All Data</strong> — wipes the index back to empty; run a full scan to rebuild.</li>
         </ul>
-        <p className="text-gray-500">
+        <p className="text-text-secondary-alt">
           Restore and Delete live in a <strong>Danger Zone</strong> and make you type a
           confirmation phrase, since they can't be undone. Neither runs while a scan is in progress.
+          Repair also requires the confirmation phrase because it modifies SQLite indexes.
         </p>
       </>
     ),
@@ -839,13 +846,13 @@ const SECTIONS: Section[] = [
     icon: LifeBuoy,
     body: (
       <>
-        <p className="font-medium text-gray-200">I added models but they don't show up</p>
+        <p className="font-medium text-text-primary-alt">I added models but they don't show up</p>
         <p>Run a <strong>Rescan</strong> on that creator from the Creators page. If the creator isn't listed yet (never scanned), run a full <strong>Scan Library</strong> first to discover it — after that, a per-creator Rescan works even for a creator that currently shows 0 models.</p>
-        <p className="font-medium text-gray-200 mt-4">A whole creator is missing or shows one model</p>
+        <p className="font-medium text-text-primary-alt mt-4">A whole creator is missing or shows one model</p>
         <p>Make sure the creator's folder is directly under one of your scan roots (see <a href="#scanning">folder layout</a>), then run a full scan.</p>
-        <p className="font-medium text-gray-200 mt-4">Scale or type tags are wrong/missing</p>
+        <p className="font-medium text-text-primary-alt mt-4">Scale or type tags are wrong/missing</p>
         <p>Auto-tags come from folder and file names. Check the scale appears in a recognizable form (<code>1:6</code>, <code>1_6</code>, <code>75mm</code>), then rescan that creator. You can always add or remove tags yourself.</p>
-        <p className="font-medium text-gray-200 mt-4">The scan seems stuck or slow</p>
+        <p className="font-medium text-text-primary-alt mt-4">The scan seems stuck or slow</p>
         <p>The first full scan of a large library takes a while, and a slow external/USB drive or NAS is limited by that drive's speed. You can <strong>Cancel</strong> at any time — already-indexed models are kept.</p>
       </>
     ),
@@ -887,7 +894,7 @@ const SECTIONS: Section[] = [
     icon: Heart,
     body: (
       <>
-        <p className="font-medium text-gray-200">Like STL Studio?</p>
+        <p className="font-medium text-text-primary-alt">Like STL Studio?</p>
         <p>
           STL Studio started because I had a problem: way too many STL files and no good
           way to keep track of them all. What began as a personal tool turned into something
@@ -911,7 +918,7 @@ const SECTIONS: Section[] = [
           building tools and content for the community.
         </p>
         <p>Thank you for being here, and happy printing!</p>
-        <p className="text-gray-500">— Brent the Programmer</p>
+        <p className="text-text-secondary-alt">— Brent the Programmer</p>
       </>
     ),
   },
@@ -953,18 +960,18 @@ export default function Help() {
       {/* Table of contents */}
       <aside className="hidden lg:block w-56 shrink-0">
         <nav className="sticky top-6">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+          <p className="text-xs font-semibold text-text-secondary-alt uppercase tracking-wider mb-3">
             Help topics
           </p>
-          <ul className="flex flex-col gap-0.5 border-l border-gray-800">
+          <ul className="flex flex-col gap-0.5 border-l border-border-subtle">
             {SECTIONS.map((s) => (
               <li key={s.id}>
                 <a
                   href={`#${s.id}`}
                   className={`block -ml-px border-l-2 pl-3 py-1 text-sm transition-colors ${
                     active === s.id
-                      ? "border-indigo-500 text-indigo-300 font-medium"
-                      : "border-transparent text-gray-500 hover:text-gray-200 hover:border-gray-600"
+                      ? "border-accent-start text-indigo-300 font-medium"
+                      : "border-transparent text-text-secondary-alt hover:text-text-primary-alt hover:border-border-divider"
                   }`}
                 >
                   {s.title}
@@ -979,7 +986,7 @@ export default function Help() {
       <div ref={contentRef} className="flex-1 min-w-0 max-w-3xl">
         <header className="mb-10">
           <h1 className="text-3xl font-bold text-white mb-2">Help &amp; Guide</h1>
-          <p className="text-gray-500">
+          <p className="text-text-secondary-alt">
             How every part of STL Studio works. Jump to a topic on the left, or scroll through.
           </p>
         </header>
@@ -991,7 +998,7 @@ export default function Help() {
                 <Icon size={18} className="text-indigo-400 shrink-0" />
                 {title}
               </h2>
-              <div className="help-prose text-sm text-gray-400 leading-relaxed flex flex-col gap-3">
+              <div className="help-prose text-sm text-text-secondary leading-relaxed flex flex-col gap-3">
                 {body}
               </div>
             </section>

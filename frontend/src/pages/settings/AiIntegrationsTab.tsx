@@ -16,6 +16,10 @@ interface DraftConfig {
   url: string;
   model: string;
   effort: string;
+  request_timeout: number;
+  batch_size: number | null;
+  reasoning_enabled: boolean;
+  api_key: string;
 }
 
 const EMPTY_DRAFT: DraftConfig = {
@@ -24,6 +28,10 @@ const EMPTY_DRAFT: DraftConfig = {
   url: "",
   model: "",
   effort: "low",
+  request_timeout: 10,
+  batch_size: null,
+  reasoning_enabled: false,
+  api_key: "",
 };
 
 const ANTHROPIC_MODELS = [
@@ -34,11 +42,11 @@ const ANTHROPIC_MODELS = [
 
 // ── Shared field styles ───────────────────────────────────────────────────────
 
-const INPUT = "w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none";
+const INPUT = "w-full bg-panel border border-border-subtle rounded px-3 py-2 text-sm text-text-primary focus:border-indigo-600 focus:outline-none";
 const SELECT = INPUT;
-const BTN_PRIMARY = "text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-2 disabled:opacity-50";
-const BTN_GHOST = "text-sm text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-3 py-2";
-const BTN_DANGER = "text-sm text-rose-300 hover:text-rose-200 border border-gray-700 hover:border-rose-800 rounded px-3 py-2";
+const BTN_PRIMARY = "text-sm bg-accent-end hover:bg-accent-start text-white rounded px-3 py-2 disabled:opacity-50";
+const BTN_GHOST = "text-sm text-text-secondary hover:text-text-primary-alt border border-border rounded px-3 py-2";
+const BTN_DANGER = "text-sm text-rose-300 hover:text-rose-200 border border-border hover:border-rose-800 rounded px-3 py-2";
 
 // ── Config form (shared between Add and Edit) ─────────────────────────────────
 
@@ -51,9 +59,6 @@ function ConfigForm({
   onFetchModels,
   keySet,
   keyHint,
-  keyDraft,
-  onKeyDraftChange,
-  onSaveKey,
   onClearKey,
   editingKey,
   onEditKey,
@@ -70,9 +75,6 @@ function ConfigForm({
   onFetchModels: (url: string) => void;
   keySet: boolean;
   keyHint: string | null;
-  keyDraft: string;
-  onKeyDraftChange: (v: string) => void;
-  onSaveKey: () => void;
   onClearKey: () => void;
   editingKey: boolean;
   onEditKey: () => void;
@@ -86,7 +88,7 @@ function ConfigForm({
       {/* Name + Type */}
       <div className="flex flex-wrap gap-4">
         <div className="flex-1 min-w-40">
-          <label className="block text-xs text-gray-400 mb-1">Name</label>
+          <label className="block text-xs text-text-secondary mb-1">Name</label>
           <input
             type="text"
             value={draft.name}
@@ -96,7 +98,7 @@ function ConfigForm({
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Type</label>
+          <label className="block text-xs text-text-secondary mb-1">Type</label>
           <select
             value={draft.api_type}
             onChange={(e) => onChange({ api_type: e.target.value as ApiType })}
@@ -111,7 +113,7 @@ function ConfigForm({
       {/* OpenAI-specific: URL */}
       {draft.api_type === "openai" && (
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Base URL</label>
+          <label className="block text-xs text-text-secondary mb-1">Base URL</label>
           <input
             type="text"
             value={draft.url}
@@ -120,15 +122,15 @@ function ConfigForm({
             placeholder="http://localhost:11434"
             className={INPUT}
           />
-          <p className="text-xs text-gray-600 mt-1">Ollama default: <code className="text-gray-500">http://localhost:11434</code></p>
+          <p className="text-xs text-text-muted mt-1">Ollama default: <code className="text-text-secondary-alt">http://localhost:11434</code></p>
         </div>
       )}
 
       {/* Model */}
       <div>
-        <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1.5">
+        <label className="block text-xs text-text-secondary mb-1 flex items-center gap-1.5">
           Model
-          {modelListLoading && <span className="text-gray-600 text-xs animate-pulse">fetching…</span>}
+          {modelListLoading && <span className="text-text-muted text-xs animate-pulse">fetching…</span>}
         </label>
         {draft.api_type === "anthropic" ? (
           <select value={draft.model} onChange={(e) => onChange({ model: e.target.value })} className={SELECT}>
@@ -165,7 +167,7 @@ function ConfigForm({
       {/* Anthropic-specific: Effort */}
       {draft.api_type === "anthropic" && (
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Effort</label>
+          <label className="block text-xs text-text-secondary mb-1">Effort</label>
           <select value={draft.effort} onChange={(e) => onChange({ effort: e.target.value })} className={SELECT}>
             <option value="low">Low — fastest (default)</option>
             <option value="medium">Medium — more reasoning</option>
@@ -174,15 +176,67 @@ function ConfigForm({
         </div>
       )}
 
+      {/* Request timeout — per connection. Remote endpoints (e.g. an Ollama box
+          loading a model cold) can take far longer than a local one. */}
+      <div>
+        <label className="block text-xs text-text-secondary mb-1">
+          Timeout <span className="text-text-muted ml-1">(seconds — raise for slow/remote endpoints)</span>
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={600}
+          value={draft.request_timeout}
+          onChange={(e) => onChange({ request_timeout: Number(e.target.value) })}
+          className={`max-w-[8rem] ${INPUT}`}
+        />
+      </div>
+
+      {/* AI Organize batch size — files per LLM request/batch. Blank uses the
+          service's built-in default (currently 15 for "parts", 5 for "unit"). */}
+      <div>
+        <label className="block text-xs text-text-secondary mb-1">
+          Organize batch size <span className="text-text-muted ml-1">(files per LLM call — blank uses the default)</span>
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={50}
+          placeholder="default"
+          value={draft.batch_size ?? ""}
+          onChange={(e) => onChange({ batch_size: e.target.value === "" ? null : Number(e.target.value) })}
+          className={`max-w-[8rem] ${INPUT}`}
+        />
+      </div>
+
+      {/* OpenAI-specific: reasoning toggle. Off by default — this is the
+          setting that suppresses a thinking-capable model's hidden reasoning
+          phase (#939). Letting the model reason is opt-in since it's slower
+          and, for a task this mechanical, adds risk without much upside. */}
+      {draft.api_type === "openai" && (
+        <label
+          className="flex items-center gap-2 cursor-pointer select-none w-fit"
+          title="Lets the model think before answering instead of skipping straight to a result. This can make organizing noticeably slower, and a model that reasons at length may run out of its response budget before it ever writes the answer."
+        >
+          <input
+            type="checkbox"
+            checked={draft.reasoning_enabled}
+            onChange={(e) => onChange({ reasoning_enabled: e.target.checked })}
+            className="accent-indigo-500 w-4 h-4"
+          />
+          <span className="text-sm text-text-primary-alt2">Allow model reasoning</span>
+        </label>
+      )}
+
       {/* API Key */}
       <div>
-        <label className="block text-xs text-gray-400 mb-1">
-          API key{draft.api_type === "openai" && <span className="text-gray-600 ml-1">(optional — Ollama doesn't need one)</span>}
+        <label className="block text-xs text-text-secondary mb-1">
+          API key{draft.api_type === "openai" && <span className="text-text-muted ml-1">(optional — Ollama doesn't need one)</span>}
         </label>
         {keySet && !editingKey ? (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
-              Key set <span className="text-gray-500">••••{keyHint?.replace(/^…/, "")}</span>
+            <span className="text-sm text-text-primary-alt2 bg-panel border border-border-subtle rounded px-3 py-2">
+              Key set <span className="text-text-secondary-alt">••••{keyHint?.replace(/^…/, "")}</span>
             </span>
             <button type="button" onClick={onEditKey} className={BTN_GHOST}>Replace</button>
             <button type="button" onClick={onClearKey} className={BTN_DANGER}>Clear</button>
@@ -191,17 +245,14 @@ function ConfigForm({
           <div className="flex items-center gap-2">
             <input
               type="password"
-              value={keyDraft}
-              onChange={(e) => onKeyDraftChange(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") onSaveKey(); }}
+              value={draft.api_key}
+              onChange={(e) => onChange({ api_key: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Enter") onSubmit(); }}
               placeholder={draft.api_type === "anthropic" ? "sk-ant-…" : "sk-… or any string"}
               className={`flex-1 max-w-sm ${INPUT}`}
             />
-            <button type="button" onClick={onSaveKey} disabled={!keyDraft.trim()} className={BTN_PRIMARY}>
-              Save key
-            </button>
             {keySet && (
-              <button type="button" onClick={onCancelKey} className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2">
+              <button type="button" onClick={onCancelKey} className="text-sm text-text-secondary hover:text-text-primary-alt px-2 py-2">
                 Cancel
               </button>
             )}
@@ -245,11 +296,14 @@ function ConfigCard({
     url: config.url ?? "",
     model: config.model,
     effort: config.effort ?? "low",
+    request_timeout: config.request_timeout ?? 10,
+    batch_size: config.batch_size ?? null,
+    reasoning_enabled: config.reasoning_enabled ?? false,
+    api_key: "",
   });
   const [modelList, setModelList] = useState<string[]>([]);
   const [modelListLoading, setModelListLoading] = useState(false);
   const [modelListError, setModelListError] = useState<string | null>(null);
-  const [keyDraft, setKeyDraft] = useState("");
   const [editingKey, setEditingKey] = useState(false);
   const [localConfig, setLocalConfig] = useState(config);
 
@@ -279,27 +333,19 @@ function ConfigCard({
         url: draft.api_type === "openai" ? (draft.url.trim() || null) : null,
         model: draft.model,
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
+        request_timeout: draft.request_timeout,
+        batch_size: draft.batch_size,
+        reasoning_enabled: draft.api_type === "openai" ? draft.reasoning_enabled : false,
+        ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
       });
       setLocalConfig(updated);
       onUpdated(updated);
+      setDraft((prev) => ({ ...prev, api_key: "" }));
+      setEditingKey(false);
       setExpanded(false);
       flash(`"${updated.name}" updated`, "ok");
     } catch (e) {
       flash(errMsg(e) || "Could not save", "err");
-    }
-  };
-
-  const saveKey = async () => {
-    if (!keyDraft.trim()) return;
-    try {
-      const updated = await api.settings.aiApis.setKey(localConfig.id, keyDraft.trim());
-      setLocalConfig(updated);
-      onUpdated(updated);
-      setKeyDraft("");
-      setEditingKey(false);
-      flash("Key saved", "ok");
-    } catch (e) {
-      flash(errMsg(e) || "Could not save key", "err");
     }
   };
 
@@ -326,10 +372,10 @@ function ConfigCard({
 
   if (!expanded) {
     return (
-      <div className="flex items-center gap-3 px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg">
+      <div className="flex items-center gap-3 px-4 py-3 bg-panel border border-border-subtle rounded-lg">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-200 font-medium truncate">{localConfig.name}</span>
+            <span className="text-sm text-text-primary-alt font-medium truncate">{localConfig.name}</span>
             <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
               localConfig.api_type === "anthropic"
                 ? "bg-violet-900/60 text-violet-300"
@@ -338,17 +384,20 @@ function ConfigCard({
               {localConfig.api_type === "anthropic" ? "Anthropic" : "OpenAI-compat"}
             </span>
           </div>
-          <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+          <div className="flex items-center gap-3 mt-0.5 text-xs text-text-secondary-alt">
             {localConfig.model && <span>{localConfig.model}</span>}
             {localConfig.url && <span className="truncate max-w-[200px]">{localConfig.url}</span>}
             {localConfig.effort && localConfig.api_type === "anthropic" && <span>effort: {localConfig.effort}</span>}
+            <span>timeout: {localConfig.request_timeout}s</span>
+            {localConfig.batch_size != null && <span>batch: {localConfig.batch_size}</span>}
+            {localConfig.api_type === "openai" && localConfig.reasoning_enabled && <span>reasoning: on</span>}
             <span>{localConfig.key_set ? `Key ••••${localConfig.key_hint?.replace(/^…/, "")}` : "No key"}</span>
           </div>
         </div>
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="shrink-0 text-gray-500 hover:text-gray-200 transition-colors p-1"
+          className="shrink-0 text-text-secondary-alt hover:text-text-primary-alt transition-colors p-1"
           title="Edit"
         >
           <Pencil size={14} />
@@ -356,7 +405,7 @@ function ConfigCard({
         <button
           type="button"
           onClick={deleteConfig}
-          className="shrink-0 text-gray-600 hover:text-rose-400 transition-colors p-1"
+          className="shrink-0 text-text-muted hover:text-rose-400 transition-colors p-1"
           title="Delete"
         >
           <Trash2 size={14} />
@@ -366,10 +415,10 @@ function ConfigCard({
   }
 
   return (
-    <div className="px-4 py-4 bg-gray-900 border border-indigo-800/50 rounded-lg">
+    <div className="px-4 py-4 bg-panel border border-indigo-800/50 rounded-lg">
       <div className="flex items-center justify-between mb-4">
-        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Edit API</span>
-        <button type="button" onClick={() => setExpanded(false)} className="text-gray-600 hover:text-gray-300">
+        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Edit API</span>
+        <button type="button" onClick={() => setExpanded(false)} className="text-text-muted hover:text-text-primary-alt2">
           <X size={14} />
         </button>
       </div>
@@ -382,13 +431,10 @@ function ConfigCard({
         onFetchModels={fetchModels}
         keySet={localConfig.key_set}
         keyHint={localConfig.key_hint}
-        keyDraft={keyDraft}
-        onKeyDraftChange={setKeyDraft}
-        onSaveKey={saveKey}
         onClearKey={clearKey}
         editingKey={editingKey}
         onEditKey={() => setEditingKey(true)}
-        onCancelKey={() => { setEditingKey(false); setKeyDraft(""); }}
+        onCancelKey={() => { setEditingKey(false); setDraft((prev) => ({ ...prev, api_key: "" })); }}
         onSubmit={save}
         onCancel={() => setExpanded(false)}
         submitLabel="Save changes"
@@ -409,13 +455,9 @@ function AddConfigCard({
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<DraftConfig>(EMPTY_DRAFT);
-  const [pendingId, setPendingId] = useState<number | null>(null);
   const [modelList, setModelList] = useState<string[]>([]);
   const [modelListLoading, setModelListLoading] = useState(false);
   const [modelListError, setModelListError] = useState<string | null>(null);
-  const [keyDraft, setKeyDraft] = useState("");
-  const [editingKey, setEditingKey] = useState(false);
-  const [pendingConfig, setPendingConfig] = useState<AiApiConfig | null>(null);
 
   const fetchModels = async (url: string) => {
     if (!url.trim() || draft.api_type !== "openai") return;
@@ -441,43 +483,21 @@ function AddConfigCard({
         url: draft.api_type === "openai" ? (draft.url.trim() || null) : null,
         model: draft.model,
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
+        request_timeout: draft.request_timeout,
+        batch_size: draft.batch_size,
+        reasoning_enabled: draft.api_type === "openai" ? draft.reasoning_enabled : false,
+        ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
       });
-      setPendingId(created.id);
-      setPendingConfig(created);
-      flash(`"${created.name}" added — set a key if required`, "ok");
+      flash(`"${created.name}" added`, "ok");
       onCreated(created);
     } catch (e) {
       flash(errMsg(e) || "Could not create", "err");
     }
   };
 
-  const saveKey = async () => {
-    if (!keyDraft.trim() || !pendingId) return;
-    try {
-      const updated = await api.settings.aiApis.setKey(pendingId, keyDraft.trim());
-      setPendingConfig(updated);
-      setKeyDraft("");
-      setEditingKey(false);
-      flash("Key saved", "ok");
-    } catch (e) {
-      flash(errMsg(e) || "Could not save key", "err");
-    }
-  };
-
-  const clearKey = async () => {
-    if (!pendingId) return;
-    try {
-      const updated = await api.settings.aiApis.clearKey(pendingId);
-      setPendingConfig(updated);
-      flash("Key cleared", "ok");
-    } catch (e) {
-      flash(errMsg(e) || "Could not clear key", "err");
-    }
-  };
-
   return (
-    <div className="px-4 py-4 bg-gray-900 border border-dashed border-gray-700 rounded-lg">
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">New API</p>
+    <div className="px-4 py-4 bg-panel border border-dashed border-border rounded-lg">
+      <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">New API</p>
       <ConfigForm
         draft={draft}
         onChange={(p) => setDraft((prev) => ({ ...prev, ...p }))}
@@ -485,18 +505,15 @@ function AddConfigCard({
         modelListLoading={modelListLoading}
         modelListError={modelListError}
         onFetchModels={fetchModels}
-        keySet={pendingConfig?.key_set ?? false}
-        keyHint={pendingConfig?.key_hint ?? null}
-        keyDraft={keyDraft}
-        onKeyDraftChange={setKeyDraft}
-        onSaveKey={saveKey}
-        onClearKey={clearKey}
-        editingKey={editingKey}
-        onEditKey={() => setEditingKey(true)}
-        onCancelKey={() => { setEditingKey(false); setKeyDraft(""); }}
+        keySet={false}
+        keyHint={null}
+        onClearKey={() => {}}
+        editingKey={false}
+        onEditKey={() => {}}
+        onCancelKey={() => {}}
         onSubmit={create}
         onCancel={onCancel}
-        submitLabel={pendingId ? "Saved ✓" : "Add API"}
+        submitLabel="Add API"
       />
     </div>
   );
@@ -515,11 +532,11 @@ function ApiSelector({
 }) {
   return (
     <div className="flex items-center gap-2 mt-2 ml-6">
-      <label className="text-xs text-gray-500 shrink-0">Use API</label>
+      <label className="text-xs text-text-secondary-alt shrink-0">Use API</label>
       <select
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-        className="bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-sm text-gray-100 focus:border-indigo-600 focus:outline-none"
+        className="bg-panel border border-border-subtle rounded px-2 py-1.5 text-sm text-text-primary focus:border-indigo-600 focus:outline-none"
       >
         <option value="">— not configured —</option>
         {configs.map((c) => (
@@ -530,7 +547,7 @@ function ApiSelector({
         ))}
       </select>
       {configs.length === 0 && (
-        <span className="text-xs text-gray-600">Add an API above first</span>
+        <span className="text-xs text-text-muted">Add an API above first</span>
       )}
     </div>
   );
@@ -622,10 +639,10 @@ export default function AiIntegrationsTab() {
 
       {/* ── AI APIs ─────────────────────────────────────────────────────── */}
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1 flex items-center gap-1.5">
           <Bot size={14} /> AI APIs
         </h2>
-        <p className="text-xs text-gray-600 mb-4">
+        <p className="text-xs text-text-muted mb-4">
           Configure named AI API connections. Add as many as you need — different models, local
           instances, or separate keys for different purposes. Each AI Function below then picks
           which one to use.
@@ -656,7 +673,7 @@ export default function AiIntegrationsTab() {
           <button
             type="button"
             onClick={() => setShowAddForm(true)}
-            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 border border-dashed border-gray-700 hover:border-gray-500 rounded-lg px-4 py-2.5 w-full transition-colors"
+            className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary-alt border border-dashed border-border hover:border-border-divider rounded-lg px-4 py-2.5 w-full transition-colors"
           >
             <Plus size={14} /> Add API
           </button>
@@ -665,12 +682,12 @@ export default function AiIntegrationsTab() {
 
       {/* ── AI Functions ────────────────────────────────────────────────── */}
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-4 flex items-center gap-1.5">
           <Wand2 size={14} /> AI Functions
         </h2>
 
         {/* Guide Drafts */}
-        <div className="mb-6 pb-6 border-b border-gray-800/60">
+        <div className="mb-6 pb-6 border-b border-border-subtle/60">
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -680,9 +697,9 @@ export default function AiIntegrationsTab() {
               )}
               className="accent-indigo-500 w-4 h-4"
             />
-            <span className="text-sm text-gray-300">AI Guide Drafts</span>
+            <span className="text-sm text-text-primary-alt2">AI Guide Drafts</span>
           </label>
-          <p className="text-xs text-gray-600 mt-1 ml-6">
+          <p className="text-xs text-text-muted mt-1 ml-6">
             Generate painting guide drafts with an AI. The draft is always reviewed before saving.
           </p>
           {settings.ai_guides_enabled && (
@@ -705,9 +722,9 @@ export default function AiIntegrationsTab() {
               )}
               className="accent-indigo-500 w-4 h-4"
             />
-            <span className="text-sm text-gray-300">AI Naming &amp; Organizing</span>
+            <span className="text-sm text-text-primary-alt2">AI Naming &amp; Organizing</span>
           </label>
-          <p className="text-xs text-gray-600 mt-1 ml-6">
+          <p className="text-xs text-text-muted mt-1 ml-6">
             Automatically normalize part names, assign categories, and link presupported files on a per-model basis.
           </p>
           {settings.ai_organize_enabled && (
@@ -721,31 +738,31 @@ export default function AiIntegrationsTab() {
       </section>
 
       {/* ── Metadata ────────────────────────────────────────────────────── */}
-      <div className="border-t border-gray-800 mt-2 mb-8 pt-8">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+      <div className="border-t border-border-subtle mt-2 mb-8 pt-8">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1 flex items-center gap-1.5">
           <Link2 size={14} /> Metadata
         </h2>
-        <p className="text-xs text-gray-600 mb-6">
+        <p className="text-xs text-text-muted mb-6">
           Third-party integrations for enriching your library with creator details, metadata, and thumbnails.
         </p>
       </div>
 
       {/* ── Cults3D ─────────────────────────────────────────────────────── */}
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1">
           Cults3D
         </h2>
-        <p className="text-xs text-gray-600 mb-4">
+        <p className="text-xs text-text-muted mb-4">
           Connect your Cults3D account to enrich your STL library with creator details,
           model metadata, and thumbnails. API access is gated — request it in{" "}
-          <code className="text-gray-500">#api-help</code> on the Cults3D Discord.
+          <code className="text-text-secondary-alt">#api-help</code> on the Cults3D Discord.
           Credentials are stored encrypted and never shown again.
         </p>
 
         {cultsSettings?.credentials_set && !editingCults ? (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
-              Connected as <span className="text-gray-400">{cultsSettings.hint}</span>
+            <span className="text-sm text-text-primary-alt2 bg-panel border border-border-subtle rounded px-3 py-2">
+              Connected as <span className="text-text-secondary">{cultsSettings.hint}</span>
             </span>
             <button type="button" onClick={() => { setEditingCults(true); setCultsUser(""); setCultsKey(""); }} className={BTN_GHOST}>Replace</button>
             <button type="button" onClick={clearCultsCredentials} className={BTN_DANGER}>Disconnect</button>
@@ -768,10 +785,10 @@ export default function AiIntegrationsTab() {
 
       {/* ── MyMiniFactory ───────────────────────────────────────────────── */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1">
           MyMiniFactory
         </h2>
-        <p className="text-xs text-gray-600 mb-4">
+        <p className="text-xs text-text-muted mb-4">
           Add a MyMiniFactory API key to enrich your STL library from their API — richer
           model metadata, images, tags and designer details than page scraping. Register an
           app at MyMiniFactory Settings → Developer to get a key. Stored encrypted and never
@@ -780,8 +797,8 @@ export default function AiIntegrationsTab() {
 
         {mmfSettings?.key_set && !editingMmf ? (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded px-3 py-2">
-              Key set <span className="text-gray-500">••••{mmfSettings.key_hint?.replace(/^…/, "")}</span>
+            <span className="text-sm text-text-primary-alt2 bg-panel border border-border-subtle rounded px-3 py-2">
+              Key set <span className="text-text-secondary-alt">••••{mmfSettings.key_hint?.replace(/^…/, "")}</span>
             </span>
             <button type="button" onClick={() => { setEditingMmf(true); setMmfKeyDraft(""); }} className={BTN_GHOST}>Replace</button>
             <button type="button" onClick={clearMmfKey} className={BTN_DANGER}>Clear</button>
@@ -792,7 +809,7 @@ export default function AiIntegrationsTab() {
               onKeyDown={(e) => { if (e.key === "Enter") saveMmfKey(); }} placeholder="API key" className={`flex-1 ${INPUT}`} />
             <button type="button" onClick={saveMmfKey} disabled={!mmfKeyDraft.trim()} className={BTN_PRIMARY}>Save</button>
             {mmfSettings?.key_set && (
-              <button type="button" onClick={() => { setEditingMmf(false); setMmfKeyDraft(""); }} className="text-sm text-gray-400 hover:text-gray-200 px-2 py-2">Cancel</button>
+              <button type="button" onClick={() => { setEditingMmf(false); setMmfKeyDraft(""); }} className="text-sm text-text-secondary hover:text-text-primary-alt px-2 py-2">Cancel</button>
             )}
           </div>
         )}

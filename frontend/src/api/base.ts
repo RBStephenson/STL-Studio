@@ -27,6 +27,13 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     } catch { /* ignore */ }
     throw new ApiError(res.status, detail || `${res.status} ${res.statusText}`);
   }
+  // 204 No Content has no body by definition (several DELETE endpoints use
+  // it) — parsing an empty body as JSON throws. Every other success status
+  // here always carries a JSON body, so this is the one case worth a check
+  // rather than a broader "is the body actually empty" probe.
+  if (res.status === 204) {
+    return undefined as T;
+  }
   return res.json();
 }
 
@@ -52,6 +59,22 @@ export function stampQuery(opts: SeriesExportOptions): string {
   return q ? `?${q}` : "";
 }
 
+// Trigger a browser download of `blob` named `filename` (STUDIO-94). Shared by
+// every blob-download call site so they can't drift back out of sync: create
+// the object URL, click a temp anchor, then revoke on the next tick rather
+// than synchronously — some browsers cancel/corrupt the download if the URL
+// is revoked before the download stack has consumed it.
+export function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 // Fetch a PDF blob and trigger a browser download. Blob endpoints can't go
 // through request(); this surfaces the 503 "Chromium not installed" / 404 detail
 // like the other download helpers. The server's Content-Disposition filename
@@ -66,10 +89,5 @@ export async function downloadPdf(url: string, fallbackName: string): Promise<vo
   const disposition = res.headers.get("Content-Disposition") || "";
   const match = /filename="?([^"]+)"?/.exec(disposition);
   const name = match ? match[1] : fallbackName;
-  const objectUrl = URL.createObjectURL(await res.blob());
-  const a = document.createElement("a");
-  a.href = objectUrl;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(objectUrl);
+  triggerBlobDownload(await res.blob(), name);
 }

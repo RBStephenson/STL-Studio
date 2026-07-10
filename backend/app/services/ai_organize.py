@@ -14,11 +14,80 @@ import json
 import logging
 import re
 import time
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Callable
 
 import httpx
+from anthropic import Anthropic  # module symbol so tests can monkeypatch it
 
 _log = logging.getLogger(__name__)
+
+# Fallback request timeout (seconds) when a caller doesn't specify one. The
+# real value normally comes from the assigned AiApiConfig.request_timeout.
+_DEFAULT_TIMEOUT = 10.0
+
+# Anthropic-only knobs. The organize response is a small JSON object, so a
+# modest cap is plenty; effort maps to an extended-thinking budget (mirrors the
+# painting guide generator).
+_ANTHROPIC_MAX_TOKENS = 4096
+_EFFORT_THINKING_BUDGET = {"low": 0, "medium": 4096, "high": 10000}
+
+# Same reasoning for the OpenAI-compatible (Ollama etc.) path: without an
+# explicit cap, a local model that gets stuck (repetition, a quantization that
+# doesn't respect response_format cleanly, ...) has nothing stopping it from
+# generating until it hits the *server's* own context limit — minutes later,
+# with a truncated, unparseable response as the only result. Bounding the
+# reply here means a misbehaving model fails fast instead of slow.
+#
+# 2048 was too thin in practice: a model that emits hidden reasoning into its
+# own field (rather than the visible "thinking" block the "think": False
+# toggle below is meant to suppress — some model tags don't honor that toggle
+# at all) can burn the *entire* budget mid-thought and never reach the actual
+# JSON answer, returning HTTP 200 with empty content and finish_reason
+# "length". Sized to roughly match the Anthropic path's headroom (4096 base,
+# up to +10000 for extended thinking) instead of assuming a well-behaved model
+# needs only a couple hundred tokens for this task.
+_OPENAI_MAX_TOKENS = 8192
+
+
+# Matches the ``scheme://userinfo@`` prefix of a URL anywhere in a string, so we
+# can scrub credentials both from bare endpoint URLs and from URLs echoed inside
+# exception messages / response bodies.
+_URL_CRED_RE = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*://)[^/@\s]*@")
+
+
+def _redact_url(text: str) -> str:
+    """Strip any userinfo (``user:password@``) from URLs within ``text``.
+
+    A user could configure an endpoint like ``https://user:secret@host:11434``;
+    we log the endpoint in the request trace and error details, so drop the
+    credential component before it reaches a log or the surfaced error message.
+    Works on a bare URL or a URL embedded in a larger string (e.g. an httpx
+    exception message).
+    """
+    return _URL_CRED_RE.sub(lambda m: m.group("scheme"), text)
+
+
+@dataclass
+class LlmOutcome:
+    """Result of the LLM refinement stage, so callers can tell what happened.
+
+    ``status`` is one of:
+      - "disabled":  no URL/model configured — heuristics only, by design.
+      - "skipped":   LLM configured but heuristics resolved everything.
+      - "ok":        LLM was called and returned suggestions.
+      - "error":     LLM was called but failed; ``detail`` explains why.
+    """
+    status: str = "disabled"
+    detail: str | None = None
+    suggestions: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class OrganizeResult:
+    """Merged suggestions plus the outcome of the optional LLM pass."""
+    suggestions: list[dict[str, Any]]
+    llm: LlmOutcome
 
 
 _SENSITIVE_LOG_KEYS = {
@@ -233,30 +302,431 @@ def heuristic_pass(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # LLM refinement (optional)
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = """You are an assistant that normalizes 3D-printing STL file names for a miniature figure library.
+# The app's fixed category list (mirrors frontend/src/pages/model-detail/utils.ts
+# PART_TYPE_SUGGESTIONS — the only categories the Category combobox offers).
+# Keep the two in sync by hand; there's no shared build step across the
+# Python/TypeScript boundary. The AI must pick from this exact list so its
+# output lines up with what the UI (and _normalize_type below) expects,
+# instead of inventing near-miss variants like "Accessory" vs "Accessories".
+CANONICAL_PART_TYPES = [
+    "Head", "Torso", "Body", "Full",
+    "Right Arm", "Left Arm", "Arms",
+    "Right Leg", "Left Leg", "Legs",
+    "Hands", "Feet", "Base",
+    "Weapon", "Shield", "Armor", "Cloak", "Cape",
+    "Hair", "Wings", "Tail", "Accessories",
+]
+
+# Appended to both prompts below (#910-follow-up): the "think": False request
+# field (see _llm_refine_openai) only suppresses reasoning on models Ollama
+# natively recognizes as hybrid-reasoning — a model whose chat template
+# reasons unconditionally regardless of that flag ignores it outright. A
+# plain-language instruction in the prompt text itself is a second, largely
+# independent lever: even a model that won't honor the API flag will often
+# still respect being told directly not to reason, measurably cutting both
+# latency and the odds of a long reasoning tangent degrading into repetition
+# before it ever reaches the answer. This does not replace response_schema
+# below — schema-constrained decoding forces the final shape regardless of
+# what the model does beforehand; this is about not spending the whole
+# max_tokens budget getting there.
+_NO_REASONING_SUFFIX = (
+    "\n\nDo not think, plan, or explain before answering. Output ONLY the "
+    "JSON object described above as your entire response — no reasoning, "
+    "no markdown fence, no text before or after it."
+)
+
+_SYSTEM_PROMPT = ("""You are an assistant that normalizes 3D-printing STL file names for a miniature figure library.
 
 Given a JSON list of STL files with heuristically-suggested part_type and part_name, refine only what is wrong or missing.
 
 Rules:
-1. part_type: one short category — Body, Head, Arm, Leg, Hand, Foot, Weapon, Shield, Armor, Base, Full, Accessory, Torso, Shoulder. Null if truly unknowable.
+1. part_type: one category from this exact list — {part_types}. Null if truly unknowable. Never invent a category outside this list.
 2. part_name: a short human-readable label (e.g. "Right Arm", "Helmeted Head"). Strip underscores, extensions, and redundant tokens.
 3. sup_base_filename: if this file is a presupported variant, return the EXACT filename of its base counterpart in the list. Otherwise null.
 4. Omit files where the existing heuristic suggestions are already correct.
 5. Return ONLY the JSON object — no markdown, no explanation.
 
-Format: {"files": [{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}, ...]}"""
+Format: {{"files": [{{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}}, ...]}}""".format(part_types=", ".join(CANONICAL_PART_TYPES))
+    + _NO_REASONING_SUFFIX)
+
+# Mirrors _SYSTEM_PROMPT's format above, for response_format={"type":
+# "json_schema", ...} on the OpenAI-compatible path (#910-follow-up):
+# constrains decoding to this exact shape regardless of how well a given
+# model otherwise follows written instructions. additionalProperties: false
+# at every object level so a model can't pad the reply with invented keys.
+_PARTS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "files": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "part_type": {"type": ["string", "null"]},
+                    "part_name": {"type": ["string", "null"]},
+                    "sup_base_filename": {"type": ["string", "null"]},
+                },
+                "required": ["id", "part_type", "part_name", "sup_base_filename"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["files"],
+    "additionalProperties": False,
+}
+
+# Unit-based strategy (#878): groups files by the in-game unit/character they
+# belong to (e.g. every file for "Royal Guard 1" — head, helmet, weapon —
+# shares that name) instead of by physical part type. Deliberately NOT
+# constrained to CANONICAL_PART_TYPES — a unit name is derived per-model, so
+# there's no fixed list to snap to; _to_pascal_case below is the only
+# normalization applied, to keep casing consistent across a unit's files.
+#
+# Response is grouped by unit rather than one flat object per file (#894-
+# follow-up): a unit's name is often several words (e.g. "Ogre Champion With
+# Great Weapon") and previously got repeated verbatim on every one of that
+# unit's files. Stating it once per group instead is a direct, unbounded-
+# with-unit-size win on completion length — the main lever for latency on a
+# slow/local model, and less for it to generate correctly before a
+# repetition/formatting slip corrupts the JSON. sup_base_filename was also
+# dropped: Sup_ files are excluded from every candidate batch (both
+# strategies), so the field could only ever come back null — pure dead
+# weight in both the prompt and every response object.
+_UNIT_SYSTEM_PROMPT = ("""You are an assistant that groups 3D-printing STL files for a miniature figure library by the in-game unit or character they belong to, not by physical part type.
+
+Given a JSON list of STL files (each {"id": <int>, "filename": <str>}), group them by which in-game unit/character they belong to — e.g. every file for "Royal Guard 1" (its head, helmet, weapon, etc.) belongs in one group — and give each file a short physical-part label.
+
+Rules:
+1. Group name: a short unit/character name derived from the filenames (e.g. "Royal Guard 1", "Ogre Champion"). Use the exact same name (consistent spelling and number) for every file belonging to that unit.
+2. part_name: a short human-readable label for what this specific file physically is (e.g. "Head Female", "Right Arm"). Strip underscores, extensions, and redundant tokens.
+3. Put any file whose unit is truly unknowable in "unknown" instead of guessing.
+4. Return ONLY the JSON object below — no markdown, no explanation, no extra keys.
+
+Format: {"units": [{"name": <str>, "members": [{"id": <int>, "part_name": <str|null>}, ...]}, ...], "unknown": [<int>, ...]}"""
+    + _NO_REASONING_SUFFIX)
+
+# Mirrors _UNIT_SYSTEM_PROMPT's format — see _PARTS_JSON_SCHEMA above.
+_UNIT_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "units": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "members": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "integer"},
+                                "part_name": {"type": ["string", "null"]},
+                            },
+                            "required": ["id", "part_name"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["name", "members"],
+                "additionalProperties": False,
+            },
+        },
+        "unknown": {"type": "array", "items": {"type": "integer"}},
+    },
+    "required": ["units", "unknown"],
+    "additionalProperties": False,
+}
 
 
-def _llm_refine(
+def _to_pascal_case(s: str) -> str:
+    """Title-case each whitespace/underscore/hyphen-separated word.
+
+    Unit-based part_type suggestions are freeform (never snapped to a fixed
+    list), so nothing else guarantees consistent casing across a unit's files
+    — the LLM could return "Royal Guard 1" for one file and "royal guard 1"
+    for another. This is applied to every unit-strategy suggestion so the
+    same unit always renders identically."""
+    words = [w for w in re.split(r"[\s_\-]+", s.strip()) if w]
+    return " ".join(w.capitalize() for w in words)
+
+
+def _strip_json_fence(raw_text: str) -> str:
+    """Strip an optional ```json ... ``` fence some models wrap replies in."""
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("```", 2)[1]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+        raw_text = raw_text.rsplit("```", 1)[0].strip()
+    return raw_text
+
+
+_RAW_RESPONSE_LOG_CAP = 1500  # chars — enough to see the failure shape without flooding logs
+
+_TRAILING_COMMA_RE = re.compile(r",(\s*[\]}])")
+
+
+def _repair_json(raw_text: str) -> str:
+    """Best-effort fix-ups for the common ways an LLM's JSON is *almost*
+    valid (#928-follow-up): a trailing comma before a closing bracket, or
+    stray prose wrapped around the object despite being told to return only
+    JSON. Deliberately narrow — not a general JSON repair tool — since a more
+    aggressive fixer risks silently producing plausible-looking but wrong
+    data instead of surfacing the failure. Truncated JSON (cut off by
+    max_tokens) is out of scope here; that's already caught upstream by the
+    empty-content/finish_reason check, not this path."""
+    text = raw_text.strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start:end + 1]
+    return _TRAILING_COMMA_RE.sub(r"\1", text)
+
+
+def _load_llm_json(raw_text: str, source: str) -> tuple[Any, LlmOutcome | None]:
+    """Strip an optional fence and parse JSON — shared by both response
+    parsers. Returns ``(data, None)`` on success or ``(None, error_outcome)``
+    on failure.
+
+    A first parse failure gets one retry against a best-effort repaired
+    version (see _repair_json) before giving up — cheap insurance against an
+    otherwise-good reply with one stray syntax slip (#928-follow-up).
+
+    On failure, the offending text is logged at WARNING (not DEBUG) —
+    "non-JSON content" alone doesn't say whether the model rambled prose,
+    got stuck repeating itself, or was simply cut off mid-object by
+    max_tokens; seeing the actual reply is the only way to tell which."""
+    raw_text = _strip_json_fence(raw_text)
+    try:
+        return json.loads(raw_text), None
+    except json.JSONDecodeError:
+        pass
+
+    repaired = _repair_json(raw_text)
+    if repaired != raw_text:
+        try:
+            data = json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+        else:
+            _log.info(
+                "ai_organize llm_repaired recovered malformed-but-close JSON from %s", source,
+            )
+            return data, None
+
+    detail = f"LLM returned non-JSON content from {source}"
+    _log.warning(
+        "ai_organize llm_error %s — raw reply (%d chars, showing up to %d): %r",
+        detail, len(raw_text), _RAW_RESPONSE_LOG_CAP, raw_text[:_RAW_RESPONSE_LOG_CAP],
+    )
+    return None, LlmOutcome(status="error", detail=detail)
+
+
+def _flat_suggestions_from_data(data: Any, source: str) -> LlmOutcome:
+    """Extract the "parts"-strategy flat ``{"files": [...]}`` shape."""
+    suggestions = data.get("files", []) if isinstance(data, dict) else []
+    if not isinstance(suggestions, list):
+        _log.warning(
+            "ai_organize llm_error malformed 'files' field from %s — parsed JSON was: %s",
+            source, repr(data)[:_RAW_RESPONSE_LOG_CAP],
+        )
+        return LlmOutcome(status="error",
+                          detail=f"Malformed 'files' field in response from {source}")
+
+    _log_step("llm_done", suggestions=len(suggestions))
+    return LlmOutcome(status="ok", suggestions=suggestions)
+
+
+def _parse_suggestions(raw_text: str, source: str) -> LlmOutcome:
+    """Parse a model's raw text reply into an :class:`LlmOutcome`.
+
+    Shared by the OpenAI and Anthropic paths: strips an optional ```json fence,
+    parses the JSON object, and extracts its ``files`` list. ``source`` is a
+    human-readable label (endpoint URL or "Anthropic API") used in log/error text.
+    """
+    # Full model output — only emitted when LOG_LEVEL=DEBUG, so the INFO trace
+    # stays terse while the raw suggestions are available on demand.
+    _log.debug("ai_organize llm_raw_response %s", raw_text[:2000])
+    data, err = _load_llm_json(raw_text, source)
+    if err:
+        return err
+    return _flat_suggestions_from_data(data, source)
+
+
+def _parse_unit_suggestions(raw_text: str, source: str) -> LlmOutcome:
+    """Parse the unit strategy's grouped ``{"units": [...], "unknown": [...]}``
+    reply (see _UNIT_SYSTEM_PROMPT), flattening it into the same per-file
+    suggestion shape _parse_suggestions returns — id/part_type/part_name/
+    sup_base_filename — so the batching and merge logic downstream don't need
+    to know the wire format differs. ``part_type`` carries the unit/group
+    name; ``sup_base_filename`` is always None (see _UNIT_SYSTEM_PROMPT's
+    comment for why it was dropped from the prompt).
+
+    Falls back to the older flat ``{"files": [...]}`` shape if a model
+    ignores the grouped format and replies in that one anyway — cheap
+    insurance against a model that's simply more reliable with the shape it's
+    seen more of in training.
+    """
+    _log.debug("ai_organize llm_raw_response %s", raw_text[:2000])
+    data, err = _load_llm_json(raw_text, source)
+    if err:
+        return err
+
+    if not isinstance(data, dict):
+        _log.warning(
+            "ai_organize llm_error malformed response from %s — parsed JSON was: %s",
+            source, repr(data)[:_RAW_RESPONSE_LOG_CAP],
+        )
+        return LlmOutcome(status="error", detail=f"Malformed response from {source}")
+
+    if "units" not in data and "files" in data:
+        return _flat_suggestions_from_data(data, source)
+
+    suggestions: list[dict[str, Any]] = []
+    units = data.get("units", [])
+    if isinstance(units, list):
+        for group in units:
+            if not isinstance(group, dict):
+                continue
+            name = group.get("name")
+            members = group.get("members", [])
+            if not isinstance(members, list):
+                continue
+            for m in members:
+                if not isinstance(m, dict) or not isinstance(m.get("id"), int):
+                    continue
+                suggestions.append({
+                    "id": m["id"],
+                    "part_type": name,
+                    "part_name": m.get("part_name"),
+                    "sup_base_filename": None,
+                })
+
+    unknown = data.get("unknown", [])
+    if isinstance(unknown, list):
+        for fid in unknown:
+            if isinstance(fid, int):
+                suggestions.append({
+                    "id": fid, "part_type": None, "part_name": None, "sup_base_filename": None,
+                })
+
+    _log_step("llm_done", suggestions=len(suggestions))
+    return LlmOutcome(status="ok", suggestions=suggestions)
+
+
+def _text_from_anthropic(resp: Any) -> str:
+    """Concatenate the text blocks of an Anthropic messages response (skips any
+    extended-thinking blocks)."""
+    parts = []
+    for block in getattr(resp, "content", []) or []:
+        if getattr(block, "type", None) == "text":
+            parts.append(getattr(block, "text", ""))
+    return "".join(parts).strip()
+
+
+def _llm_refine_anthropic(
+    files: list[dict[str, Any]],
+    model: str,
+    api_key: str,
+    timeout: float = _DEFAULT_TIMEOUT,
+    effort: str | None = None,
+    system_prompt: str = _SYSTEM_PROMPT,
+    user_prefix: str = "",
+    parser: Callable[[str, str], LlmOutcome] = _parse_suggestions,
+) -> LlmOutcome:
+    """Refine via the Anthropic Messages API. Mirrors the OpenAI path's contract:
+    returns ``status="error"`` with a human-readable ``detail`` on any failure.
+
+    ``user_prefix``, when given, is prepended (as plain text, before the JSON
+    file list) to the user turn — used by the unit strategy's batching to tell
+    a later batch which unit names earlier batches already established, so
+    the same unit doesn't get renamed across batches. ``parser`` picks the
+    response shape to expect — the unit strategy's is grouped, not flat (see
+    _parse_unit_suggestions)."""
+    source = "Anthropic API"
+    if not api_key:
+        detail = "No API key configured for this Anthropic connection."
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    _log_step("llm_request", endpoint=source, model=model,
+              file_count=len(files), timeout_s=timeout)
+    t0 = time.monotonic()
+    try:
+        client = Anthropic(api_key=api_key, timeout=timeout)
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": _ANTHROPIC_MAX_TOKENS,
+            "system": system_prompt,
+            "messages": [
+                {"role": "user", "content": user_prefix + json.dumps(files, ensure_ascii=False)},
+            ],
+        }
+        budget = _EFFORT_THINKING_BUDGET.get((effort or "low"), 0)
+        if budget:
+            # max_tokens must exceed the thinking budget.
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            kwargs["max_tokens"] = _ANTHROPIC_MAX_TOKENS + budget
+        resp = client.messages.create(**kwargs)
+    except Exception as exc:  # anthropic.APIError, auth, timeout, etc.
+        detail = f"{exc.__class__.__name__}: {exc}".strip().rstrip(":")
+        _log.warning("ai_organize llm_error source=%s reason=%s", source, detail)
+        return LlmOutcome(status="error", detail=detail)
+
+    _log_step("llm_response", elapsed_s=round(time.monotonic() - t0, 1), status="ok")
+    raw_text = _text_from_anthropic(resp)
+    if not raw_text:
+        # Mirrors the OpenAI path's empty-content diagnostic: stop_reason
+        # ("max_tokens" confirms it ran out of budget) plus the content block
+        # types actually returned (e.g. all "thinking", no "text") say why,
+        # even though max_tokens here already reserves headroom on top of the
+        # thinking budget specifically to avoid this (see kwargs above).
+        stop_reason = getattr(resp, "stop_reason", None)
+        block_types = [getattr(b, "type", None) for b in (getattr(resp, "content", []) or [])]
+        detail = f"Empty response from {source} (stop_reason={stop_reason!r})"
+        _log.warning("ai_organize llm_error %s — content block types: %s", detail, block_types)
+        return LlmOutcome(status="error", detail=detail)
+    return parser(raw_text, source)
+
+
+def _llm_refine_openai(
     files: list[dict[str, Any]],
     base_url: str,
     model: str,
     api_key: str,
-) -> list[dict[str, Any]]:
-    """Call the LLM and return a merged suggestion list.
+    timeout: float = _DEFAULT_TIMEOUT,
+    system_prompt: str = _SYSTEM_PROMPT,
+    user_prefix: str = "",
+    parser: Callable[[str, str], LlmOutcome] = _parse_suggestions,
+    response_schema: dict[str, Any] | None = None,
+    disable_reasoning: bool = True,
+) -> LlmOutcome:
+    """Call an OpenAI-compatible /v1/chat/completions endpoint (e.g. Ollama).
 
-    On any error, logs and returns an empty list so the caller falls back to
-    the heuristic results.
+    On any failure the outcome carries ``status="error"`` and a human-readable
+    ``detail``, and the caller falls back to the heuristic results. Errors are
+    logged at WARNING (not INFO) with the endpoint and the underlying reason so
+    connection refusals, timeouts, and HTTP errors are distinguishable in logs.
+
+    ``user_prefix``: see _llm_refine_anthropic — same purpose here. ``parser``:
+    see _llm_refine_anthropic — same purpose here.
+
+    ``response_schema`` (#910-follow-up): when given, requests schema-
+    constrained decoding (``response_format={"type": "json_schema", ...}``)
+    instead of the looser ``"json_object"`` mode — forces the model's output
+    into this exact shape via constrained decoding rather than hoping it
+    follows the prompt's written format instructions, which a model can
+    drift away from (e.g. inventing its own key names) even while still
+    producing well-formed JSON. Falls back to ``"json_object"`` when omitted.
+
+    ``disable_reasoning`` (#939-follow-up, default True): sends "think": false
+    and "reasoning_effort": "none" to suppress a thinking-capable model's
+    hidden reasoning phase, since there's nothing to reason about for this
+    task. Configurable per AiApiConfig (opt-in reasoning) because forcing it
+    off is a call-time choice, not a hardcoded one — some deployments may
+    want the model's own judgment on ambiguous names badly enough to accept
+    the added latency and max_tokens risk that comes with it.
     """
     import re as _re
     base_url = _re.sub(
@@ -269,63 +739,114 @@ def _llm_refine(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    response_format: dict[str, Any] = (
+        {"type": "json_schema", "json_schema": {"name": "ai_organize_response", "schema": response_schema, "strict": True}}
+        if response_schema is not None
+        else {"type": "json_object"}
+    )
     payload: dict[str, Any] = {
         "model": model,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(files, ensure_ascii=False)},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prefix + json.dumps(files, ensure_ascii=False)},
         ],
         "temperature": 0.1,
-        "response_format": {"type": "json_object"},
+        "response_format": response_format,
+        "max_tokens": _OPENAI_MAX_TOKENS,
     }
+    if disable_reasoning:
+        # Some locally-served models (DeepSeek-R1-style, QwQ, Gemma reasoning
+        # variants, etc.) support an extended "thinking"/reasoning phase
+        # before the real answer. There's nothing to reason about for this
+        # task — it's filename pattern-matching — and a thinking model can
+        # spend its *entire* max_tokens budget on hidden reasoning and emit
+        # nothing into content at all (#903-follow-up: exactly this — 78s,
+        # status 200, empty content).
+        #
+        # "think" is the native Ollama /api/chat field — it is NOT read by
+        # Ollama's OpenAI-compatible /v1/chat/completions endpoint at all
+        # (ollama/ollama#15288), so kept here only in case some other
+        # OpenAI-compatible server (llama.cpp, etc.) honors it. The field
+        # this endpoint actually reads is "reasoning_effort" (ollama/ollama
+        # #14820); "none" is the documented value to disable thinking.
+        # Ignored by servers/models that don't recognize either field.
+        payload["think"] = False
+        payload["reasoning_effort"] = "none"
 
     endpoint = f"{base_url}/v1/chat/completions"
-    _log_step("llm_request", endpoint=endpoint, model=model, file_count=len(files))
+    # Credential-safe form for logs and surfaced error messages.
+    log_endpoint = _redact_url(endpoint)
+    _log_step("llm_request", endpoint=log_endpoint, model=model,
+              file_count=len(files), timeout_s=timeout)
     t0 = time.monotonic()
 
-    try:
-        resp = httpx.post(endpoint, json=payload, headers=headers, timeout=10)
-    except httpx.RequestError as exc:
-        _log_step("llm_error", reason=exc.__class__.__name__)
-        return []
+    def _request_error(exc: httpx.RequestError) -> LlmOutcome:
+        # str(exc) includes the target host/port and the OS-level reason
+        # (e.g. "Connection refused", "timed out"), which the class name alone
+        # discarded. A timeout is by far the most common remote-Ollama failure,
+        # so name it explicitly. Redact the exception text too: httpx errors
+        # echo the request URL, which may carry userinfo credentials.
+        detail = _redact_url(f"{exc.__class__.__name__}: {exc}".strip().rstrip(":"))
+        if isinstance(exc, httpx.TimeoutException):
+            detail = (
+                f"Timed out after {timeout:g}s calling {log_endpoint} — the model may "
+                f"be cold-starting; raise this API's timeout in Settings."
+            )
+        _log.warning("ai_organize llm_error endpoint=%r reason=%s", log_endpoint, detail)
+        return LlmOutcome(status="error", detail=detail)
 
-    if resp.status_code == 400 and "response_format" in resp.text:
-        payload.pop("response_format", None)
-        try:
-            resp = httpx.post(endpoint, json=payload, headers=headers, timeout=10)
-        except httpx.RequestError as exc:
-            _log_step("llm_error", reason=exc.__class__.__name__)
-            return []
+    try:
+        resp = httpx.post(endpoint, json=payload, headers=headers, timeout=timeout)
+    except httpx.RequestError as exc:
+        return _request_error(exc)
+
+    # Retry once per optional field a strict server rejects outright (rather
+    # than just ignoring) — checked in sequence so a server that objects to
+    # both fields sheds each in turn instead of only ever trying the first.
+    for optional_key in ("response_format", "think", "reasoning_effort"):
+        if resp.status_code == 400 and optional_key in payload and optional_key in resp.text:
+            payload.pop(optional_key, None)
+            try:
+                resp = httpx.post(endpoint, json=payload, headers=headers, timeout=timeout)
+            except httpx.RequestError as exc:
+                return _request_error(exc)
 
     elapsed = time.monotonic() - t0
-    _log_step("llm_response", elapsed_s=round(elapsed, 1))
+    _log_step("llm_response", elapsed_s=round(elapsed, 1), status=resp.status_code)
 
     if not resp.is_success:
-        _log_step("llm_error", reason="http_error")
-        return []
+        body_snippet = resp.text[:300].replace("\n", " ")
+        detail = f"HTTP {resp.status_code} from {log_endpoint}: {body_snippet}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
 
     try:
-        body      = resp.json()
-        raw_text: str = body["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError):
-        _log_step("llm_error", reason="bad_shape")
-        return []
+        body    = resp.json()
+        choice  = body["choices"][0]
+        message = choice.get("message", {})
+        raw_text: str = (message.get("content") or "").strip()
+    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        detail = f"Unexpected response shape from {log_endpoint}: {exc.__class__.__name__}"
+        _log.warning("ai_organize llm_error %s", detail)
+        return LlmOutcome(status="error", detail=detail)
 
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("```", 2)[1]
-        if raw_text.startswith("json"):
-            raw_text = raw_text[4:]
-        raw_text = raw_text.rsplit("```", 1)[0].strip()
+    if not raw_text:
+        # A model with a hidden "thinking"/reasoning phase can spend its
+        # entire max_tokens budget reasoning and never emit anything into
+        # content — the request still succeeds (status 200) with nothing to
+        # show for it. finish_reason == "length" confirms it ran out of
+        # budget rather than the model choosing to stop; the full message
+        # object surfaces a reasoning/thinking field the server may have put
+        # the content in instead, if there is one.
+        finish_reason = choice.get("finish_reason")
+        detail = f"Empty response content from {log_endpoint} (finish_reason={finish_reason!r})"
+        _log.warning(
+            "ai_organize llm_error %s — full message: %s",
+            detail, repr(message)[:_RAW_RESPONSE_LOG_CAP],
+        )
+        return LlmOutcome(status="error", detail=detail)
 
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError:
-        _log.warning("ai_organize llm returned non-JSON response")
-        return []
-
-    suggestions = data.get("files", [])
-    _log_step("llm_done", suggestions=len(suggestions) if isinstance(suggestions, list) else "bad")
-    return suggestions if isinstance(suggestions, list) else []
+    return parser(raw_text, log_endpoint)
 
 
 # ---------------------------------------------------------------------------
@@ -334,66 +855,261 @@ def _llm_refine(
 
 _LLM_FILE_CAP = 15   # max files sent to LLM per request
 
+# Unit strategy gets a smaller per-call cap than parts (#910-follow-up): it
+# has no heuristic fallback and, unlike parts' single flat request, its
+# per-unit grouping reasoning (when a model reasons at all) scales with how
+# many distinct units are in play in one call — a verbose local model that
+# can just about finish a handful of files in one go runs out of budget well
+# before _LLM_FILE_CAP on a real multi-unit kit. More, smaller calls trade
+# latency for actually finishing instead of hard-failing on a large batch.
+_UNIT_LLM_FILE_CAP = 5
+
+
+def _run_unit_batches(
+    candidates: list[dict[str, Any]],
+    call_llm: Callable[[list[dict[str, Any]], str, str], LlmOutcome],
+    batch_size: int = _UNIT_LLM_FILE_CAP,
+) -> LlmOutcome:
+    """Send every unit-strategy candidate to the LLM in chunks of
+    ``batch_size`` (defaults to _UNIT_LLM_FILE_CAP), one call per chunk,
+    instead of a single capped call that silently drops everything past the
+    first cap's worth of files (#884) — the unit strategy has no heuristic
+    fallback to catch what a single call misses, unlike "parts".
+
+    Each chunk after the first is told which unit names earlier chunks
+    already established, so the same physical unit doesn't get renamed
+    differently across chunks. Success-via-API-or-nothing (#821) still holds
+    across the whole run: the first chunk that errors makes the entire
+    result "error", exactly as a single non-batched call would — never a mix
+    of some real suggestions and some silently missing.
+    """
+    all_suggestions: list[dict[str, Any]] = []
+    known_units: list[str] = []  # insertion order, for a stable/readable hint
+    total = len(candidates)
+
+    for start in range(0, total, batch_size):
+        chunk = candidates[start:start + batch_size]
+        prefix = ""
+        if known_units:
+            prefix = (
+                "Units already established from earlier files in this same "
+                "model (reuse one of these exactly — same spelling and "
+                "number — if a file below belongs to it): "
+                + ", ".join(known_units) + "\n\n"
+            )
+        _log_step(
+            "llm_batch", sending=len(chunk), of=total,
+            batch=start // batch_size + 1,
+        )
+        outcome = call_llm(chunk, _UNIT_SYSTEM_PROMPT, prefix)
+        if outcome.status != "ok":
+            return outcome
+        for s in outcome.suggestions:
+            pt = s.get("part_type")
+            if pt:
+                cased = _to_pascal_case(pt)
+                s["part_type"] = cased
+                if cased not in known_units:
+                    known_units.append(cased)
+        all_suggestions.extend(outcome.suggestions)
+
+    return LlmOutcome(status="ok", suggestions=all_suggestions)
+
 
 def run(
     files: list[dict[str, Any]],
     base_url: str,
     model: str,
     api_key: str = "",
-) -> list[dict[str, Any]]:
-    """Return a merged list of suggestions for the given files.
+    timeout: float = _DEFAULT_TIMEOUT,
+    api_type: str = "openai",
+    effort: str | None = None,
+    strategy: str = "parts",
+    batch_size: int | None = None,
+    reasoning_enabled: bool = False,
+) -> OrganizeResult:
+    """Return merged suggestions plus the outcome of the optional LLM pass.
 
-    Heuristics run first and are always returned immediately. The LLM is
-    only called for files where heuristics could NOT determine a part_type
-    (capped at _LLM_FILE_CAP), so the response time stays reasonable even
-    for models with hundreds of files.
+    ``strategy="parts"`` (default): heuristics run first and are always
+    returned immediately. The LLM then always runs too (capped at
+    _LLM_FILE_CAP files, so the response time stays reasonable even for
+    models with hundreds of files) — it is never skipped just because
+    heuristics filled in every part_type; the AI still gets a chance to
+    correct a wrong heuristic guess or fix a part_name, which "already
+    resolved" coverage of part_type alone can't tell you. Each candidate file
+    is sent with its current best-known part_type/part_name (the heuristic
+    suggestion when there is one, else what was already stored), matching
+    what the system prompt tells the model it's receiving.
+
+    ``strategy="unit"`` (#878): groups files by the in-game unit/character
+    they belong to instead of by physical part — e.g. every file for "Royal
+    Guard 1" gets that as its part_type, not "Head"/"Weapon"/etc. There is no
+    keyword heuristic for this (a unit name isn't derivable from the same
+    part-type keyword map), so this strategy skips Stage 1 entirely and goes
+    straight to the LLM with the unit-grouping prompt. Its part_type
+    suggestions are freeform (no canonical list to snap to), so each one is
+    Pascal-cased for consistency across a unit's files before being returned.
+
+    Both strategies: Sup_ files are excluded from the LLM batch — they
+    inherit their base file's type and would just duplicate that file's
+    request. Remaining candidates are further deduped by cleaned filename
+    (e.g. "Head_28mm.stl" / "Head_75mm.stl" — the same part at different
+    scales both clean to "Head") — only one representative per group is sent,
+    and its suggestion is copied to every sibling. The returned
+    :class:`OrganizeResult` reports whether the LLM ran, was skipped (no
+    non-Sup files to send), was disabled, or errored so the caller can
+    surface that to the user instead of silently degrading.
+
+    ``api_type`` selects the transport: "openai" (an OpenAI-compatible endpoint
+    at ``base_url``, e.g. Ollama) or "anthropic" (the Anthropic Messages API,
+    which needs no URL but requires ``api_key``; ``effort`` maps to a thinking
+    budget).
+
+    ``batch_size``, when given, overrides the per-request file cap for
+    whichever strategy runs (_LLM_FILE_CAP for "parts", _UNIT_LLM_FILE_CAP for
+    "unit") — configurable per AiApiConfig so a fast/reliable endpoint can send
+    more files per call and a slow/flaky one can send fewer. ``None`` keeps
+    the built-in defaults.
+
+    ``reasoning_enabled`` (OpenAI-compatible path only, #939-follow-up):
+    defaults to False, which actively suppresses a thinking-capable model's
+    hidden reasoning phase (see _llm_refine_openai's ``disable_reasoning``).
+    Set True to let the model reason before answering — off by default
+    because reasoning adds latency and risks the exact empty-content failure
+    the suppression exists to avoid, for a task (filename pattern-matching)
+    that gains little from it.
     """
-    _log_step("start", file_count=len(files), has_llm=bool(base_url and model))
+    # An Anthropic config carries no URL; an OpenAI-compatible one needs one.
+    llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
+    _log_step("start", file_count=len(files), has_llm=llm_ready, api_type=api_type, strategy=strategy)
+    outcome = LlmOutcome(status="disabled")
+    merged: dict[int, dict[str, Any]] = {}
 
-    # Stage 1: fast Python heuristics
-    heuristic = heuristic_pass(files)
-    merged: dict[int, dict[str, Any]] = {s["id"]: s for s in heuristic}
+    if strategy == "parts":
+        # Stage 1: fast Python heuristics
+        heuristic = heuristic_pass(files)
+        merged = {s["id"]: s for s in heuristic}
 
-    # For Sup_ files whose base file's type WAS inferred, inherit it.
-    all_filenames = [f["filename"] for f in files]
-    type_by_filename: dict[str, str | None] = {}
-    for f in files:
-        sug = merged.get(f["id"])
-        type_by_filename[f["filename"]] = sug.get("part_type") if sug else f.get("part_type")
+        # For Sup_ files whose base file's type WAS inferred, inherit it.
+        all_filenames = [f["filename"] for f in files]
+        type_by_filename: dict[str, str | None] = {}
+        for f in files:
+            sug = merged.get(f["id"])
+            type_by_filename[f["filename"]] = sug.get("part_type") if sug else f.get("part_type")
 
-    for f in files:
-        sug = merged.get(f["id"])
-        if sug and sug.get("part_type") is None and _is_sup(f["filename"]):
-            base = sug.get("sup_base_filename") or _find_base(f["filename"], all_filenames)
-            if base and type_by_filename.get(base):
-                sug["part_type"] = type_by_filename[base]
+        for f in files:
+            sug = merged.get(f["id"])
+            if sug and sug.get("part_type") is None and _is_sup(f["filename"]):
+                base = sug.get("sup_base_filename") or _find_base(f["filename"], all_filenames)
+                if base and type_by_filename.get(base):
+                    sug["part_type"] = type_by_filename[base]
 
-    # Stage 2: LLM refinement for genuinely ambiguous files only.
-    if base_url and model:
-        unresolved = [
-            f for f in files
-            if not (merged.get(f["id"]) or {}).get("part_type")
-            and not _is_sup(f["filename"])   # Sup_ files inherit; don't duplicate
-        ][:_LLM_FILE_CAP]
+    # Stage 2: LLM refinement — always runs when configured (never skipped
+    # based on how much Stage 1 already resolved; unit strategy has no Stage
+    # 1 at all, so this is the only stage).
+    if llm_ready:
+        def _with_heuristic(f: dict[str, Any]) -> dict[str, Any]:
+            sug = merged.get(f["id"]) or {}
+            out = dict(f)
+            if sug.get("part_type") is not None:
+                out["part_type"] = sug["part_type"]
+            if sug.get("part_name"):
+                out["part_name"] = sug["part_name"]
+            return out
 
-        if unresolved:
-            _log_step("llm_batch", sending=len(unresolved), of=len(files))
-            llm_results = _llm_refine(unresolved, base_url, model, api_key)
-            for s in llm_results:
-                fid = s.get("id")
-                if not isinstance(fid, int):
-                    continue
-                existing = merged.get(fid, {"id": fid, "filename": "", "sup_base_filename": None})
-                if s.get("part_type") is not None:
-                    existing["part_type"] = s["part_type"]
-                if s.get("part_name"):
-                    existing["part_name"] = s["part_name"]
-                if s.get("sup_base_filename"):
-                    existing["sup_base_filename"] = s["sup_base_filename"]
-                merged[fid] = existing
+        # Unit strategy has no heuristic stage (merged is always empty), and
+        # its prompt only asks the model to group by filename — the stored
+        # part_type/part_name it would otherwise inherit are stale leftovers
+        # from a different classification scheme, not useful context. Sending
+        # just id/filename shrinks the prompt for no loss of signal.
+        def _candidate(f: dict[str, Any]) -> dict[str, Any]:
+            if strategy == "unit":
+                return {"id": f["id"], "filename": f["filename"]}
+            return _with_heuristic(f)
+
+        all_candidates = [
+            _candidate(f) for f in files
+            if not _is_sup(f["filename"])   # Sup_ files inherit; don't duplicate
+        ]
+
+        # Dedupe scale/version variants of the same physical part (e.g.
+        # "Head_28mm.stl" and "Head_75mm.stl" both clean to "Head") before
+        # hitting the LLM (#861-follow-up). They'd get an identical answer
+        # anyway, since part_type/part_name are derived from the cleaned name
+        # either way — so only the first file per cleaned name is sent, and
+        # its suggestion is copied to every sibling afterward. This shrinks
+        # both the prompt and (more importantly) the completion — fewer JSON
+        # objects to generate is the main lever for latency on a slow/remote
+        # model, and it also means more *distinct* parts fit under
+        # _LLM_FILE_CAP instead of the cap being spent on duplicates.
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for f in all_candidates:
+            groups.setdefault(_clean_name(f["filename"]), []).append(f)
+        representatives = [members[0] for members in groups.values()]
+        if len(representatives) < len(all_candidates):
+            _log_step("llm_dedupe", candidates=len(all_candidates), unique=len(representatives))
+
+        parser = _parse_unit_suggestions if strategy == "unit" else _parse_suggestions
+        # Anthropic has no equivalent to OpenAI-style schema-constrained
+        # decoding in this API shape, so response_schema is OpenAI-path only.
+        response_schema = _UNIT_JSON_SCHEMA if strategy == "unit" else _PARTS_JSON_SCHEMA
+
+        def _call_llm(chunk: list[dict[str, Any]], system_prompt: str, user_prefix: str = "") -> LlmOutcome:
+            if api_type == "anthropic":
+                return _llm_refine_anthropic(
+                    chunk, model, api_key, timeout, effort,
+                    system_prompt=system_prompt, user_prefix=user_prefix, parser=parser,
+                )
+            return _llm_refine_openai(
+                chunk, base_url, model, api_key, timeout=timeout,
+                system_prompt=system_prompt, user_prefix=user_prefix, parser=parser,
+                response_schema=response_schema, disable_reasoning=not reasoning_enabled,
+            )
+
+        if not representatives:
+            outcome = LlmOutcome(status="skipped")
+            _log_step("llm_skip", reason="no non-Sup files to send")
+        elif strategy == "unit":
+            # Batched (#884): a single _LLM_FILE_CAP-sized call would silently
+            # drop every file past the cap, since unit strategy has no
+            # heuristic fallback to catch the rest (unlike "parts" below).
+            outcome = _run_unit_batches(
+                representatives, _call_llm,
+                batch_size=batch_size or _UNIT_LLM_FILE_CAP,
+            )
         else:
-            _log_step("llm_skip", reason="no unresolved files after heuristics")
+            candidates = representatives[:(batch_size or _LLM_FILE_CAP)]
+            _log_step("llm_batch", sending=len(candidates), of=len(files))
+            outcome = _call_llm(candidates, _SYSTEM_PROMPT)
+
+        # Fan each representative's suggestion back out to every sibling that
+        # shared its cleaned name (a group of 1 is a no-op here).
+        expanded: list[dict[str, Any]] = []
+        rep_id_to_key = {members[0]["id"]: key for key, members in groups.items()}
+        for s in outcome.suggestions:
+            expanded.append(s)
+            key = rep_id_to_key.get(s.get("id"))
+            if key is None:
+                continue
+            for sibling in groups[key][1:]:
+                expanded.append({**s, "id": sibling["id"]})
+        outcome.suggestions = expanded
+
+        for s in outcome.suggestions:
+            fid = s.get("id")
+            if not isinstance(fid, int):
+                continue
+            existing = merged.get(fid, {"id": fid, "filename": "", "sup_base_filename": None})
+            if s.get("part_type") is not None:
+                existing["part_type"] = (
+                    _to_pascal_case(s["part_type"]) if strategy == "unit" else s["part_type"]
+                )
+            if s.get("part_name"):
+                existing["part_name"] = s["part_name"]
+            if s.get("sup_base_filename"):
+                existing["sup_base_filename"] = s["sup_base_filename"]
+            merged[fid] = existing
 
     result = list(merged.values())
-    _log_step("done", total_suggestions=len(result))
-    return result
+    _log_step("done", total_suggestions=len(result), llm_status=outcome.status)
+    return OrganizeResult(suggestions=result, llm=outcome)

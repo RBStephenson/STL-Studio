@@ -17,7 +17,7 @@ export default function GuideValidationPanel({
   result, loading,
 }: { result: GuideValidationResult | null; loading: boolean }) {
   if (loading && !result) {
-    return <p className="text-xs text-gray-500">Checking…</p>;
+    return <p className="text-xs text-text-secondary-alt">Checking…</p>;
   }
   if (!result) return null;
 
@@ -36,9 +36,9 @@ export default function GuideValidationPanel({
   const blocks = result.flags.filter((f) => f.severity === "block").length;
 
   return (
-    <div className="border border-gray-800 rounded-lg p-3 bg-gray-900/60">
+    <div className="border border-border-subtle rounded-lg p-3 bg-panel/60">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-medium text-gray-200">Validation</h2>
+        <h2 className="text-sm font-medium text-text-primary-alt">Validation</h2>
         <span className={`text-xs ${blocks ? "text-rose-400" : "text-amber-400"}`}>
           {blocks > 0
             ? `${blocks} blocking issue${blocks === 1 ? "" : "s"} — resolve before publishing`
@@ -56,7 +56,7 @@ export default function GuideValidationPanel({
                 onClick={() => focusNode(f)}
                 disabled={!jumpable}
                 className={`w-full text-left flex items-start gap-2 rounded px-2 py-1.5 text-xs ${
-                  jumpable ? "hover:bg-gray-800 cursor-pointer" : "cursor-default"
+                  jumpable ? "hover:bg-panel-secondary cursor-pointer" : "cursor-default"
                 }`}
               >
                 <Icon
@@ -64,8 +64,8 @@ export default function GuideValidationPanel({
                   className={`mt-0.5 shrink-0 ${f.severity === "block" ? "text-rose-400" : "text-amber-400"}`}
                 />
                 <span className="min-w-0">
-                  {f.path && <span className="block text-gray-400 truncate">{f.path}</span>}
-                  <span className="text-gray-200">{f.message}</span>
+                  {f.path && <span className="block text-text-secondary truncate">{f.path}</span>}
+                  <span className="text-text-primary-alt">{f.message}</span>
                 </span>
               </button>
             </li>

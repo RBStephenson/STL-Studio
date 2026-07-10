@@ -20,6 +20,11 @@ class CreatorRead(CreatorBase):
         from_attributes = True
 
 
+class CreatorCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    source_url: Optional[str] = None
+
+
 class STLFileRead(BaseModel):
     id: int
     path: str
@@ -114,6 +119,10 @@ class ModelDetail(ModelRead):
     stl_files: list[STLFileRead] = []
     creator: Optional[CreatorRead] = None
     collection_ids: list[int] = []
+    # True when this model's current folder no longer matches where it would
+    # land under the library's organize template. Purely informational — never
+    # blocks a save; the user still has to run Reorganize to actually move it.
+    unorganized: bool = False
 
 
 class ModelList(BaseModel):
@@ -176,6 +185,11 @@ class ModelUpdate(BaseModel):
     creator_name: Optional[str] = None
 
 
+class OtherFileDeleteRequest(BaseModel):
+    """Delete one entry from Model.other_files, on disk and in the DB (#880)."""
+    path: str
+
+
 class ThumbnailUpdate(BaseModel):
     thumbnail_path: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -211,8 +225,9 @@ class QueueReorder(BaseModel):
 
 
 class GroupReorder(BaseModel):
-    creator_id: int
-    character: str
+    creator_id: Optional[int] = None
+    character: Optional[str] = None
+    group_id: Optional[int] = None
     # Member ids in the desired display order. Empty = reset (clear the whole
     # group's manual order, falling back to the heuristic). Ids not in the group
     # are ignored.
@@ -272,6 +287,7 @@ class BulkEnrichUpdate(BaseModel):
     title: Optional[str] = None
     notes: Optional[str] = None
     source_url: Optional[str] = None
+    source_site: Optional[str] = None
 
 
 class BulkDeleteRequest(BaseModel):
@@ -336,7 +352,7 @@ class LibraryRead(BaseModel):
     path: str
     name: str
     is_writable: bool
-    write_enabled: bool  # deployment-level reorganize_write_enabled flag
+    write_enabled: bool  # the reorganize_enabled app-setting feature flag
 
     class Config:
         from_attributes = True
@@ -416,6 +432,46 @@ class ImportApplyResponse(BaseModel):
     undo_log: Optional[str] = None
 
 
+class ImportApplyStart(BaseModel):
+    """Immediate response to POST /import/apply. ``started=False`` means there
+    was nothing to move (no eligible files) — ``result`` is already final, no
+    need to poll. ``started=True`` means a background job is now running;
+    poll GET /import/apply/status for progress and the eventual result."""
+    started: bool
+    result: Optional[ImportApplyResponse] = None
+
+
+class ImportApplyStatus(BaseModel):
+    running: bool
+    message: str
+    moved_files: int = 0
+    total_files: int = 0
+    error: Optional[str] = None
+    result: Optional[ImportApplyResponse] = None
+
+
+class DownloadImagesResult(BaseModel):
+    downloaded: int
+
+
+class DownloadImagesStart(BaseModel):
+    """Immediate response to POST /import/download-images. ``started=False``
+    means there was nothing to download (``result`` already final, no need to
+    poll). ``started=True`` means a background job is now running; poll
+    GET /import/download-images/status for progress and the eventual result."""
+    started: bool
+    result: Optional[DownloadImagesResult] = None
+
+
+class DownloadImagesStatus(BaseModel):
+    running: bool
+    message: str
+    downloaded: int = 0
+    total: int = 0
+    error: Optional[str] = None
+    result: Optional[DownloadImagesResult] = None
+
+
 class DownloadZipRequest(BaseModel):
     file_ids: list[int] = Field(..., max_length=500)
     zip_name: str = "kit-build"
@@ -490,6 +546,22 @@ class AppSettingsRead(BaseModel):
     ai_guides_enabled: bool = False
     ai_guides_api: Optional[int] = None
     ai_organize_api: Optional[int] = None
+    # Application log verbosity for the `app.*` loggers. Changing this in the UI
+    # takes effect immediately (no restart) and persists across restarts.
+    log_level: str = "INFO"
+    # Library reorganize destination template ("" = the built-in default,
+    # {creator}/{character}/{title}; optional {scale}) and whether every segment is rendered
+    # lowercase/hyphenated (import-style) rather than case-preserving.
+    reorganize_template: str = ""
+    reorganize_slugify: bool = True
+    # Feature flag: gates the Library reorganize feature end-to-end — the UI
+    # (nav link, /reorganize route/page) AND the destructive apply/undo writes.
+    # Default off; toggled from the Library settings tab. Retires the old
+    # deployment-level REORGANIZE_WRITE_ENABLED env var.
+    reorganize_enabled: bool = False
+    # Collections page: give every card the same box size (the one cover art
+    # already uses) instead of a compact box for collections with no cover.
+    collections_uniform_size: bool = True
 
 
 class AppSettingsUpdate(BaseModel):
@@ -524,6 +596,11 @@ class AppSettingsUpdate(BaseModel):
     ai_guides_enabled: Optional[bool] = None
     ai_guides_api: Optional[int] = None
     ai_organize_api: Optional[int] = None
+    log_level: Optional[str] = Field(None, pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
+    reorganize_template: Optional[str] = Field(None, max_length=500)
+    reorganize_slugify: Optional[bool] = None
+    reorganize_enabled: Optional[bool] = None
+    collections_uniform_size: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod
@@ -579,6 +656,13 @@ class AiApiConfigRead(BaseModel):
     url: Optional[str] = None
     model: str
     effort: Optional[str] = None
+    # Per-connection request timeout (seconds). Default 10.
+    request_timeout: int = 10
+    # Max files per AI Organize LLM request/batch. None = service default.
+    batch_size: Optional[int] = None
+    # OpenAI-compatible only: let the model reason before answering. Off by
+    # default — see AiApiConfig.reasoning_enabled.
+    reasoning_enabled: bool = False
     key_set: bool
     key_hint: Optional[str] = None
 
@@ -589,6 +673,12 @@ class AiApiConfigCreate(BaseModel):
     url: Optional[str] = Field(None, max_length=500)
     model: str = Field("", max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    request_timeout: int = Field(10, ge=1, le=600)
+    batch_size: Optional[int] = Field(None, ge=1, le=50)
+    reasoning_enabled: bool = False
+    # Optional so a config can still be created key-less (e.g. Ollama), but lets
+    # the client set the key in the same request instead of a follow-up call.
+    api_key: Optional[str] = Field(None, max_length=400)
 
 
 class AiApiConfigUpdate(BaseModel):
@@ -596,6 +686,10 @@ class AiApiConfigUpdate(BaseModel):
     url: Optional[str] = Field(None, max_length=500)
     model: Optional[str] = Field(None, max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    request_timeout: Optional[int] = Field(None, ge=1, le=600)
+    batch_size: Optional[int] = Field(None, ge=1, le=50)
+    reasoning_enabled: Optional[bool] = None
+    api_key: Optional[str] = Field(None, max_length=400)
 
 
 # --- AI settings (#517) ---------------------------------------------------
@@ -622,6 +716,14 @@ class AiOrganizeSettingsRead(BaseModel):
     model: str = ""
 
 
+class AiOrganizeRequest(BaseModel):
+    """``strategy`` selects the grouping mode (#878): "parts" (default) suggests
+    a physical part_type category (Head, Weapon, ...); "unit" suggests an
+    in-game unit/character name instead (e.g. "Royal Guard 1"), written into
+    the same part_type field but not constrained to the canonical category list."""
+    strategy: Literal["parts", "unit"] = "parts"
+
+
 class AiOrganizeSuggestion(BaseModel):
     id: int
     part_type: Optional[str] = None
@@ -646,6 +748,11 @@ class AiOrganizeSuggestionPreview(BaseModel):
 
 class AiOrganizePreviewResult(BaseModel):
     suggestions: list[AiOrganizeSuggestionPreview]
+    # Outcome of the optional LLM pass so the UI can distinguish "AI ran" from
+    # "AI failed / was skipped" instead of silently showing heuristics-only.
+    # status: "ok" | "skipped" | "disabled" | "error". detail is set on error.
+    llm_status: str = "disabled"
+    llm_detail: Optional[str] = None
 
 
 class AiOrganizeApplyItem(BaseModel):
@@ -721,7 +828,7 @@ CollisionKind = Literal[
 
 
 class ReorganizeFileMove(BaseModel):
-    stl_file_id: int
+    stl_file_id: Optional[int] = None
     current_path: str          # normalized, '/'-internal
     proposed_path: str
     # Real fingerprint for the Phase 2 drift check (decision D) — not the dead
@@ -733,6 +840,9 @@ class ReorganizeFileMove(BaseModel):
     # Source absent/unreadable at preview — (size, mtime) are a zeroed sentinel,
     # not a usable fingerprint for the Phase 2 drift check.
     missing_file: bool = False
+    # "stl" repaths an STLFile row (stl_file_id set); "image" repaths one of
+    # the model's own image_paths/thumbnail_path/primary_image_path instead.
+    kind: str = "stl"
 
 
 class ReorganizeEntry(BaseModel):
@@ -789,6 +899,7 @@ class ReorganizeOverride(BaseModel):
     falls back to the model's metadata; suffix is appended to the title."""
     creator: Optional[str] = None
     character: Optional[str] = None
+    scale: Optional[str] = None
     title: Optional[str] = None
     suffix: Optional[str] = None
 

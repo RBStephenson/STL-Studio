@@ -329,7 +329,7 @@ All AI capabilities are bring-your-own-API-key; no keys ship in the repo or buil
 
 ---
 
-## v0.17.0 — Painting full-corpus & wargaming 🗓 Planned
+## v0.17.0 — Painting full-corpus & wargaming ✅ Complete
 
 | Issue | Item |
 |-------|------|
@@ -339,20 +339,56 @@ All AI capabilities are bring-your-own-API-key; no keys ship in the repo or buil
 
 ---
 
-## v1.0 — Desktop shell (final polish) 🚧 In progress
+## v0.18 — Desktop app (Electron) & hardening ✅ Complete
 
-The 1.0 release is the desktop-experience polish pass.
+The headline is the new **Windows desktop app**: STL Studio now ships as a real
+NSIS-installed Electron application, alongside a large batch of features and
+security/correctness fixes accumulated since v0.17.0. Effectively a public beta of
+the desktop build — it ships **unsigned** (SmartScreen warns on first run) and has
+**no auto-update yet**; both land in 1.0.
 
-| Issue | Item |
-|-------|------|
-| [#528](https://github.com/RBStephenson/STL-Inventory/issues/528) | ✅ **Desktop shell: pywebview → Electron** — Windows ships a real NSIS-installed Electron app (Start-menu entry, app icon, no console window); the Python backend runs as a windowless sidecar on a dynamic port. Unsigned, auto-update deferred |
+**Desktop app — [#528](https://github.com/RBStephenson/STL-Inventory/issues/528)**
 
-Follow-ups deferred out of the v1 Electron scope: **code signing** (ships unsigned;
-SmartScreen warns on first run), **auto-update** (electron-updater feed), and
-**Linux/macOS Electron packaging** — Linux keeps the loose binary + browser
-fallback for now. macOS notarization ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17))
-sits in the backlog — deferred until there's appetite for the Apple Developer
-Program cost.
+| Item |
+|------|
+| **pywebview → Electron** — NSIS installer, Start-menu entry, multi-resolution app icon, no console window; the Python backend runs as a windowless sidecar on a dynamic free port. |
+| Branded **startup splash** while the backend boots; custom application menu with **back/forward navigation** (right-click, `Alt+←`/`Alt+→`, mouse buttons) and no Edit menu. |
+
+**Features**
+
+- Collections — cover images, description editing, card redesign (#749/#750)
+- Kit-builder — sticky 3D part preview pane (#778)
+- Gallery — set thumbnails from the gallery (#770), display preferences (#783), scanned-gallery population (#769)
+- Settings reorganization — part settings → Preferences, gallery prefs (#755/#756/#784)
+- Smarter AI naming; Library performance via TanStack Query migration (#740/#741)
+
+**Hardening — security & correctness**
+
+- SSRF guards on server-side URL fetches + scraper redirect cap (#737/#734)
+- Case-insensitive model identity to stop scan data loss (#733); partial-walk prune shielding (#738); dangling `rep_model_id` repair (#727/#729)
+- Bug-bounty P1s — `bulkAddModels` fail-loud (#776), scan-busy → 409 (#777), DB restore/reset behind the write lock (#780)
+- NSFW variant-thumbnail blur (#731); queue-position race fix (#730); DB restore body cap (#732)
+
+---
+
+## v1.0 — Signed, self-updating desktop app 🗓 Planned
+
+The desktop shell itself shipped in **v0.18**. The 1.0 milestone is what turns it
+into a *trustworthy installed app*: code signing so Windows stops flagging it, and
+auto-update so users get patches automatically — plus a correctness pass over the
+outstanding bug-bounty findings.
+
+| Item |
+|------|
+| **Code signing** ([STUDIO-99](https://rbrentstephenson.atlassian.net/browse/STUDIO-99)) — Authenticode signing so SmartScreen no longer warns (individual/OSS-friendly cloud-HSM cert). |
+| **Auto-update** — electron-updater feed off GitHub Releases so installs self-patch. |
+| **Correctness pass** — the remaining bug-bounty P2/P3 items ([STUDIO-81](https://rbrentstephenson.atlassian.net/browse/STUDIO-81)), e.g. browse-allowlist ordering, enrich single-flight, guide-CSS scoping. |
+| **CI boot-smoke** ([STUDIO-102](https://rbrentstephenson.atlassian.net/browse/STUDIO-102)) — launch the packaged exe in CI so unbootable builds can't ship. |
+
+Still deferred beyond 1.0: **Linux/macOS Electron packaging** — Linux keeps the loose
+binary + browser fallback for now; macOS notarization
+([#17](https://github.com/RBStephenson/STL-Inventory/issues/17)) waits on appetite for
+the Apple Developer Program cost.
 
 ---
 

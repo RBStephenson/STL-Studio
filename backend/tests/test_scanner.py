@@ -152,6 +152,59 @@ class TestGalleryImages:
         assert str(removed) not in model.image_paths
         assert str(kept) in model.image_paths
 
+    def test_scan_ignores_hidden_directories(self, db, tmp_path):
+        """A hidden dot-directory (e.g. some other tool's own derivative-
+        thumbnail cache) must never be walked into for images, and never
+        become a model of its own (#888-follow-up)."""
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Knight"
+        _stl(model_dir)
+        _img(model_dir, "real_photo.jpg")
+        hidden = model_dir / ".othertool" / "derivatives" / "real_photo.jpg"
+        hidden.mkdir(parents=True)
+        (hidden / "carousel.jpg").write_bytes(b"\x89PNG\r\n")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert len(models) == 1   # the hidden dir never became a model of its own
+        model = models[0]
+        assert model.image_paths == [str(model_dir / "real_photo.jpg")]
+
+    def test_transient_read_error_does_not_prune_known_gallery_images(self, db, tmp_path, monkeypatch):
+        """A gallery-discovery failure during a rescan (drive hiccup,
+        permission blip) must never look identical to "no images here
+        anymore" — a real, already-indexed gallery image must survive
+        (#894-follow-up).
+
+        Mocks _collect_gallery_images directly rather than breaking a real
+        subdirectory: any unreadable folder is *also* caught earlier by the
+        existing model-vs-container STL classification (_any_child_has_stls_cached),
+        which aborts that whole creator's walk — a coarser, separately-tested
+        safety net. This test isolates the finer-grained protection added
+        specifically around the gallery merge.
+        """
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Knight"
+        _stl(model_dir)
+        _img(model_dir, "real_photo.jpg")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+        model = _models(db, creator)[0]
+        assert model.image_paths == [str(model_dir / "real_photo.jpg")]
+
+        def _boom(*a, **k):
+            raise OSError("simulated read failure")
+
+        monkeypatch.setattr(scanner, "_collect_gallery_images", _boom)
+
+        _walk(db, creator, creator_dir)   # must not raise — and must not prune
+        db.refresh(model)
+
+        assert model.image_paths == [str(model_dir / "real_photo.jpg")]
+
     def test_scan_preserves_remote_and_user_added_gallery_paths(self, db, tmp_path):
         creator_dir = tmp_path / "Creator"
         model_dir = creator_dir / "Knight"
@@ -613,6 +666,34 @@ class TestSplitPack:
         assert chars == {"Electro", "Sandman", "Spiderman"}
         assert check.query(PackOverride).filter(PackOverride.path == str(pack)).count() == 1
         check.close()
+
+    def test_split_pack_reports_error_on_unreadable_child(self, db, tmp_path, monkeypatch):
+        """A child folder that fails to list (drive hiccup, permission blip)
+        must come back as a clean {"ok": False, ...} the caller can show, not
+        an unhandled 500 (#894-follow-up)."""
+        from sqlalchemy.orm import sessionmaker
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Sinister Six"
+        _stl(pack / "Electro", "head.stl")
+
+        setup = Session()
+        creator = Creator(name="Creator")
+        setup.add(creator); setup.flush()
+        collapsed = Model(name="Sinister Six", folder_path=str(pack), creator_id=creator.id)
+        setup.add(collapsed); setup.flush()
+        collapsed_id = collapsed.id
+        setup.add(STLFile(model_id=collapsed_id, path=str(pack / "x.stl"), filename="x.stl"))
+        setup.commit(); setup.close()
+
+        monkeypatch.setattr(scanner, "_has_stls", lambda *a, **k: (_ for _ in ()).throw(OSError("simulated")))
+
+        result = scanner.split_pack(collapsed_id)
+
+        assert result["ok"] is False
+        assert "try again" in result["message"]
 
 
 # ---------------------------------------------------------------------------

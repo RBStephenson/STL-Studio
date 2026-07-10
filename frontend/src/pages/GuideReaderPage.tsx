@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Printer, Globe, Undo2, Trash2, Pencil, ListTree } from "lucide-react";
 import { api, Guide } from "../api/client";
 import GuideReader from "../components/guide/GuideReader";
+import GuideReaderSkeleton from "../components/guide/GuideReaderSkeleton";
 import GuideExportMenu from "../components/guide/GuideExportMenu";
 import ModelLink from "../components/guide/ModelLink";
 import { useToast } from "../context/ToastContext";
@@ -69,7 +70,7 @@ export default function GuideReaderPage() {
     <div>
       <div className="max-w-5xl mx-auto px-4 pt-4 flex items-center justify-between print:hidden">
         <div className="flex items-center gap-4">
-          <Link to="/painting/guides" className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300">
+          <Link to="/painting/guides" className="inline-flex items-center gap-1 text-xs text-text-secondary-alt hover:text-text-primary-alt2">
             <ArrowLeft size={14} /> All guides
           </Link>
           {guide?.model_id != null && <ModelLink modelId={guide.model_id} />}
@@ -79,14 +80,14 @@ export default function GuideReaderPage() {
             <Link
               to={`/painting/guides/${guide.id}/edit`}
               title="Edit this guide's title, metadata and details"
-              className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+              className="inline-flex items-center gap-1.5 bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt text-sm px-3 py-1.5 rounded transition-colors"
             >
               <Pencil size={15} /> Edit
             </Link>
             <Link
               to={`/painting/guides/${guide.id}/content`}
               title="Edit this guide's tabs, steps and swatches"
-              className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+              className="inline-flex items-center gap-1.5 bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt text-sm px-3 py-1.5 rounded transition-colors"
             >
               <ListTree size={15} /> Edit content
             </Link>
@@ -94,7 +95,7 @@ export default function GuideReaderPage() {
               onClick={togglePublish}
               disabled={busy}
               title={guide.status === "published" ? "Unpublish — return this guide to draft" : "Publish this guide"}
-              className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt text-sm px-3 py-1.5 rounded transition-colors disabled:opacity-50"
             >
               {guide.status === "published"
                 ? (<><Undo2 size={15} /> Unpublish</>)
@@ -104,7 +105,7 @@ export default function GuideReaderPage() {
               onClick={remove}
               disabled={busy}
               title="Delete this guide"
-              className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-red-950/60 border border-gray-700 hover:border-red-800 text-gray-300 hover:text-red-300 text-sm px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 bg-panel-secondary hover:bg-red-950/60 border border-border hover:border-red-800 text-text-primary-alt2 hover:text-red-300 text-sm px-3 py-1.5 rounded transition-colors disabled:opacity-50"
             >
               <Trash2 size={15} /> Delete
             </button>
@@ -112,7 +113,7 @@ export default function GuideReaderPage() {
             <button
               onClick={() => window.print()}
               title="Print this guide — every tab and sub-tab expands into one document"
-              className="inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+              className="inline-flex items-center gap-1.5 bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt text-sm px-3 py-1.5 rounded transition-colors"
             >
               <Printer size={15} /> Print
             </button>
@@ -120,7 +121,7 @@ export default function GuideReaderPage() {
         )}
       </div>
 
-      {loading && <p className="max-w-5xl mx-auto px-4 py-8 text-sm text-gray-500">Loading…</p>}
+      {loading && <GuideReaderSkeleton />}
       {error && (
         <p role="alert" className="max-w-5xl mx-auto px-4 py-8 text-sm text-rose-400">{error}</p>
       )}

@@ -5,9 +5,11 @@ Children B/C/D extend it with the pack-grouped preview projection, scoped
 ingest, and batch apply. Module is named `imports` because `import` is a
 reserved word.
 """
+import asyncio
 import logging
 import os
 import shutil
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -19,21 +21,34 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import ImportSourceMapping, Model, ScanRoot, STLFile
-from app.routers.reorganize import _build_and_persist
+from app.routers.reorganize import _build_and_persist, _slugify_all
 from app.routers.scan import _bootstrap_roots, _configured_roots
 from app.schemas import (
-    DownloadImagesRequest,
+    DownloadImagesRequest, DownloadImagesResult, DownloadImagesStart, DownloadImagesStatus,
     ImportApplyIneligible, ImportApplyRequest, ImportApplyResponse,
+    ImportApplyStart, ImportApplyStatus,
     ImportPreviewPack, ImportPreviewResponse, InboxScanRequest,
     SourceContentsEntry, SourceContentsResponse,
     SourceMappingRead, SourceMappingSet,
 )
 from app.services import reorganize_apply, scanner, write_lock
+from app.services.job_runner import JobHandle, JobState, runner
 from app.services.path_guard import assert_within_roots
 from app.services.reorganize_apply import ApplyError
 from app.services.thumbnails import CONTENT_TYPE_EXT, IMAGE_EXTS
+
+# Single global job key — an import-apply's real mutual exclusion comes from
+# the write lock apply_manifest already holds; this just lets one apply be
+# tracked/polled at a time, mirroring scanner.py's _SCAN_KEY.
+_IMPORT_APPLY_KEY = "import_apply"
+
+# Same pattern for the gallery-image download step: one download at a time,
+# tracked/polled through the shared job runner.
+_DOWNLOAD_IMAGES_KEY = "download_images"
+_DOWNLOAD_CONCURRENCY = 6
+_DOWNLOAD_IMAGE_TIMEOUT = 10.0
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -64,6 +79,23 @@ def _allowed_bases(db: Session) -> list[str]:
     browse allowlist. Import sources come through the allowlist-guarded folder
     picker, and a pack may sit inside a configured root, so both are permitted."""
     return [os.path.realpath(str(r)) for r in _configured_roots(db) + _bootstrap_roots()]
+
+
+def _mapped_source_for(db: Session, src: str) -> ImportSourceMapping | None:
+    """The mapping covering `src`: an exact match, or the longest mapped ancestor.
+
+    A mapping is set once on the root a user picks in the UI (e.g. `/import`),
+    but apply is scoped per-pack (`src` = a specific subfolder under that root)
+    so one pack's move can't sweep in every other pending pack. This mirrors the
+    longest-prefix resolution build_manifest's own `_dest_for` already does for
+    the destination library — this is just the existence check ahead of it."""
+    key = os.path.normcase(src)
+    best_len, best = -1, None
+    for m in db.query(ImportSourceMapping).all():
+        mkey = os.path.normcase(m.source_path)
+        if (key == mkey or key.startswith(mkey + os.sep)) and len(mkey) > best_len:
+            best_len, best = len(mkey), m
+    return best
 
 
 def _pack_key(folder_path: str, source: str) -> str:
@@ -322,10 +354,76 @@ def _image_ext(url: str, content_type: str) -> str:
     return suffix if suffix in IMAGE_EXTS else ".jpg"
 
 
-@router.post("/download-images")
+async def _download_images_async(handle: JobHandle, pack_dir_str: str, urls: list[str]) -> int:
+    """Fetch every URL into pack_dir concurrently (bounded), reporting progress
+    on handle after each one finishes. Returns the count actually written.
+
+    Concurrent + a short per-image timeout, replacing a fully sequential loop
+    with a 30s-per-image timeout — a couple of slow/unreachable CDN URLs used
+    to serialize into minutes of dead time with zero feedback to the UI."""
+    pack_dir = Path(pack_dir_str)
+    total = len(urls)
+    downloaded = 0
+    done = 0
+    lock = asyncio.Lock()
+    sem = asyncio.Semaphore(_DOWNLOAD_CONCURRENCY)
+
+    async def fetch_one(client: httpx.AsyncClient, n: int, url: str) -> None:
+        nonlocal downloaded, done
+        async with sem:
+            try:
+                r = await client.get(url)
+                r.raise_for_status()
+                ct = r.headers.get("content-type", "").split(";")[0].strip().lower()
+                if ct in ("image/svg+xml", "text/html", "application/json"):
+                    logger.warning("gallery image %d skipped — unsupported content-type %r", n, ct)
+                    return
+                ext = _image_ext(url, ct)
+                # Guard: ext must be a known-safe image extension — reject anything
+                # that could escape the filename (e.g. a crafted URL suffix).
+                if ext not in IMAGE_EXTS:
+                    logger.warning("gallery image %d skipped — unexpected ext %r", n, ext)
+                    return
+                dest = pack_dir / f"gallery_{n:02d}{ext}"
+                dest.write_bytes(r.content)
+                async with lock:
+                    downloaded += 1
+            except Exception as e:
+                logger.warning("gallery image %d download failed: %s", n, e)
+            finally:
+                async with lock:
+                    done += 1
+                    handle.update(
+                        message=f"Downloading images ({done}/{total})",
+                        downloaded=downloaded, total=total,
+                    )
+
+    async with httpx.AsyncClient(
+        timeout=_DOWNLOAD_IMAGE_TIMEOUT, follow_redirects=True,
+        headers={"User-Agent": "STL-Inventory/1.0"},
+    ) as client:
+        await asyncio.gather(*(fetch_one(client, n, url) for n, url in enumerate(urls)))
+    return downloaded
+
+
+def _run_download_images_job(handle: JobHandle, pack_dir_str: str, urls: list[str]) -> None:
+    """Background body for POST /import/download-images. Runs its own asyncio
+    event loop on this job's dedicated thread (JobRunner threads are plain
+    sync callables) so the fetches above can run concurrently."""
+    downloaded = asyncio.run(_download_images_async(handle, pack_dir_str, urls))
+    handle.update(
+        state=JobState.DONE,
+        message=f"done — {downloaded} image(s)",
+        result=DownloadImagesResult(downloaded=downloaded).model_dump(),
+    )
+
+
+@router.post("/download-images", response_model=DownloadImagesStart)
 def download_images(body: DownloadImagesRequest, db: Session = Depends(get_db)):
     """Download CDN image URLs into the pack folder so they travel with the pack
-    during apply. Called from the import UI after enrichment, before apply."""
+    during apply. Called from the import UI after enrichment, before apply.
+    Runs as a background job (mirroring /import/apply) — poll
+    GET /import/download-images/status for progress and the eventual result."""
     raw_pack_path = body.pack_path.strip()
     if not raw_pack_path:
         raise HTTPException(status_code=400, detail="pack_path is required")
@@ -341,29 +439,33 @@ def download_images(body: DownloadImagesRequest, db: Session = Depends(get_db)):
     if not pack_dir.is_dir():
         raise HTTPException(status_code=404, detail="Pack folder not found")
 
-    downloaded = 0
-    with httpx.Client(timeout=30, follow_redirects=True,
-                      headers={"User-Agent": "STL-Inventory/1.0"}) as client:
-        for n, url in enumerate(body.image_urls[:30]):  # cap at 30 images
-            try:
-                r = client.get(url)
-                r.raise_for_status()
-                ct = r.headers.get("content-type", "").split(";")[0].strip().lower()
-                if ct in ("image/svg+xml", "text/html", "application/json"):
-                    logger.warning("gallery image %d skipped — unsupported content-type %r", n, ct)
-                    continue
-                ext = _image_ext(url, ct)
-                # Guard: ext must be a known-safe image extension — reject anything
-                # that could escape the filename (e.g. a crafted URL suffix).
-                if ext not in IMAGE_EXTS:
-                    logger.warning("gallery image %d skipped — unexpected ext %r", n, ext)
-                    continue
-                dest = pack_dir / f"gallery_{n:02d}{ext}"
-                dest.write_bytes(r.content)
-                downloaded += 1
-            except Exception as e:
-                logger.warning("gallery image %d download failed: %s", n, e)
-    return {"downloaded": downloaded}
+    urls = body.image_urls[:30]  # cap at 30 images
+    if not urls:
+        return DownloadImagesStart(started=False, result=DownloadImagesResult(downloaded=0))
+
+    handle = runner.start(
+        _DOWNLOAD_IMAGES_KEY, _run_download_images_job, single_flight=True,
+        pack_dir_str=pack_dir_str, urls=urls,
+    )
+    if handle is None:
+        raise HTTPException(status_code=409, detail="An image download is already in progress.")
+    return DownloadImagesStart(started=True)
+
+
+@router.get("/download-images/status", response_model=DownloadImagesStatus)
+def download_images_status():
+    """Poll target for the job POST /import/download-images starts."""
+    payload = runner.status(_DOWNLOAD_IMAGES_KEY)
+    prog = payload["progress"]
+    result = prog.get("result")
+    return DownloadImagesStatus(
+        running=payload["state"] == JobState.RUNNING.value,
+        message=payload["message"] or "idle",
+        downloaded=prog.get("downloaded", 0),
+        total=prog.get("total", 0),
+        error=payload["error"],
+        result=DownloadImagesResult(**result) if result else None,
+    )
 
 
 def _move_non_stl_files(
@@ -413,9 +515,22 @@ def _move_non_stl_files(
             except OSError as e:
                 logger.warning("Could not move %r → %r: %s", src, dst, e)
 
+    old_boundary = Path(old_folder)
     for m in models:
-        if new_images:
-            m.image_paths = new_images
+        # Merge rather than "only overwrite if we moved something new": a
+        # model whose old_folder held nothing but hidden-directory junk
+        # (e.g. a stale .manyfold cache — #903-follow-up) got an empty
+        # new_images, so `if new_images:` never fired and those stale
+        # image_paths entries — still pointing at the now-emptied old
+        # folder — survived indefinitely. The merge drops anything within
+        # old_folder that wasn't rediscovered while preserving paths that
+        # live elsewhere (manually-added images, remote URLs, etc.).
+        m.image_paths = scanner._merge_scan_gallery_paths(
+            existing=m.image_paths or [],
+            discovered=new_images,
+            removed=m.removed_image_paths or [],
+            boundary=old_boundary,
+        )
         if new_others:
             m.other_files = new_others
         # Remap thumbnail_path if it pointed into the old folder (stale after move).
@@ -453,103 +568,33 @@ def _cleanup_non_stl_folders(old_to_new: dict[str, str], db: Session) -> None:
             logger.exception("Non-STL cleanup failed for %r → %r", old_folder, new_folder)
 
 
-@router.post("/apply", response_model=ImportApplyResponse)
-def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
-    """Batch-move the ingested inbox packs under a source into their mapped
-    library (#453). Builds a manifest scoped to those inbox models (destination =
-    mapped library via the source→library mapping) and runs it through the
-    existing reorganize apply engine — drift verification + crash-safe undo log,
-    is_inbox cleared on move (#324). After the STL move, all remaining files
-    (images, PDFs, etc.) are moved to the library folder and the old pack folder
-    is removed."""
-    if not body.source.strip():
-        raise HTTPException(status_code=400, detail="source is required")
-    src = os.path.realpath(body.source.strip())
+def _retry_with_suffix(
+    db: Session, src: str, eligible_ids: list[int], slugify_all: bool,
+) -> tuple[ImportPreviewResponse, list[int]]:
+    """Regenerate the manifest with a short random suffix appended to every
+    currently-eligible model's title, and return the new (manifest, eligible
+    ids) pair for a retry. Only called when nothing has moved yet, so a full
+    regenerate-and-retry is safe — this never runs mid-batch.
 
-    mapping = (
-        db.query(ImportSourceMapping)
-        .filter(ImportSourceMapping.source_path == src)
-        .first()
-    )
-    if not mapping:
-        raise HTTPException(status_code=400, detail="No destination library mapped for this source.")
-
-    # Use {creator}/{title} template so imports land in creator/slug-of-title.
-    # slugify_title=True converts the {title} segment to a lowercase-dashes slug.
+    ``slugify_all`` must be the same value the initial manifest for this apply
+    was built with (resolved once by the router, not re-read here) — reading
+    reorganize_slugify fresh on retry could pick a different value than the
+    initial build if the setting changed mid-request, splitting this single
+    pack's STL and image destinations across two casings again (#874)."""
+    suffix = uuid.uuid4().hex[:4]
+    overrides = {mid: {"suffix": suffix} for mid in eligible_ids}
     resp = _build_and_persist(
-        db, "{creator}/{title}", None, None, inbox_source=src, slugify_title=True
+        db, "{creator}/{title}", None, overrides, inbox_source=src,
+        slugify_title=True, slugify_all=slugify_all,
     )
-    eligible_ids = [e.model_id for e in resp.entries if e.eligible]
-    ineligible = [
-        ImportApplyIneligible(
-            model_id=e.model_id, proposed_dir=e.proposed_dir, reasons=_ineligible_reasons(e),
-        )
-        for e in resp.entries if not e.eligible
-    ]
-
-    # Capture old folder paths for ALL manifest entries (eligible + ineligible) so
-    # we can move non-STL files and remove old pack folders regardless of eligibility.
-    all_model_ids = [e.model_id for e in resp.entries]
-    all_folder_map: dict[int, str] = {
-        m.id: m.folder_path
-        for m in db.query(Model).filter(Model.id.in_(all_model_ids)).all()
-        if m.folder_path
-    }
-    # old→new from ALL manifest entries; we only move non-STL files when the
-    # destination already exists on disk (covers "files missing on disk" ineligible
-    # models whose STLs were already moved by a prior import).
-    all_old_to_new: dict[str, str] = {}
-    for entry in resp.entries:
-        old = all_folder_map.get(entry.model_id, "")
-        if old and old not in all_old_to_new and entry.proposed_dir:
-            all_old_to_new[old] = entry.proposed_dir
-
-    if not eligible_ids:
-        # No STLs to move, but still clean up non-STL files (gallery images, etc.)
-        # that were downloaded into the import folder before eligibility was checked.
-        _cleanup_non_stl_folders(all_old_to_new, db)
-        return ImportApplyResponse(
-            manifest_id=resp.manifest_id, moved_models=0, moved_files=0,
-            skipped=len(ineligible), ineligible=ineligible,
-        )
+    retry_ids = [e.model_id for e in resp.entries if e.eligible]
+    return resp, retry_ids
 
 
-    try:
-        result = reorganize_apply.apply_manifest(db, resp.manifest_id, eligible_ids)
-    except write_lock.LibraryBusy as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ApplyError as e:
-        raise HTTPException(status_code=e.status, detail={"message": str(e), **e.detail})
-
-    # Move all remaining non-STL files (images, PDFs, etc.) from each old folder
-    # to the new library folder, then remove the now-empty source folder.
-    try:
-        model_by_id = {
-            m.id: m
-            for m in db.query(Model).filter(Model.id.in_(eligible_ids)).all()
-        }
-        for old_folder, new_folder in all_old_to_new.items():
-            # For ineligible packs only move non-STL files if the destination
-            # already exists; eligible packs always get moved.
-            if not os.path.isdir(new_folder):
-                continue
-            models_here = [
-                model_by_id[mid]
-                for mid, old in all_folder_map.items()
-                if old == old_folder and mid in model_by_id
-            ]
-            _move_non_stl_files(old_folder, new_folder, models_here, db)
-            # Resolve before rmtree so any symlink traversal is collapsed first.
-            old_resolved = os.path.realpath(old_folder)
-            try:
-                shutil.rmtree(old_resolved)
-            except OSError as rmtree_err:
-                logger.warning("Could not remove old pack folder %r: %s", old_resolved, rmtree_err)
-        db.commit()
-    except Exception:
-        logger.exception("Non-STL file move/cleanup failed; STL files were already moved successfully")
-
-    # Resolve the configured root that contains `src` (already an abs realpath).
+def _cleanup_stale_source_dirs(db: Session, src: str) -> None:
+    """Remove now-empty directories left behind in the source root after a
+    move. Best-effort: a containment/validation miss skips cleanup rather than
+    failing the caller, and any unexpected error is logged, not raised."""
     matched_root = None
     for _base in _allowed_bases(db):
         _b = os.path.realpath(os.path.expanduser(_base))
@@ -560,11 +605,6 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
         except ValueError:
             continue
 
-    # Clean up any stale empty directories left in the source root. This is
-    # best-effort work AFTER the move already succeeded and the response is built,
-    # so a containment/validation miss here must skip cleanup, never fail the
-    # request. The guards raise ValueError (internal control-flow, not a client
-    # 400) and any unexpected error is logged rather than silently swallowed.
     try:
         if not matched_root:
             raise ValueError("source not within a configured scan root")
@@ -595,11 +635,202 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
     except Exception:
         logger.exception("Stale-dir cleanup after import failed (non-fatal)")
 
-    return ImportApplyResponse(
-        manifest_id=result.manifest_id,
-        moved_models=result.moved_models,
-        moved_files=result.moved_files,
-        skipped=len(ineligible),
-        ineligible=ineligible,
-        undo_log=result.undo_log,
+
+def _run_import_apply_job(
+    handle: JobHandle,
+    manifest_id: str,
+    eligible_ids: list[int],
+    ineligible: list[ImportApplyIneligible],
+    src: str,
+    all_old_to_new: dict[str, str],
+    all_folder_map: dict[int, str],
+    slugify_all: bool,
+) -> None:
+    """Background body for POST /import/apply once there's real work to do.
+    Moving files (and the best-effort cleanup after) can take a while for a
+    large/nested pack or a slow mount — running it off the request thread
+    means the client polls GET /import/apply/status for real progress instead
+    of one long-lived HTTP request with zero feedback either way it ends."""
+    db = SessionLocal()
+    try:
+        def _on_progress(moved: int, total: int) -> None:
+            handle.update(message=f"Moving files ({moved}/{total})", moved_files=moved, total_files=total)
+
+        try:
+            result = reorganize_apply.apply_manifest(
+                db, manifest_id, eligible_ids, on_progress=_on_progress,
+            )
+        except write_lock.LibraryBusy as e:
+            handle.update(state=JobState.ERROR, error=str(e), message=str(e))
+            return
+        except ApplyError as e:
+            if e.detail.get("moved", 0) != 0 or "already exists" not in str(e):
+                handle.update(state=JobState.ERROR, error=str(e), message=str(e))
+                return
+            # Nothing moved yet, and the destination already has a stray file
+            # on disk (e.g. left over from an earlier interrupted import at
+            # the same path) — safe to retry once with an auto-disambiguated
+            # destination instead of failing the whole import outright.
+            logger.warning("Import destination collision for %r — retrying with a suffix", src)
+            resp, eligible_ids = _retry_with_suffix(db, src, eligible_ids, slugify_all)
+            if not eligible_ids:
+                handle.update(state=JobState.ERROR, error=str(e), message=str(e))
+                return
+            manifest_id = resp.manifest_id
+            try:
+                result = reorganize_apply.apply_manifest(
+                    db, manifest_id, eligible_ids, on_progress=_on_progress,
+                )
+            except (write_lock.LibraryBusy, ApplyError) as e2:
+                handle.update(state=JobState.ERROR, error=str(e2), message=str(e2))
+                return
+            # The retry manifest picked a different (suffixed) proposed_dir for
+            # these models — the pre-retry all_old_to_new still points at the
+            # stray/colliding folder, not where the files actually landed.
+            # Refresh it so the non-STL cleanup pass below moves images into
+            # the real destination instead of the leftover collision folder.
+            for entry in resp.entries:
+                if entry.model_id in eligible_ids:
+                    old = all_folder_map.get(entry.model_id)
+                    if old:
+                        all_old_to_new[old] = entry.proposed_dir
+
+        handle.update(message="Cleaning up")
+        # Move all remaining non-STL files (images, PDFs, etc.) from each old
+        # folder to the new library folder, then remove the now-empty source.
+        try:
+            model_by_id = {
+                m.id: m
+                for m in db.query(Model).filter(Model.id.in_(eligible_ids)).all()
+            }
+            for old_folder, new_folder in all_old_to_new.items():
+                # For ineligible packs only move non-STL files if the
+                # destination already exists; eligible packs always get moved.
+                if not os.path.isdir(new_folder):
+                    continue
+                models_here = [
+                    model_by_id[mid]
+                    for mid, old in all_folder_map.items()
+                    if old == old_folder and mid in model_by_id
+                ]
+                _move_non_stl_files(old_folder, new_folder, models_here, db)
+                # Resolve before rmtree so symlink traversal is collapsed first.
+                old_resolved = os.path.realpath(old_folder)
+                try:
+                    shutil.rmtree(old_resolved)
+                except OSError as rmtree_err:
+                    logger.warning("Could not remove old pack folder %r: %s", old_resolved, rmtree_err)
+            db.commit()
+        except Exception:
+            logger.exception("Non-STL file move/cleanup failed; STL files were already moved successfully")
+
+        _cleanup_stale_source_dirs(db, src)
+
+        final = ImportApplyResponse(
+            manifest_id=result.manifest_id,
+            moved_models=result.moved_models,
+            moved_files=result.moved_files,
+            skipped=len(ineligible),
+            ineligible=ineligible,
+            undo_log=result.undo_log,
+        )
+        handle.update(
+            state=JobState.DONE,
+            message=f"done — {result.moved_models} model(s), {result.moved_files} file(s)",
+            result=final.model_dump(mode="json"),
+        )
+    finally:
+        db.close()
+
+
+@router.post("/apply", response_model=ImportApplyStart)
+def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
+    """Batch-move the ingested inbox packs under a source into their mapped
+    library (#453). Builds a manifest scoped to those inbox models (destination
+    = mapped library via the source→library mapping); when there's anything to
+    move, the actual apply + cleanup runs as a background job — poll
+    GET /import/apply/status for progress and the eventual result. Everything
+    the job does is identical to the old synchronous body: drift verification
+    + crash-safe undo log, is_inbox cleared on move (#324), then non-STL files
+    (images, PDFs, etc.) moved and the old pack folder removed."""
+    if not body.source.strip():
+        raise HTTPException(status_code=400, detail="source is required")
+    src = os.path.realpath(body.source.strip())
+
+    mapping = _mapped_source_for(db, src)
+    if not mapping:
+        raise HTTPException(status_code=400, detail="No destination library mapped for this source.")
+
+    # Use {creator}/{title} template so imports land in creator/slug-of-title.
+    # slugify_title=True converts the {title} segment to a lowercase-dashes slug.
+    # slugify_all mirrors the Reorganize page's reorganize_slugify setting so an
+    # import lands already-organized without a separate manual Reorganize pass —
+    # but it's resolved ONCE here and threaded through the whole apply (including
+    # a collision retry), never re-read mid-request. Reading it fresh at each step
+    # is what caused a single pack's STL and image destinations to split across
+    # two casings when the setting changed between calls (#874).
+    slugify_all = _slugify_all(db)
+    resp = _build_and_persist(
+        db, "{creator}/{title}", None, None, inbox_source=src,
+        slugify_title=True, slugify_all=slugify_all,
+    )
+    eligible_ids = [e.model_id for e in resp.entries if e.eligible]
+    ineligible = [
+        ImportApplyIneligible(
+            model_id=e.model_id, proposed_dir=e.proposed_dir, reasons=_ineligible_reasons(e),
+        )
+        for e in resp.entries if not e.eligible
+    ]
+
+    # Capture old folder paths for ALL manifest entries (eligible + ineligible) so
+    # we can move non-STL files and remove old pack folders regardless of eligibility.
+    all_model_ids = [e.model_id for e in resp.entries]
+    all_folder_map: dict[int, str] = {
+        m.id: m.folder_path
+        for m in db.query(Model).filter(Model.id.in_(all_model_ids)).all()
+        if m.folder_path
+    }
+    # old→new from ALL manifest entries; we only move non-STL files when the
+    # destination already exists on disk (covers "files missing on disk" ineligible
+    # models whose STLs were already moved by a prior import).
+    all_old_to_new: dict[str, str] = {}
+    for entry in resp.entries:
+        old = all_folder_map.get(entry.model_id, "")
+        if old and old not in all_old_to_new and entry.proposed_dir:
+            all_old_to_new[old] = entry.proposed_dir
+
+    if not eligible_ids:
+        # No STLs to move, but still clean up non-STL files (gallery images, etc.)
+        # that were downloaded into the import folder before eligibility was checked.
+        _cleanup_non_stl_folders(all_old_to_new, db)
+        return ImportApplyStart(started=False, result=ImportApplyResponse(
+            manifest_id=resp.manifest_id, moved_models=0, moved_files=0,
+            skipped=len(ineligible), ineligible=ineligible,
+        ))
+
+    handle = runner.start(
+        _IMPORT_APPLY_KEY, _run_import_apply_job, single_flight=True,
+        manifest_id=resp.manifest_id, eligible_ids=eligible_ids, ineligible=ineligible,
+        src=src, all_old_to_new=all_old_to_new, all_folder_map=all_folder_map,
+        slugify_all=slugify_all,
+    )
+    if handle is None:
+        raise HTTPException(status_code=409, detail="An import is already in progress.")
+    return ImportApplyStart(started=True)
+
+
+@router.get("/apply/status", response_model=ImportApplyStatus)
+def import_apply_status():
+    """Poll target for the job POST /import/apply starts. Uniform job payload
+    mapped to the import-apply contract, mirroring GET /scan/status."""
+    payload = runner.status(_IMPORT_APPLY_KEY)
+    prog = payload["progress"]
+    result = prog.get("result")
+    return ImportApplyStatus(
+        running=payload["state"] == JobState.RUNNING.value,
+        message=payload["message"] or "idle",
+        moved_files=prog.get("moved_files", 0),
+        total_files=prog.get("total_files", 0),
+        error=payload["error"],
+        result=ImportApplyResponse(**result) if result else None,
     )

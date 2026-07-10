@@ -33,31 +33,31 @@ export default function PaintingTab() {
       <FlashBanner success={success} error={error} />
 
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1 flex items-center gap-1.5">
           <Paintbrush size={14} /> Painting Guides
         </h2>
-        <p className="text-xs text-gray-600 mb-4">
+        <p className="text-xs text-text-muted mb-4">
           Author step-by-step painting guides for your models. Enabling this adds{" "}
-          <strong className="text-gray-500">Guides</strong> to the navigation. The{" "}
-          <strong className="text-gray-500">Paint Shelf</strong> is always available.
+          <strong className="text-text-secondary-alt">Guides</strong> to the navigation. The{" "}
+          <strong className="text-text-secondary-alt">Paint Shelf</strong> is always available.
         </p>
-        <label className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 cursor-pointer select-none self-start">
+        <label className="flex items-center gap-3 bg-panel border border-border-subtle rounded-lg px-4 py-3 cursor-pointer select-none self-start">
           <input
             type="checkbox"
             checked={settings.painting_guides_enabled}
             onChange={togglePaintingGuides}
             className="h-4 w-4 accent-indigo-500"
           />
-          <span className="text-sm text-gray-200">Enable Painting Guides</span>
+          <span className="text-sm text-text-primary-alt">Enable Painting Guides</span>
         </label>
       </section>
 
       {settings.painting_guides_enabled && (
         <section>
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1">
+          <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1">
             Default Guide Theme
           </h2>
-          <p className="text-xs text-gray-600 mb-3">
+          <p className="text-xs text-text-muted mb-3">
             New guides inherit these colors. Each guide can override them in its editor.
           </p>
           <ThemeEditor

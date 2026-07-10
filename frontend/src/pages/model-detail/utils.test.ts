@@ -6,7 +6,14 @@ import {
   groupAlphabetically,
   buildFileHierarchy,
   parseLibraryOrigin,
+  PART_TYPE_SUGGESTIONS,
 } from "./utils";
+
+describe("PART_TYPE_SUGGESTIONS", () => {
+  it("includes Full as a category (a single presupported/complete-figure file)", () => {
+    expect(PART_TYPE_SUGGESTIONS).toContain("Full");
+  });
+});
 
 describe("toPascalCase", () => {
   it("title-cases each word and collapses whitespace", () => {

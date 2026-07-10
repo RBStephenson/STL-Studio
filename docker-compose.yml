@@ -2,7 +2,8 @@ services:
   backend:
     build: ./backend
     # Bind published ports to loopback only — the API is unauthenticated and
-    # must not be reachable from the LAN. Use the proxy at http://localhost.
+    # must not be reachable from the LAN. Reach the app via the frontend at
+    # http://localhost, which serves the UI and proxies /api to this service.
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -18,11 +19,17 @@ services:
       - "${IMPORT_DIR:-/dev/null}:/import"
     environment:
       - DATABASE_URL=sqlite:////data/stl_inventory.db
-      - REORGANIZE_WRITE_ENABLED=true
       - STL_ROOTS=/mnt/drive1,/mnt/drive2
       - STL_DRIVE_1=${STL_DRIVE_1:-}
       - STL_DRIVE_2=${STL_DRIVE_2:-}
       - PYTHONUNBUFFERED=1
+      # Serving this behind a reverse proxy on a real domain? Allowlist that
+      # hostname or writes are blocked (see docs/docker.md → TRUSTED_HOSTS).
+      # - TRUSTED_HOSTS=stl.example.com
+      # Encrypts stored API keys (AI/Cults3D/MMF). Without it, a generated key
+      # lives only in memory and stored keys won't survive a restart — set a
+      # stable value in .env to persist them (see docs/docker.md → STL_SECRET_KEY).
+      - STL_SECRET_KEY=${STL_SECRET_KEY:-}
     # Allows the backend to reach services on the host (e.g. Ollama at localhost:11434).
     # host-gateway resolves to the host's IP as seen from the container's network.
     extra_hosts:
@@ -30,24 +37,16 @@ services:
       - "ollama-host:host-gateway"
     restart: unless-stopped
 
+  # Serves the SPA and reverse-proxies /api to the backend, so it's the single
+  # entry point — no separate proxy container needed. Published on :80 so the
+  # app is at http://localhost. BACKEND_ORIGIN must match the backend service
+  # name/port on this network.
   frontend:
     build: ./frontend
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:80:3000"
     environment:
-      - VITE_API_URL=http://backend:8000
+      - BACKEND_ORIGIN=http://backend:8000
     depends_on:
       - backend
-    restart: unless-stopped
-
-  # nginx reverse proxy so frontend can call /api without CORS issues
-  proxy:
-    image: nginx:alpine
-    ports:
-      - "127.0.0.1:80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - backend
-      - frontend
     restart: unless-stopped

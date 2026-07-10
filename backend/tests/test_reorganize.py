@@ -22,7 +22,7 @@ def _get_creator(db, name):
 
 
 def _model_with_file(db, tmp_path, creator_name="Abe3D", character="Joker",
-                     title="Bust", filename="head.stl", subdir=""):
+                     title="Bust", filename="head.stl", subdir="", auto_tags=None):
     """Create creator/character/title model with one real file on disk."""
     folder = tmp_path / creator_name / (character or "loose") / title / subdir
     folder.mkdir(parents=True, exist_ok=True)
@@ -32,6 +32,7 @@ def _model_with_file(db, tmp_path, creator_name="Abe3D", character="Joker",
     m = make_model(db, creator, name=title, character=character)
     m.folder_path = str(folder)
     m.title = title
+    m.auto_tags = auto_tags or []
     db.commit()
     make_stl_file(db, m, filename=filename, path=str(f))
     db.commit()
@@ -68,9 +69,38 @@ class TestPreviewHappyPath:
         _model_with_file(db, tmp_path, creator_name="Abe3D", character="Joker", title="Bust")
 
         entry = client.get("/reorganize/preview").json()["entries"][0]
-        assert entry["proposed_dir"].endswith("Abe3D/Joker/Bust")
+        # Destination segments render lowercase/hyphenated by default (#reorganize).
+        assert entry["proposed_dir"].endswith("abe3d/joker/bust")
         assert entry["eligible"] is True
         assert entry["escapes_scan_root"] is False
+
+
+class TestHiddenDirImagesExcluded:
+    def test_image_inside_hidden_directory_never_becomes_a_move_entry(self, client, db, tmp_path):
+        """A stale image_paths reference into a hidden directory (e.g. a
+        .manyfold derivative-thumbnail cache another tool left behind, from
+        before the scanner started skipping them) must never be treated as
+        a real gallery image to carry through a move — that would relocate
+        the junk into the organized library instead of letting it fall away
+        (#903-follow-up)."""
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path)
+        folder = tmp_path / "Abe3D" / "Joker" / "Bust"
+        hidden = folder / ".manyfold" / "derivatives"
+        hidden.mkdir(parents=True)
+        stale = hidden / "carousel.jpg"
+        stale.write_bytes(b"\x89PNG\r\n\x1a\n")
+        # A real, legitimate gallery image too, to prove it's still included.
+        real = folder / "cover.jpg"
+        real.write_bytes(b"\x89PNG\r\n\x1a\n")
+        m.image_paths = [str(stale), str(real)]
+        db.commit()
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        image_sources = [f["current_path"] for f in entry["files"] if f["kind"] == "image"]
+
+        assert not any(".manyfold" in p for p in image_sources)
+        assert any(p.endswith("cover.jpg") for p in image_sources)
 
 
 class TestSentinels:
@@ -82,7 +112,7 @@ class TestSentinels:
         assert "character" in entry["missing_fields"]
         assert entry["unclassifiable"] is True
         assert entry["eligible"] is False
-        assert "_Unknown Character" in entry["proposed_dir"]
+        assert "unknown-character" in entry["proposed_dir"]
 
 
 class TestCollisions:
@@ -170,10 +200,10 @@ class TestMissingFile:
 
 
 class TestTemplateValidation:
-    def test_malformed_template_returns_400(self, client, db, tmp_path):
+    def test_unknown_template_field_returns_400(self, client, db, tmp_path):
         _root(db, tmp_path)
         _model_with_file(db, tmp_path)
-        resp = client.get("/reorganize/preview", params={"template": "{creator}/{scale}"})
+        resp = client.get("/reorganize/preview", params={"template": "{creator}/{franchise}"})
         assert resp.status_code == 400
 
     def test_custom_template_applied(self, client, db, tmp_path):
@@ -182,7 +212,35 @@ class TestTemplateValidation:
         entry = client.get(
             "/reorganize/preview", params={"template": "{creator}/{title}"}
         ).json()["entries"][0]
-        assert entry["proposed_dir"].endswith("Abe3D/Bust")
+        assert entry["proposed_dir"].endswith("abe3d/bust")
+
+    def test_scale_template_uses_detected_auto_tag(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust", auto_tags=["1:6", "statue"])
+
+        entry = client.get(
+            "/reorganize/preview", params={"template": "{creator}/{scale}/{title}"}
+        ).json()["entries"][0]
+
+        assert entry["proposed_dir"].endswith("abe3d/1-6/bust")
+        assert entry["eligible"] is True
+        assert "scale" not in entry["missing_fields"]
+
+    def test_missing_scale_only_blocks_when_template_uses_scale(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust")
+
+        default_entry = client.get("/reorganize/preview").json()["entries"][0]
+        assert "scale" not in default_entry["missing_fields"]
+        assert default_entry["eligible"] is True
+
+        scale_entry = client.get(
+            "/reorganize/preview", params={"template": "{creator}/{scale}/{title}"}
+        ).json()["entries"][0]
+        assert "scale" in scale_entry["missing_fields"]
+        assert scale_entry["unclassifiable"] is True
+        assert scale_entry["eligible"] is False
+        assert "unknown-scale" in scale_entry["proposed_dir"]
 
 
 class TestResolution:
@@ -199,7 +257,22 @@ class TestResolution:
         entry = resp.json()["entries"][0]
         assert entry["eligible"] is True
         assert "character" not in entry["missing_fields"]
-        assert entry["proposed_dir"].endswith("Harley/Bust")
+        assert entry["proposed_dir"].endswith("harley/bust")
+
+    def test_override_resolves_missing_scale(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path)
+
+        resp = client.post("/reorganize/preview", json={
+            "template": "{creator}/{scale}/{title}",
+            "overrides": {str(m.id): {"scale": "75mm"}},
+        })
+
+        assert resp.status_code == 200
+        entry = resp.json()["entries"][0]
+        assert entry["eligible"] is True
+        assert "scale" not in entry["missing_fields"]
+        assert entry["proposed_dir"].endswith("abe3d/75mm/bust")
 
     def test_suffix_breaks_a_collision(self, client, db, tmp_path):
         _root(db, tmp_path)
@@ -213,7 +286,7 @@ class TestResolution:
         by_id = {e["model_id"]: e for e in data["entries"]}
         assert by_id[m1.id]["collision"] is False
         assert by_id[m2.id]["collision"] is False
-        assert by_id[m2.id]["proposed_dir"].endswith("Bust v2")
+        assert by_id[m2.id]["proposed_dir"].endswith("bust-v2")
 
     def test_post_preview_persists_new_manifest(self, client, db, tmp_path):
         from app.models import ReorganizeManifest

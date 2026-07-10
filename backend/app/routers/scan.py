@@ -12,6 +12,7 @@ from app.schemas import (
     ScanStatus, ScanRootCreate, ScanRootUpdate, InboxScanRequest, LibraryRead,
 )
 from app.services import scanner, layout
+from app.services.reorganize_apply import reorganize_enabled
 from app.config import settings
 
 router = APIRouter(prefix="/scan", tags=["scan"])
@@ -257,16 +258,17 @@ def list_roots(db: Session = Depends(get_db)):
 def list_libraries(db: Session = Depends(get_db)):
     """Writable scan roots usable as import destinations (#450) — feeds the
     Library dropdown. `write_enabled` reflects the deployment-level flag so the
-    UI can grey out destinations on a read-only deploy (the disk probe still
-    runs at apply time)."""
+    UI can grey out destinations when reorganize is disabled (the disk probe
+    still runs at apply time)."""
     roots = db.query(ScanRoot).filter(ScanRoot.is_writable == True).all()  # noqa: E712
+    write_enabled = reorganize_enabled(db)
     return [
         LibraryRead(
             id=r.id,
             path=r.path,
             name=r.name or Path(r.path).name,
             is_writable=r.is_writable,
-            write_enabled=settings.reorganize_write_enabled,
+            write_enabled=write_enabled,
         )
         for r in roots
     ]

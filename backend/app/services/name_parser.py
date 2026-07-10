@@ -59,6 +59,13 @@ _TYPES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bdiorama[s]?\b",                 re.I), "diorama"),
     (re.compile(r"\bchibi[s]?\b",                   re.I), "chibi"),
     (re.compile(r"\bfan[-\s]?art\b",                re.I), "fan art"),
+    # Garage-kit / statue scene (multi-word patterns first so "garage kit"
+    # doesn't get swallowed by the bare "kit" match below)
+    (re.compile(r"\bgarage[-\s]?kit[s]?\b",         re.I), "garage kit"),
+    (re.compile(r"\bgk\b",                          re.I), "garage kit"),
+    (re.compile(r"\bresin\b",                       re.I), "resin"),
+    (re.compile(r"\bmaquette[s]?\b",                re.I), "maquette"),
+    (re.compile(r"\bcollectible[s]?\b",             re.I), "collectible"),
     (re.compile(r"\bkit\b",                         re.I), "kit"),
     # Miniature / tabletop
     (re.compile(r"\bminiature[s]?\b",               re.I), "miniature"),
@@ -106,6 +113,13 @@ _MODIFIERS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bpatreon\b",                     re.I), "patreon"),
     (re.compile(r"\bnsfw\b",                        re.I), "nsfw"),
     (re.compile(r"\bpinup\b|pin[-\s]up\b",         re.I), "pin-up"),
+    # Statue/collectible edition tags — real product-distinguishing SKU variants,
+    # not print-prep noise. "standard"/"regular" deliberately excluded: too generic,
+    # would strip real character names (e.g. "1.JSC Batgirl Regular").
+    (re.compile(r"\bdeluxe\b",                      re.I), "deluxe"),
+    (re.compile(r"\bexclusive\b",                   re.I), "exclusive"),
+    (re.compile(r"\blimited[-\s]?edition\b",        re.I), "limited edition"),
+    (re.compile(r"\bbonus\b",                       re.I), "bonus"),
 ]
 
 # ---------------------------------------------------------------------------

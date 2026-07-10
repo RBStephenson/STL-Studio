@@ -18,6 +18,7 @@ from app.services.url_guard import guarded_async_client
 from bs4 import BeautifulSoup
 from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlparse, quote
 
 from app.services.scrapers.base import detect_site, MAX_REDIRECTS
 
@@ -60,18 +61,26 @@ async def scrape_storefront(url: str, mmf_api_key: Optional[str] = None) -> list
 # ---------------------------------------------------------------------------
 # MyMiniFactory
 # ---------------------------------------------------------------------------
+_MMF_BASE = "https://www.myminifactory.com"
+_MMF_STORE_PAGE_SIZE = 100
+_MMF_STORE_MAX_PAGES = 50
+
+
 async def _scrape_mmf(url: str, api_key: Optional[str] = None) -> list[StorefrontProduct]:
     """
     List a MMF user store's products.
 
-    MMF renders listings client-side but embeds a JSON blob with all object IDs
-    grouped by store category. We collect the unique IDs, then resolve each via
-    the MMF adapter (``mmf.fetch``) — which uses the MMF REST API when a key is
-    set and falls back to scraping the object page otherwise. This replaces the
-    old per-object HTML JSON-LD regex with structured, more robust data.
+    The current store UI exposes a shallow JSON product listing. Use it for the
+    match screen so large stores do not trigger one detail API call per object.
+    Fall back to the older embedded-ID path when that endpoint is unavailable.
     """
-    # Local import avoids a package-init import cycle (mmf imports storefront).
-    from app.services.scrapers import mmf
+    username = _mmf_username_from_url(url)
+    if username:
+        products = await _scrape_mmf_store_products(username, referer=url)
+        if products:
+            logger.info(f"MMF: listed {len(products)} products from store API")
+            return products
+        logger.info("MMF store API returned no products; falling back to embedded object IDs")
 
     async with guarded_async_client(timeout=20, headers=_HEADERS, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
         try:
@@ -98,6 +107,9 @@ async def _scrape_mmf(url: str, api_key: Optional[str] = None) -> list[Storefron
 
     logger.info(f"MMF: found {len(object_ids)} unique object IDs, fetching details…")
 
+    # Local import avoids a package-init import cycle (mmf imports storefront).
+    from app.services.scrapers import mmf
+
     semaphore = asyncio.Semaphore(10)
 
     async def fetch_object(oid: int) -> StorefrontProduct | None:
@@ -120,6 +132,106 @@ async def _scrape_mmf(url: str, api_key: Optional[str] = None) -> list[Storefron
     products = [p for p in results if p is not None]
     logger.info(f"MMF: listed {len(products)} products successfully")
     return products
+
+
+def _mmf_username_from_url(url: str) -> Optional[str]:
+    parsed = urlparse(url if "//" in url else f"https://{url}")
+    host = (parsed.hostname or "").lower()
+    if host != "myminifactory.com" and not host.endswith(".myminifactory.com"):
+        return None
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) >= 2 and parts[0].lower() == "users":
+        return parts[1]
+    return None
+
+
+async def _scrape_mmf_store_products(username: str, referer: str) -> list[StorefrontProduct]:
+    """List public MMF store objects through the JSON endpoint used by the UI."""
+    products: list[StorefrontProduct] = []
+    seen: set[str] = set()
+    encoded_user = quote(username, safe="")
+    headers = {
+        **_HEADERS,
+        "Accept": "application/json, text/plain, */*",
+        "Referer": referer,
+    }
+
+    async with guarded_async_client(
+        timeout=20,
+        headers=headers,
+        follow_redirects=True,
+        max_redirects=MAX_REDIRECTS,
+    ) as client:
+        for page in range(1, _MMF_STORE_MAX_PAGES + 1):
+            try:
+                r = await client.get(
+                    f"{_MMF_BASE}/api/users/{encoded_user}/store/products",
+                    params={
+                        "object": "1",
+                        "bundle": "0",
+                        "page": page,
+                        "perPage": _MMF_STORE_PAGE_SIZE,
+                    },
+                )
+                r.raise_for_status()
+                data = r.json()
+            except Exception as e:
+                logger.warning(f"MMF store API page {page} failed for {username!r}: {e}")
+                return []
+
+            page_products = data.get("products") or []
+            for raw in page_products:
+                product = _mmf_store_product(raw)
+                if product is None or product.source_url in seen:
+                    continue
+                seen.add(product.source_url)
+                products.append(product)
+
+            total = _int_or_zero(data.get("total") or data.get("totalProducts"))
+            if len(page_products) < _MMF_STORE_PAGE_SIZE or (total and len(products) >= total):
+                return products
+
+    logger.warning(
+        f"MMF: stopping store API listing at page cap ({_MMF_STORE_MAX_PAGES}) "
+        f"for {username!r}; found {len(products)} products."
+    )
+    return products
+
+
+def _mmf_store_product(raw: dict) -> StorefrontProduct | None:
+    if (raw.get("document_name_s") or "").lower() != "threedobject":
+        return None
+    title = (raw.get("name") or "").strip()
+    object_id = str(raw.get("id") or "").strip()
+    slug = (raw.get("url") or "").strip()
+    if not title or not object_id or not slug:
+        return None
+    if slug.startswith("http"):
+        source_url = slug
+    elif slug.startswith("/"):
+        source_url = f"{_MMF_BASE}{slug}"
+    else:
+        source_url = f"{_MMF_BASE}/object/3d-print-{slug}"
+    tags = [
+        t for t in (raw.get("tags") or raw.get("category_name") or [])
+        if isinstance(t, str) and t
+    ]
+    return StorefrontProduct(
+        title=title,
+        source_url=source_url,
+        source_site="myminifactory",
+        external_id=object_id,
+        thumbnail_url=raw.get("obj_img") or raw.get("thumbnail_url"),
+        description=(raw.get("description") or "").strip() or None,
+        tags=tags,
+    )
+
+
+def _int_or_zero(value: object) -> int:
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -279,11 +391,126 @@ def _gumroad_inertia_page(html: str) -> Optional[dict]:
 _CULTS_CREATION_RE = re.compile(
     r"cults3d\.com/\w+/3d-(?:model|printing-file|modelling)/([\w/-]+)", re.I
 )
+_CULTS_USER_RE = re.compile(r"cults3d\.com/[^/]+/users/([^/?#]+)", re.I)
 
 _CULTS_MAX_PAGES = 50  # bound the ?page=N walk so a markup change can't loop forever (#218)
+_CULTS_API_PAGE_SIZE = 50
+
+_CULTS_STOREFRONT_QUERY = """
+query CreatorCreations($query: String!, $creatorNick: String!, $limit: Int!, $offset: Int!) {
+  creationsSearchBatch(
+    query: $query
+    creatorNick: $creatorNick
+    limit: $limit
+    offset: $offset
+  ) {
+    total
+    results {
+      name
+      slug
+      url
+      shortUrl
+      illustrationImageUrl
+      tags
+    }
+  }
+}
+"""
 
 
 async def _scrape_cults(url: str) -> list[StorefrontProduct]:
+    api_products = await _scrape_cults_api(url)
+    if api_products is not None:
+        return api_products
+    return await _scrape_cults_html(url)
+
+
+async def _scrape_cults_api(url: str) -> list[StorefrontProduct] | None:
+    """List a Cults3D creator's products through the official GraphQL API."""
+    from app.services.scrapers import cults3d
+
+    m = _CULTS_USER_RE.search(url)
+    if not m:
+        return None
+    creator_nick = m.group(1)
+
+    creds = cults3d._get_credentials()
+    if not creds:
+        logger.info("Cults3D API credentials not configured — storefront API skipped")
+        return None
+
+    username, api_key = creds
+    headers = {
+        "Authorization": cults3d._auth_header(username, api_key),
+        "Content-Type": "application/json",
+    }
+
+    products: list[StorefrontProduct] = []
+    seen: set[str] = set()
+    offset = 0
+
+    async with guarded_async_client(timeout=20) as client:
+        for _ in range(_CULTS_MAX_PAGES):
+            try:
+                r = await client.post(
+                    cults3d._GRAPHQL_URL,
+                    headers=headers,
+                    json={
+                        "query": _CULTS_STOREFRONT_QUERY,
+                        "variables": {
+                            "query": "",
+                            "creatorNick": creator_nick,
+                            "limit": _CULTS_API_PAGE_SIZE,
+                            "offset": offset,
+                        },
+                    },
+                )
+                r.raise_for_status()
+                data = r.json()
+            except Exception as e:
+                logger.error(f"Cults3D storefront API failed for {creator_nick!r}: {e}")
+                return None
+
+            errors = data.get("errors")
+            if errors:
+                logger.error(f"Cults3D storefront API errors for {creator_nick!r}: {errors}")
+                return None
+
+            batch = (data.get("data") or {}).get("creationsSearchBatch") or {}
+            results = batch.get("results") or []
+            for item in results:
+                title = (item.get("name") or "").strip()
+                product_url = item.get("url") or item.get("shortUrl") or ""
+                slug = item.get("slug") or extract_cults_slug(product_url)
+                if not title or not product_url or product_url in seen:
+                    continue
+                seen.add(product_url)
+                products.append(StorefrontProduct(
+                    title=title,
+                    source_url=product_url,
+                    source_site="cults3d",
+                    external_id=slug,
+                    thumbnail_url=item.get("illustrationImageUrl"),
+                    tags=item.get("tags") or [],
+                ))
+
+            if len(results) < _CULTS_API_PAGE_SIZE:
+                return products
+            offset += _CULTS_API_PAGE_SIZE
+
+    logger.warning(
+        f"Cults3D: stopping API storefront listing at page cap ({_CULTS_MAX_PAGES}) "
+        f"for {creator_nick!r}; found {len(products)} products."
+    )
+    return products
+
+
+def extract_cults_slug(url: str) -> Optional[str]:
+    m = _CULTS_CREATION_RE.search(url)
+    return m.group(1) if m else None
+
+
+async def _scrape_cults_html(url: str) -> list[StorefrontProduct]:
     """
     Scrape a Cults3D user creations page.
     Accepts any Cults3D profile URL — /3d-models, /creations, or bare profile.
@@ -334,12 +561,11 @@ async def _scrape_cults(url: str) -> list[StorefrontProduct]:
                 img_el = card.select_one("img[data-src], img[src]")
                 thumb = (img_el.get("data-src") or img_el.get("src")) if img_el else None
 
-                m = _CULTS_CREATION_RE.search(product_url)
                 products.append(StorefrontProduct(
                     title=title,
                     source_url=product_url,
                     source_site="cults3d",
-                    external_id=m.group(1) if m else None,
+                    external_id=extract_cults_slug(product_url),
                     thumbnail_url=thumb,
                 ))
 

@@ -91,7 +91,7 @@ function GroupAction({ model, creatorId, moveToGroup, removeFromGroup, onRemoved
           onChange={(e) => setTarget(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") saveMove(); if (e.key === "Escape") setMoving(false); }}
           placeholder="Target group…"
-          className="flex-1 min-w-0 px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-xs text-gray-200 outline-none"
+          className="flex-1 min-w-0 px-2 py-1 rounded bg-panel border border-border focus:border-accent-start text-xs text-text-primary-alt outline-none"
         />
         <datalist id={listId}>
           {suggestions.filter((s) => s !== model.character).map((s) => <option key={s} value={s} />)}
@@ -99,13 +99,13 @@ function GroupAction({ model, creatorId, moveToGroup, removeFromGroup, onRemoved
         <button
           onClick={saveMove}
           disabled={saving || !target.trim()}
-          className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-xs text-white disabled:opacity-40"
+          className="px-2 py-1 rounded bg-indigo-700 hover:bg-accent-end text-xs text-white disabled:opacity-40"
         >
           {saving ? "…" : "Move"}
         </button>
         <button
           onClick={() => setMoving(false)}
-          className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400"
+          className="px-2 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary"
         >
           Cancel
         </button>
@@ -118,7 +118,7 @@ function GroupAction({ model, creatorId, moveToGroup, removeFromGroup, onRemoved
       <button
         onClick={openMove}
         title="Move to a different group"
-        className="flex items-center gap-1 flex-1 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+        className="flex items-center gap-1 flex-1 px-2 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary hover:text-text-primary-alt transition-colors"
       >
         <MoveRight size={11} />
         Move to group
@@ -131,7 +131,7 @@ function GroupAction({ model, creatorId, moveToGroup, removeFromGroup, onRemoved
         className={`px-2 py-1 rounded border text-xs transition-colors ${
           model.is_group_rep
             ? "bg-indigo-900/50 border-indigo-600 text-indigo-300 cursor-default"
-            : "bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-500 hover:text-gray-200"
+            : "bg-panel-secondary hover:bg-panel-secondary border-border text-text-secondary-alt hover:text-text-primary-alt"
         }`}
       >
         <ImageIcon size={11} />
@@ -139,7 +139,7 @@ function GroupAction({ model, creatorId, moveToGroup, removeFromGroup, onRemoved
       <button
         onClick={remove}
         title="Remove from this group"
-        className="px-2 py-1 rounded bg-gray-800 hover:bg-red-900/40 border border-gray-700 hover:border-red-600 text-xs text-gray-500 hover:text-red-400 transition-colors"
+        className="px-2 py-1 rounded bg-panel-secondary hover:bg-red-900/40 border border-border hover:border-red-600 text-xs text-text-secondary-alt hover:text-red-400 transition-colors"
       >
         <X size={11} />
       </button>
@@ -178,7 +178,7 @@ function BulkMove({ creatorId, currentGroup, onMove }: {
       <button
         onClick={openMove}
         aria-label="Move selected to group"
-        className="flex items-center gap-1 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
+        className="flex items-center gap-1 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-secondary hover:text-text-primary-alt transition-colors"
       >
         <MoveRight size={13} />
         Move to group
@@ -197,7 +197,7 @@ function BulkMove({ creatorId, currentGroup, onMove }: {
         onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setOpen(false); }}
         placeholder="Target group…"
         aria-label="Target group"
-        className="px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-xs text-gray-200 outline-none"
+        className="px-2 py-1 rounded bg-panel border border-border focus:border-accent-start text-xs text-text-primary-alt outline-none"
       />
       <datalist id="bulk-move-groups">
         {suggestions.filter((s) => s !== currentGroup).map((s) => <option key={s} value={s} />)}
@@ -205,13 +205,13 @@ function BulkMove({ creatorId, currentGroup, onMove }: {
       <button
         onClick={submit}
         disabled={!target.trim()}
-        className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-xs text-white disabled:opacity-40"
+        className="px-2 py-1 rounded bg-indigo-700 hover:bg-accent-end text-xs text-white disabled:opacity-40"
       >
         Move
       </button>
       <button
         onClick={() => setOpen(false)}
-        className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400"
+        className="px-2 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary"
       >
         Cancel
       </button>
@@ -248,7 +248,7 @@ function BulkSetImage({ onApply }: { onApply: (url: string) => void | Promise<vo
       <button
         onClick={openInput}
         aria-label="Set image for selected"
-        className="flex items-center gap-1 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
+        className="flex items-center gap-1 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-secondary hover:text-text-primary-alt transition-colors"
       >
         <ImageIcon size={13} />
         Set image
@@ -266,18 +266,18 @@ function BulkSetImage({ onApply }: { onApply: (url: string) => void | Promise<vo
         onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setOpen(false); }}
         placeholder="Image or page URL…"
         aria-label="Image URL"
-        className="px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-xs text-gray-200 outline-none w-56"
+        className="px-2 py-1 rounded bg-panel border border-border focus:border-accent-start text-xs text-text-primary-alt outline-none w-56"
       />
       <button
         onClick={submit}
         disabled={saving || !url.trim()}
-        className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-xs text-white disabled:opacity-40"
+        className="px-2 py-1 rounded bg-indigo-700 hover:bg-accent-end text-xs text-white disabled:opacity-40"
       >
         {saving ? "…" : "Apply"}
       </button>
       <button
         onClick={() => setOpen(false)}
-        className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400"
+        className="px-2 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary"
       >
         Cancel
       </button>
@@ -315,7 +315,7 @@ function BulkSetStoreLink({ onApply }: { onApply: (url: string) => void | Promis
       <button
         onClick={openInput}
         aria-label="Set store page for selected"
-        className="flex items-center gap-1 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
+        className="flex items-center gap-1 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-secondary hover:text-text-primary-alt transition-colors"
       >
         <LinkIcon size={13} />
         Set store page
@@ -333,18 +333,18 @@ function BulkSetStoreLink({ onApply }: { onApply: (url: string) => void | Promis
         onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setOpen(false); }}
         placeholder="Store page URL…"
         aria-label="Store page URL"
-        className="px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-xs text-gray-200 outline-none w-56"
+        className="px-2 py-1 rounded bg-panel border border-border focus:border-accent-start text-xs text-text-primary-alt outline-none w-56"
       />
       <button
         onClick={submit}
         disabled={saving || !url.trim()}
-        className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-xs text-white disabled:opacity-40"
+        className="px-2 py-1 rounded bg-indigo-700 hover:bg-accent-end text-xs text-white disabled:opacity-40"
       >
         {saving ? "…" : "Apply"}
       </button>
       <button
         onClick={() => setOpen(false)}
-        className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400"
+        className="px-2 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary"
       >
         Cancel
       </button>
@@ -371,7 +371,7 @@ function SortableCard({ id, children }: { id: number; children: React.ReactNode 
         {...attributes}
         aria-label="Drag to reorder"
         title="Drag to reorder within the group"
-        className="absolute top-2 left-2 z-30 p-1 rounded bg-black/60 hover:bg-black/90 text-gray-300 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/sortable:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-400 outline-none transition-opacity"
+        className="absolute top-2 left-2 z-30 p-1 rounded bg-black/60 hover:bg-black/90 text-text-primary-alt2 hover:text-white cursor-grab active:cursor-grabbing touch-none opacity-0 group-hover/sortable:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-400 outline-none transition-opacity"
       >
         <GripVertical size={14} />
       </button>
@@ -517,7 +517,7 @@ export default function VariantGroup() {
     setVariants(order.map((id) => byId.get(id)!));   // optimistic
     setHasManualOrder(true);
     try {
-      await api.models.reorderGroup(numCreatorId, decodedCharacter, order);
+      await api.models.reorderGroup(numCreatorId, decodedCharacter, order, groupId);
     } catch (err) {
       setVariants(prev);   // roll back
       toast(errMsg(err) || "Couldn't save the order — try again.", "error");
@@ -526,7 +526,7 @@ export default function VariantGroup() {
 
   const resetOrder = async () => {
     try {
-      await api.models.reorderGroup(numCreatorId, decodedCharacter, []);
+      await api.models.reorderGroup(numCreatorId, decodedCharacter, [], groupId);
       setHasManualOrder(false);
       reloadVariants();
       toast("Order reset to default.", "success");
@@ -561,7 +561,7 @@ export default function VariantGroup() {
         const skipped = res.missing.length;
         toast(skipped > 0 ? `Image set on ${n} ${noun}; ${skipped} skipped.` : `Image set on ${n} ${noun}.`, "success");
       }
-      const data = await api.models.variants(numCreatorId, decodedCharacter);
+      const data = await api.models.variants(numCreatorId, decodedCharacter, groupId);
       setVariants(data.items);
     } catch (e) {
       toast(errMsg(e) || "Couldn't set the group image — try again.", "error");
@@ -582,7 +582,7 @@ export default function VariantGroup() {
         skipped > 0 ? `${res.message} (${skipped} skipped.)` : res.message,
         res.scraped ? "success" : "info",
       );
-      const data = await api.models.variants(numCreatorId, decodedCharacter);
+      const data = await api.models.variants(numCreatorId, decodedCharacter, groupId);
       setVariants(data.items);
     } catch (e) {
       toast(errMsg(e) || "Couldn't set the store page — try again.", "error");
@@ -662,12 +662,12 @@ export default function VariantGroup() {
       <div className="flex items-center gap-3 mb-6">
         <button
           onClick={() => navigate(from)}
-          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors"
+          className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-white transition-colors"
         >
           <ArrowLeft size={16} />
           Back
         </button>
-        <div className="h-4 w-px bg-gray-700" />
+        <div className="h-4 w-px bg-panel-secondary" />
         <Layers size={16} className="text-indigo-400" />
         {renaming ? (
           <div className="flex items-center gap-1">
@@ -681,14 +681,14 @@ export default function VariantGroup() {
                 if (e.key === "Escape") setRenaming(false);
               }}
               aria-label="Group name"
-              className="px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-lg text-white outline-none"
+              className="px-2 py-1 rounded bg-panel border border-border focus:border-accent-start text-lg text-white outline-none"
             />
             <button
               onClick={saveRename}
               disabled={!renameValue.trim() || renameValue.trim() === decodedCharacter}
               title="Save name"
               aria-label="Save name"
-              className="p-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white disabled:opacity-40"
+              className="p-1.5 rounded bg-indigo-700 hover:bg-accent-end text-white disabled:opacity-40"
             >
               <Check size={16} />
             </button>
@@ -696,7 +696,7 @@ export default function VariantGroup() {
               onClick={() => setRenaming(false)}
               title="Cancel rename"
               aria-label="Cancel rename"
-              className="p-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400"
+              className="p-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-secondary"
             >
               <X size={16} />
             </button>
@@ -713,7 +713,7 @@ export default function VariantGroup() {
           </button>
         )}
         {!loading && (
-          <span className="text-sm text-gray-400">
+          <span className="text-sm text-text-secondary">
             {variants.length} variant{variants.length !== 1 ? "s" : ""}
           </span>
         )}
@@ -721,7 +721,7 @@ export default function VariantGroup() {
           onClick={() => setShowShortcuts(true)}
           title="Keyboard shortcuts ( ? )"
           aria-label="Keyboard shortcuts"
-          className="ml-auto p-1.5 rounded border border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-100 hover:border-gray-500 transition-colors"
+          className="ml-auto p-1.5 rounded border border-border bg-panel text-text-secondary hover:text-text-primary hover:border-border-divider transition-colors"
         >
           <Keyboard size={16} />
         </button>
@@ -731,17 +731,17 @@ export default function VariantGroup() {
         <div className="flex items-center gap-3 mb-4 text-sm">
           <button
             onClick={toggleSelectAll}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="text-text-secondary hover:text-white transition-colors"
           >
             {allSelected ? "Clear selection" : "Select all"}
           </button>
-          <span className="text-gray-600">·</span>
-          <span className="text-gray-500">Drag a card's grip to reorder</span>
+          <span className="text-text-muted">·</span>
+          <span className="text-text-secondary-alt">Drag a card's grip to reorder</span>
           {hasManualOrder && (
             <button
               onClick={resetOrder}
               title="Clear the manual order and restore the default"
-              className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors"
+              className="flex items-center gap-1 text-text-secondary hover:text-white transition-colors"
             >
               <ListRestart size={13} />
               Reset order
@@ -749,14 +749,14 @@ export default function VariantGroup() {
           )}
           {selected.size > 0 && (
             <>
-              <div className="h-4 w-px bg-gray-700" />
-              <span className="text-gray-400">{selected.size} selected</span>
+              <div className="h-4 w-px bg-panel-secondary" />
+              <span className="text-text-secondary">{selected.size} selected</span>
               <BulkMove creatorId={numCreatorId} currentGroup={decodedCharacter} onMove={moveSelected} />
               <BulkSetImage onApply={setImageForSelected} />
               <BulkSetStoreLink onApply={setStoreUrlForSelected} />
               <button
                 onClick={ungroupSelected}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-gray-800 hover:bg-red-900/40 border border-gray-700 hover:border-red-600 text-gray-400 hover:text-red-400 transition-colors"
+                className="flex items-center gap-1 px-2.5 py-1 rounded bg-panel-secondary hover:bg-red-900/40 border border-border hover:border-red-600 text-text-secondary hover:text-red-400 transition-colors"
               >
                 <X size={13} />
                 Ungroup
@@ -767,9 +767,9 @@ export default function VariantGroup() {
       )}
 
       {loading ? (
-        <div className="flex justify-center py-24 text-gray-500 text-sm">Loading…</div>
+        <div className="flex justify-center py-24 text-text-secondary-alt text-sm">Loading…</div>
       ) : variants.length === 0 ? (
-        <div className="flex justify-center py-24 text-gray-500 text-sm">No variants found.</div>
+        <div className="flex justify-center py-24 text-text-secondary-alt text-sm">No variants found.</div>
       ) : (
         <DndContext
           sensors={dndSensors}
@@ -784,7 +784,7 @@ export default function VariantGroup() {
                 <SortableCard key={model.id} id={model.id}>
                   <div className="relative">
                     {/* Checkbox sits right of the drag grip (top-left). */}
-                    <label className="absolute top-2 left-9 z-10 flex items-center justify-center p-1 rounded bg-gray-900/80 border border-gray-700 cursor-pointer">
+                    <label className="absolute top-2 left-9 z-10 flex items-center justify-center p-1 rounded bg-panel/80 border border-border cursor-pointer">
                       <input
                         type="checkbox"
                         checked={selected.has(model.id)}

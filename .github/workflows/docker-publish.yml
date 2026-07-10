@@ -3,7 +3,8 @@ name: Build and Publish Docker Images
 on:
   push:
     branches: [main]
-    tags: ['v*.*.*']
+  release:
+    types: [published]
   pull_request:
     branches: [main]
 
@@ -25,14 +26,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -40,25 +41,27 @@ jobs:
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           # metadata-action lowercases the name, which GHCR requires.
           images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.service }}
-          # Tag-driven releases: pushing a git tag v1.2.3 publishes :1.2.3, :1.2,
-          # :1 and :latest. Pushes to main publish :main (moving) and :sha-<hash>
-          # (pinned) rolling dev images — no semver tag, no :latest.
+          # Release-driven versions publish semver tags. Pushes to main publish
+          # the rolling dev tags :main, :latest, and :sha-<hash> so Docker users
+          # can track the newest successful main build without a GitHub Release.
           tags: |
             type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
-          # :latest tracks the newest semver tag release, never a main push.
+          # latest=auto still allows release events to mark full releases as
+          # :latest, while the explicit raw tag above makes main pushes update it.
           flavor: |
             latest=auto
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           platforms: linux/amd64

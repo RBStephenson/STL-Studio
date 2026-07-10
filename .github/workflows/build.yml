@@ -17,6 +17,18 @@ on:
         description: "Git ref to build (defaults to the triggering ref)"
         type: string
         default: ""
+      release_draft:
+        description: "Create/update release assets on a draft release"
+        type: boolean
+        default: true
+      release_prerelease:
+        description: "Mark created/updated release as a prerelease"
+        type: boolean
+        default: false
+      artifact_retention_days:
+        description: "Retention period for non-release CI artifacts"
+        type: number
+        default: 7
 
 jobs:
   build:
@@ -71,9 +83,9 @@ jobs:
       # The backend exe is a headless windowless sidecar (Phase 2, STUDIO-72). On
       # Windows it is wrapped by Electron below; on Linux it ships as-is with the
       # browser fallback (#463). electron-builder expects the *unlabelled*
-      # dist-standalone/stl-library.exe, so packaging runs before any rename.
+      # dist-standalone/stl-studio.exe, so packaging runs before any rename.
       - name: Build executable
-        run: pyinstaller packaging/stl-library.spec --distpath dist-standalone
+        run: pyinstaller packaging/stl-studio.spec --distpath dist-standalone
 
       # ---- Windows: wrap the backend exe in the Electron NSIS installer ----
       # (Phase 4, STUDIO-74). desktop/electron-builder.yml copies the sidecar from
@@ -82,6 +94,23 @@ jobs:
         if: matrix.os == 'windows-latest'
         working-directory: desktop
         run: npm ci
+
+      # Stamps the installer with a real version so About/app.getVersion() show
+      # something meaningful. Release builds get the semver tag (v1.2.3 -> 1.2.3);
+      # the rolling main build's tag ("rolling") isn't semver, so it falls back to
+      # a 0.0.0-<sha> prerelease version instead.
+      - name: Set desktop app version
+        if: ${{ inputs.release && matrix.os == 'windows-latest' }}
+        working-directory: desktop
+        shell: bash
+        run: |
+          tag="${{ inputs.tag }}"
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            version="${tag#v}"
+          else
+            version="0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          npm version "$version" --no-git-tag-version --allow-same-version
 
       - name: Build desktop (tsc)
         if: matrix.os == 'windows-latest'
@@ -101,7 +130,7 @@ jobs:
       #      of the installer above) ----
       - name: Rename artifact (Linux)
         if: matrix.os != 'windows-latest'
-        run: mv dist-standalone/stl-library dist-standalone/stl-library-${{ matrix.label }}
+        run: mv dist-standalone/stl-studio dist-standalone/stl-studio-${{ matrix.label }}
 
       # ---- Upload to the DRAFT release (release.yml publishes it afterwards) OR
       #      keep as a CI artifact (build-check). Uploading to a draft keeps the
@@ -113,15 +142,19 @@ jobs:
         with:
           tag_name: ${{ inputs.tag }}
           files: desktop/release/*.exe
-          draft: true            # stay a draft; release.yml's publish job flips it
+          draft: ${{ inputs.release_draft }}
+          prerelease: ${{ inputs.release_prerelease }}
+          overwrite_files: true
 
       - name: Upload to draft release (Linux binary)
         if: ${{ inputs.release && matrix.os != 'windows-latest' }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
-          files: dist-standalone/stl-library-${{ matrix.label }}
-          draft: true
+          files: dist-standalone/stl-studio-${{ matrix.label }}
+          draft: ${{ inputs.release_draft }}
+          prerelease: ${{ inputs.release_prerelease }}
+          overwrite_files: true
 
       - name: Upload build artifact (Windows installer)
         if: ${{ !inputs.release && matrix.os == 'windows-latest' }}
@@ -129,12 +162,12 @@ jobs:
         with:
           name: stl-studio-setup-${{ matrix.label }}
           path: desktop/release/*.exe
-          retention-days: 7
+          retention-days: ${{ inputs.artifact_retention_days }}
 
       - name: Upload build artifact (Linux binary)
         if: ${{ !inputs.release && matrix.os != 'windows-latest' }}
         uses: actions/upload-artifact@v7
         with:
-          name: stl-library-${{ matrix.label }}
-          path: dist-standalone/stl-library-${{ matrix.label }}
-          retention-days: 7
+          name: stl-studio-${{ matrix.label }}
+          path: dist-standalone/stl-studio-${{ matrix.label }}
+          retention-days: ${{ inputs.artifact_retention_days }}

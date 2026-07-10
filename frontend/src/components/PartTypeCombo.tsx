@@ -11,14 +11,19 @@ interface Props {
   onClick?: (e: React.MouseEvent) => void;
 }
 
+// Matches the list's max-h-48 (12rem) so the flip-up decision knows how much
+// room the dropdown actually needs.
+const DROPDOWN_MAX_HEIGHT = 192;
+
 export function PartTypeCombo({ value, options, placeholder, className, onChange, onCommit, onClick }: Props) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const sorted = [...options].sort((a, b) => a.localeCompare(b));
   const filtered = value
-    ? options.filter((o) => o.toLowerCase().includes(value.toLowerCase()))
-    : options;
+    ? sorted.filter((o) => o.toLowerCase().includes(value.toLowerCase()))
+    : sorted;
 
   const openDrop = () => {
     if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
@@ -31,11 +36,25 @@ export function PartTypeCombo({ value, options, placeholder, className, onChange
     setOpen(false);
   };
 
+  // Prefer opening below the field (the common case); flip above it when
+  // there isn't enough room below but there is above, so the list is never
+  // clipped off the bottom of the viewport (e.g. a row near the page end).
+  const spaceBelow = rect ? window.innerHeight - rect.bottom : 0;
+  const openUpward = rect ? spaceBelow < DROPDOWN_MAX_HEIGHT && rect.top > spaceBelow : false;
+
   const dropdown =
     open && filtered.length > 0 && rect
       ? createPortal(
           <ul
-            style={{ position: "fixed", top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 140), zIndex: 9999 }}
+            style={{
+              position: "fixed",
+              ...(openUpward
+                ? { bottom: window.innerHeight - rect.top + 2 }
+                : { top: rect.bottom + 2 }),
+              left: rect.left,
+              width: Math.max(rect.width, 140),
+              zIndex: 9999,
+            }}
             className="bg-gray-900 border border-gray-700 rounded shadow-xl max-h-48 overflow-y-auto"
           >
             {filtered.map((opt) => (

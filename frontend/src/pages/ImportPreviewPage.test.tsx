@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import ImportPreviewPage from "./ImportPreviewPage";
+import ImportPreviewPage, { ImageRotator } from "./ImportPreviewPage";
 
 vi.mock("../api/client", () => ({
   api: {
@@ -13,9 +13,17 @@ vi.mock("../api/client", () => ({
       preview: vi.fn(),
       scanFolder: vi.fn().mockResolvedValue({ running: true, message: "importing" }),
       apply: vi.fn().mockResolvedValue({
-        manifest_id: "m1", moved_models: 1, moved_files: 2, skipped: 0, ineligible: [], undo_log: null,
+        started: false,
+        result: { manifest_id: "m1", moved_models: 1, moved_files: 2, skipped: 0, ineligible: [], undo_log: null },
       }),
-      downloadImages: vi.fn().mockResolvedValue(undefined),
+      applyStatus: vi.fn().mockResolvedValue({
+        running: false, message: "done", moved_files: 2, total_files: 2, error: null,
+        result: { manifest_id: "m1", moved_models: 1, moved_files: 2, skipped: 0, ineligible: [], undo_log: null },
+      }),
+      downloadImages: vi.fn().mockResolvedValue({ started: false, result: { downloaded: 0 } }),
+      downloadImagesStatus: vi.fn().mockResolvedValue({
+        running: false, message: "done", downloaded: 0, total: 0, error: null, result: { downloaded: 0 },
+      }),
     },
     scan: {
       libraries: vi.fn(),
@@ -199,6 +207,115 @@ describe("ImportPreviewPage (#452 C2)", () => {
     expect(screen.getByDisplayValue("Scraped Creator")).toBeInTheDocument();
   });
 
+  it("persists source_site scraped from the storefront through to bulkEnrich", async () => {
+    // Regression: source_site was captured from the scrape response but never
+    // sent to bulkEnrich, so it was silently dropped even though the user
+    // provided a recognised store URL.
+    vi.mocked(api.scrape.fetchUrl).mockResolvedValue({
+      title: "Scraped Title", description: null, source_url: "https://cults3d.com/x",
+      source_site: "cults3d", external_id: null, creator_name: "Scraped Creator",
+      thumbnail_url: null, image_urls: [], tags: [], category: null, license: null,
+      like_count: null, download_count: null,
+    });
+    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    await scan();
+    fireEvent.click(screen.getByLabelText("Expand"));
+
+    fireEvent.change(await screen.findByPlaceholderText("https://…"), { target: { value: "https://cults3d.com/x" } });
+    fireEvent.click(screen.getByRole("button", { name: /fetch/i }));
+    await waitFor(() => expect(api.scrape.fetchUrl).toHaveBeenCalledWith("https://cults3d.com/x"));
+    await screen.findByDisplayValue("Scraped Title");
+
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(
+      () => expect(api.models.bulkEnrich).toHaveBeenCalledWith(
+        [1, 2], expect.objectContaining({ source_site: "cults3d" }),
+      ),
+      { timeout: _WAIT },
+    );
+  });
+
+  it("polls download-images status and shows downloading progress for a background job", async () => {
+    vi.mocked(api.scrape.fetchUrl).mockResolvedValue({
+      title: "Scraped Title", description: null, source_url: "https://cults3d.com/x",
+      source_site: "cults3d", external_id: null, creator_name: "Scraped Creator",
+      thumbnail_url: "https://cdn.example/cover.jpg", image_urls: [], tags: [], category: null,
+      license: null, like_count: null, download_count: null,
+    });
+    vi.mocked(api.import.downloadImages).mockResolvedValue({ started: true, result: null });
+    vi.mocked(api.import.downloadImagesStatus)
+      .mockResolvedValueOnce({
+        running: true, message: "Downloading images (0/1)", downloaded: 0, total: 1, error: null, result: null,
+      })
+      .mockResolvedValue({
+        running: false, message: "done", downloaded: 1, total: 1, error: null, result: { downloaded: 1 },
+      });
+
+    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    await scan();
+    fireEvent.click(screen.getByLabelText("Expand"));
+    fireEvent.change(await screen.findByPlaceholderText("https://…"), { target: { value: "https://cults3d.com/x" } });
+    fireEvent.click(screen.getByRole("button", { name: /fetch/i }));
+    await screen.findByDisplayValue("Scraped Title");
+
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    expect(await screen.findByText(/downloading 0\/1 images/i, {}, { timeout: _WAIT })).toBeInTheDocument();
+    expect(await screen.findByText("Imported", {}, { timeout: _WAIT })).toBeInTheDocument();
+  });
+
+  it("scopes the move to the pack's own path, not the top-level import source", async () => {
+    // Regression: apply used to be called with the whole import root, which
+    // could sweep in every other pending pack under that root, not just the
+    // one being imported.
+    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    await scan();
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(
+      () => expect(api.import.apply).toHaveBeenCalledWith("/src/PackA"),
+      { timeout: _WAIT },
+    );
+    expect(api.import.apply).not.toHaveBeenCalledWith("/src");
+  });
+
+  it("polls apply status and shows moving-files progress for a background job", async () => {
+    vi.mocked(api.import.apply).mockResolvedValue({ started: true, result: null });
+    vi.mocked(api.import.applyStatus)
+      .mockResolvedValueOnce({
+        running: true, message: "Moving files (1/2)", moved_files: 1, total_files: 2, error: null, result: null,
+      })
+      .mockResolvedValue({
+        running: false, message: "done", moved_files: 2, total_files: 2, error: null,
+        result: { manifest_id: "m1", moved_models: 1, moved_files: 2, skipped: 0, ineligible: [], undo_log: null },
+      });
+
+    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    await scan();
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    expect(await screen.findByText(/moving 1\/2 files/i, {}, { timeout: _WAIT })).toBeInTheDocument();
+    expect(await screen.findByText("Imported", {}, { timeout: _WAIT })).toBeInTheDocument();
+  });
+
+  it("surfaces a background-job error as a toast", async () => {
+    vi.mocked(api.import.apply).mockResolvedValue({ started: true, result: null });
+    vi.mocked(api.import.applyStatus).mockResolvedValue({
+      running: false, message: "error", moved_files: 0, total_files: 0,
+      error: "destination already exists", result: null,
+    });
+
+    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    await scan();
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(
+      () => expect(toastMock).toHaveBeenCalledWith(expect.stringContaining("destination already exists"), "error"),
+      { timeout: _WAIT },
+    );
+  });
+
   it("assigns the pack to a selected collection after ingest (#458)", async () => {
     setup({ mapping: { source_path: "/src", library_id: 1 } });
     await scan();
@@ -211,5 +328,24 @@ describe("ImportPreviewPage (#452 C2)", () => {
       () => expect(api.collections.bulkAddModels).toHaveBeenCalledWith(7, [1, 2]),
       { timeout: _WAIT }
     );
+  });
+});
+
+describe("ImageRotator fade-timer cleanup on unmount (STUDIO-95)", () => {
+  it("triggering a fade then unmounting does not update state after teardown", () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = render(<ImageRotator images={["a.png", "b.png"]} />);
+    fireEvent.click(screen.getByLabelText("Next image")); // starts the 200ms fade-out/in cycle
+
+    unmount();
+    vi.advanceTimersByTime(200);
+
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("Can't perform a React state update on an unmounted component")
+    );
+    errorSpy.mockRestore();
+    vi.useRealTimers();
   });
 });

@@ -62,11 +62,11 @@ export default function ImportPage() {
   return (
     <div className="max-w-2xl mx-auto px-6 py-10 space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">
+        <h1 className="text-2xl font-bold text-text-primary flex items-center gap-2">
           <Inbox size={22} className="text-indigo-400" />
           Import Folder
         </h1>
-        <p className="mt-2 text-sm text-gray-400">
+        <p className="mt-2 text-sm text-text-secondary">
           Index an inbox folder without adding it as a permanent scan root.
           Models are imported with an inbox flag so you can enrich and reorganize
           them separately.
@@ -74,18 +74,18 @@ export default function ImportPage() {
       </div>
 
       {/* Step 1 — pick folder */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="font-semibold text-gray-200 text-sm uppercase tracking-wide">
+      <section className="bg-panel border border-border-subtle rounded-xl p-6 space-y-4">
+        <h2 className="font-semibold text-text-primary-alt text-sm uppercase tracking-wide">
           1 — Choose a folder
         </h2>
         <div className="flex items-center gap-3">
-          <span className="flex-1 font-mono text-sm text-gray-300 truncate min-w-0 bg-gray-800 border border-gray-700 rounded px-3 py-2">
-            {selectedPath || <span className="text-gray-600">No folder selected</span>}
+          <span className="flex-1 font-mono text-sm text-text-primary-alt2 truncate min-w-0 bg-panel-secondary border border-border rounded px-3 py-2">
+            {selectedPath || <span className="text-text-muted">No folder selected</span>}
           </span>
           <button
             onClick={() => setPhase("picking")}
             disabled={phase === "running"}
-            className="flex items-center gap-1.5 px-4 py-2 rounded bg-gray-800 border border-gray-700 text-sm text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-40 transition-colors shrink-0"
+            className="flex items-center gap-1.5 px-4 py-2 rounded bg-panel-secondary border border-border text-sm text-text-primary-alt2 hover:bg-panel-secondary hover:text-white disabled:opacity-40 transition-colors shrink-0"
           >
             <FolderOpen size={14} />
             Browse
@@ -94,8 +94,8 @@ export default function ImportPage() {
       </section>
 
       {/* Step 2 — import */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
-        <h2 className="font-semibold text-gray-200 text-sm uppercase tracking-wide">
+      <section className="bg-panel border border-border-subtle rounded-xl p-6 space-y-4">
+        <h2 className="font-semibold text-text-primary-alt text-sm uppercase tracking-wide">
           2 — Import
         </h2>
 
@@ -107,8 +107,8 @@ export default function ImportPage() {
               onClick={(e) => { if (!selectedPath) e.preventDefault(); }}
               className={`flex items-center gap-2 px-5 py-3 rounded-lg text-sm font-medium transition-colors ${
                 selectedPath
-                  ? "bg-indigo-600 hover:bg-indigo-500 text-white"
-                  : "bg-indigo-600/40 text-white/60 cursor-not-allowed pointer-events-none"
+                  ? "bg-accent-end hover:bg-accent-start text-white"
+                  : "bg-accent-end/40 text-white/60 cursor-not-allowed pointer-events-none"
               }`}
             >
               <Package size={14} />
@@ -120,7 +120,7 @@ export default function ImportPage() {
             <button
               onClick={startImport}
               disabled={!selectedPath}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 text-xs disabled:opacity-40 transition-colors"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-panel-secondary hover:bg-panel-secondary border border-border text-text-secondary text-xs disabled:opacity-40 transition-colors"
             >
               <Play size={12} />
               Quick import (no metadata)
@@ -129,7 +129,7 @@ export default function ImportPage() {
         )}
 
         {phase === "running" && (
-          <div className="flex items-center gap-2 text-sm text-gray-400">
+          <div className="flex items-center gap-2 text-sm text-text-secondary">
             <Loader2 size={16} className="animate-spin text-indigo-400" />
             <span>{statusMsg || "importing…"}</span>
           </div>
@@ -144,14 +144,14 @@ export default function ImportPage() {
             <div className="flex items-center gap-3">
               <Link
                 to="/?is_inbox=1"
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent-end hover:bg-accent-start text-white text-sm font-medium transition-colors"
               >
                 <Inbox size={14} />
                 View inbox models
               </Link>
               <button
                 onClick={reset}
-                className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm transition-colors"
+                className="px-4 py-2 rounded-lg bg-panel-secondary hover:bg-panel-secondary text-text-primary-alt2 text-sm transition-colors"
               >
                 Import another
               </button>
@@ -167,7 +167,7 @@ export default function ImportPage() {
             </div>
             <button
               onClick={reset}
-              className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm transition-colors"
+              className="px-4 py-2 rounded-lg bg-panel-secondary hover:bg-panel-secondary text-text-primary-alt2 text-sm transition-colors"
             >
               Try again
             </button>

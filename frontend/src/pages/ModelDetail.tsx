@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw } from "lucide-react";
-import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizeSuggestionPreview } from "../api/client";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, RefreshCw, Trash2 } from "lucide-react";
+import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult, AiOrganizeStrategy } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
+import AiOrganizeStrategyModal from "../components/AiOrganizeStrategyModal";
 import FindOnWeb from "../components/FindOnWeb";
 import ImagePicker from "../components/ImagePicker";
 import MetadataEditor from "../components/MetadataEditor";
@@ -15,6 +16,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 import { useConfirm } from "../context/ConfirmContext";
 import { queryKeys } from "../hooks/queries/keys";
+import { invalidateModelViews } from "../hooks/queries/invalidation";
 import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
 import { useModelGuideId } from "../hooks/queries/guides";
 import { useModelTags } from "./model-detail/hooks/useModelTags";
@@ -117,7 +119,8 @@ export default function ModelDetail() {
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [aiOrganizing, setAiOrganizing] = useState(false);
-  const [aiOrganizeSuggestions, setAiOrganizeSuggestions] = useState<AiOrganizeSuggestionPreview[] | null>(null);
+  const [aiOrganizeResult, setAiOrganizeResult] = useState<AiOrganizePreviewResult | null>(null);
+  const [showAiOrganizeStrategy, setShowAiOrganizeStrategy] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
@@ -236,16 +239,24 @@ export default function ModelDetail() {
     }
   };
 
-  const runAiOrganize = async () => {
+  // Button click opens the strategy picker (#878) rather than calling the API
+  // directly — the actual call happens in runAiOrganize once a strategy is chosen.
+  const runAiOrganize = () => {
     if (!model || aiOrganizing) return;
+    setShowAiOrganizeStrategy(true);
+  };
+
+  const organizeWithStrategy = async (strategy: AiOrganizeStrategy) => {
+    if (!model) return;
+    setShowAiOrganizeStrategy(false);
     setAiOrganizing(true);
     try {
-      const result = await api.models.aiOrganize(model.id);
-      if (!result.suggestions.length) {
-        toast("AI returned no suggestions for this model.", "error");
-        return;
-      }
-      setAiOrganizeSuggestions(result.suggestions);
+      // Always open the modal so the user sees WHY, whether that's a review
+      // table (llm_status "ok") or a clear explanation (disabled/skipped/
+      // error) — AI Organize never silently substitutes heuristics for a
+      // real AI result (#821), so an empty response is still feedback worth
+      // surfacing, not a value to swallow into a toast.
+      setAiOrganizeResult(await api.models.aiOrganize(model.id, strategy));
     } catch (e) {
       toast(errMsg(e) || "AI organize failed", "error");
     } finally {
@@ -317,11 +328,31 @@ export default function ModelDetail() {
     }
   };
 
+  const deleteOtherFile = async (path: string) => {
+    if (!model) return;
+    const name = path.split(/[\\/]/).pop() ?? path;
+    const ok = await confirm({
+      title: "Delete this file?",
+      message: `"${name}" will be permanently deleted from disk.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await api.models.deleteOtherFile(model.id, path);
+      toast("File deleted.", "success");
+      load();
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't delete the file — try again.", "error");
+    }
+  };
+
   const toggleNSFW = async () => {
     const next = !nsfw;
     setNsfw(next);
     try {
       await api.models.setNSFW(Number(id), next);
+      invalidateModelViews(queryClient, { modelId: Number(id), includeVariants: false });
     } catch {
       setNsfw(!next);  // revert on failure
       toast("Couldn't update NSFW flag — try again.", "error");
@@ -333,6 +364,7 @@ export default function ModelDetail() {
     setFavorite(next);
     try {
       await api.models.setFavorite(Number(id), next);
+      invalidateModelViews(queryClient, { modelId: Number(id), includeVariants: false });
     } catch {
       setFavorite(!next);  // revert on failure
       toast("Couldn't update favorite — try again.", "error");
@@ -344,6 +376,7 @@ export default function ModelDetail() {
     setRating(next);
     try {
       await api.models.setRating(Number(id), next);
+      invalidateModelViews(queryClient, { modelId: Number(id), includeVariants: false });
     } catch {
       setRating(prev);  // revert on failure
       toast("Couldn't update rating — try again.", "error");
@@ -356,7 +389,7 @@ export default function ModelDetail() {
   const load = useCallback(() => {
     if (numericId == null) return;
     modelQuery.refetch();
-    queryClient.invalidateQueries({ queryKey: queryKeys.models.variantsAll });
+    invalidateModelViews(queryClient, { includeVariants: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [numericId, queryClient]);
 
@@ -365,21 +398,21 @@ export default function ModelDetail() {
     openMergePicker, cancelMerge, mergeIntoGroup, removeFromGroup,
   } = useGroupMerge(model, numericId, load);
 
-  if (loading) return <div className="p-8 text-gray-500 animate-pulse">Loading…</div>;
+  if (loading) return <div className="p-8 text-text-secondary-alt animate-pulse">Loading…</div>;
   if (loadError === "network") {
     return (
-      <div className="p-8 flex flex-col items-start gap-3 text-gray-400">
+      <div className="p-8 flex flex-col items-start gap-3 text-text-secondary">
         <p>Couldn't load this model — check your connection and try again.</p>
         <button
           onClick={load}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm text-white transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-accent-end hover:bg-accent-start text-sm text-white transition-colors"
         >
           <RefreshCw size={14} /> Retry
         </button>
       </div>
     );
   }
-  if (!model) return <div className="p-8 text-gray-500">Model not found.</div>;
+  if (!model) return <div className="p-8 text-text-secondary-alt">Model not found.</div>;
 
   const allImages = [
     model.thumbnail_path ? api.fileUrl(model.thumbnail_path, model.updated_at) : model.thumbnail_url,
@@ -393,7 +426,7 @@ export default function ModelDetail() {
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <Link to={backTo} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-300 w-fit">
+        <Link to={backTo} className="flex items-center gap-1.5 text-sm text-text-secondary-alt hover:text-text-primary-alt2 w-fit">
           <ArrowLeft size={14} /> Back to Library
         </Link>
 
@@ -404,17 +437,17 @@ export default function ModelDetail() {
                 <Link
                   to={`/models/${prevNav.id}`}
                   state={{ from: prevNav.from }}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-gray-100 hover:bg-gray-800 transition-colors"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-panel-secondary transition-colors"
                 >
                   <ChevronLeft size={15} /> Prev
                 </Link>
               ) : (
-                <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-700 cursor-default select-none">
+                <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-text-muted-alt cursor-default select-none">
                   <ChevronLeft size={15} /> Prev
                 </span>
               )
             ) : (
-              <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-700 animate-pulse select-none">
+              <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-text-muted-alt animate-pulse select-none">
                 <ChevronLeft size={15} /> Prev
               </span>
             )}
@@ -424,17 +457,17 @@ export default function ModelDetail() {
                 <Link
                   to={`/models/${nextNav.id}`}
                   state={{ from: nextNav.from }}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-gray-100 hover:bg-gray-800 transition-colors"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-panel-secondary transition-colors"
                 >
                   Next <ChevronRight size={15} />
                 </Link>
               ) : (
-                <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-700 cursor-default select-none">
+                <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-text-muted-alt cursor-default select-none">
                   Next <ChevronRight size={15} />
                 </span>
               )
             ) : (
-              <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-gray-700 animate-pulse select-none">
+              <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-text-muted-alt animate-pulse select-none">
                 Next <ChevronRight size={15} />
               </span>
             )}
@@ -474,9 +507,19 @@ export default function ModelDetail() {
               {model.character && (
                 <p className="text-sm text-indigo-400 mb-1">{model.character}</p>
               )}
-              <h1 className="text-2xl font-bold text-gray-100 break-words">{model.title || model.name}</h1>
+              <h1 className="text-2xl font-bold text-text-primary break-words flex items-center gap-2">
+                {model.title || model.name}
+                {model.unorganized && (
+                  <span
+                    title="Unorganized — location doesn't match your organize template. Run Reorganize Library to move it."
+                    className="inline-flex shrink-0"
+                  >
+                    <FolderSync size={18} className="text-amber-400" />
+                  </span>
+                )}
+              </h1>
               {model.creator && (
-                <p className="text-gray-400 mt-1">by {model.creator.name}</p>
+                <p className="text-text-secondary mt-1">by {model.creator.name}</p>
               )}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -496,14 +539,14 @@ export default function ModelDetail() {
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm transition-colors ${
                   favorite
                     ? "bg-yellow-950/60 border-yellow-800 text-yellow-400 hover:bg-yellow-900/60"
-                    : "bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200"
+                    : "bg-panel-secondary border-border text-text-secondary hover:text-text-primary-alt"
                 }`}
               >
                 <Star size={14} fill={favorite ? "currentColor" : "none"} />
                 Favorite
               </button>
               <div
-                className="flex items-center gap-1 px-2 py-1 rounded border bg-gray-800 border-gray-700"
+                className="flex items-center gap-1 px-2 py-1 rounded border bg-panel-secondary border-border"
                 title={rating ? `Rated ${rating}/5 — click a star to change, or the same star to clear` : "Rate this model"}
               >
                 <StarRating value={rating} onChange={changeRating} size={16} />
@@ -519,7 +562,7 @@ export default function ModelDetail() {
                     ? "bg-amber-950/60 border-amber-800 text-amber-400 hover:bg-amber-900/60"
                     : printStatus === "printed"
                     ? "bg-emerald-950/60 border-emerald-800 text-emerald-400 hover:bg-emerald-900/60"
-                    : "bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200"
+                    : "bg-panel-secondary border-border text-text-secondary hover:text-text-primary-alt"
                 }`}
               >
                 <Printer size={14} />
@@ -533,7 +576,7 @@ export default function ModelDetail() {
                   onClick={clearPrintStatus}
                   title="Clear print status (revert to not set)"
                   aria-label="Clear print status"
-                  className="px-2 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors"
+                  className="px-2 py-1.5 rounded border border-border bg-panel-secondary text-text-secondary hover:text-text-primary-alt transition-colors"
                 >
                   <X size={14} />
                 </button>
@@ -544,21 +587,21 @@ export default function ModelDetail() {
                 className={`px-3 py-1.5 rounded border text-sm transition-colors ${
                   nsfw
                     ? "bg-red-950/60 border-red-800 text-red-400 hover:bg-red-900/60"
-                    : "bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200"
+                    : "bg-panel-secondary border-border text-text-secondary hover:text-text-primary-alt"
                 }`}
               >
                 {nsfw ? "NSFW ✓" : "NSFW"}
               </button>
               <button
                 onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 text-sm text-gray-300 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border hover:border-accent-start text-sm text-text-primary-alt2 transition-colors"
               >
                 <Pencil size={14} />
                 Edit
               </button>
               <button
                 onClick={() => setShowFindOnWeb(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 text-sm text-gray-300 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border hover:border-accent-start text-sm text-text-primary-alt2 transition-colors"
               >
                 <Globe size={14} />
                 Find on Web
@@ -567,7 +610,7 @@ export default function ModelDetail() {
                 onClick={splitPack}
                 disabled={splitting}
                 title="If this folder is actually a pack of separate models, split it into one model per sub-folder"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 text-sm text-gray-300 transition-colors disabled:opacity-40"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border hover:border-accent-start text-sm text-text-primary-alt2 transition-colors disabled:opacity-40"
               >
                 <Split size={14} />
                 {splitting ? "Splitting…" : "Split pack"}
@@ -585,7 +628,7 @@ export default function ModelDetail() {
                   <button
                     onClick={removeFromGroup}
                     title="Remove this model from its group"
-                    className="px-2 py-1.5 rounded bg-gray-800 hover:bg-red-900/40 border border-gray-700 hover:border-red-600 text-xs text-gray-500 hover:text-red-400 transition-colors"
+                    className="px-2 py-1.5 rounded bg-panel-secondary hover:bg-red-900/40 border border-border hover:border-red-600 text-xs text-text-secondary-alt hover:text-red-400 transition-colors"
                   >
                     ✕
                   </button>
@@ -594,7 +637,7 @@ export default function ModelDetail() {
                 <button
                   onClick={openMergePicker}
                   title="Merge this model into an existing group (persists across rescans)"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 text-sm text-gray-300 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border hover:border-accent-start text-sm text-text-primary-alt2 transition-colors"
                 >
                   <Tag size={14} />
                   Merge into group
@@ -615,7 +658,7 @@ export default function ModelDetail() {
                 onChange={(e) => setGroupInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") mergeIntoGroup(); if (e.key === "Escape") cancelMerge(); }}
                 placeholder="Existing group name…"
-                className="flex-1 px-2 py-1 rounded bg-gray-900 border border-gray-700 focus:border-indigo-500 text-sm text-gray-200 outline-none"
+                className="flex-1 px-2 py-1 rounded bg-panel border border-border focus:border-accent-start text-sm text-text-primary-alt outline-none"
               />
               <datalist id="group-suggestions">
                 {groupSuggestions.map((s) => <option key={s} value={s} />)}
@@ -623,13 +666,13 @@ export default function ModelDetail() {
               <button
                 onClick={mergeIntoGroup}
                 disabled={savingGroup || !groupInput.trim()}
-                className="px-3 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-sm text-white disabled:opacity-40"
+                className="px-3 py-1 rounded bg-indigo-700 hover:bg-accent-end text-sm text-white disabled:opacity-40"
               >
                 {savingGroup ? "Merging…" : "Merge"}
               </button>
               <button
                 onClick={cancelMerge}
-                className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sm text-gray-400"
+                className="px-3 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-sm text-text-secondary"
               >
                 Cancel
               </button>
@@ -677,7 +720,7 @@ export default function ModelDetail() {
           )}
 
           {model.description && (
-            <p className="text-sm text-gray-400 leading-relaxed whitespace-pre-line line-clamp-6">
+            <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-line line-clamp-6">
               {model.description}
             </p>
           )}
@@ -705,20 +748,20 @@ export default function ModelDetail() {
           {/* Location — in right column right under collections when horizontal layout */}
           {settings.horizontal_parts_layout && (
             <div>
-              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+              <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1.5 mb-2">
                 <Folder size={14} />
                 Location
               </h3>
-              <div className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
-                <p className="text-xs text-gray-400 break-all font-mono leading-relaxed">
+              <div className="bg-panel border border-border-subtle rounded-lg px-3 py-2">
+                <p className="text-xs text-text-secondary break-all font-mono leading-relaxed">
                   {model.native_folder_path || model.folder_path}
                 </p>
                 <div className="flex gap-2 mt-2">
-                  <button onClick={copyPath} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                  <button onClick={copyPath} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary hover:text-text-primary-alt transition-colors">
                     {copiedPath ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
                     {copiedPath ? "Copied!" : "Copy path"}
                   </button>
-                  <button onClick={openFolder} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                  <button onClick={openFolder} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary hover:text-text-primary-alt transition-colors">
                     <FolderDown size={11} />
                     Open folder
                   </button>
@@ -731,7 +774,7 @@ export default function ModelDetail() {
           {/* Other Files — in right column when horizontal layout */}
           {settings.horizontal_parts_layout && (model.other_files ?? []).length > 0 && (
             <div>
-              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+              <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1.5 mb-2">
                 <FileBox size={14} />
                 Other Files ({(model.other_files ?? []).length})
               </h3>
@@ -739,10 +782,20 @@ export default function ModelDetail() {
                 {(model.other_files ?? []).map((fp) => {
                   const name = fp.split(/[\\/]/).pop() ?? fp;
                   return (
-                    <a key={fp} href={api.documentUrl(fp)} download={name} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-600 hover:bg-gray-800 text-xs text-gray-300 hover:text-gray-100 transition-colors">
-                      <FileBox size={12} className="shrink-0 text-gray-500" />
-                      <span className="truncate">{name}</span>
-                    </a>
+                    <div key={fp} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-panel border border-border-subtle hover:border-border-divider hover:bg-panel-secondary text-xs text-text-primary-alt2 transition-colors">
+                      <a href={api.documentUrl(fp)} download={name} className="flex items-center gap-2 flex-1 min-w-0 hover:text-text-primary">
+                        <FileBox size={12} className="shrink-0 text-text-secondary-alt" />
+                        <span className="truncate">{name}</span>
+                      </a>
+                      <button
+                        onClick={() => deleteOtherFile(fp)}
+                        className="shrink-0 p-1 rounded text-text-muted hover:text-red-400 hover:bg-red-950/40 transition-colors"
+                        aria-label={`Delete ${name}`}
+                        title={`Delete ${name}`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -775,7 +828,7 @@ export default function ModelDetail() {
           {/* Other Files (PDFs, TXTs, ZIPs, etc.) — right column only when NOT horizontal */}
           {!settings.horizontal_parts_layout && (model.other_files ?? []).length > 0 && (
             <div>
-              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+              <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1.5 mb-2">
                 <FileBox size={14} />
                 Other Files ({(model.other_files ?? []).length})
               </h3>
@@ -783,15 +836,27 @@ export default function ModelDetail() {
                 {(model.other_files ?? []).map((fp) => {
                   const name = fp.split(/[\\/]/).pop() ?? fp;
                   return (
-                    <a
+                    <div
                       key={fp}
-                      href={api.documentUrl(fp)}
-                      download={name}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-600 hover:bg-gray-800 text-xs text-gray-300 hover:text-gray-100 transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-panel border border-border-subtle hover:border-border-divider hover:bg-panel-secondary text-xs text-text-primary-alt2 transition-colors"
                     >
-                      <FileBox size={12} className="shrink-0 text-gray-500" />
-                      <span className="truncate">{name}</span>
-                    </a>
+                      <a
+                        href={api.documentUrl(fp)}
+                        download={name}
+                        className="flex items-center gap-2 flex-1 min-w-0 hover:text-text-primary"
+                      >
+                        <FileBox size={12} className="shrink-0 text-text-secondary-alt" />
+                        <span className="truncate">{name}</span>
+                      </a>
+                      <button
+                        onClick={() => deleteOtherFile(fp)}
+                        className="shrink-0 p-1 rounded text-text-muted hover:text-red-400 hover:bg-red-950/40 transition-colors"
+                        aria-label={`Delete ${name}`}
+                        title={`Delete ${name}`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -800,25 +865,25 @@ export default function ModelDetail() {
 
           {/* File location — right column only when NOT horizontal */}
           {!settings.horizontal_parts_layout && <div className="mt-auto">
-            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+            <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1.5 mb-2">
               <Folder size={14} />
               Location
             </h3>
-            <div className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
-              <p className="text-xs text-gray-400 break-all font-mono leading-relaxed">
+            <div className="bg-panel border border-border-subtle rounded-lg px-3 py-2">
+              <p className="text-xs text-text-secondary break-all font-mono leading-relaxed">
                 {model.native_folder_path || model.folder_path}
               </p>
               <div className="flex gap-2 mt-2">
                 <button
                   onClick={copyPath}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary hover:text-text-primary-alt transition-colors"
                 >
                   {copiedPath ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
                   {copiedPath ? "Copied!" : "Copy path"}
                 </button>
                 <button
                   onClick={openFolder}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary hover:text-text-primary-alt transition-colors"
                 >
                   <FolderDown size={11} />
                   Open folder
@@ -888,13 +953,20 @@ export default function ModelDetail() {
         />
       )}
 
-      {aiOrganizeSuggestions && (
+      {showAiOrganizeStrategy && (
+        <AiOrganizeStrategyModal
+          onChoose={organizeWithStrategy}
+          onClose={() => setShowAiOrganizeStrategy(false)}
+        />
+      )}
+
+      {aiOrganizeResult && (
         <AiOrganizeReviewModal
           modelId={model.id}
-          suggestions={aiOrganizeSuggestions}
+          result={aiOrganizeResult}
           stlFiles={model.stl_files}
-          onApplied={() => { setAiOrganizeSuggestions(null); load(); }}
-          onClose={() => setAiOrganizeSuggestions(null)}
+          onApplied={() => { setAiOrganizeResult(null); load(); }}
+          onClose={() => setAiOrganizeResult(null)}
         />
       )}
 

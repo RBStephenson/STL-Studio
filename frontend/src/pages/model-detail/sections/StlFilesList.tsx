@@ -77,7 +77,7 @@ export default function StlFilesList({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+        <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
           <FileBox size={14} />
           Files ({model.stl_files.length})
         </h3>
@@ -87,7 +87,7 @@ export default function StlFilesList({
               <button
                 onClick={runAiOrganize}
                 disabled={aiOrganizing}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-violet-950 border border-gray-700 hover:border-violet-600 disabled:opacity-40 text-xs text-gray-400 hover:text-violet-300 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-violet-950 border border-border hover:border-violet-600 disabled:opacity-40 text-xs text-text-secondary hover:text-violet-300 transition-colors"
               >
                 {aiOrganizing
                   ? <Loader2 size={12} className="animate-spin" />
@@ -98,14 +98,14 @@ export default function StlFilesList({
             <button
               onClick={downloadAllFiles}
               disabled={downloadingAll}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 disabled:opacity-40 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border hover:border-border-divider disabled:opacity-40 text-xs text-text-secondary hover:text-text-primary-alt transition-colors"
             >
               <FolderDown size={12} />
               {downloadingAll ? "Zipping…" : "Download all"}
             </button>
             <button
               onClick={onOpenKitBuilder}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-800 hover:bg-indigo-950 border border-gray-700 hover:border-indigo-600 text-xs text-gray-400 hover:text-indigo-300 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-panel-secondary hover:bg-indigo-950 border border-border hover:border-indigo-600 text-xs text-text-secondary hover:text-indigo-300 transition-colors"
             >
               <Wrench size={12} />
               Kit Builder
@@ -130,13 +130,13 @@ export default function StlFilesList({
               <div
                 data-file-row={f.id}
                 onClick={() => { setSelectedStlFileId(f.id); setViewMode("3d"); }}
-                className={`flex items-center gap-1.5 text-xs border px-2 py-1.5 rounded cursor-pointer transition-colors ${isSup ? "ml-4" : ""} ${isSelected ? "bg-indigo-950/40 border-indigo-500/60" : "bg-gray-900 border-gray-800 hover:border-gray-700"}`}
+                className={`flex items-center gap-1.5 text-xs border px-2 py-1.5 rounded cursor-pointer transition-colors ${isSup ? "ml-4" : ""} ${isSelected ? "bg-indigo-950/40 border-accent-start/60" : "bg-panel border-border-subtle hover:border-border"}`}
               >
                 {/* Hierarchy indicator */}
-                {isSup && <span className="text-gray-600 shrink-0 select-none">↳</span>}
+                {isSup && <span className="text-text-muted shrink-0 select-none">↳</span>}
 
                 {/* Filename */}
-                <span className="text-gray-300 truncate flex-1 min-w-0" title={f.filename}>{f.filename}</span>
+                <span className="text-text-primary-alt2 truncate flex-1 min-w-0" title={f.filename}>{f.filename}</span>
 
                 {/* Category input (categories mode only) */}
                 {withCategory && (
@@ -146,13 +146,13 @@ export default function StlFilesList({
                     placeholder="Category…"
                     onChange={(v) => setPartTypes((prev) => ({ ...prev, [f.id]: toPascalCase(v) + (v.endsWith(" ") ? " " : "") }))}
                     onCommit={(v) => savePartType(f.id, v)}
-                    className="w-28 shrink-0 bg-gray-800 border border-gray-700 focus:border-indigo-500 rounded px-2 py-0.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none"
+                    className="w-28 shrink-0 bg-panel-secondary border border-border focus:border-accent-start rounded px-2 py-0.5 text-xs text-text-primary-alt2 placeholder-gray-600 focus:outline-none"
                   />
                 )}
 
                 {/* Size */}
                 {f.size_bytes ? (
-                  <a href={api.stlUrl(f.path)} download={f.filename} onClick={(e) => e.stopPropagation()} className="text-gray-600 hover:text-gray-400 shrink-0 tabular-nums transition-colors w-14 text-right">
+                  <a href={api.stlUrl(f.path)} download={f.filename} onClick={(e) => e.stopPropagation()} className="text-text-muted hover:text-text-secondary shrink-0 tabular-nums transition-colors w-14 text-right">
                     {(f.size_bytes / 1024 / 1024).toFixed(1)} MB
                   </a>
                 ) : <span className="w-14 shrink-0" />}
@@ -162,7 +162,7 @@ export default function StlFilesList({
                   <button
                     title="Remove supported-version link"
                     onClick={(e) => { e.stopPropagation(); unlinkSup(f.id); }}
-                    className="shrink-0 text-gray-600 hover:text-rose-400 transition-colors"
+                    className="shrink-0 text-text-muted hover:text-rose-400 transition-colors"
                   >
                     <Unlink2 size={14} />
                   </button>
@@ -170,7 +170,7 @@ export default function StlFilesList({
                   <button
                     title="Link a supported version"
                     onClick={(e) => { e.stopPropagation(); setLinkingBaseId(linkingBaseId === f.id ? null : f.id); }}
-                    className={`shrink-0 transition-colors ${linkingBaseId === f.id ? "text-indigo-400" : "text-gray-600 hover:text-indigo-400"}`}
+                    className={`shrink-0 transition-colors ${linkingBaseId === f.id ? "text-indigo-400" : "text-text-muted hover:text-indigo-400"}`}
                   >
                     <Link2 size={14} />
                   </button>
@@ -180,14 +180,14 @@ export default function StlFilesList({
               {/* Inline sup-picker */}
               {isBase && linkingBaseId === f.id && (
                 <div
-                  className="ml-4 flex items-center gap-2 px-2 py-1.5 bg-gray-800 rounded border border-indigo-600/60"
+                  className="ml-4 flex items-center gap-2 px-2 py-1.5 bg-panel-secondary rounded border border-indigo-600/60"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <Link2 size={14} className="text-indigo-400 shrink-0" />
                   <select
                     autoFocus
                     defaultValue=""
-                    className="flex-1 min-w-0 bg-gray-700 text-xs text-gray-300 rounded px-1.5 py-0.5 border border-gray-600 focus:outline-none focus:border-indigo-500"
+                    className="flex-1 min-w-0 bg-panel-secondary text-xs text-text-primary-alt2 rounded px-1.5 py-0.5 border border-border-divider focus:outline-none focus:border-accent-start"
                     onChange={(e) => { if (e.target.value) { linkSup(f.id, parseInt(e.target.value)); setLinkingBaseId(null); } }}
                     onBlur={() => setLinkingBaseId(null)}
                   >
@@ -205,7 +205,7 @@ export default function StlFilesList({
                         );
                       })}
                   </select>
-                  <button onMouseDown={(e) => e.preventDefault()} onClick={() => setLinkingBaseId(null)} className="shrink-0 text-gray-500 hover:text-gray-300">
+                  <button onMouseDown={(e) => e.preventDefault()} onClick={() => setLinkingBaseId(null)} className="shrink-0 text-text-secondary-alt hover:text-text-primary-alt2">
                     <X size={11} />
                   </button>
                 </div>
@@ -228,12 +228,12 @@ export default function StlFilesList({
             <div key={key} className="flex flex-col gap-0.5">
               <button
                 onClick={() => setFilesCollapsed((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; })}
-                className="w-full flex items-center justify-between px-2 py-1.5 rounded bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 text-left transition-colors"
+                className="w-full flex items-center justify-between px-2 py-1.5 rounded bg-panel-secondary/60 hover:bg-panel-secondary border border-border/50 text-left transition-colors"
               >
                 {header}
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-gray-600 tabular-nums">{files.length}</span>
-                  {!isCollapsed ? <ChevronDown size={11} className="text-gray-600" /> : <ChevronRight size={11} className="text-gray-600" />}
+                  <span className="text-xs text-text-muted tabular-nums">{files.length}</span>
+                  {!isCollapsed ? <ChevronDown size={11} className="text-text-muted" /> : <ChevronRight size={11} className="text-text-muted" />}
                 </div>
               </button>
               {(defaultOpen ? !isCollapsed : !isCollapsed) && hierarchy.map(({ file: f, depth }) => renderRow(f, depth, withCategory))}
@@ -248,14 +248,14 @@ export default function StlFilesList({
                 {groupedStlFiles.labeled.map(([cat, catFiles]) =>
                   renderSection(
                     cat,
-                    <span className="text-xs font-medium text-gray-400">{toPascalCase(cat)}</span>,
+                    <span className="text-xs font-medium text-text-secondary">{toPascalCase(cat)}</span>,
                     catFiles,
                     true,
                   )
                 )}
                 {groupedStlFiles.unlabeled.length > 0 && renderSection(
                   "__uncategorized__",
-                  <span className="text-xs font-medium text-gray-500">
+                  <span className="text-xs font-medium text-text-secondary-alt">
                     Uncategorized · {groupedStlFiles.unlabeled.length} of {model.stl_files.length}
                   </span>,
                   groupedStlFiles.unlabeled,
@@ -267,7 +267,7 @@ export default function StlFilesList({
               groupAlphabetically([...model.stl_files].sort((a, b) => a.filename.localeCompare(b.filename))).map(([band, bandFiles]) =>
                 renderSection(
                   band,
-                  <span className="text-xs font-medium text-gray-400 font-mono">{band}</span>,
+                  <span className="text-xs font-medium text-text-secondary font-mono">{band}</span>,
                   bandFiles,
                   false,
                 )

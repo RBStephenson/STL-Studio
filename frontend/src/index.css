@@ -1,8 +1,135 @@
 @import "tailwindcss";
 
+/* Visual-refresh design tokens (design/README.md Design System section).
+   Tailwind v4 reads theme tokens from this CSS-first @theme block, not from
+   tailwind.config.js, when loaded via @tailwindcss/vite without @config. */
+@theme {
+  --color-page: #0b0c10;
+  --color-panel: #131419;
+  --color-panel-secondary: #141519;
+  --color-panel-inset: #0e0f13;
+
+  --color-border-subtle: #23252d;
+  --color-border: #1e2027;
+  --color-border-divider: #262932;
+
+  --color-text-primary: #f4f4f6;
+  --color-text-primary-alt: #e5e6ea;
+  --color-text-primary-alt2: #e9eaee;
+  --color-text-secondary: #8b8f9c;
+  --color-text-secondary-alt: #6b7080;
+  --color-text-muted: #5c6070;
+  --color-text-muted-alt: #4b4e58;
+
+  --color-accent-start: #6366f1;
+  --color-accent-end: #4f46e5;
+
+  --color-status-amber: #fbbf24;
+  --color-status-amber-dark: #f59e0b;
+  --color-status-yellow: #facc15;
+  --color-status-sky: #7dd3fc;
+  --color-status-sky-dark: #38bdf8;
+  --color-status-emerald: #6ee7b7;
+  --color-status-emerald-dark: #10b981;
+  --color-status-rose: #fda4af;
+  --color-status-rose-dark: #f43f5e;
+  --color-status-violet: #a78bfa;
+  --color-status-fuchsia: #e879f9;
+
+  --font-app: Inter, sans-serif;
+
+  --radius-card: 10px;
+  --radius-card-lg: 13px;
+
+  --shadow-page-frame: 0 40px 80px -20px rgba(0, 0, 0, 0.6);
+  --shadow-cta-hover: 0 8px 20px -6px rgba(79, 70, 229, 0.55);
+  --shadow-focus-ring: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
 @layer base {
   body {
     @apply bg-gray-950 text-gray-100 antialiased;
+  }
+
+  input,
+  select,
+  textarea {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+    border-color: var(--color-accent-start);
+    box-shadow: var(--shadow-focus-ring);
+  }
+
+  /* Keyboard-only focus ring for interactive primitives (design/README.md
+     "New Since Last Handoff" — Focus-visible accessibility ring). Covers nav
+     buttons, tabs, chips, and cards without per-component classes, since
+     those primitives are all rendered as <button>/<a>/role="tab" elements. */
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  [role="tab"]:focus-visible {
+    outline: 2px solid var(--color-accent-start);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+/* Global micro-interaction utilities (design/README.md Micro-interactions
+   section). Opt in per component during each page's restyle PR. */
+@layer components {
+  .btn-cta {
+    background-image: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
+    transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+  }
+  .btn-cta:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
+    box-shadow: var(--shadow-cta-hover);
+  }
+  .btn-cta:active {
+    transform: translateY(0);
+    filter: brightness(0.96);
+  }
+
+  .card-interactive {
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .card-interactive:hover {
+    border-color: var(--color-accent-end);
+    transform: translateY(-3px);
+  }
+  .card-interactive .drag-grip {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .card-interactive:hover .drag-grip {
+    opacity: 1;
+  }
+
+  /* Skeleton shimmer sweep (design/README.md "New Since Last Handoff" — Guide
+     Reader loading state). One absolutely-positioned overlay per skeleton
+     panel; the diagonal highlight passes over every block underneath together
+     instead of animating each block individually. */
+  @keyframes stl-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .stl-shimmer-overlay {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .stl-shimmer-overlay::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.06) 50%, transparent 65%);
+    animation: stl-shimmer 1.4s linear infinite;
   }
 }
 

@@ -114,4 +114,20 @@ describe("Navbar – NSFW toggle persists server-side (#32)", () => {
     expect(api.settings.update).toHaveBeenCalledWith({ show_nsfw: true });
     expect(await screen.findByRole("button", { name: /nsfw on/i })).toBeInTheDocument();
   });
+
+  it("styles the badge as an outlined pill, off by default, accented once flipped on", async () => {
+    const { api } = await import("../api/client");
+    const userEvent = (await import("@testing-library/user-event")).default;
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ show_nsfw: false }));
+    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ show_nsfw: true }));
+
+    renderNavbar();
+
+    const btn = await screen.findByRole("button", { name: /nsfw off/i });
+    expect(btn).toHaveStyle({ borderColor: "#202329", background: "#181a20" });
+
+    await userEvent.click(btn);
+    const onBtn = await screen.findByRole("button", { name: /nsfw on/i });
+    expect(onBtn.style.borderColor).not.toBe("#202329");
+  });
 });

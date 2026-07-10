@@ -17,21 +17,31 @@ class Settings(BaseSettings):
     stl_drive_1: str = ""
     stl_drive_2: str = ""
 
+    # Hostnames trusted by the write-request guard in addition to localhost, for
+    # running behind a reverse proxy on a custom domain (e.g. stl.pagden.us).
+    # Comma-separated; set via TRUSTED_HOSTS. Writes (POST/PUT/PATCH/DELETE) are
+    # allowed when the request's Origin/Host hostname is localhost or one of
+    # these. Empty (the default) = localhost-only.
+    trusted_hosts: str = ""
+
     # MyMiniFactory REST API key (simple ?key= query auth). When set, the MMF
     # adapter uses the API for object detail + search and falls back to scraping
     # on miss. Register an app at MMF Settings -> Developer to obtain a key.
     mmf_api_key: str = ""
 
-    # Library reorganize apply (#324, Phase 2a) — the ONLY feature that moves
-    # user files on disk. Default OFF: a deployment must opt in explicitly, and
-    # even then apply re-probes each destination directory for writability at run
-    # time. The read-only Docker mount is the intended default safety posture, so
-    # this stays off unless a writable standalone deployment sets it.
-    reorganize_write_enabled: bool = False
+    # Root log level for the application's own loggers (the `app.*` hierarchy).
+    # Uvicorn only configures its own loggers, leaving `app.*` at the default
+    # WARNING with no handler — so INFO-level diagnostics (e.g. the AI organizer
+    # request/response trace) were silently dropped. Set via LOG_LEVEL.
+    log_level: str = "INFO"
 
     @property
     def stl_root_list(self) -> list[str]:
         return [r.strip() for r in self.stl_roots.split(",") if r.strip()]
+
+    @property
+    def trusted_host_list(self) -> list[str]:
+        return [h.strip().lower() for h in self.trusted_hosts.split(",") if h.strip()]
 
     def to_native_path(self, docker_path: str) -> str:
         """Translate a Docker container path to the native host path, if mappings are configured."""

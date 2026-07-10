@@ -97,6 +97,15 @@ def _allowed_roots() -> list[Path]:
             for (path,) in db.query(ScanRoot.path).filter(ScanRoot.enabled == True):
                 if path:
                     roots.append(Path(path))
+            # Inbox/import models are deliberately never registered as a scan
+            # root (scan_inbox_folder skips it on purpose), but their own
+            # folder_path is a directory the scanner has already walked and
+            # trusts — allow serving images from inside it so the Import
+            # Preview page can show real thumbnails instead of every request
+            # 403ing.
+            for (path,) in db.query(ModelDB.folder_path).filter(ModelDB.is_inbox == True).distinct():
+                if path:
+                    roots.append(Path(path))
         finally:
             db.close()
     except Exception:
@@ -352,11 +361,13 @@ def browse_images(path: str = ""):
             }
         path = str(Path.home())
 
-    p = Path(path)
+    try:
+        real = assert_within_roots(path, _allowed_roots())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Path not allowed")
+    p = Path(real)
     if not p.exists() or not p.is_dir():
         raise HTTPException(status_code=404, detail="Folder not found")
-    if not _is_safe_path(p):
-        raise HTTPException(status_code=403, detail="Path not allowed")
 
     parent = str(p.parent) if p.parent != p else None
 

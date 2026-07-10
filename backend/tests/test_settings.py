@@ -28,7 +28,18 @@ DEFAULTS = {
     "ai_guides_enabled": False,
     "ai_guides_api": None,
     "ai_organize_api": None,
+    "log_level": "INFO",
+    "reorganize_template": "",
+    "reorganize_slugify": True,
+    "reorganize_enabled": False,
+    "collections_uniform_size": True,
 }
+
+
+def test_reorganize_enabled_round_trips(client):
+    assert client.get("/settings").json()["reorganize_enabled"] is False
+    assert client.patch("/settings", json={"reorganize_enabled": True}).status_code == 200
+    assert client.get("/settings").json()["reorganize_enabled"] is True
 
 
 def test_ai_effort_round_trips_and_rejects_bad_value(client):
@@ -99,6 +110,42 @@ def test_patch_null_value_leaves_setting_unchanged(client):
     r = client.patch("/settings", json={"painting_guides_enabled": None})
     assert r.status_code == 200
     assert r.json()["painting_guides_enabled"] is True
+
+
+# --- Log level (runtime toggle, no restart) ---
+
+def test_log_level_round_trips_and_rejects_bad_value(client):
+    assert client.patch("/settings", json={"log_level": "DEBUG"}).status_code == 200
+    assert client.get("/settings").json()["log_level"] == "DEBUG"
+    # Only the five standard levels are accepted.
+    assert client.patch("/settings", json={"log_level": "VERBOSE"}).status_code == 422
+    assert client.patch("/settings", json={"log_level": "debug"}).status_code == 422
+
+
+def test_log_level_patch_applies_to_logger_live(client):
+    """Updating the setting changes the `app` logger level immediately — the
+    behaviour the UI relies on to toggle verbosity without a restart."""
+    import logging
+
+    client.patch("/settings", json={"log_level": "WARNING"})
+    assert logging.getLogger("app").level == logging.WARNING
+
+    client.patch("/settings", json={"log_level": "DEBUG"})
+    assert logging.getLogger("app").level == logging.DEBUG
+
+
+def test_apply_log_level_helper_validates():
+    import logging
+    from app.logging_config import apply_log_level
+
+    assert apply_log_level("error") == "ERROR"          # normalizes case
+    assert logging.getLogger("app").level == logging.ERROR
+    try:
+        apply_log_level("nonsense")
+    except ValueError:
+        pass
+    else:  # pragma: no cover - fail explicitly if no error raised
+        raise AssertionError("apply_log_level should reject unknown levels")
 
 
 # --- Preferences (#32) ---

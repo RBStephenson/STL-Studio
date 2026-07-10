@@ -18,10 +18,15 @@ from tests.test_painting_guides import mk_paint
 
 
 @pytest.fixture(autouse=True)
-def _isolate(monkeypatch):
+def _isolate(monkeypatch, db):
     monkeypatch.setenv("STL_SECRET_KEY", Fernet.generate_key().decode())
     secrets.reset_cache()
     draft_jobs.reset()
+    # These tests exercise job orchestration (kickoff/status/single-flight) with
+    # a faked generator, not config resolution itself — enable the feature so
+    # the router's eager check doesn't 503 before the fake generator ever runs.
+    db.add(AppSetting(key="ai_guides_enabled", value=True))
+    db.commit()
     yield
     secrets.reset_cache()
     draft_jobs.reset_generator()

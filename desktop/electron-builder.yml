@@ -4,7 +4,7 @@
 # PyInstaller backend as an extraResources sidecar. v1 scope: Windows only,
 # unsigned, auto-update deferred (see docs/plans/528-pywebview-to-electron.md).
 #
-# The backend exe must be built first (pyinstaller packaging/stl-library.spec
+# The backend exe must be built first (pyinstaller packaging/stl-studio.spec
 # --distpath dist-standalone) — CI chains this in Phase 4 (STUDIO-74).
 appId: com.stlstudio.desktop
 productName: STL Studio
@@ -18,12 +18,15 @@ directories:
 files:
   - dist/**/*
   - index.html
+  - splash.html
+  # Splash art (resources/splash.png) + app icon, referenced at runtime.
+  - resources/**/*
 
 # The PyInstaller backend, copied verbatim into the packaged app's resources/
 # dir (process.resourcesPath). resolveBackendExe() reads it there when packaged.
 extraResources:
-  - from: ../dist-standalone/stl-library.exe
-    to: stl-library.exe
+  - from: ../dist-standalone/stl-studio.exe
+    to: stl-studio.exe
 
 win:
   target: nsis

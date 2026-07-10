@@ -2,6 +2,7 @@
 Tests for the /files endpoints: image serving, STL serving, zip download.
 """
 import io
+import os
 import zipfile
 from pathlib import Path
 import pytest
@@ -54,6 +55,45 @@ class TestAllowedRoots:
 
         f = tmp_path / "model.stl"
         f.write_bytes(b"solid\nendsolid\n")
+
+        files_module._roots_cache = None
+        assert files_module._is_safe_path(f) is False
+
+    def test_inbox_model_folder_is_allowed_though_not_a_scan_root(self, db, tmp_path):
+        """Import/inbox models are deliberately never registered as a scan
+        root (scan_inbox_folder skips it on purpose) — but a request for an
+        image inside one of their own folders must still be servable, or the
+        Import Preview page can never show a real thumbnail (#888-follow-up)."""
+        import app.routers.files as files_module
+
+        creator = make_creator(db, "Inbox Creator")
+        inbox_folder = tmp_path / "import" / "some-pack"
+        inbox_folder.mkdir(parents=True)
+        m = make_model(db, creator, name="Some Pack")
+        m.folder_path = str(inbox_folder)
+        m.is_inbox = True
+        db.commit()
+
+        f = inbox_folder / "photo.jpg"
+        f.write_bytes(b"\xff\xd8\xff")
+
+        files_module._roots_cache = None
+        assert files_module._is_safe_path(f) is True
+
+    def test_non_inbox_model_folder_does_not_widen_the_allowlist(self, db, tmp_path):
+        """A regular (non-inbox) model's folder_path must NOT be treated as an
+        allowed root — only scan_roots and actual inbox folders are."""
+        import app.routers.files as files_module
+
+        creator = make_creator(db, "Regular Creator")
+        model_folder = tmp_path / "library" / "some-model"
+        model_folder.mkdir(parents=True)
+        m = make_model(db, creator, name="Some Model")
+        m.folder_path = str(model_folder)
+        db.commit()
+
+        f = model_folder / "photo.jpg"
+        f.write_bytes(b"\xff\xd8\xff")
 
         files_module._roots_cache = None
         assert files_module._is_safe_path(f) is False
@@ -314,7 +354,10 @@ class TestBrowseImages:
     @pytest.fixture(autouse=True)
     def _allow_tmp(self, monkeypatch):
         import app.routers.files as files_module
-        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: True)
+        monkeypatch.setattr(
+            files_module, "assert_within_roots",
+            lambda path, roots: os.path.realpath(str(path)),
+        )
 
     def test_lists_subdirs_and_images(self, client, tmp_path):
         (tmp_path / "subfolder").mkdir()
@@ -368,10 +411,29 @@ class TestBrowseImages:
 
     def test_path_outside_allowed_roots_returns_403(self, client, monkeypatch):
         import app.routers.files as files_module
-        monkeypatch.setattr(files_module, "_is_safe_path", lambda p: False)
+
+        def _deny(path, roots):
+            raise ValueError("outside roots")
+
+        monkeypatch.setattr(files_module, "assert_within_roots", _deny)
 
         resp = client.get("/files/browse-images", params={"path": "/etc"})
         assert resp.status_code == 403
+
+    def test_missing_path_outside_allowed_roots_returns_403_not_404(self, client, monkeypatch):
+        # The allowlist check must run before any exists()/is_dir() filesystem
+        # touch (STUDIO-84) — otherwise a caller can distinguish missing vs
+        # existing-but-not-allowed paths outside configured roots.
+        import app.routers.files as files_module
+
+        def _deny(path, roots):
+            raise ValueError("outside roots")
+
+        monkeypatch.setattr(files_module, "assert_within_roots", _deny)
+
+        resp = client.get("/files/browse-images", params={"path": "/etc/does-not-exist-xyz"})
+        assert resp.status_code == 403
+        # test_missing_path_returns_404 above already covers missing-but-inside-roots -> 404.
 
 
 # ---------------------------------------------------------------------------

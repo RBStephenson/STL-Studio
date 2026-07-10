@@ -12,6 +12,7 @@ than ``os.path.normcase`` — normcase is identity on POSIX (the test/CI host), 
 relying on it would silently disable case-collision detection there.
 """
 import os
+import re
 import unicodedata
 from dataclasses import dataclass, field
 
@@ -23,15 +24,13 @@ from app.models import (
     PackOverride,
     ScanRoot,
 )
-from app.services.path_sanitize import (
-    path_over_length,
-    sanitize_segment,
-    slug_segment,
-)
-from app.services.reorganize_template import parse_template, render_segments
+from app.services.path_sanitize import path_over_length, sanitize_segment
+from app.services.reorganize_template import VALID_FIELDS, parse_template, render_segments
 
 UNKNOWN_CREATOR = "_Unknown Creator"
 UNKNOWN_CHARACTER = "_Unknown Character"
+UNKNOWN_SCALE = "_Unknown Scale"
+_SCALE_TAG_RE = re.compile(r"^(\d{1,4}mm|1[:/\-_]\d{1,2})$", re.I)
 
 
 def _canon(path: str) -> str:
@@ -60,7 +59,7 @@ def _parent(path: str) -> str:
 
 @dataclass
 class FileMove:
-    stl_file_id: int
+    stl_file_id: int | None
     current_path: str
     proposed_path: str
     size_bytes: int
@@ -71,6 +70,10 @@ class FileMove:
     # then a sentinel, not a real fingerprint — Phase 2's drift check can't
     # distinguish "gone" from "matches" without this flag, so the move is unsafe.
     missing_file: bool
+    # "stl" repaths an STLFile row (stl_file_id set); "image" repaths one of
+    # the model's own image_paths/thumbnail_path/primary_image_path instead —
+    # see reorganize_apply._repath_db.
+    kind: str = "stl"
 
 
 @dataclass
@@ -129,6 +132,18 @@ def _stat_file(path: str) -> tuple[int, int, bool, bool]:
         return 0, 0, False, True
 
 
+def _scale_value(auto_tags: list | None) -> str:
+    """Return the first scanner scale tag, normalizing ratio separators."""
+    for raw in auto_tags or []:
+        tag = str(raw).strip()
+        if not _SCALE_TAG_RE.match(tag):
+            continue
+        if tag.lower().endswith("mm"):
+            return tag.lower()
+        return tag.replace("/", ":").replace("-", ":").replace("_", ":")
+    return ""
+
+
 def build_manifest(
     db: Session,
     template: str | None,
@@ -136,6 +151,8 @@ def build_manifest(
     overrides: dict[int, dict] | None = None,
     inbox_source: str | None = None,
     slugify_title: bool = False,
+    slugify_all: bool = False,
+    model_ids: list[int] | None = None,
 ) -> Manifest:
     """Build the reorganize preview manifest. Raises ReorganizeTemplateError on
     a malformed template (caller maps to 4xx).
@@ -144,7 +161,12 @@ def build_manifest(
     ``creator`` / ``character`` / ``title`` substitutions (fix unclassifiable) and
     an optional ``suffix`` appended to the title segment (dodge a collision /
     shorten an over-length or reserved name). A regenerated manifest with
-    overrides is a fresh artifact with its own fingerprint baseline."""
+    overrides is a fresh artifact with its own fingerprint baseline.
+
+    ``slugify_all`` renders every segment lowercase/hyphenated (import-style),
+    overriding the narrower ``slugify_title`` (title-only) used by inbox import.
+    ``model_ids``, when given, restricts the built entries to those models —
+    the collision/overlap passes then only run over that subset."""
     overrides = overrides or {}
     segments = parse_template(template)
     canonical_template = "/".join(segments)
@@ -216,11 +238,16 @@ def build_manifest(
     else:
         models = models_q.all()
 
+    if model_ids is not None:
+        wanted = set(model_ids)
+        models = [m for m in models if m.id in wanted]
+
     entries: list[Entry] = []
     for m in models:
         entries.append(_build_entry(m, segments, root_keys, pack_paths,
                                     overrides.get(m.id), _dest_for(m),
-                                    slugify_title=slugify_title))
+                                    slugify_title=slugify_title,
+                                    slugify_all=slugify_all))
 
     _detect_collisions(entries)
     _detect_overlaps(entries)
@@ -235,19 +262,21 @@ def _build_entry(
     override: dict | None = None,
     dest_root: str | None = None,
     slugify_title: bool = False,
+    slugify_all: bool = False,
 ) -> Entry:
     # User resolutions (Phase 2c) take precedence over model metadata and clear
     # the corresponding 'missing' flag.
     override = override or {}
     ov_creator = (override.get("creator") or "").strip()
     ov_character = (override.get("character") or "").strip()
+    ov_scale = (override.get("scale") or "").strip()
     ov_title = (override.get("title") or "").strip()
     ov_suffix = (override.get("suffix") or "").strip()
 
     # Fields actually referenced in the template — only flag missing for these.
     used_fields = {
         f for seg in segments
-        for f in ("creator", "character", "title")
+        for f in VALID_FIELDS
         if ("{" + f + "}") in seg.lower()
     }
 
@@ -263,6 +292,11 @@ def _build_entry(
         character = UNKNOWN_CHARACTER
         if "character" in used_fields:
             missing.append("character")
+    scale = ov_scale or _scale_value(m.auto_tags)
+    if not scale:
+        scale = UNKNOWN_SCALE
+        if "scale" in used_fields:
+            missing.append("scale")
     title = ov_title or m.title or m.name or ""
     if not (ov_title or (m.title or "").strip()):
         # title fell back to folder name — only 'missing' if that's also empty
@@ -272,22 +306,25 @@ def _build_entry(
     if ov_suffix:
         title = f"{title} {ov_suffix}"
 
-    values = {"creator": creator_name, "character": character, "title": title}
+    values = {
+        "creator": creator_name,
+        "character": character,
+        "scale": scale,
+        "title": title,
+    }
     rendered = render_segments(segments, values)
 
     reserved = False
     over_len = False
     safe_parts: list[str] = []
     for raw_seg, part in zip(segments, rendered):
-        # When slugify_title is on, segments containing {title} get a slug instead of
-        # the standard sanitizer so import folder names are lowercase-with-dashes.
-        if slugify_title and "{title}" in raw_seg.lower():
-            safe_parts.append(slug_segment(part))
-        else:
-            sani = sanitize_segment(part)
-            reserved = reserved or sani.reserved_name
-            over_len = over_len or sani.over_length
-            safe_parts.append(sani.value)
+        # slugify_all lowercases/hyphenates every segment (import-style);
+        # slugify_title narrows that to just the {title} segment.
+        do_slug = slugify_all or (slugify_title and "{title}" in raw_seg.lower())
+        sani = sanitize_segment(part, slugify=do_slug)
+        reserved = reserved or sani.reserved_name
+        over_len = over_len or sani.over_length
+        safe_parts.append(sani.value)
 
     current_dir = _canon(m.folder_path or "")
     cur_key = _key(m.folder_path or "")
@@ -328,6 +365,61 @@ def _build_entry(
             missing_file=is_missing,
         ))
     spans_multiple_dirs = len(src_dirs) > 1
+
+    # Local gallery images move alongside the STLs. Scoped to images that live
+    # inside the model's OWN folder tree — a gallery image inherited from a
+    # shared parent folder (e.g. a character-level "renders/" dir referenced
+    # by several sibling variants) is deliberately left in place, since moving
+    # it would break the path for every other model still pointing at it.
+    # Missing/stale entries (the file no longer exists — #854/#855) are just
+    # skipped rather than treated as a blocker: a stale gallery path shouldn't
+    # stop the model's STLs from being reorganized. Never counted toward
+    # spans_multiple_dirs — images commonly live in their own subfolder next
+    # to the STLs, and that's not the ambiguous-source-directory case that
+    # check exists to catch.
+    cur_prefix = cur_key + "/"
+
+    def _owned_local_image(p: object) -> bool:
+        if not isinstance(p, str) or not p or "://" in p:
+            return False
+        k = _key(p)
+        if k != cur_key and not k.startswith(cur_prefix):
+            return False
+        # Never carry a hidden-directory reference along as if it were a
+        # real gallery image (#903-follow-up) — e.g. a stale .manyfold
+        # derivative-cache path a pre-fix scan picked up. The scanner itself
+        # has stopped discovering these; carrying an already-stored one
+        # through a move would relocate the junk into the organized library
+        # instead of letting it fall away.
+        if any(part.startswith(".") for part in _canon(p).split("/")):
+            return False
+        return True
+
+    seen_image_keys: set[str] = set()
+    image_candidates: list[str] = []
+    for p in [*(m.image_paths or []), m.thumbnail_path, m.primary_image_path]:
+        if _owned_local_image(p):
+            k = _key(p)
+            if k not in seen_image_keys:
+                seen_image_keys.add(k)
+                image_candidates.append(p)
+
+    for p in image_candidates:
+        size, mtime_ns, link, is_missing = _stat_file(p)
+        if is_missing:
+            continue
+        is_symlink = is_symlink or link
+        files.append(FileMove(
+            stl_file_id=None,
+            current_path=_canon(p),
+            proposed_path=_canon(proposed_dir + "/" + os.path.basename(p)),
+            size_bytes=size,
+            mtime_ns=mtime_ns,
+            content_hash=None,
+            fingerprint_method="stat",
+            missing_file=False,
+            kind="image",
+        ))
 
     # Path-keyed overrides this move invalidates (under the model's folder).
     pack_refs = [p for p in pack_paths if _key(p) == cur_key or _key(p).startswith(cur_key + "/")]
@@ -375,6 +467,46 @@ def _build_entry(
         escapes_scan_root=escapes,
         missing_files_on_disk=missing_files_on_disk,
     )
+
+
+def creator_scan_dir(
+    db: Session, template: str | None, creator_name: str, slugify: bool = True,
+) -> str | None:
+    """The on-disk directory a brand-new creator's folder should live in.
+
+    Renders only the template segments up to and including the first one that
+    references ``{creator}``, anchored at the primary enabled scan root.
+    ``slugify`` mirrors the library's ``reorganize_slugify`` setting — when
+    off, the creator name keeps its original casing/spacing (still made
+    filesystem-safe). Returns ``None`` when the template doesn't reference
+    ``{creator}``, an earlier segment needs ``{character}``/``{scale}``/
+    ``{title}`` (not available for a bare creator), or there's no scan root to
+    anchor to.
+    """
+    segments = parse_template(template)
+    idx = next((i for i, seg in enumerate(segments) if "{creator}" in seg.lower()), None)
+    if idx is None:
+        return None
+    lead = segments[: idx + 1]
+    other_fields = {
+        f for seg in lead for f in ("character", "scale", "title")
+        if ("{" + f + "}") in seg.lower()
+    }
+    if other_fields:
+        return None
+
+    primary = (
+        db.query(ScanRoot)
+        .filter(ScanRoot.enabled == True)  # noqa: E712
+        .order_by(ScanRoot.id)
+        .first()
+    )
+    if not primary or not primary.path:
+        return None
+
+    rendered = render_segments(lead, {"creator": creator_name})
+    parts = [sanitize_segment(p, slugify=slugify).value for p in rendered]
+    return _canon(_canon(primary.path) + "/" + "/".join(parts))
 
 
 def _classify_kind(current_dir: str, proposed_dir: str) -> str:

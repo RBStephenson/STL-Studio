@@ -19,3 +19,9 @@ reorg_undo_*.log
 backend/reorg_undo_*.log
 bulk_import_report.csv
 corpus_validation_report.csv
+
+# Auto-generated Fernet key for encrypting secrets at rest (app/services/secrets.py).
+# Falls back to cwd when DATABASE_URL isn't a resolvable sqlite file path (e.g.
+# running pytest/uvicorn from backend/), so it can appear outside data/ too.
+.secret_key
+backend/.secret_key

@@ -16,7 +16,7 @@ export function ColorChip({ hex, size = 20 }: { hex: string | null; size?: numbe
     return (
       <span
         data-testid="color-chip-empty"
-        className="inline-block rounded border border-gray-700 bg-gray-800 relative overflow-hidden"
+        className="inline-block rounded border border-border bg-panel-secondary relative overflow-hidden"
         style={{ width: size, height: size }}
         title="No swatch color"
       >
@@ -27,7 +27,7 @@ export function ColorChip({ hex, size = 20 }: { hex: string | null; size?: numbe
   return (
     <span
       data-testid="color-chip"
-      className="inline-block rounded border border-gray-600"
+      className="inline-block rounded border border-border-divider"
       style={{ width: size, height: size, backgroundColor: hex }}
       title={hex}
     />
@@ -68,16 +68,16 @@ function PaintForm({ brands, initial, onSubmit, onCancel, busy, error }: {
     onSubmit(form);
   };
 
-  const inputCls = "bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500";
+  const inputCls = "bg-panel border border-border rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-accent-start";
 
   return (
-    <form onSubmit={submit} className="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-4 flex flex-wrap items-end gap-3">
+    <form onSubmit={submit} className="bg-panel border border-border-subtle rounded-lg p-4 mb-4 flex flex-wrap items-end gap-3">
       {error && (
         <p role="alert" className="w-full text-sm text-rose-400 bg-rose-950/30 border border-rose-900/50 rounded px-3 py-2 m-0">
           {error}
         </p>
       )}
-      <label className="flex flex-col gap-1 text-xs text-gray-500">
+      <label className="flex flex-col gap-1 text-xs text-text-secondary-alt">
         Line
         <select
           required
@@ -90,45 +90,45 @@ function PaintForm({ brands, initial, onSubmit, onCancel, busy, error }: {
           {lineOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
         </select>
       </label>
-      <label className="flex flex-col gap-1 text-xs text-gray-500">
+      <label className="flex flex-col gap-1 text-xs text-text-secondary-alt">
         Code
         <input required value={form.code} onChange={(e) => set({ code: e.target.value })} placeholder="002" className={`${inputCls} w-24`} />
       </label>
-      <label className="flex flex-col gap-1 text-xs text-gray-500">
+      <label className="flex flex-col gap-1 text-xs text-text-secondary-alt">
         Name
         <input required value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="Coal Black" className={`${inputCls} w-48`} />
       </label>
-      <label className="flex flex-col gap-1 text-xs text-gray-500">
+      <label className="flex flex-col gap-1 text-xs text-text-secondary-alt">
         Color
         <div className="flex items-center gap-1.5">
           <input
             type="color"
             value={/^#[0-9a-fA-F]{6}$/.test(form.hex) ? form.hex : "#808080"}
             onChange={(e) => set({ hex: e.target.value })}
-            className="h-8 w-9 bg-gray-900 border border-gray-700 rounded cursor-pointer p-0.5"
+            className="h-8 w-9 bg-panel border border-border rounded cursor-pointer p-0.5"
             title="Pick swatch color"
           />
           <input value={form.hex} onChange={(e) => set({ hex: e.target.value })} placeholder="#2A2A2A" className={`${inputCls} w-24 font-mono`} />
         </div>
       </label>
-      <label className="flex flex-col gap-1 text-xs text-gray-500">
+      <label className="flex flex-col gap-1 text-xs text-text-secondary-alt">
         Finish
         <select value={form.finish} onChange={(e) => set({ finish: e.target.value as PaintFinish })} className={inputCls}>
           {PAINT_FINISHES.map((f) => <option key={f} value={f}>{f}</option>)}
         </select>
       </label>
-      <label className="flex items-center gap-2 text-sm text-gray-300 pb-1.5">
+      <label className="flex items-center gap-2 text-sm text-text-primary-alt2 pb-1.5">
         <input type="checkbox" checked={form.owned} onChange={(e) => set({ owned: e.target.checked })} className="h-4 w-4 accent-indigo-500" />
         Owned
       </label>
       <div className="flex items-center gap-2 ml-auto">
-        <button type="button" onClick={onCancel} className="text-sm text-gray-500 hover:text-gray-300 px-2 py-1.5">
+        <button type="button" onClick={onCancel} className="text-sm text-text-secondary-alt hover:text-text-primary-alt2 px-2 py-1.5">
           Cancel
         </button>
         <button
           type="submit"
           disabled={busy}
-          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm px-4 py-1.5 rounded transition-colors"
+          className="bg-accent-end hover:bg-accent-start disabled:opacity-50 text-white text-sm px-4 py-1.5 rounded transition-colors"
         >
           Save
         </button>
@@ -293,7 +293,7 @@ export default function PaintShelfPage() {
   }, [formMode, editingPaint]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const selectCls = "bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-indigo-500";
+  const selectCls = "bg-panel border border-border rounded px-2 py-1.5 text-sm text-text-primary-alt2 focus:outline-none focus:border-accent-start";
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -325,29 +325,29 @@ export default function PaintShelfPage() {
           <button
             onClick={() => fileInputRef.current?.click()}
             title="Import a PaintRack CSV export — you'll see a diff preview before anything is applied"
-            className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+            className="flex items-center gap-1.5 bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt text-sm px-3 py-1.5 rounded transition-colors"
           >
             <Upload size={15} /> Import CSV
           </button>
           <button
             onClick={() => api.painting.inventory.exportCsv().catch((e) => toast(errMsg(e) || "Export failed.", "error"))}
             title="Download the shelf as a PaintRack-format CSV"
-            className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-sm px-3 py-1.5 rounded transition-colors"
+            className="flex items-center gap-1.5 bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt text-sm px-3 py-1.5 rounded transition-colors"
           >
             <Download size={15} /> Export CSV
           </button>
           <button
             onClick={() => setFormMode(formMode === "add" ? "hidden" : "add")}
-            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-3 py-1.5 rounded transition-colors"
+            className="flex items-center gap-1.5 bg-accent-end hover:bg-accent-start text-white text-sm px-3 py-1.5 rounded transition-colors"
           >
             <Plus size={15} /> Add paint
           </button>
         </div>
       </div>
-      <p className="text-sm text-gray-500 mb-1">
+      <p className="text-sm text-text-secondary-alt mb-1">
         {total.toLocaleString()} paints — guides will only ever reference paints from your shelf.
       </p>
-      <p className="text-xs text-gray-600 mb-6">
+      <p className="text-xs text-text-muted mb-6">
         Import / export uses the CSV format from{" "}
         <a
           href="https://www.courageousoctopus.com/"
@@ -388,12 +388,12 @@ export default function PaintShelfPage() {
       {/* Filter bar */}
       <div className="flex flex-wrap gap-2 mb-4">
         <div className="relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
           <input
             value={q}
             onChange={(e) => setParam("q", e.target.value)}
             placeholder="Search name or code…"
-            className="bg-gray-900 border border-gray-700 rounded pl-8 pr-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 w-56"
+            className="bg-panel border border-border rounded pl-8 pr-3 py-1.5 text-sm text-white focus:outline-none focus:border-accent-start w-56"
           />
         </div>
         <select aria-label="Brand" value={brandId} onChange={(e) => setParam("brand_id", e.target.value)} className={selectCls}>
@@ -416,7 +416,7 @@ export default function PaintShelfPage() {
         {(q || brandId || lineId || finish || ownedParam) && (
           <button
             onClick={() => setSearchParams(new URLSearchParams())}
-            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 px-2"
+            className="flex items-center gap-1 text-xs text-text-secondary-alt hover:text-text-primary-alt2 px-2"
           >
             <X size={12} /> Clear
           </button>
@@ -424,10 +424,10 @@ export default function PaintShelfPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+      <div className="bg-panel border border-border-subtle rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
+            <tr className="text-left text-xs text-text-secondary-alt uppercase tracking-wider border-b border-border-subtle">
               <th className="px-4 py-2.5 w-10"></th>
               <th className="px-2 py-2.5">Code</th>
               <th className="px-2 py-2.5">Name</th>
@@ -443,21 +443,21 @@ export default function PaintShelfPage() {
               return (
                 <tr key={p.id} className="border-b border-gray-850 last:border-0 hover:bg-gray-850/50 group">
                   <td className="px-4 py-2"><ColorChip hex={p.hex} /></td>
-                  <td className="px-2 py-2 font-mono text-xs text-gray-400">{p.code}</td>
-                  <td className="px-2 py-2 text-gray-100">{p.name}</td>
-                  <td className="px-2 py-2 text-gray-500 text-xs">
+                  <td className="px-2 py-2 font-mono text-xs text-text-secondary">{p.code}</td>
+                  <td className="px-2 py-2 text-text-primary">{p.name}</td>
+                  <td className="px-2 py-2 text-text-secondary-alt text-xs">
                     {lineInfo ? `${lineInfo.brand} — ${lineInfo.line}` : "—"}
                   </td>
                   <td className="px-2 py-2">
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{p.finish}</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-panel-secondary text-text-secondary">{p.finish}</span>
                   </td>
-                  <td className="px-2 py-2 text-xs">{p.owned ? <span className="text-emerald-400">yes</span> : <span className="text-gray-600">no</span>}</td>
+                  <td className="px-2 py-2 text-xs">{p.owned ? <span className="text-emerald-400">yes</span> : <span className="text-text-muted">no</span>}</td>
                   <td className="px-2 py-2">
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                      <button onClick={() => setFormMode(p.id)} title="Edit" className="p-1 rounded text-gray-400 hover:text-indigo-300 hover:bg-gray-800">
+                      <button onClick={() => setFormMode(p.id)} title="Edit" className="p-1 rounded text-text-secondary hover:text-indigo-300 hover:bg-panel-secondary">
                         <Pencil size={13} />
                       </button>
-                      <button onClick={() => deletePaint(p)} title="Delete" className="p-1 rounded text-gray-400 hover:text-red-300 hover:bg-gray-800">
+                      <button onClick={() => deletePaint(p)} title="Delete" className="p-1 rounded text-text-secondary hover:text-red-300 hover:bg-panel-secondary">
                         <Trash2 size={13} />
                       </button>
                     </div>
@@ -467,7 +467,7 @@ export default function PaintShelfPage() {
             })}
             {!loading && paints.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-600">
+                <td colSpan={7} className="px-4 py-10 text-center text-sm text-text-muted">
                   {total === 0 && !q && !brandId && !lineId && !finish && !ownedParam
                     ? "Your shelf is empty — add a paint, or use Import CSV with a PaintRack export."
                     : "No paints match the current filters."}
@@ -480,11 +480,11 @@ export default function PaintShelfPage() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-3 mt-5 text-sm text-gray-400">
+        <div className="flex items-center justify-center gap-3 mt-5 text-sm text-text-secondary">
           <button
             onClick={() => setParam("page", String(page - 1))}
             disabled={page <= 1}
-            className="px-3 py-1.5 rounded bg-gray-900 border border-gray-700 disabled:opacity-40 hover:border-gray-500 transition-colors"
+            className="px-3 py-1.5 rounded bg-panel border border-border disabled:opacity-40 hover:border-border-divider transition-colors"
           >
             Prev
           </button>
@@ -492,7 +492,7 @@ export default function PaintShelfPage() {
           <button
             onClick={() => setParam("page", String(page + 1))}
             disabled={page >= totalPages}
-            className="px-3 py-1.5 rounded bg-gray-900 border border-gray-700 disabled:opacity-40 hover:border-gray-500 transition-colors"
+            className="px-3 py-1.5 rounded bg-panel border border-border disabled:opacity-40 hover:border-border-divider transition-colors"
           >
             Next
           </button>
@@ -502,15 +502,15 @@ export default function PaintShelfPage() {
       {/* Import diff preview modal — nothing is applied until Confirm */}
       {pendingImport && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" data-testid="import-diff-modal">
-          <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-2xl max-h-[80vh] flex flex-col">
-            <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+          <div className="bg-panel border border-border rounded-lg w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="px-5 py-4 border-b border-border-subtle flex items-center justify-between">
               <h2 className="text-lg font-semibold text-white">Import preview</h2>
-              <button onClick={() => setPendingImport(null)} className="text-gray-500 hover:text-gray-300">
+              <button onClick={() => setPendingImport(null)} className="text-text-secondary-alt hover:text-text-primary-alt2">
                 <X size={18} />
               </button>
             </div>
             <div className="px-5 py-4 overflow-y-auto flex-1">
-              <p className="text-sm text-gray-400 mb-4">
+              <p className="text-sm text-text-secondary mb-4">
                 {pendingImport.diff.summary.rows.toLocaleString()} rows in the file:{" "}
                 <span className="text-emerald-400">{pendingImport.diff.summary.added} new</span>,{" "}
                 <span className="text-amber-400">{pendingImport.diff.summary.changed} changed</span>,{" "}
@@ -527,11 +527,11 @@ export default function PaintShelfPage() {
                     {pendingImport.diff.warnings.slice(0, 200).map((w, i) => (
                       <li key={i}>
                         {w.brand} {w.code && <span className="font-mono">{w.code}</span>} — {w.name}:{" "}
-                        <span className="text-gray-500">{w.message}</span>
+                        <span className="text-text-secondary-alt">{w.message}</span>
                       </li>
                     ))}
                     {pendingImport.diff.warnings.length > 200 && (
-                      <li className="text-gray-600">…and {pendingImport.diff.warnings.length - 200} more</li>
+                      <li className="text-text-muted">…and {pendingImport.diff.warnings.length - 200} more</li>
                     )}
                   </ul>
                 </details>
@@ -546,25 +546,25 @@ export default function PaintShelfPage() {
                     <summary className={`cursor-pointer text-sm font-medium ${color}`}>
                       {section} ({rows.length})
                     </summary>
-                    <ul className="mt-1.5 ml-4 text-xs text-gray-400 space-y-0.5 max-h-48 overflow-y-auto">
+                    <ul className="mt-1.5 ml-4 text-xs text-text-secondary space-y-0.5 max-h-48 overflow-y-auto">
                       {rows.slice(0, 200).map((r, i) => (
                         <li key={i}>
                           {r.brand} {r.code && <span className="font-mono">{r.code}</span>} — {r.name}
                           {r.changes && (
-                            <span className="text-gray-600">
+                            <span className="text-text-muted">
                               {" "}({Object.entries(r.changes).map(([f, d]) => `${f}: ${d.from} → ${d.to}`).join(", ")})
                             </span>
                           )}
                         </li>
                       ))}
-                      {rows.length > 200 && <li className="text-gray-600">…and {rows.length - 200} more</li>}
+                      {rows.length > 200 && <li className="text-text-muted">…and {rows.length - 200} more</li>}
                     </ul>
                   </details>
                 );
               })}
 
               {pendingImport.diff.summary.removed > 0 && (
-                <label className="flex items-center gap-2 text-sm text-gray-300 mt-2 bg-rose-950/30 border border-rose-900/50 rounded px-3 py-2">
+                <label className="flex items-center gap-2 text-sm text-text-primary-alt2 mt-2 bg-rose-950/30 border border-rose-900/50 rounded px-3 py-2">
                   <input
                     type="checkbox"
                     checked={applyRemoved}
@@ -572,18 +572,18 @@ export default function PaintShelfPage() {
                     className="h-4 w-4 accent-rose-500"
                   />
                   Also delete the {pendingImport.diff.summary.removed} previously-imported paint(s) missing from this file
-                  <span className="text-xs text-gray-600">(manually added paints are never touched)</span>
+                  <span className="text-xs text-text-muted">(manually added paints are never touched)</span>
                 </label>
               )}
             </div>
-            <div className="px-5 py-3 border-t border-gray-800 flex justify-end gap-2">
-              <button onClick={() => setPendingImport(null)} className="text-sm text-gray-400 hover:text-gray-200 px-3 py-1.5">
+            <div className="px-5 py-3 border-t border-border-subtle flex justify-end gap-2">
+              <button onClick={() => setPendingImport(null)} className="text-sm text-text-secondary hover:text-text-primary-alt px-3 py-1.5">
                 Cancel
               </button>
               <button
                 onClick={confirmImport}
                 disabled={importing || (pendingImport.diff.summary.added === 0 && pendingImport.diff.summary.changed === 0 && !applyRemoved)}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm px-4 py-1.5 rounded transition-colors"
+                className="bg-accent-end hover:bg-accent-start disabled:opacity-50 text-white text-sm px-4 py-1.5 rounded transition-colors"
               >
                 {importing ? "Applying…" : "Apply import"}
               </button>

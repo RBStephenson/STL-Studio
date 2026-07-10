@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import type {
   ReorganizeEntry,
   ReorganizePreview,
@@ -63,7 +64,16 @@ function isResolvable(e: ReorganizeEntry): boolean {
 }
 
 export default function ReorganizePage() {
+  const { settings } = useAppSettings();
   const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
+  // Seed the field from the saved library setting once it's loaded (async),
+  // but only until the user starts typing their own one-off template.
+  const [templateTouched, setTemplateTouched] = useState(false);
+  useEffect(() => {
+    if (!templateTouched && settings.reorganize_template) {
+      setTemplate(settings.reorganize_template);
+    }
+  }, [settings.reorganize_template, templateTouched]);
   const [overrides, setOverrides] = useState<Record<number, ReorganizeOverride>>({});
   const [preview, setPreview] = useState<ReorganizePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -180,8 +190,8 @@ export default function ReorganizePage() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-gray-100">Reorganize Library</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="text-xl font-semibold text-text-primary">Reorganize Library</h1>
+        <p className="text-sm text-text-secondary-alt mt-1">
           Preview the proposed layout, resolve any flagged rows, then apply. Apply
           moves files on disk and requires a writable standalone deployment.
         </p>
@@ -189,17 +199,18 @@ export default function ReorganizePage() {
 
       {/* Template editor */}
       <div className="space-y-2">
-        <label className="block text-sm text-gray-300">Destination template</label>
+        <label className="block text-sm text-text-primary-alt2">Destination template</label>
         <input
           type="text"
           value={template}
-          onChange={(e) => setTemplate(e.target.value)}
-          className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 font-mono focus:outline-none focus:border-indigo-500"
+          onChange={(e) => { setTemplate(e.target.value); setTemplateTouched(true); }}
+          className="w-full bg-panel border border-border rounded px-3 py-2 text-sm text-text-primary font-mono focus:outline-none focus:border-accent-start"
           aria-label="Destination template"
         />
-        <div className="text-xs text-gray-500">
+        <div className="text-xs text-text-secondary-alt">
           Tokens: <code className="text-indigo-400">{"{creator}"}</code>{" "}
           <code className="text-indigo-400">{"{character}"}</code>{" "}
+          <code className="text-indigo-400">{"{scale}"}</code>{" "}
           <code className="text-indigo-400">{"{title}"}</code> — separate levels with <code>/</code>.
         </div>
         {error && <div className="text-sm text-rose-400">{error}</div>}
@@ -210,15 +221,15 @@ export default function ReorganizePage() {
           <ReorganizeStatsBar stats={preview.stats} />
 
           {/* Filter tabs */}
-          <div className="flex gap-1 flex-wrap border-b border-gray-800">
+          <div className="flex gap-1 flex-wrap border-b border-border-subtle">
             {FILTERS.map((f) => (
               <button
                 key={f.key}
                 onClick={() => setTab(f.key)}
                 className={`px-3 py-1.5 text-sm rounded-t ${
                   tab === f.key
-                    ? "bg-gray-800 text-gray-100 border-b-2 border-indigo-500"
-                    : "text-gray-500 hover:text-gray-300"
+                    ? "bg-panel-secondary text-text-primary border-b-2 border-accent-start"
+                    : "text-text-secondary-alt hover:text-text-primary-alt2"
                 }`}
               >
                 {f.label}
@@ -229,7 +240,7 @@ export default function ReorganizePage() {
           {/* Manifest table */}
           <div className="space-y-1">
             {visible.length === 0 && (
-              <div className="text-sm text-gray-600 py-6 text-center">No models in this view.</div>
+              <div className="text-sm text-text-muted py-6 text-center">No models in this view.</div>
             )}
             {visible.map((e) => {
               const chips = blockerChips(e);
@@ -238,7 +249,7 @@ export default function ReorganizePage() {
               return (
                 <div
                   key={e.model_id}
-                  className={`rounded border ${e.eligible ? "border-gray-800" : "border-orange-900/60 bg-orange-950/20"}`}
+                  className={`rounded border ${e.eligible ? "border-border-subtle" : "border-orange-900/60 bg-orange-950/20"}`}
                 >
                   <div className="w-full flex items-center gap-3 px-3 py-2">
                     {canSelect && (
@@ -251,12 +262,12 @@ export default function ReorganizePage() {
                       />
                     )}
                     <button onClick={() => toggle(e.model_id)} className="flex items-center gap-3 text-left flex-1 min-w-0">
-                      <span className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300 shrink-0">
+                      <span className="text-xs px-2 py-0.5 rounded bg-panel-secondary text-text-primary-alt2 shrink-0">
                         {KIND_LABEL[e.kind]}
                       </span>
                       <span className="flex-1 min-w-0">
-                        <span className="block text-sm text-gray-200 truncate">{e.model_name}</span>
-                        <span className="block text-xs text-gray-500 truncate font-mono">→ {e.proposed_dir}</span>
+                        <span className="block text-sm text-text-primary-alt truncate">{e.model_name}</span>
+                        <span className="block text-xs text-text-secondary-alt truncate font-mono">→ {e.proposed_dir}</span>
                       </span>
                     </button>
                     {chips.map((c) => (
@@ -266,19 +277,19 @@ export default function ReorganizePage() {
                     ))}
                   </div>
                   {isOpen && (
-                    <div className="px-3 pb-2 space-y-2 border-t border-gray-800 pt-2">
+                    <div className="px-3 pb-2 space-y-2 border-t border-border-subtle pt-2">
                       {e.files.map((f) => (
-                        <div key={f.stl_file_id} className="text-xs font-mono text-gray-500">
-                          <span className="text-gray-600">{f.current_path}</span>
-                          <span className="text-gray-700"> → </span>
-                          <span className="text-gray-400">{f.proposed_path}</span>
+                        <div key={f.current_path} className="text-xs font-mono text-text-secondary-alt">
+                          <span className="text-text-muted">{f.current_path}</span>
+                          <span className="text-text-muted-alt"> → </span>
+                          <span className="text-text-secondary">{f.proposed_path}</span>
                         </div>
                       ))}
                       {!e.eligible && isResolvable(e) && (
-                        <div className="pt-2 border-t border-gray-800/60">
-                          <div className="text-xs text-gray-400 mb-1">Resolve</div>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            {(["creator", "character", "title", "suffix"] as const).map((field) => (
+                        <div className="pt-2 border-t border-border-subtle/60">
+                          <div className="text-xs text-text-secondary mb-1">Resolve</div>
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                            {(["creator", "character", "scale", "title", "suffix"] as const).map((field) => (
                               <input
                                 key={field}
                                 type="text"
@@ -286,7 +297,7 @@ export default function ReorganizePage() {
                                 aria-label={`${field} for ${e.model_name}`}
                                 value={overrides[e.model_id]?.[field] ?? ""}
                                 onChange={(ev) => setOverride(e.model_id, { [field]: ev.target.value })}
-                                className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                                className="bg-panel border border-border rounded px-2 py-1 text-xs text-text-primary focus:outline-none focus:border-accent-start"
                               />
                             ))}
                           </div>
@@ -301,7 +312,7 @@ export default function ReorganizePage() {
         </>
       )}
 
-      {loading && !preview && <div className="text-sm text-gray-500">Loading preview…</div>}
+      {loading && !preview && <div className="text-sm text-text-secondary-alt">Loading preview…</div>}
 
       {/* Apply / Undo */}
       <div className="pt-2 flex items-center gap-3 flex-wrap">
@@ -311,8 +322,8 @@ export default function ReorganizePage() {
           disabled={busy || selected.size === 0}
           className={`px-4 py-2 rounded text-sm ${
             busy || selected.size === 0
-              ? "bg-gray-800 text-gray-600 cursor-not-allowed"
-              : "bg-indigo-600 text-white hover:bg-indigo-500"
+              ? "bg-panel-secondary text-text-muted cursor-not-allowed"
+              : "bg-accent-end text-white hover:bg-accent-start"
           }`}
         >
           {busy ? "Working…" : `Apply ${selected.size || ""}`.trim()}
@@ -322,7 +333,7 @@ export default function ReorganizePage() {
             type="button"
             onClick={runUndo}
             disabled={busy}
-            className="px-4 py-2 rounded text-sm bg-gray-800 text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+            className="px-4 py-2 rounded text-sm bg-panel-secondary text-text-primary-alt hover:bg-panel-secondary disabled:opacity-50"
           >
             Undo last apply
           </button>

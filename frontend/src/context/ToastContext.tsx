@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from "react";
 import { CheckCircle, AlertCircle, Info, X } from "lucide-react";
 
 type ToastType = "success" | "error" | "info";
@@ -19,8 +19,17 @@ let _nextId = 0;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Tracks each toast's auto-dismiss timer (STUDIO-93) so a manual dismiss or
+  // provider unmount can clear it — otherwise a stray timer fires setState
+  // after the toast (or the whole provider) is already gone.
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
   const remove = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
@@ -28,10 +37,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (message: string, type: ToastType = "info") => {
       const id = ++_nextId;
       setToasts((prev) => [...prev, { id, message, type }]);
-      setTimeout(() => remove(id), 4000);
+      timers.current.set(id, setTimeout(() => remove(id), 4000));
     },
     [remove],
   );
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      pending.forEach(clearTimeout);
+      pending.clear();
+    };
+  }, []);
 
   return (
     <ToastContext.Provider value={{ toast }}>

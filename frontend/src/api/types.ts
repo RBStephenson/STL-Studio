@@ -103,6 +103,9 @@ export interface ModelDetail extends Model {
   stl_files: STLFile[];
   creator: { id: number; name: string; source_url: string | null } | null;
   collection_ids: number[];
+  // True when this model's current folder no longer matches where it would
+  // land under the library's organize template (see /settings library tab).
+  unorganized: boolean;
 }
 
 export interface ModelList {
@@ -191,6 +194,42 @@ export interface ImportApplyResult {
   undo_log: string | null;
 }
 
+export interface ImportApplyStart {
+  // false = nothing to move — `result` is already final, no need to poll.
+  // true = a background job is running; poll importApi.applyStatus().
+  started: boolean;
+  result: ImportApplyResult | null;
+}
+
+export interface ImportApplyStatus {
+  running: boolean;
+  message: string;
+  moved_files: number;
+  total_files: number;
+  error: string | null;
+  result: ImportApplyResult | null;
+}
+
+export interface DownloadImagesResult {
+  downloaded: number;
+}
+
+export interface DownloadImagesStart {
+  // false = nothing to download — `result` is already final, no need to poll.
+  // true = a background job is running; poll importApi.downloadImagesStatus().
+  started: boolean;
+  result: DownloadImagesResult | null;
+}
+
+export interface DownloadImagesStatus {
+  running: boolean;
+  message: string;
+  downloaded: number;
+  total: number;
+  error: string | null;
+  result: DownloadImagesResult | null;
+}
+
 export interface DriveStatusRoot {
   path: string;
   enabled: boolean;
@@ -234,7 +273,22 @@ export interface AppSettings {
   ai_guides_enabled: boolean;
   ai_guides_api: number | null;
   ai_organize_api: number | null;
+  // Application log verbosity — changing it takes effect immediately (no restart).
+  log_level: LogLevel;
+  // Library reorganize destination template ("" = the built-in default,
+  // {creator}/{character}/{title}; optional {scale}) and whether every segment renders
+  // lowercase/hyphenated (import-style) rather than case-preserving.
+  reorganize_template: string;
+  reorganize_slugify: boolean;
+  // Feature flag: gates the Reorganize Library feature end-to-end (UI + the
+  // destructive apply/undo writes). Off by default; toggled on the Library tab.
+  reorganize_enabled: boolean;
+  // Collections page: every card gets the same box size (the one cover art
+  // already uses) instead of a compact box for collections with no cover.
+  collections_uniform_size: boolean;
 }
+
+export type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
 
 export interface AiApiConfig {
   id: number;
@@ -243,6 +297,12 @@ export interface AiApiConfig {
   url: string | null;
   model: string;
   effort: string | null;
+  // Per-connection request timeout in seconds (default 10).
+  request_timeout: number;
+  // Max files per AI Organize LLM request/batch. null = service default.
+  batch_size: number | null;
+  // OpenAI-compatible only: let the model reason before answering. Default false.
+  reasoning_enabled: boolean;
   key_set: boolean;
   key_hint: string | null;
 }
@@ -255,6 +315,11 @@ export interface AiOrganizeSettings {
   url: string;
   model: string;
 }
+
+// "parts" (default) categorizes by physical part type (Head, Weapon, ...).
+// "unit" groups by in-game unit/character instead (#878) — freeform, not
+// limited to the standard category list.
+export type AiOrganizeStrategy = "parts" | "unit";
 
 export interface AiOrganizeSuggestion {
   id: number;
@@ -279,6 +344,11 @@ export interface AiOrganizeSuggestionPreview {
 
 export interface AiOrganizePreviewResult {
   suggestions: AiOrganizeSuggestionPreview[];
+  // Outcome of the optional LLM pass so the UI can distinguish "AI ran" from
+  // "AI failed / was skipped": "ok" | "skipped" | "disabled" | "error".
+  // llm_detail carries the failure reason when llm_status === "error".
+  llm_status?: "ok" | "skipped" | "disabled" | "error";
+  llm_detail?: string | null;
 }
 
 export interface AiOrganizeModelsList {
@@ -855,7 +925,7 @@ export type ReorganizeCollisionKind =
   | "none" | "exact" | "case_only" | "unicode_only" | "legitimate_duplicate";
 
 export interface ReorganizeFileMove {
-  stl_file_id: number;
+  stl_file_id: number | null;
   current_path: string;
   proposed_path: string;
   size_bytes: number;
@@ -863,6 +933,9 @@ export interface ReorganizeFileMove {
   content_hash: string | null;
   fingerprint_method: "stat" | "content_hash";
   missing_file: boolean;
+  // "stl" repaths an STLFile row; "image" repaths one of the model's own
+  // image_paths/thumbnail_path/primary_image_path instead.
+  kind: "stl" | "image";
 }
 
 export interface ReorganizeEntry {
@@ -912,6 +985,7 @@ export interface ReorganizePreview {
 export interface ReorganizeOverride {
   creator?: string;
   character?: string;
+  scale?: string;
   title?: string;
   suffix?: string;
 }

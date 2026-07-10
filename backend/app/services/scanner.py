@@ -717,7 +717,12 @@ def split_pack(model_id: int) -> dict:
                 return {"ok": False, "created": 0, "message": "folder not found on disk"}
 
             child_dirs = [d for d in pack.iterdir() if d.is_dir()]
-            if not any(_has_stls(d, recurse=True) for d in child_dirs):
+            try:
+                any_child_has_stls = any(_has_stls(d, recurse=True) for d in child_dirs)
+            except OSError:
+                return {"ok": False, "created": 0,
+                        "message": "couldn't read one or more child folders — try again"}
+            if not any_child_has_stls:
                 return {"ok": False, "created": 0,
                         "message": "no child folders with STLs to split into"}
 
@@ -898,7 +903,7 @@ def _walk_for_models(
     # model. This is what makes an opt-in split durable across rescans.
     is_creator_root = folder == creator_boundary or str(folder) in _pack_overrides
 
-    child_dirs = [d for d in sorted(folder.iterdir()) if d.is_dir()]
+    child_dirs = [d for d in sorted(folder.iterdir()) if d.is_dir() and not _is_hidden(d.name)]
     has_direct_stls = _has_stls(folder, recurse=False)
     any_child_stls = _any_child_has_stls_cached(child_dirs, stl_cache)
     has_any_stls = has_direct_stls or any_child_stls
@@ -1158,23 +1163,34 @@ def _index_model(
                     model.needs_review = True
 
         if not folder_unchanged:
-            gallery_images = _collect_gallery_images(
-                folder,
-                boundary=creator_boundary or folder,
-                stl_cache=stl_cache,
-            )
+            try:
+                gallery_images = _collect_gallery_images(
+                    folder,
+                    boundary=creator_boundary or folder,
+                    stl_cache=stl_cache,
+                )
+            except OSError:
+                # A transient read failure (drive hiccup, permission blip) —
+                # not "this model's images are gone". Leave image_paths/
+                # thumbnail_path exactly as they are; a later scan re-tries.
+                logger.warning(
+                    "Gallery image discovery failed for %s — leaving existing "
+                    "image_paths untouched this scan", folder, exc_info=True,
+                )
+                gallery_images = None
 
-            # Thumbnail: walk upward if not already set
-            if not model.thumbnail_path:
-                if gallery_images:
-                    model.thumbnail_path = str(gallery_images[0])
+            if gallery_images is not None:
+                # Thumbnail: walk upward if not already set
+                if not model.thumbnail_path:
+                    if gallery_images:
+                        model.thumbnail_path = str(gallery_images[0])
 
-            model.image_paths = _merge_scan_gallery_paths(
-                existing=model.image_paths or [],
-                discovered=[str(img) for img in gallery_images],
-                removed=model.removed_image_paths or [],
-                boundary=creator_boundary or folder,
-            )
+                model.image_paths = _merge_scan_gallery_paths(
+                    existing=model.image_paths or [],
+                    discovered=[str(img) for img in gallery_images],
+                    removed=model.removed_image_paths or [],
+                    boundary=creator_boundary or folder,
+                )
 
             _index_stl_files(model, folder, db)
 
@@ -1227,9 +1243,52 @@ def _merge_auto_tags(detected: list[str], layout_tags: list[str] | None) -> list
     return merged
 
 
+def _is_hidden(name: str) -> bool:
+    """True for dotfile/dot-directory names (.git, .DS_Store, …).
+
+    Other tools stash their own metadata/derivative caches in hidden folders
+    alongside real content — e.g. a resized-thumbnail cache nested several
+    levels deep. None of that should ever be treated as a model, an STL, or a
+    gallery image.
+    """
+    return name.startswith(".")
+
+
+def _has_hidden_ancestor(path: Path, within: Path) -> bool:
+    """True if any directory component between *within* and *path* is hidden."""
+    try:
+        parts = path.relative_to(within).parts
+    except ValueError:
+        return False
+    return any(_is_hidden(p) for p in parts[:-1])
+
+
+def _iter_files_recursive(folder: Path):
+    """Yield every non-hidden file under folder, recursing into subdirectories.
+
+    Deliberately NOT built on Path.rglob()/glob(): both silently swallow any
+    OSError while listing a subdirectory (see CPython's _WildcardSelector —
+    a bare ``except OSError: pass``), so an unreadable folder anywhere in the
+    tree looks identical to "this subtree is genuinely empty". That
+    difference matters here: a caller that merges this into image_paths (a
+    destructive prune of anything not rediscovered) must be able to tell a
+    transient read failure apart from a real deletion, so this walk lets
+    OSError/PermissionError propagate instead.
+    """
+    with os.scandir(folder) as it:
+        entries = list(it)
+    for entry in entries:
+        if _is_hidden(entry.name):
+            continue
+        if entry.is_dir():
+            yield from _iter_files_recursive(Path(entry.path))
+        else:
+            yield Path(entry.path)
+
+
 def _has_stls(folder: Path, recurse: bool = False) -> bool:
     if recurse:
-        return any(f.suffix.lower() in STL_EXTENSIONS for f in folder.rglob("*") if f.is_file())
+        return any(p.suffix.lower() in STL_EXTENSIONS for p in _iter_files_recursive(folder))
     return any(f.suffix.lower() in STL_EXTENSIONS for f in folder.iterdir() if f.is_file())
 
 
@@ -1264,13 +1323,13 @@ def _is_within_boundary(path: str, boundary: Path) -> bool:
 
 
 def _image_files_recursive(folder: Path) -> list[Path]:
-    try:
-        return [
-            img for img in sorted(folder.rglob("*"))
-            if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS
-        ]
-    except (OSError, PermissionError):
-        return []
+    # _iter_files_recursive (not rglob/glob) so a transient read failure
+    # (external-drive hiccup, permission blip) propagates instead of looking
+    # identical to "this folder genuinely has no images" — see its docstring.
+    return sorted(
+        p for p in _iter_files_recursive(folder)
+        if p.suffix.lower() in IMAGE_EXTENSIONS
+    )
 
 
 def _collect_gallery_images(leaf: Path, boundary: Path,
@@ -1282,6 +1341,12 @@ def _collect_gallery_images(leaf: Path, boundary: Path,
       1. Preferred image subdirs, recursively
       2. Direct image files in the folder itself
       3. Any other subdir that doesn't contain STLs
+
+    Raises OSError/PermissionError if any folder along the way couldn't be
+    listed — deliberately not caught here. Callers that merge the result into
+    image_paths (dropping anything not rediscovered) must catch this and skip
+    that merge rather than trust a possibly-incomplete listing as if it were
+    a confirmed-empty one.
     """
     def _has_stls_cached(d: Path) -> bool:
         key = str(d)
@@ -1292,11 +1357,8 @@ def _collect_gallery_images(leaf: Path, boundary: Path,
         return _has_stls(d, recurse=True)
 
     def images_at(folder: Path) -> list[Path]:
-        try:
-            children = list(folder.iterdir())
-        except (OSError, PermissionError):
-            return []
-        subdirs = [c for c in children if c.is_dir()]
+        children = list(folder.iterdir())
+        subdirs = [c for c in children if c.is_dir() and not _is_hidden(c.name)]
         found: list[Path] = []
 
         for sub in sorted(subdirs):
@@ -1365,6 +1427,52 @@ def _merge_scan_gallery_paths(
     return result
 
 
+def refresh_model_gallery(db: Session, model: Model) -> None:
+    """Re-sync one model's gallery images with what's actually on disk.
+
+    Reuses the same discovery/merge primitives a full or per-creator scan
+    applies to every model (_collect_gallery_images / _merge_scan_gallery_paths)
+    — just scoped to this one model, on demand, without touching naming, tags,
+    or STL indexing. Mutates the passed-in ORM object; the caller commits.
+
+    Raises OSError/PermissionError if the folder listing failed partway
+    through (a transient drive/permission hiccup) — deliberately not caught
+    here, and nothing has been mutated yet when it's raised, so the caller
+    can surface the failure instead of silently treating an unreliable
+    listing as "no images here anymore".
+    """
+    folder = Path(model.folder_path)
+    if not folder.exists():
+        return
+
+    creator_boundary: Path | None = None
+    creator = model.creator or (
+        db.query(Creator).filter(Creator.id == model.creator_id).first()
+        if model.creator_id else None
+    )
+    if creator:
+        for creator_dir, _tags, _grp in _creator_dirs_for(creator, db):
+            if _is_within_boundary(str(folder), creator_dir):
+                creator_boundary = creator_dir
+                break
+
+    boundary = creator_boundary or folder
+    gallery_images = _collect_gallery_images(folder, boundary=boundary, stl_cache={})
+
+    if not model.thumbnail_path and gallery_images:
+        model.thumbnail_path = str(gallery_images[0])
+
+    model.image_paths = _merge_scan_gallery_paths(
+        existing=model.image_paths or [],
+        discovered=[str(img) for img in gallery_images],
+        removed=model.removed_image_paths or [],
+        boundary=boundary,
+    )
+
+    if model.primary_image_path and model.primary_image_path not in model.image_paths:
+        model.primary_image_path = None
+
+
 def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
                     stl_cache: dict[str, bool] | None = None):
     """
@@ -1393,13 +1501,13 @@ def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
             children = list(folder.iterdir())
         except PermissionError:
             return None
-        subdirs = [c for c in children if c.is_dir()]
+        subdirs = [c for c in children if c.is_dir() and not _is_hidden(c.name)]
 
         # 1. PREFERRED subdirs first — rglob to handle nested layouts (e.g. Renders/Color/)
         for sub in sorted(subdirs):
             if sub.name.lower() in PREFERRED:
                 for img in sorted(sub.rglob("*")):
-                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS:
+                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS and not _has_hidden_ancestor(img, sub):
                         return img
 
         # 2. Direct image files at this level
@@ -1411,7 +1519,7 @@ def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
         for sub in sorted(subdirs):
             if sub.name.lower() not in PREFERRED and not _has_stls_cached(sub):
                 for img in sorted(sub.rglob("*")):
-                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS:
+                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS and not _has_hidden_ancestor(img, sub):
                         return img
 
         return None
@@ -1575,7 +1683,7 @@ def _inbox_scan(job: JobHandle, path: str, db: Session | None = None) -> None:
                 )
             else:
                 # Creator-structure layout: each immediate subdir with STLs is a creator
-                child_dirs = [d for d in sorted(inbox.iterdir()) if d.is_dir()]
+                child_dirs = [d for d in sorted(inbox.iterdir()) if d.is_dir() and not _is_hidden(d.name)]
                 creator_ids: dict[str, int] = {}
                 for child in child_dirs:
                     if _has_stls(child, recurse=True):

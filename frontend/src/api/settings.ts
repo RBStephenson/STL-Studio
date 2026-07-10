@@ -87,13 +87,13 @@ export const settingsApi = {
   },
   aiApis: {
     list: () => request<AiApiConfig[]>("/settings/ai-apis"),
-    create: (body: { name: string; api_type: string; url?: string | null; model?: string; effort?: string | null }) =>
+    create: (body: { name: string; api_type: string; url?: string | null; model?: string; effort?: string | null; request_timeout?: number; batch_size?: number | null; reasoning_enabled?: boolean; api_key?: string }) =>
       request<AiApiConfig>("/settings/ai-apis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
-    update: (id: number, body: { name?: string; url?: string | null; model?: string; effort?: string | null }) =>
+    update: (id: number, body: { name?: string; url?: string | null; model?: string; effort?: string | null; request_timeout?: number; batch_size?: number | null; reasoning_enabled?: boolean; api_key?: string }) =>
       request<AiApiConfig>(`/settings/ai-apis/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -101,12 +101,6 @@ export const settingsApi = {
       }),
     delete: (id: number) =>
       request<void>(`/settings/ai-apis/${id}`, { method: "DELETE" }),
-    setKey: (id: number, key: string) =>
-      request<AiApiConfig>(`/settings/ai-apis/${id}/key`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key }),
-      }),
     clearKey: (id: number) =>
       request<AiApiConfig>(`/settings/ai-apis/${id}/key`, { method: "DELETE" }),
     getModels: (id: number) =>
