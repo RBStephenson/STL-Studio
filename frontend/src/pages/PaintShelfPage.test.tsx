@@ -80,6 +80,22 @@ describe("ColorChip", () => {
 describe("PaintShelfPage", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
+  it("shows the shared error state on a list-fetch failure, with a working Retry", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.painting.paints.list).mockRejectedValueOnce(new Error("Backend unreachable"));
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Backend unreachable");
+    expect(screen.getByText("Couldn't load the paint shelf")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
+
+    vi.mocked(api.painting.paints.list).mockResolvedValueOnce({
+      total: 2, page: 1, page_size: 48, items: PAINTS,
+    });
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByText("Coal Black")).toBeInTheDocument();
+  });
+
   it("lists paints with chips, line labels, and owned state", async () => {
     renderPage();
 

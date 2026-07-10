@@ -123,11 +123,16 @@ describe("GuideReaderPage", () => {
     expect(screen.queryByTestId("guide-reader-skeleton")).toBeNull();
   });
 
-  it("surfaces a load error", async () => {
+  it("surfaces a load error via the shared error state, with a working Retry", async () => {
     const { api } = await import("../api/client");
     vi.mocked(api.painting.guides.get).mockRejectedValueOnce(new Error("boom"));
     renderAt("1");
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
+    expect(screen.getByText("Couldn't load this guide")).toBeInTheDocument();
+
+    vi.mocked(api.painting.guides.get).mockResolvedValueOnce(GUIDE);
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByRole("heading", { level: 1, name: /RoboCop/ })).toBeInTheDocument();
   });
 
   it("publishes a draft guide (#277)", async () => {

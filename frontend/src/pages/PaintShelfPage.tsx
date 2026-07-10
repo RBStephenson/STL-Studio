@@ -6,6 +6,7 @@ import {
 } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import HelpLink from "../components/HelpLink";
+import ErrorState from "../components/ErrorState";
 import { errMsg } from "../utils/err";
 
 const PAGE_SIZE = 48;
@@ -162,6 +163,7 @@ export default function PaintShelfPage() {
   const [total, setTotal] = useState(0);
   const [brands, setBrands] = useState<PaintBrand[]>([]);
   const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
   const [formMode, setFormModeRaw] = useState<"hidden" | "add" | number>("hidden"); // number = editing that paint id
   const [formError, setFormError] = useState<string | null>(null);
   const setFormMode = (mode: "hidden" | "add" | number) => {
@@ -216,6 +218,7 @@ export default function PaintShelfPage() {
   const fetchPaints = useCallback(async () => {
     const fetchId = ++fetchIdRef.current;
     setLoading(true);
+    setListError(null);
     try {
       const params: Record<string, string | number | boolean> = { page, page_size: PAGE_SIZE };
       if (q) params.q = q;
@@ -227,6 +230,8 @@ export default function PaintShelfPage() {
       if (fetchId !== fetchIdRef.current) return; // stale response
       setPaints(data.items);
       setTotal(data.total);
+    } catch (e) {
+      if (fetchId === fetchIdRef.current) setListError(errMsg(e) || "Could not load the paint shelf.");
     } finally {
       if (fetchId === fetchIdRef.current) setLoading(false);
     }
@@ -423,7 +428,12 @@ export default function PaintShelfPage() {
         )}
       </div>
 
+      {listError && (
+        <ErrorState title="Couldn't load the paint shelf" message={listError} onRetry={fetchPaints} />
+      )}
+
       {/* Table */}
+      {!listError && (
       <div className="bg-panel border border-border-subtle rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -477,9 +487,10 @@ export default function PaintShelfPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {!listError && totalPages > 1 && (
         <div className="flex items-center justify-center gap-3 mt-5 text-sm text-text-secondary">
           <button
             onClick={() => setParam("page", String(page - 1))}
