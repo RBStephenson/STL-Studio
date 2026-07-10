@@ -31,6 +31,25 @@ function renderPage() {
   return render(<MemoryRouter><Triage /></MemoryRouter>);
 }
 
+describe("Triage error state", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("shows the shared error state when the queue fails to load, with a working Retry", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.models.list).mockRejectedValueOnce(new Error("Network down"));
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Network down");
+    expect(screen.getByText("Couldn't load the review queue")).toBeInTheDocument();
+
+    vi.mocked(api.models.list).mockResolvedValueOnce(
+      { items: [MODEL] } as unknown as Awaited<ReturnType<typeof api.models.list>>
+    );
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByText("Widget")).toBeInTheDocument();
+  });
+});
+
 describe("Triage keyboard-hint row", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 

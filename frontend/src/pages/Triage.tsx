@@ -7,6 +7,7 @@ import {
 import { api, Model } from "../api/client";
 import ScanButton from "../components/ScanButton";
 import HelpLink from "../components/HelpLink";
+import ErrorState from "../components/ErrorState";
 
 const BATCH_SIZE = 50;
 
@@ -16,12 +17,14 @@ export default function Triage() {
   const [total, setTotal] = useState(0);
   const [dismissed, setDismissed] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [creators, setCreators] = useState<Map<number, string>>(new Map());
   const skippedIdsRef = useRef<Set<number>>(new Set());
 
   const loadBatch = useCallback(async (resetSkipped = false) => {
     setLoading(true);
+    setError(null);
     if (resetSkipped) skippedIdsRef.current = new Set();
     try {
       const [batch, stats] = await Promise.all([
@@ -41,6 +44,8 @@ export default function Triage() {
         setQueue(filtered);
         setCursor(0);
       }
+    } catch (e) {
+      setError((e as Error)?.message || "Could not load the review queue.");
     } finally {
       setLoading(false);
     }
@@ -106,6 +111,14 @@ export default function Triage() {
     return (
       <div className="flex items-center justify-center h-96 text-text-secondary">
         Loading review queue…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-6">
+        <ErrorState title="Couldn't load the review queue" message={error} onRetry={() => loadBatch()} />
       </div>
     );
   }
