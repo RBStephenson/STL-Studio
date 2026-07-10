@@ -104,7 +104,7 @@ export default function Triage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96 text-gray-400">
+      <div className="flex items-center justify-center h-96 text-text-secondary">
         Loading review queue…
       </div>
     );
@@ -112,7 +112,7 @@ export default function Triage() {
 
   if (done || total === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-96 gap-4 text-gray-400">
+      <div className="flex flex-col items-center justify-center h-96 gap-4 text-text-secondary">
         <CheckCircle size={48} className="text-green-500" />
         <p className="text-lg">All caught up — nothing needs review.</p>
         <Link to="/" className="text-indigo-400 hover:underline text-sm">
@@ -140,7 +140,7 @@ export default function Triage() {
     <div className="max-w-5xl mx-auto px-6 py-6 flex flex-col gap-5">
       {/* Top bar */}
       <div className="flex items-center justify-between">
-        <h1 className="flex items-center gap-2 text-xl font-bold text-gray-100">
+        <h1 className="flex items-center gap-2 text-xl font-bold text-text-primary">
           Review Queue
           <HelpLink section="triage" label="How the review queue works" />
         </h1>
@@ -148,7 +148,7 @@ export default function Triage() {
           <button
             onClick={() => loadBatch()}
             title="Refresh queue"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-sm text-gray-300 hover:bg-gray-700 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-panel-secondary border border-border text-sm text-text-primary-alt2 hover:bg-panel-secondary transition-colors"
           >
             <RefreshCw size={13} />
             Refresh
@@ -159,7 +159,7 @@ export default function Triage() {
 
       {/* Progress header */}
       <div className="flex items-center justify-between text-sm">
-        <span className="flex items-center gap-2 text-gray-400">
+        <span className="flex items-center gap-2 text-text-secondary">
           <AlertTriangle size={14} className="text-yellow-500" />
           <span>
             <span className="text-white font-medium">{total.toLocaleString()}</span> models need review
@@ -170,23 +170,23 @@ export default function Triage() {
             </span>
           )}
         </span>
-        <span className="text-xs text-gray-600">
+        <span className="text-xs text-text-muted">
           {cursor + 1} of {queue.length} in batch
         </span>
       </div>
 
-      <div className="w-full bg-gray-800 rounded-full h-1">
+      <div className="w-full bg-panel-secondary rounded-full h-1">
         <div
-          className="bg-indigo-500 h-1 rounded-full transition-all duration-300"
+          className="bg-accent-start h-1 rounded-full transition-all duration-300"
           style={{ width: `${progressPct}%` }}
         />
       </div>
 
       {/* Main card */}
       {current && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex min-h-[400px]">
+        <div className="bg-panel border border-border-subtle rounded-xl overflow-hidden flex min-h-[400px]">
           {/* Thumbnail */}
-          <div className="w-72 shrink-0 bg-gray-950 flex items-center justify-center overflow-hidden">
+          <div className="w-72 shrink-0 bg-panel-inset flex items-center justify-center overflow-hidden">
             {thumbSrc ? (
               <img
                 src={thumbSrc}
@@ -194,7 +194,7 @@ export default function Triage() {
                 className="w-full h-full object-cover"
               />
             ) : (
-              <div className="flex flex-col items-center gap-2 text-gray-700">
+              <div className="flex flex-col items-center gap-2 text-text-muted-alt">
                 <Package size={48} />
                 <span className="text-xs">No image</span>
               </div>
@@ -204,22 +204,22 @@ export default function Triage() {
           {/* Info */}
           <div className="flex-1 p-6 flex flex-col gap-4 min-w-0">
             <div>
-              <p className="text-xs text-gray-500 mb-1">{creatorName}</p>
+              <p className="text-xs text-text-secondary-alt mb-1">{creatorName}</p>
               <h2 className="text-xl font-semibold text-white leading-snug">
                 {current.title || current.name}
               </h2>
               {current.title && current.title !== current.name && (
-                <p className="text-sm text-gray-400 mt-0.5">{current.name}</p>
+                <p className="text-sm text-text-secondary mt-0.5">{current.name}</p>
               )}
             </div>
 
-            <p className="text-xs text-gray-600 font-mono break-all leading-relaxed">
+            <p className="text-xs text-text-muted font-mono break-all leading-relaxed">
               {current.folder_path}
             </p>
 
             {current.auto_tags?.filter(t => !(current.removed_auto_tags ?? []).includes(t)).length > 0 && (
               <div>
-                <p className="text-xs text-gray-500 mb-1.5">Detected tags</p>
+                <p className="text-xs text-text-secondary-alt mb-1.5">Detected tags</p>
                 <div className="flex flex-wrap gap-1.5">
                   {current.auto_tags.filter(t => !(current.removed_auto_tags ?? []).includes(t)).map(tag => (
                     <span
@@ -235,12 +235,12 @@ export default function Triage() {
 
             {current.tags?.length > 0 && (
               <div>
-                <p className="text-xs text-gray-500 mb-1.5">User tags</p>
+                <p className="text-xs text-text-secondary-alt mb-1.5">User tags</p>
                 <div className="flex flex-wrap gap-1.5">
                   {current.tags.map(tag => (
                     <span
                       key={tag}
-                      className="px-2 py-0.5 bg-gray-800 border border-gray-700 text-gray-300 rounded text-xs"
+                      className="px-2 py-0.5 bg-panel-secondary border border-border text-text-primary-alt2 rounded text-xs"
                     >
                       {tag}
                     </span>
@@ -254,7 +254,7 @@ export default function Triage() {
               <Link
                 to={`/models/${current.id}`}
                 target="_blank"
-                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-400 transition-colors w-fit"
+                className="flex items-center gap-1.5 text-xs text-text-secondary-alt hover:text-indigo-400 transition-colors w-fit"
               >
                 <ExternalLink size={12} />
                 Open full detail
@@ -265,7 +265,7 @@ export default function Triage() {
                   onClick={prev}
                   disabled={cursor === 0}
                   title="Back (←)"
-                  className="flex items-center gap-1.5 px-3 py-2 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 disabled:opacity-30 text-sm transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded bg-panel-secondary border border-border text-text-primary-alt2 hover:bg-panel-secondary disabled:opacity-30 text-sm transition-colors"
                 >
                   <ChevronLeft size={15} />
                   Back
@@ -273,7 +273,7 @@ export default function Triage() {
                 <button
                   onClick={skip}
                   title="Skip (S)"
-                  className="flex items-center gap-1.5 px-4 py-2 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 text-sm transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded bg-panel-secondary border border-border text-text-primary-alt2 hover:bg-panel-secondary text-sm transition-colors"
                 >
                   <SkipForward size={15} />
                   Skip
@@ -293,7 +293,7 @@ export default function Triage() {
       )}
 
       {/* Keyboard hints */}
-      <div className="flex items-center justify-center gap-6 text-xs text-gray-600">
+      <div className="flex items-center justify-center gap-6 text-xs text-text-muted">
         {(
           [
             ["→ / Space", "Looks Good"],
@@ -302,7 +302,7 @@ export default function Triage() {
           ] as [string, string][]
         ).map(([key, label]) => (
           <span key={key} className="flex items-center gap-1.5">
-            <kbd className="bg-gray-800 px-1.5 py-0.5 rounded border border-gray-700 font-mono">
+            <kbd className="bg-panel-secondary px-1.5 py-0.5 rounded border border-border font-mono">
               {key}
             </kbd>
             {label}
