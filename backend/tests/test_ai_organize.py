@@ -329,6 +329,72 @@ def test_openai_path_disables_thinking(monkeypatch):
     assert captured["payload"]["think"] is False
 
 
+def test_both_system_prompts_instruct_against_reasoning():
+    """A model whose chat template reasons unconditionally, ignoring the
+    "think": False API field entirely, will often still respect a plain-
+    language instruction in the prompt text itself — cheap, independent
+    insurance against the same failure mode (#910-follow-up)."""
+    for prompt in (ai._SYSTEM_PROMPT, ai._UNIT_SYSTEM_PROMPT):
+        assert "do not think" in prompt.lower()
+
+
+def test_openai_path_sends_json_schema_for_parts_strategy(monkeypatch):
+    """Schema-constrained decoding forces the exact "files"/"part_type" shape
+    via the request itself, rather than hoping the model's own output
+    matches the prompt's written format instructions — a model can drift to
+    inventing its own key names even while producing well-formed JSON
+    (#910-follow-up)."""
+    captured: dict = {}
+    content = json.dumps({"files": []})
+
+    def _fake_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    monkeypatch.setattr(ai.httpx, "post", _fake_post)
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai", strategy="parts")
+
+    rf = captured["payload"]["response_format"]
+    assert rf["type"] == "json_schema"
+    assert rf["json_schema"]["schema"] == ai._PARTS_JSON_SCHEMA
+
+
+def test_openai_path_sends_json_schema_for_unit_strategy(monkeypatch):
+    content = json.dumps({"units": [], "unknown": []})
+
+    def _fake_post(url, **kwargs):
+        class _Resp:
+            status_code = 200
+            is_success = True
+            text = ""
+
+            def json(self):
+                return {"choices": [{"message": {"content": content}}]}
+        return _Resp()
+
+    captured: dict = {}
+    real_post = _fake_post
+
+    def _spy_post(url, **kwargs):
+        captured["payload"] = kwargs["json"]
+        return real_post(url, **kwargs)
+
+    monkeypatch.setattr(ai.httpx, "post", _spy_post)
+    ai.run(_UNRESOLVED, "http://ollama:11434", "llama3", "", api_type="openai", strategy="unit")
+
+    rf = captured["payload"]["response_format"]
+    assert rf["type"] == "json_schema"
+    assert rf["json_schema"]["schema"] == ai._UNIT_JSON_SCHEMA
+
+
 def test_openai_path_retries_without_think_on_400(monkeypatch):
     """A strict server that rejects the unrecognized "think" field outright
     (rather than just ignoring it) gets one retry with it stripped —
@@ -776,10 +842,10 @@ def test_unit_strategy_still_skipped_when_every_file_is_a_sup_variant():
 # --- Unit strategy: batching past _LLM_FILE_CAP (#884) ---
 
 def test_unit_strategy_batches_and_processes_every_file_past_the_cap(monkeypatch):
-    """Regression: a model with more than _LLM_FILE_CAP files used to have
+    """Regression: a model with more than _UNIT_LLM_FILE_CAP files used to have
     everything past the cap silently dropped — no suggestion at all, since
     unit strategy has no heuristic fallback to catch the rest."""
-    n = ai._LLM_FILE_CAP + 5  # forces exactly two batches
+    n = ai._UNIT_LLM_FILE_CAP + 2  # forces exactly two batches
     files = [
         {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
         for i in range(n)
@@ -808,8 +874,8 @@ def test_unit_strategy_batches_and_processes_every_file_past_the_cap(monkeypatch
 
     assert res.llm.status == "ok"
     assert len(calls) == 2
-    assert len(calls[0]) == ai._LLM_FILE_CAP
-    assert len(calls[1]) == 5
+    assert len(calls[0]) == ai._UNIT_LLM_FILE_CAP
+    assert len(calls[1]) == 2
     # Every file got a suggestion — none silently dropped past the cap.
     assert {s["id"] for s in res.suggestions} == set(range(n))
     assert all(s["part_type"] == "Royal Guard 1" for s in res.suggestions)
@@ -820,7 +886,7 @@ def test_unit_strategy_later_batch_is_told_the_earlier_batchs_unit_names(monkeyp
     first batch already established, so the LLM reuses them instead of
     inventing a differently-spelled variant for the same physical unit.
     Exercises the grouped response format end to end across batches."""
-    n = ai._LLM_FILE_CAP + 1
+    n = ai._UNIT_LLM_FILE_CAP + 1
     files = [
         {"id": i, "filename": f"Royal_Guard_1_Part_{i}.stl", "part_type": None, "part_name": None}
         for i in range(n)

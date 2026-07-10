@@ -308,7 +308,25 @@ CANONICAL_PART_TYPES = [
     "Hair", "Wings", "Tail", "Accessories",
 ]
 
-_SYSTEM_PROMPT = """You are an assistant that normalizes 3D-printing STL file names for a miniature figure library.
+# Appended to both prompts below (#910-follow-up): the "think": False request
+# field (see _llm_refine_openai) only suppresses reasoning on models Ollama
+# natively recognizes as hybrid-reasoning — a model whose chat template
+# reasons unconditionally regardless of that flag ignores it outright. A
+# plain-language instruction in the prompt text itself is a second, largely
+# independent lever: even a model that won't honor the API flag will often
+# still respect being told directly not to reason, measurably cutting both
+# latency and the odds of a long reasoning tangent degrading into repetition
+# before it ever reaches the answer. This does not replace response_schema
+# below — schema-constrained decoding forces the final shape regardless of
+# what the model does beforehand; this is about not spending the whole
+# max_tokens budget getting there.
+_NO_REASONING_SUFFIX = (
+    "\n\nDo not think, plan, or explain before answering. Output ONLY the "
+    "JSON object described above as your entire response — no reasoning, "
+    "no markdown fence, no text before or after it."
+)
+
+_SYSTEM_PROMPT = ("""You are an assistant that normalizes 3D-printing STL file names for a miniature figure library.
 
 Given a JSON list of STL files with heuristically-suggested part_type and part_name, refine only what is wrong or missing.
 
@@ -320,6 +338,34 @@ Rules:
 5. Return ONLY the JSON object — no markdown, no explanation.
 
 Format: {{"files": [{{"id": <int>, "part_type": <str|null>, "part_name": <str|null>, "sup_base_filename": <str|null>}}, ...]}}""".format(part_types=", ".join(CANONICAL_PART_TYPES))
+    + _NO_REASONING_SUFFIX)
+
+# Mirrors _SYSTEM_PROMPT's format above, for response_format={"type":
+# "json_schema", ...} on the OpenAI-compatible path (#910-follow-up):
+# constrains decoding to this exact shape regardless of how well a given
+# model otherwise follows written instructions. additionalProperties: false
+# at every object level so a model can't pad the reply with invented keys.
+_PARTS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "files": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "part_type": {"type": ["string", "null"]},
+                    "part_name": {"type": ["string", "null"]},
+                    "sup_base_filename": {"type": ["string", "null"]},
+                },
+                "required": ["id", "part_type", "part_name", "sup_base_filename"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["files"],
+    "additionalProperties": False,
+}
 
 # Unit-based strategy (#878): groups files by the in-game unit/character they
 # belong to (e.g. every file for "Royal Guard 1" — head, helmet, weapon —
@@ -338,7 +384,7 @@ Format: {{"files": [{{"id": <int>, "part_type": <str|null>, "part_name": <str|nu
 # dropped: Sup_ files are excluded from every candidate batch (both
 # strategies), so the field could only ever come back null — pure dead
 # weight in both the prompt and every response object.
-_UNIT_SYSTEM_PROMPT = """You are an assistant that groups 3D-printing STL files for a miniature figure library by the in-game unit or character they belong to, not by physical part type.
+_UNIT_SYSTEM_PROMPT = ("""You are an assistant that groups 3D-printing STL files for a miniature figure library by the in-game unit or character they belong to, not by physical part type.
 
 Given a JSON list of STL files (each {"id": <int>, "filename": <str>}), group them by which in-game unit/character they belong to — e.g. every file for "Royal Guard 1" (its head, helmet, weapon, etc.) belongs in one group — and give each file a short physical-part label.
 
@@ -349,6 +395,40 @@ Rules:
 4. Return ONLY the JSON object below — no markdown, no explanation, no extra keys.
 
 Format: {"units": [{"name": <str>, "members": [{"id": <int>, "part_name": <str|null>}, ...]}, ...], "unknown": [<int>, ...]}"""
+    + _NO_REASONING_SUFFIX)
+
+# Mirrors _UNIT_SYSTEM_PROMPT's format — see _PARTS_JSON_SCHEMA above.
+_UNIT_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "units": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "members": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "integer"},
+                                "part_name": {"type": ["string", "null"]},
+                            },
+                            "required": ["id", "part_name"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["name", "members"],
+                "additionalProperties": False,
+            },
+        },
+        "unknown": {"type": "array", "items": {"type": "integer"}},
+    },
+    "required": ["units", "unknown"],
+    "additionalProperties": False,
+}
 
 
 def _to_pascal_case(s: str) -> str:
@@ -573,6 +653,7 @@ def _llm_refine_openai(
     system_prompt: str = _SYSTEM_PROMPT,
     user_prefix: str = "",
     parser: Callable[[str, str], LlmOutcome] = _parse_suggestions,
+    response_schema: dict[str, Any] | None = None,
 ) -> LlmOutcome:
     """Call an OpenAI-compatible /v1/chat/completions endpoint (e.g. Ollama).
 
@@ -583,6 +664,14 @@ def _llm_refine_openai(
 
     ``user_prefix``: see _llm_refine_anthropic — same purpose here. ``parser``:
     see _llm_refine_anthropic — same purpose here.
+
+    ``response_schema`` (#910-follow-up): when given, requests schema-
+    constrained decoding (``response_format={"type": "json_schema", ...}``)
+    instead of the looser ``"json_object"`` mode — forces the model's output
+    into this exact shape via constrained decoding rather than hoping it
+    follows the prompt's written format instructions, which a model can
+    drift away from (e.g. inventing its own key names) even while still
+    producing well-formed JSON. Falls back to ``"json_object"`` when omitted.
     """
     import re as _re
     base_url = _re.sub(
@@ -595,6 +684,11 @@ def _llm_refine_openai(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    response_format: dict[str, Any] = (
+        {"type": "json_schema", "json_schema": {"name": "ai_organize_response", "schema": response_schema, "strict": True}}
+        if response_schema is not None
+        else {"type": "json_object"}
+    )
     payload: dict[str, Any] = {
         "model": model,
         "messages": [
@@ -602,7 +696,7 @@ def _llm_refine_openai(
             {"role": "user", "content": user_prefix + json.dumps(files, ensure_ascii=False)},
         ],
         "temperature": 0.1,
-        "response_format": {"type": "json_object"},
+        "response_format": response_format,
         "max_tokens": _OPENAI_MAX_TOKENS,
         # Some locally-served models (DeepSeek-R1-style, QwQ, etc.) support an
         # extended "thinking"/reasoning phase before the real answer. There's
@@ -696,16 +790,25 @@ def _llm_refine_openai(
 
 _LLM_FILE_CAP = 15   # max files sent to LLM per request
 
+# Unit strategy gets a smaller per-call cap than parts (#910-follow-up): it
+# has no heuristic fallback and, unlike parts' single flat request, its
+# per-unit grouping reasoning (when a model reasons at all) scales with how
+# many distinct units are in play in one call — a verbose local model that
+# can just about finish a handful of files in one go runs out of budget well
+# before _LLM_FILE_CAP on a real multi-unit kit. More, smaller calls trade
+# latency for actually finishing instead of hard-failing on a large batch.
+_UNIT_LLM_FILE_CAP = 5
+
 
 def _run_unit_batches(
     candidates: list[dict[str, Any]],
     call_llm: Callable[[list[dict[str, Any]], str, str], LlmOutcome],
 ) -> LlmOutcome:
     """Send every unit-strategy candidate to the LLM in chunks of
-    _LLM_FILE_CAP, one call per chunk, instead of a single capped call that
-    silently drops everything past the first _LLM_FILE_CAP files (#884) — the
-    unit strategy has no heuristic fallback to catch what a single call
-    misses, unlike "parts".
+    _UNIT_LLM_FILE_CAP, one call per chunk, instead of a single capped call
+    that silently drops everything past the first cap's worth of files
+    (#884) — the unit strategy has no heuristic fallback to catch what a
+    single call misses, unlike "parts".
 
     Each chunk after the first is told which unit names earlier chunks
     already established, so the same physical unit doesn't get renamed
@@ -718,8 +821,8 @@ def _run_unit_batches(
     known_units: list[str] = []  # insertion order, for a stable/readable hint
     total = len(candidates)
 
-    for start in range(0, total, _LLM_FILE_CAP):
-        chunk = candidates[start:start + _LLM_FILE_CAP]
+    for start in range(0, total, _UNIT_LLM_FILE_CAP):
+        chunk = candidates[start:start + _UNIT_LLM_FILE_CAP]
         prefix = ""
         if known_units:
             prefix = (
@@ -730,7 +833,7 @@ def _run_unit_batches(
             )
         _log_step(
             "llm_batch", sending=len(chunk), of=total,
-            batch=start // _LLM_FILE_CAP + 1,
+            batch=start // _UNIT_LLM_FILE_CAP + 1,
         )
         outcome = call_llm(chunk, _UNIT_SYSTEM_PROMPT, prefix)
         if outcome.status != "ok":
@@ -865,6 +968,9 @@ def run(
             _log_step("llm_dedupe", candidates=len(all_candidates), unique=len(representatives))
 
         parser = _parse_unit_suggestions if strategy == "unit" else _parse_suggestions
+        # Anthropic has no equivalent to OpenAI-style schema-constrained
+        # decoding in this API shape, so response_schema is OpenAI-path only.
+        response_schema = _UNIT_JSON_SCHEMA if strategy == "unit" else _PARTS_JSON_SCHEMA
 
         def _call_llm(chunk: list[dict[str, Any]], system_prompt: str, user_prefix: str = "") -> LlmOutcome:
             if api_type == "anthropic":
@@ -875,6 +981,7 @@ def run(
             return _llm_refine_openai(
                 chunk, base_url, model, api_key, timeout=timeout,
                 system_prompt=system_prompt, user_prefix=user_prefix, parser=parser,
+                response_schema=response_schema,
             )
 
         if not representatives:
