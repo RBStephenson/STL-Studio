@@ -687,7 +687,11 @@ off to keep each segment's original casing and spacing.
   each, with a move-kind chip (move / rename / case rename / in place / merge) and
   blocker chips for anything unsafe (collision, over-length or reserved name,
   unclassifiable, symlink, multi-directory, escapes-scan-root, missing files).
-  Nothing is touched until you apply.
+  Nothing is touched until you apply. A **missing files** chip means the app's
+  own record of that file's path doesn't resolve on disk — usually because it
+  was renamed or moved outside the app. A full [scan](scanning-and-folders.md#full-scan-vs-per-creator-rescan)
+  cleans up file records left behind by an out-of-app rename; run one before
+  trusting a persistent "missing files" chip.
 - **Resolve flagged rows.** Expand an ineligible row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an
   over-long/reserved name. The preview regenerates as you type.

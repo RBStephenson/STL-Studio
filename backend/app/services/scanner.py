@@ -258,6 +258,9 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                     protected_creator_ids=failed_creator_ids,
                 )
                 removed += _prune_stale_paths(_db, available_paths)
+                _prune_stale_stl_files(
+                    _db, available_paths, protected_creator_ids=failed_creator_ids,
+                )
                 # Drop models that a newly-added ignore pattern now covers (#31).
                 removed += _prune_ignored(_db, available_paths)
                 # Slicer rows must go before the phantom prune so a model whose
@@ -354,6 +357,78 @@ def _prune_stale_paths(db: Session, available_root_paths: list[str]):
 
     _cascade_delete_models(db, stale_ids)
     logger.info(f"Post-scan: pruned {len(stale_ids)} models with missing folder paths")
+    return len(stale_ids)
+
+
+def _prune_stale_stl_files(
+    db: Session,
+    available_root_paths: list[str],
+    protected_creator_ids: set[int] | None = None,
+):
+    """Remove STLFile rows whose recorded path no longer exists on disk, for
+    models whose own folder IS confirmed present this run.
+
+    _index_stl_files (the per-folder indexer) is additive-only: it inserts a
+    row for any on-disk file not already indexed by exact path, but never
+    removes one whose file has since vanished under that exact path — e.g. a
+    bulk rename done outside the app (case/hyphenation change, a renamed
+    scale suffix, etc.). Left alone, those rows never go away on their own:
+    the model's folder still exists (so _prune_stale_paths doesn't catch it)
+    and the model still has other valid STL rows (so _prune_phantoms doesn't
+    either) — they just sit there forever looking like a "missing file" to
+    Reorganize and anything else that stats STLFile.path, even though the
+    file is right there under its new name.
+
+    Same safety rails as the other prunes: only rows belonging to a model
+    under a root confirmed ONLINE this run, whose folder itself still exists,
+    and not under a creator whose walk failed (protected_creator_ids) — a
+    transient mount hiccup or partial walk must never look like a legitimate
+    rename. Cap-guarded like the others against a botched run.
+
+    Returns the number of STL rows pruned (for the scan completion summary).
+    """
+    if not available_root_paths:
+        return 0
+    protected = protected_creator_ids or set()
+    roots_norm = [os.path.normcase(os.path.normpath(p)) for p in available_root_paths]
+
+    def _under_online_root(folder_path: str | None) -> bool:
+        if not folder_path:
+            return False
+        n = os.path.normcase(os.path.normpath(folder_path))
+        return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
+
+    models = (
+        db.query(Model.id, Model.folder_path, Model.creator_id)
+        .filter(Model.folder_path != None)  # noqa: E711
+        .all()
+    )
+    model_ids = [
+        m.id for m in models
+        if m.creator_id not in protected
+        and _under_online_root(m.folder_path)
+        and Path(m.folder_path).exists()
+    ]
+    if not model_ids:
+        return 0
+
+    total = 0
+    stale_ids: list[int] = []
+    for i in range(0, len(model_ids), 500):
+        chunk = model_ids[i:i + 500]
+        rows = db.query(STLFile.id, STLFile.path).filter(STLFile.model_id.in_(chunk)).all()
+        total += len(rows)
+        stale_ids.extend(r.id for r in rows if not r.path or not os.path.exists(r.path))
+
+    if not stale_ids:
+        return 0
+    if _exceeds_prune_cap(len(stale_ids), total, "STL file path missing on disk"):
+        return 0
+
+    for i in range(0, len(stale_ids), 500):
+        db.query(STLFile).filter(STLFile.id.in_(stale_ids[i:i + 500])).delete(synchronize_session=False)
+    db.commit()
+    logger.info(f"Post-scan: pruned {len(stale_ids)} stale STL file row(s) (renamed/removed outside the app)")
     return len(stale_ids)
 
 
