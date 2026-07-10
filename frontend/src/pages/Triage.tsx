@@ -296,13 +296,22 @@ export default function Triage() {
       <div className="flex items-center justify-center gap-6 text-xs text-text-muted">
         {(
           [
-            ["→ / Space", "Looks Good"],
-            ["S", "Skip"],
-            ["←", "Back"],
+            ["→ / Space", "dismiss (looks fine)"],
+            ["S", "skip"],
+            ["←", "back"],
           ] as [string, string][]
         ).map(([key, label]) => (
           <span key={key} className="flex items-center gap-1.5">
-            <kbd className="bg-panel-secondary px-1.5 py-0.5 rounded border border-border font-mono">
+            <kbd
+              className="rounded font-mono"
+              style={{
+                background: "#1c1e26",
+                border: "1px solid #1c1e24",
+                padding: "2px 7px",
+                fontSize: "11.5px",
+                color: "#dcdde2",
+              }}
+            >
               {key}
             </kbd>
             {label}
