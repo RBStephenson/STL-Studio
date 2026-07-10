@@ -7,6 +7,7 @@ import { useToast } from "../context/ToastContext";
 import CollectionCoverPicker from "../components/CollectionCoverPicker";
 import CreateCollectionModal from "../components/CreateCollectionModal";
 import { errMsg } from "../utils/err";
+import ErrorState from "../components/ErrorState";
 
 function CollectionCard({
   col,
@@ -176,8 +177,18 @@ export default function Collections() {
   const { toast } = useToast();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [creating, setCreating] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => { api.collections.list().then(setCollections).catch(() => {}); }, []);
+  const load = () => {
+    setLoading(true);
+    setLoadError(null);
+    api.collections.list()
+      .then(setCollections)
+      .catch((e) => setLoadError(errMsg(e) || "Could not load collections."))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
 
   const addCreated = (col: Collection) => {
     setCollections((prev) => [...prev, { ...col, model_count: 0 }]);
@@ -235,7 +246,11 @@ export default function Collections() {
         />
       )}
 
-      {collections.length === 0 ? (
+      {loading ? (
+        <div className="flex justify-center py-24 text-text-secondary-alt text-sm">Loading…</div>
+      ) : loadError ? (
+        <ErrorState title="Couldn't load collections" message={loadError} onRetry={load} />
+      ) : collections.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-text-muted">
           <FolderOpen size={48} />
           <p className="mt-3">No collections yet</p>
