@@ -13,6 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { api, Model, ModelList } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import BulkTagBar from "../components/BulkTagBar";
+import ErrorState from "../components/ErrorState";
 import { useToast } from "../context/ToastContext";
 import { useCollections } from "../hooks/queries/collections";
 import { invalidateModelViews } from "../hooks/queries/invalidation";
@@ -66,6 +67,11 @@ export default function Queue() {
   const printed = printedQuery.data?.items ?? [];
   const collections = useCollections().data ?? [];
   const loading = queuedQuery.isPending || printedQuery.isPending;
+  const isError = queuedQuery.isError || printedQuery.isError;
+  const errorMessage = (queuedQuery.error as Error)?.message
+    || (printedQuery.error as Error)?.message
+    || "Could not load the print queue.";
+  const retry = () => { queuedQuery.refetch(); printedQuery.refetch(); };
 
   const toggleSelect = useCallback((id: number) => {
     setSelection(prev => {
@@ -131,6 +137,8 @@ export default function Queue() {
             <div key={i} className="aspect-square bg-panel rounded-lg animate-pulse" />
           ))}
         </div>
+      ) : isError ? (
+        <ErrorState title="Couldn't load the print queue" message={errorMessage} onRetry={retry} />
       ) : queued.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-text-muted">
           <Printer size={40} className="mb-3 opacity-40" />

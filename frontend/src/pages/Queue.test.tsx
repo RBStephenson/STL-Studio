@@ -70,6 +70,28 @@ function renderQueue() {
   );
 }
 
+describe("Queue error state", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    reorderQueue.mockResolvedValue({ ok: true, updated: 0 });
+  });
+
+  it("shows the shared error state when the queue fails to load, with a working Retry", async () => {
+    list.mockRejectedValueOnce(new Error("Network down"));
+    renderQueue();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Network down");
+    expect(screen.getByText("Couldn't load the print queue")).toBeInTheDocument();
+
+    list.mockImplementation(async (params: Record<string, unknown>) => {
+      if (params.print_status === "queued") return { items: [queuedModel], total: 1 };
+      return { items: [], total: 0 };
+    });
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByText("Dragon")).toBeInTheDocument();
+  });
+});
+
 describe("Queue cache coherence (#848)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
