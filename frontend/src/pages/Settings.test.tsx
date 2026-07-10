@@ -14,7 +14,7 @@ const goTab = async (label: RegExp | string) => {
   await userEvent.click(btn);
   // Wait for the tab to become active — navigate() + useEffect chain may span
   // two React render cycles, so we wait until the button reflects active state.
-  await waitFor(() => expect(btn).toHaveClass("border-accent-start"));
+  await waitFor(() => expect(btn).toHaveAttribute("aria-current", "page"));
 };
 
 vi.mock("../api/client", () => ({
@@ -181,7 +181,7 @@ describe("Settings – Painting Guides toggle (#180)", () => {
     vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/painting/i);
+    await goTab(/features/i);
 
     const checkbox = await screen.findByRole("checkbox", { name: /enable painting guides/i });
     expect(checkbox).not.toBeChecked();
@@ -199,7 +199,7 @@ describe("Settings – Painting Guides toggle (#180)", () => {
     vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ painting_guides_enabled: false }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/painting/i);
+    await goTab(/features/i);
 
     const checkbox = await screen.findByRole("checkbox", { name: /enable painting guides/i, checked: true });
 
@@ -215,7 +215,7 @@ describe("Settings – Painting Guides toggle (#180)", () => {
     vi.mocked(api.settings.update).mockRejectedValueOnce(new Error("DB locked"));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/painting/i);
+    await goTab(/features/i);
 
     const checkbox = await screen.findByRole("checkbox", { name: /enable painting guides/i });
     await userEvent.click(checkbox);
@@ -262,7 +262,7 @@ describe("Settings – Scan ignore patterns (#31)", () => {
     );
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/scanning/i);
+    await goTab(/library/i);
 
     // Scope to the ignore-patterns list — "WIP" also appears in the example text.
     const patternsList = await screen.findByTestId("ignore-patterns");
@@ -281,7 +281,7 @@ describe("Settings – Scan ignore patterns (#31)", () => {
     vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ scan_ignore_patterns: ["WIP"] }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/scanning/i);
+    await goTab(/library/i);
 
     const patternsList = await screen.findByTestId("ignore-patterns");
     await within(patternsList).findByText("WIP");
@@ -301,7 +301,7 @@ describe("Settings – Scan ignore patterns (#31)", () => {
     );
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/scanning/i);
+    await goTab(/library/i);
 
     await userEvent.click(await screen.findByRole("button", { name: /remove WIP/i }));
 
@@ -320,7 +320,7 @@ describe("Settings – Scan tag rules (#31)", () => {
     );
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/scanning/i);
+    await goTab(/library/i);
 
     await userEvent.type(await screen.findByPlaceholderText(/keyword/i), "Aztec");
     await userEvent.type(screen.getByPlaceholderText(/tag \(/i), "civ");
@@ -339,7 +339,7 @@ describe("Settings – Scan tag rules (#31)", () => {
     vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ scan_tag_rules: [] }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/scanning/i);
+    await goTab(/library/i);
 
     await userEvent.click(await screen.findByRole("button", { name: /remove Aztec to civ/i }));
 
@@ -358,7 +358,7 @@ describe("Settings – Scan parts names (#31)", () => {
     );
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/scanning/i);
+    await goTab(/library/i);
 
     await userEvent.type(await screen.findByPlaceholderText(/Sprues/i), "Sprues");
     await userEvent.click(screen.getAllByRole("button", { name: /^add$/i })[2]);
@@ -372,7 +372,7 @@ describe("Settings – Scan parts names (#31)", () => {
     vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ scan_parts_names: [] }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/scanning/i);
+    await goTab(/library/i);
 
     await userEvent.click(await screen.findByRole("button", { name: /remove Sprues/i }));
 
@@ -389,7 +389,7 @@ describe("Settings – Library page size (#32)", () => {
     vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ library_page_size: 96 }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/preferences/i);
+    await goTab(/general/i);
 
     await userEvent.click(await screen.findByRole("button", { name: "96" }));
 
@@ -406,7 +406,7 @@ describe("Settings - Image gallery preferences", () => {
     vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ gallery_enabled: false }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/preferences/i);
+    await goTab(/general/i);
 
     await userEvent.click(await screen.findByRole("checkbox", { name: /enable image gallery/i }));
 
@@ -423,7 +423,7 @@ describe("Settings - Image gallery preferences", () => {
     );
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
-    await goTab(/preferences/i);
+    await goTab(/general/i);
 
     await userEvent.click(screen.getByRole("button", { name: "20s" }));
     expect(api.settings.update).toHaveBeenCalledWith({ gallery_rotation_seconds: 20 });
