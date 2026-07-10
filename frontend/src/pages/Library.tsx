@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useLocation, Link } from "react-router-dom";
-import { AlertCircle, AlertTriangle, X, Star, Printer, FolderPlus, ArrowRight, EyeOff, Layers, Sparkles, Keyboard } from "lucide-react";
+import { AlertTriangle, FolderPlus, ArrowRight, Layers, Keyboard } from "lucide-react";
 import {
   PointerSensor, KeyboardSensor, useSensor, useSensors,
   DragStartEvent, DragEndEvent, Announcements,
 } from "@dnd-kit/core";
 import { gridKeyboardCoordinates } from "../utils/gridKeyboardCoordinates";
-import { api, Model, FilterPreset, LibrarySort, ModelList, PRINT_STATUS_LABELS } from "../api/client";
+import { api, Model, LibrarySort, ModelList } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { queryKeys } from "../hooks/queries/keys";
 import { useLibraryModels, useCreators, useModelStats, useAllTags } from "../hooks/queries/models";
@@ -16,7 +16,6 @@ import { useScanRootCount, useUnavailableRoots } from "../hooks/queries/scan";
 import { useGuideModelIds } from "../hooks/queries/guides";
 import ScanButton from "../components/ScanButton";
 import BulkTagBar from "../components/BulkTagBar";
-import HelpLink from "../components/HelpLink";
 import { useToast } from "../context/ToastContext";
 import { nextSelection } from "../utils/selection";
 import { modelLinkTo } from "../utils/modelLink";
@@ -25,7 +24,7 @@ import { resolveDragIntent, resolveGroupMergePayload } from "../utils/dragGroup"
 import { useLibraryKeyboard } from "../hooks/useLibraryKeyboard";
 import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import ShortcutsOverlay from "../components/ShortcutsOverlay";
-import FilterBar from "./library/FilterBar";
+import Sidebar, { useSidebarCollapsed } from "./library/Sidebar";
 import ModelGrid from "./library/ModelGrid";
 import PaginationBar from "./library/PaginationBar";
 import { errMsg } from "../utils/err";
@@ -45,27 +44,19 @@ export default function Library() {
   const {
     searchParams, setSearchParams,
     page, creatorId, excludeCreatorId, site, activeTag, excludeTag,
-    needsReview, nsfwParam, thumbParam, favParam, printStatusParam, excludePrinted,
-    excludedParam, minRating, supportParam, slicerParam, addedDays,
-    setParam, setParams, setPage,
-    searchInputRef, effectiveSort, changeSort, listParams,
+    needsReview, favParam, printStatusParam, excludePrinted,
+    excludedParam, supportParam, addedDays, searchInputRef,
+    setPage, effectiveSort, changeSort, listParams,
   } = filters;
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
 
   const queryClient = useQueryClient();
-  const [showFilters, setShowFilters] = useState(
-    !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || nsfwParam || thumbParam)
-  );
+  const [collapsed, setCollapsed] = useSidebarCollapsed();
   const [selection, setSelection] = useState<Set<number>>(new Set());
-  const { settings, upsertPreset, deletePreset: removePreset } = useAppSettings();
-  const presets = settings.filter_presets;
+  const { settings } = useAppSettings();
   const pageSize = settings.library_page_size;
-
-  const [savingPreset, setSavingPreset] = useState(false);
-  const [presetName, setPresetName] = useState("");
-  const presetInputRef = useRef<HTMLInputElement>(null);
 
   const scrollRestoredRef = useRef(false);
 
@@ -109,14 +100,10 @@ export default function Library() {
     }
   }, [loading]);
 
-  useEffect(() => {
-    if (savingPreset) presetInputRef.current?.focus();
-  }, [savingPreset]);
-
   const totalPages = Math.ceil(total / pageSize);
-  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || nsfwParam || thumbParam || favParam || printStatusParam || excludePrinted || minRating || supportParam || slicerParam || addedDays);
+  const hasFilters = !!(creatorId || excludeCreatorId || site || activeTag || excludeTag || needsReview || favParam || printStatusParam || excludePrinted || supportParam || addedDays);
 
-  // Current URL params as a preset-saveable string (excluding page)
+  // Current URL params, remembered for filter stickiness (excluding page)
   const currentQS = (() => {
     const p = new URLSearchParams(searchParams);
     p.delete("page");
@@ -147,24 +134,6 @@ export default function Library() {
     if (currentQS) sessionStorage.setItem(LIBRARY_QUERY_KEY, currentQS);
     else sessionStorage.removeItem(LIBRARY_QUERY_KEY);
   }, [currentQS]);
-
-  const applyPreset = (preset: FilterPreset) => {
-    const p = new URLSearchParams(preset.qs);
-    p.delete("page");
-    setSearchParams(p);
-  };
-
-  const deletePreset = (name: string) => {
-    void removePreset(name);
-  };
-
-  const confirmSavePreset = () => {
-    const name = presetName.trim();
-    if (!name) return;
-    void upsertPreset({ name, qs: currentQS });
-    setSavingPreset(false);
-    setPresetName("");
-  };
 
   // Anchor for shift-click range selection — the last card toggled without Shift.
   const selectAnchorRef = useRef<number | null>(null);
@@ -401,167 +370,71 @@ export default function Library() {
   };
 
   return (
-    <div className="p-6">
-      {/* A configured drive is unavailable (unmounted/disconnected) — #304 */}
-      {unavailableRoots.length > 0 && (
-        <div className="mb-6 rounded-xl border border-amber-700/60 bg-amber-950/40 p-4" role="alert">
-          <div className="flex items-start gap-3">
-            <div className="rounded-lg bg-amber-600/20 p-2 text-amber-300 shrink-0">
-              <AlertTriangle size={20} />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-sm font-semibold text-amber-100">
-                {unavailableRoots.length === 1 ? "A scan folder is unavailable" : "Some scan folders are unavailable"}
-              </h2>
-              <p className="text-sm text-amber-200/80 mt-1">
-                These folders couldn't be found — the drive may be disconnected or unmounted.
-                Models stored there won't load until it's reconnected.
-              </p>
-              <ul className="mt-2 space-y-0.5 text-xs font-mono text-amber-200/70">
-                {unavailableRoots.map((p) => <li key={p}>{p}</li>)}
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
+    <div className="flex items-stretch min-h-[calc(100vh-56px)]">
+      <Sidebar
+        collapsed={collapsed}
+        onToggleCollapsed={() => setCollapsed((c) => !c)}
+        total={total}
+        filters={filters}
+        creators={creators}
+        allTags={allTags}
+        stats={stats}
+        recentDays={settings.recent_days}
+        hasFilters={hasFilters}
+      />
 
-      {/* First-run onboarding: no scan folders configured yet */}
-      {scanRootCount === 0 && (
-        <div className="mb-6 rounded-xl border border-indigo-700/60 bg-indigo-950/40 p-5">
-          <div className="flex items-start gap-4">
-            <div className="rounded-lg bg-indigo-600/20 p-2.5 text-indigo-300 shrink-0">
-              <FolderPlus size={22} />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-lg font-semibold text-gray-100">Welcome to STL Studio 👋</h2>
-              <p className="text-sm text-gray-400 mt-1">
-                No folders are set up yet. Tell the app where your STL files live, then run a
-                scan to build your library.
-              </p>
-              <Link
-                to="/settings"
-                className="inline-flex items-center gap-1.5 mt-3 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
-              >
-                Add your STL folder in Settings
-                <ArrowRight size={15} />
-              </Link>
+      <div className="flex-1 min-w-0 p-6">
+        {/* A configured drive is unavailable (unmounted/disconnected) — #304 */}
+        {unavailableRoots.length > 0 && (
+          <div className="mb-6 rounded-xl border border-amber-700/60 bg-amber-950/40 p-4" role="alert">
+            <div className="flex items-start gap-3">
+              <div className="rounded-lg bg-amber-600/20 p-2 text-amber-300 shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-sm font-semibold text-amber-100">
+                  {unavailableRoots.length === 1 ? "A scan folder is unavailable" : "Some scan folders are unavailable"}
+                </h2>
+                <p className="text-sm text-amber-200/80 mt-1">
+                  These folders couldn't be found — the drive may be disconnected or unmounted.
+                  Models stored there won't load until it's reconnected.
+                </p>
+                <ul className="mt-2 space-y-0.5 text-xs font-mono text-amber-200/70">
+                  {unavailableRoots.map((p) => <li key={p}>{p}</li>)}
+                </ul>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-100">
-            Library
-            <HelpLink section="library" label="How the Library works" />
-          </h1>
-          <div className="flex items-center gap-3 mt-0.5">
-            <p className="text-sm text-gray-500">{total.toLocaleString()} models</p>
-            {stats && stats.needs_review > 0 && (
-              <button
-                onClick={() => setParam("needs_review", needsReview ? "" : "1")}
-                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
-                  needsReview
-                    ? "bg-amber-500 text-amber-950 font-medium"
-                    : "bg-amber-950/50 text-amber-400 hover:bg-amber-900/50"
-                }`}
-              >
-                <AlertCircle size={11} />
-                {stats.needs_review} need review
-              </button>
-            )}
-            {stats && stats.favorites > 0 && (
-              <button
-                onClick={() => setParam("is_favorite", favParam ? "" : "1")}
-                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
-                  favParam
-                    ? "bg-yellow-500 text-yellow-950 font-medium"
-                    : "bg-yellow-950/50 text-yellow-400 hover:bg-yellow-900/50"
-                }`}
-              >
-                <Star size={11} fill="currentColor" />
-                {stats.favorites} favorites
-              </button>
-            )}
-            {/* Print-status lifecycle filters (#166). The active chip shows an
-                X to clear; inactive chips show their count and filter on click. */}
-            {(["queued", "printing", "printed"] as const).map((s) => (
-              printStatusParam === s ? (
-                <button
-                  key={s}
-                  onClick={() => setParam("print_status", "")}
-                  className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded font-medium transition-colors ${
-                    s === "queued" ? "bg-sky-500 text-sky-950" :
-                    s === "printing" ? "bg-amber-500 text-amber-950" :
-                    "bg-emerald-500 text-emerald-950"
-                  }`}
+        {/* First-run onboarding: no scan folders configured yet */}
+        {scanRootCount === 0 && (
+          <div className="mb-6 rounded-xl border border-accent-end/60 bg-indigo-950/40 p-5">
+            <div className="flex items-start gap-4">
+              <div className="rounded-lg bg-accent-end/20 p-2.5 text-indigo-300 shrink-0">
+                <FolderPlus size={22} />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-lg font-semibold text-text-primary">Welcome to STL Studio 👋</h2>
+                <p className="text-sm text-text-secondary mt-1">
+                  No folders are set up yet. Tell the app where your STL files live, then run a
+                  scan to build your library.
+                </p>
+                <Link
+                  to="/settings"
+                  className="btn-cta inline-flex items-center gap-1.5 mt-3 px-4 py-2 rounded-lg text-white text-sm font-medium"
                 >
-                  <Printer size={11} />
-                  {PRINT_STATUS_LABELS[s]}
-                  <X size={10} />
-                </button>
-              ) : (stats && stats[s] > 0) ? (
-                <button
-                  key={s}
-                  onClick={() => setParams({ print_status: s, exclude_printed: "" })}
-                  title={`Show only ${PRINT_STATUS_LABELS[s]} models`}
-                  className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
-                    s === "queued" ? "bg-sky-950/50 text-sky-400 hover:bg-sky-900/50" :
-                    s === "printing" ? "bg-amber-950/50 text-amber-400 hover:bg-amber-900/50" :
-                    "bg-emerald-950/50 text-emerald-400 hover:bg-emerald-900/50"
-                  }`}
-                >
-                  <Printer size={11} />
-                  {stats[s]} {PRINT_STATUS_LABELS[s].toLowerCase()}
-                </button>
-              ) : null
-            ))}
-            {/* Hide-printed filter: excludes printed models while keeping variant
-                grouping on. Mutually exclusive with the print_status chips above. */}
-            <button
-              onClick={() => setParams({ exclude_printed: excludePrinted ? "" : "1", print_status: "" })}
-              title="Hide models you've already printed"
-              className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
-                excludePrinted
-                  ? "bg-rose-500 text-rose-950 font-medium"
-                  : "bg-rose-950/50 text-rose-400 hover:bg-rose-900/50"
-              }`}
-            >
-              <Printer size={11} />
-              hide printed
-              {excludePrinted && <X size={10} />}
-            </button>
-            <button
-              onClick={() => setParam("added_days", addedDays ? "" : String(settings.recent_days))}
-              title={`Models added in the last ${settings.recent_days} days, newest first`}
-              className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
-                addedDays
-                  ? "bg-indigo-500 text-indigo-950 font-medium"
-                  : "bg-indigo-950/50 text-indigo-400 hover:bg-indigo-900/50"
-              }`}
-            >
-              <Sparkles size={11} />
-              recently added
-            </button>
-            {stats && (stats.excluded > 0 || excludedParam) && (
-              <button
-                onClick={() => setParam("excluded", excludedParam ? "" : "1")}
-                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors ${
-                  excludedParam
-                    ? "bg-gray-500 text-gray-950 font-medium"
-                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                }`}
-              >
-                <EyeOff size={11} />
-                {stats.excluded} excluded
-              </button>
-            )}
+                  Add your STL folder in Settings
+                  <ArrowRight size={15} />
+                </Link>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 text-sm text-gray-400">
+        )}
+
+        {/* Toolbar */}
+        <div className="flex items-center justify-end gap-2.5 mb-4.5">
+          <label className="flex items-center gap-2 text-sm text-text-muted mr-auto sm:mr-0">
             Sort
             <select
               aria-label="Sort models"
@@ -569,7 +442,7 @@ export default function Library() {
               disabled={!!addedDays}
               title={addedDays ? "Sorted by date added while the Recently added filter is on" : undefined}
               onChange={(e) => changeSort(e.target.value as LibrarySort)}
-              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 disabled:opacity-50"
+              className="bg-panel-inset border border-border-divider rounded-lg px-2.5 py-1.5 text-sm text-text-primary-alt2 disabled:opacity-50"
             >
               <option value="name">Name</option>
               <option value="added">Date added</option>
@@ -581,75 +454,52 @@ export default function Library() {
             onClick={() => setShowShortcuts(true)}
             title="Keyboard shortcuts ( ? )"
             aria-label="Keyboard shortcuts"
-            className="p-1.5 rounded border border-gray-700 bg-gray-900 text-gray-400 hover:text-gray-100 hover:border-gray-500 transition-colors"
+            className="p-2 rounded-lg border border-border-divider bg-panel-inset text-text-secondary hover:text-text-primary transition-colors"
           >
             <Keyboard size={16} />
           </button>
           <ScanButton onScanComplete={fetchModels} />
         </div>
-      </div>
 
-      <FilterBar
-        filters={filters}
-        showFilters={showFilters}
-        setShowFilters={setShowFilters}
-        hasFilters={hasFilters}
-        creators={creators}
-        allTags={allTags}
-        presets={presets}
-        applyPreset={applyPreset}
-        deletePreset={deletePreset}
-        savingPreset={savingPreset}
-        setSavingPreset={setSavingPreset}
-        presetName={presetName}
-        setPresetName={setPresetName}
-        presetInputRef={presetInputRef}
-        confirmSavePreset={confirmSavePreset}
-      />
-
-      {/* Pagination (top) */}
-      {totalPages > 1 && (
-        <PaginationBar page={page} totalPages={totalPages} onPage={setPage} className="mb-6" />
-      )}
-
-      {/* Grid */}
-      <ModelGrid
-        loading={loading}
-        models={models}
-        selection={selection}
-        onSelect={toggleSelect}
-        onMutate={refreshStats}
-        excludedView={excludedParam}
-        onRemoved={handleRemoved}
-        guideModelIds={guideModelIds}
-        allTagSuggestions={allTags}
-        focusedIndex={focusedIndex}
-        gridRef={gridRef}
-        dndEnabled={dndEnabled}
-        dndSensors={dndSensors}
-        dndAnnouncements={dndAnnouncements}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onDragCancel={() => setDraggingId(null)}
-        draggingModel={draggingModel}
-        dragCount={dragCount}
-      />
-
-      {selection.size > 0 && (
-        <BulkTagBar
-          selectedIds={Array.from(selection)}
-          totalOnPage={models.length}
-          onSelectAll={selectAll}
-          onClear={clearSelection}
-          onDone={fetchModels}
-          collections={collections}
+        {/* Grid */}
+        <ModelGrid
+          loading={loading}
+          models={models}
+          selection={selection}
+          onSelect={toggleSelect}
+          onMutate={refreshStats}
+          excludedView={excludedParam}
+          onRemoved={handleRemoved}
+          guideModelIds={guideModelIds}
+          allTagSuggestions={allTags}
+          focusedIndex={focusedIndex}
+          gridRef={gridRef}
+          dndEnabled={dndEnabled}
+          dndSensors={dndSensors}
+          dndAnnouncements={dndAnnouncements}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onDragCancel={() => setDraggingId(null)}
+          draggingModel={draggingModel}
+          dragCount={dragCount}
         />
-      )}
 
-      {/* Pagination (bottom) */}
-      {totalPages > 1 && (
-        <PaginationBar page={page} totalPages={totalPages} onPage={setPage} />
-      )}
+        {selection.size > 0 && (
+          <BulkTagBar
+            selectedIds={Array.from(selection)}
+            totalOnPage={models.length}
+            onSelectAll={selectAll}
+            onClear={clearSelection}
+            onDone={fetchModels}
+            collections={collections}
+          />
+        )}
+
+        {/* Floating pagination */}
+        {totalPages > 1 && (
+          <PaginationBar page={page} totalPages={totalPages} onPage={setPage} />
+        )}
+      </div>
 
       {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} showDragGroup={dndEnabled} />}
 
@@ -660,14 +510,14 @@ export default function Library() {
           onClick={() => !merging && setPendingMerge(null)}
         >
           <div
-            className="w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-5 shadow-2xl"
+            className="w-full max-w-sm rounded-xl border border-border bg-panel p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2 mb-3">
-              <Layers size={18} className="text-indigo-400" />
-              <h2 className="text-lg font-semibold text-gray-100">Group as variants</h2>
+              <Layers size={18} className="text-accent-start" />
+              <h2 className="text-lg font-semibold text-text-primary">Group as variants</h2>
             </div>
-            <p className="text-sm text-gray-400 mb-3">
+            <p className="text-sm text-text-secondary mb-3">
               Name the variant group these two models will share. The grouping is
               saved and survives rescans.
             </p>
@@ -681,20 +531,20 @@ export default function Library() {
                 if (e.key === "Escape" && !merging) setPendingMerge(null);
               }}
               placeholder="Group name"
-              className="w-full px-3 py-2 rounded bg-gray-950 border border-gray-700 focus:border-indigo-500 text-sm text-gray-100 outline-none mb-4"
+              className="w-full px-3 py-2 rounded bg-panel-inset border border-border focus:border-accent-start text-sm text-text-primary outline-none mb-4"
             />
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setPendingMerge(null)}
                 disabled={merging}
-                className="px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sm text-gray-300 disabled:opacity-40"
+                className="px-3 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-sm text-text-primary-alt2 disabled:opacity-40"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmMerge}
                 disabled={merging || !mergeName.trim()}
-                className="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm text-white disabled:opacity-40"
+                className="px-3 py-1.5 rounded bg-accent-end hover:bg-accent-start text-sm text-white disabled:opacity-40"
               >
                 {merging ? "Grouping…" : "Group"}
               </button>
@@ -710,24 +560,24 @@ export default function Library() {
           onClick={() => !merging && setPendingGroupMerge(null)}
         >
           <div
-            className="w-full max-w-sm rounded-xl border border-gray-700 bg-gray-900 p-5 shadow-2xl"
+            className="w-full max-w-sm rounded-xl border border-border bg-panel p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2 mb-3">
-              <Layers size={18} className="text-indigo-400" />
-              <h2 className="text-lg font-semibold text-gray-100">Merge variant groups</h2>
+              <Layers size={18} className="text-accent-start" />
+              <h2 className="text-lg font-semibold text-text-primary">Merge variant groups</h2>
             </div>
-            <p className="text-sm text-gray-400 mb-4">
+            <p className="text-sm text-text-secondary mb-4">
               Move all{" "}
-              <span className="font-semibold text-gray-200">
+              <span className="font-semibold text-text-primary-alt">
                 {pendingGroupMerge.source.variant_count ?? 1}
               </span>{" "}
               models from{" "}
-              <span className="font-semibold text-gray-200">
+              <span className="font-semibold text-text-primary-alt">
                 "{pendingGroupMerge.source.character}"
               </span>{" "}
               into{" "}
-              <span className="font-semibold text-gray-200">
+              <span className="font-semibold text-text-primary-alt">
                 "{pendingGroupMerge.target.character
                   || pendingGroupMerge.target.title
                   || pendingGroupMerge.target.name}"
@@ -738,14 +588,14 @@ export default function Library() {
               <button
                 onClick={() => setPendingGroupMerge(null)}
                 disabled={merging}
-                className="px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-sm text-gray-300 disabled:opacity-40"
+                className="px-3 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-sm text-text-primary-alt2 disabled:opacity-40"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmGroupMerge}
                 disabled={merging}
-                className="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm text-white disabled:opacity-40"
+                className="px-3 py-1.5 rounded bg-accent-end hover:bg-accent-start text-sm text-white disabled:opacity-40"
               >
                 {merging ? "Merging…" : "Merge"}
               </button>

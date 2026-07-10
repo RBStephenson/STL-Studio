@@ -59,7 +59,7 @@ export default function ScanButton({ onScanComplete }: Props) {
   return (
     <div className="flex items-center gap-3">
       {status?.running && (
-        <span className="text-xs text-gray-400 animate-pulse">
+        <span className="text-xs text-text-secondary animate-pulse">
           {cancelling ? "Cancelling…" : `Scanning… ${status.models_found ?? 0} models`}
         </span>
       )}
@@ -68,7 +68,7 @@ export default function ScanButton({ onScanComplete }: Props) {
           onClick={cancel}
           disabled={cancelling}
           title="Cancel scan"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed border border-gray-600 text-sm text-gray-200 transition-colors"
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-panel-secondary hover:bg-border disabled:opacity-40 disabled:cursor-not-allowed border border-border-divider text-sm text-text-primary-alt transition-colors"
         >
           <Square size={13} fill="currentColor" />
           {cancelling ? "Cancelling…" : "Cancel"}
@@ -76,7 +76,7 @@ export default function ScanButton({ onScanComplete }: Props) {
       ) : (
         <button
           onClick={start}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-sm transition-colors"
+          className="btn-cta flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold text-white"
         >
           <RefreshCw size={14} />
           Scan Library
