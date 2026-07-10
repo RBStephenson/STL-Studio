@@ -488,7 +488,7 @@ function PhaseEditor({ value, onChange, tabIndex, phaseIndex, dragHandle, ...ctl
   );
 }
 
-function TabEditor({ value, onChange, tabIndex, dragHandle, ...ctl }: { value: DraftTab; onChange: (v: DraftTab) => void; tabIndex: number; dragHandle?: ReactNode } & RowControls) {
+function TabEditor({ value, onChange, tabIndex, dragHandle, ctl }: { value: DraftTab; onChange: (v: DraftTab) => void; tabIndex: number; dragHandle?: ReactNode; ctl?: RowControls }) {
   const set = (patch: Partial<DraftTab>) => onChange({ ...value, ...patch });
 
   const sensors = useSensors(
@@ -508,7 +508,7 @@ function TabEditor({ value, onChange, tabIndex, dragHandle, ...ctl }: { value: D
       <div className="flex items-center gap-2">
         {dragHandle}
         <input aria-label="Tab name" placeholder="Tab name *" className={`${field} font-medium`} value={value.name} onChange={(e) => set({ name: e.target.value })} />
-        <RowButtons {...ctl} />
+        {ctl && <RowButtons {...ctl} />}
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <div><label className={labelCls}>Section heading</label><input className={field} value={value.heading} onChange={(e) => set({ heading: e.target.value })} /></div>
@@ -557,8 +557,45 @@ interface Props {
   onPreviewChange?: (tabs: GuideTab[]) => void;
 }
 
+const stepCount = (t: DraftTab) => t.phases.reduce((n, p) => n + p.steps.length, 0);
+
+// One row in the spine sidebar (design/README.md "New Since Last Handoff" —
+// Guide Content Editor sidebar tab nav): tab name + step count, active-state
+// styling mirrors the Settings sidebar (STUDIO-142).
+function SpineTabRow({
+  value, active, onSelect, dragHandle, ...ctl
+}: { value: DraftTab; active: boolean; onSelect: () => void; dragHandle?: ReactNode } & RowControls) {
+  return (
+    <div
+      className="flex items-center gap-1.5 group"
+      style={{
+        padding: "9px 12px",
+        background: active ? "#1c1e2e" : "transparent",
+        borderLeft: active ? "2px solid #6366f1" : "2px solid transparent",
+        borderRadius: "0 8px 8px 0",
+      }}
+    >
+      {dragHandle}
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={active ? "page" : undefined}
+        className="flex-1 min-w-0 text-left text-sm truncate"
+        style={{ color: active ? "#f4f4f6" : "#8b8f9c" }}
+      >
+        {value.name.trim() || "Untitled tab"}
+        <span className="block text-[11px] text-text-muted">{stepCount(value)} step{stepCount(value) === 1 ? "" : "s"}</span>
+      </button>
+      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+        <RowButtons {...ctl} />
+      </div>
+    </div>
+  );
+}
+
 export default function GuideSpineEditor({ initialTabs, busy, error, onSave, onCancel, onPreviewChange }: Props) {
   const [tabs, setTabs] = useState<DraftTab[]>(() => toDraft(initialTabs));
+  const [activeSpineTab, setActiveSpineTab] = useState(0);
   const [localError, setLocalError] = useState<string | null>(null);
 
   // Push the live preview projection whenever the draft changes (and on mount).
@@ -593,39 +630,67 @@ export default function GuideSpineEditor({ initialTabs, busy, error, onSave, onC
 
   const shown = localError || error;
 
+  const addTab = () => {
+    setTabs((cur) => [...cur, { _key: nextKey(), name: "", dom_id: "", heading: "", intro: "", phases: [] }]);
+    setActiveSpineTab(tabs.length); // jump to the new tab
+  };
+  const removeTab = (i: number) => {
+    setTabs((cur) => removeAt(cur, i));
+    setActiveSpineTab((cur) => Math.min(cur, tabs.length - 2 < 0 ? 0 : tabs.length - 2));
+  };
+
   return (
     <div className="space-y-4">
       {shown && (
         <p role="alert" className="text-sm text-rose-400 bg-rose-950/30 border border-rose-900/50 rounded px-3 py-2">{shown}</p>
       )}
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onTabDragEnd}>
-        <SortableContext items={tabs.map((t) => t._key)} strategy={verticalListSortingStrategy}>
-          {tabs.map((t, i) => (
-            <SortableItem key={t._key} id={t._key}>
-              {(handle) => (
-                <TabEditor
-                  value={t} tabIndex={i}
-                  dragHandle={handle}
-                  onChange={(v) => setTabs((cur) => replaceAt(cur, i, v))}
-                  onUp={() => setTabs((cur) => move(cur, i, -1))}
-                  onDown={() => setTabs((cur) => move(cur, i, 1))}
-                  onRemove={() => setTabs((cur) => removeAt(cur, i))}
-                  removeLabel="Remove tab"
-                />
-              )}
-            </SortableItem>
-          ))}
-        </SortableContext>
-      </DndContext>
+      <div className="flex gap-4 items-start">
+        {/* Spine tab sidebar */}
+        <nav className="w-[200px] shrink-0 flex flex-col gap-0.5" aria-label="Guide content tabs">
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onTabDragEnd}>
+            <SortableContext items={tabs.map((t) => t._key)} strategy={verticalListSortingStrategy}>
+              {tabs.map((t, i) => (
+                <SortableItem key={t._key} id={t._key}>
+                  {(handle) => (
+                    <SpineTabRow
+                      value={t}
+                      active={i === activeSpineTab}
+                      onSelect={() => setActiveSpineTab(i)}
+                      dragHandle={handle}
+                      onUp={() => setTabs((cur) => move(cur, i, -1))}
+                      onDown={() => setTabs((cur) => move(cur, i, 1))}
+                      onRemove={() => removeTab(i)}
+                      removeLabel={`Remove tab ${t.name.trim() || "Untitled tab"}`}
+                    />
+                  )}
+                </SortableItem>
+              ))}
+            </SortableContext>
+          </DndContext>
+          <button
+            type="button"
+            onClick={addTab}
+            className="inline-flex items-center gap-1.5 text-sm text-indigo-400 hover:text-indigo-300 px-3 py-2"
+          >
+            <Plus size={14} /> Add tab
+          </button>
+        </nav>
 
-      <button
-        type="button"
-        onClick={() => setTabs((cur) => [...cur, { _key: nextKey(), name: "", dom_id: "", heading: "", intro: "", phases: [] }])}
-        className="inline-flex items-center gap-1.5 bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt text-sm px-3 py-1.5 rounded transition-colors"
-      >
-        <Plus size={15} /> Add tab
-      </button>
+        {/* Selected tab's steps for editing */}
+        <div className="flex-1 min-w-0">
+          {tabs[activeSpineTab] ? (
+            <TabEditor
+              key={tabs[activeSpineTab]._key}
+              value={tabs[activeSpineTab]}
+              tabIndex={activeSpineTab}
+              onChange={(v) => setTabs((cur) => replaceAt(cur, activeSpineTab, v))}
+            />
+          ) : (
+            <p className="text-sm text-text-secondary-alt">No tabs yet — add one to start building this guide.</p>
+          )}
+        </div>
+      </div>
 
       <div className="flex items-center gap-2 pt-2">
         <button type="button" onClick={save} disabled={busy}
