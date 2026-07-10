@@ -452,6 +452,9 @@ def _to_pascal_case(s: str) -> str:
     return " ".join(w.capitalize() for w in words)
 
 
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
 def _prefix_unit_name(unit: str, part_name: str) -> str:
     """Compose a unit-strategy file's final part_name as "<unit> <part>".
 
@@ -466,13 +469,37 @@ def _prefix_unit_name(unit: str, part_name: str) -> str:
     keeps the prompt's token savings while making the applied name
     unambiguous on its own (#941).
 
-    Guards against double-prefixing a part_name a model returned already
-    including the unit name despite the prompt asking it not to.
+    A single-file "unit" (e.g. "Escaraba_Flamer.stl") commonly gets a
+    part_name that's just the unit name's own distinguishing word
+    ("Flamer") — naively concatenating produced "Escaraba Flamer Flamer"
+    (#942-follow-up). So before concatenating, check for redundancy on
+    normalized (lowercased, punctuation/whitespace-stripped) text:
+      - part_name already contains the unit name (and possibly more), e.g.
+        unit "Royal Guard 1" + part_name "Royal Guard 1 Head" -> kept as-is,
+        it's already the full compound name.
+      - the unit name already says everything part_name does, e.g. unit
+        "Escaraba Flamer" + part_name "Flamer" -> just the unit name.
+      - otherwise, concatenated as before.
+
+    This is a plain substring check on normalized text (so e.g. unit
+    "Escaraba Leftarm 1" + part_name "Left Arm" is caught as redundant —
+    "leftarm" is a substring of "escarabaleftarm1" either way spacing goes),
+    not a word-aware one — a part_name using different word order or a
+    synonym for the same physical thing the unit name already implies won't
+    be recognized as redundant, and the model's own inconsistent
+    spelling/spacing for the unit name itself (e.g. "Leftarm" instead of
+    "Left Arm") isn't corrected here either; that's a naming-quality nuance
+    of the LLM's own unit grouping, not something this finalization step
+    can fix after the fact.
     """
     if not part_name:
         return part_name
-    if part_name.lower().startswith(unit.lower()):
+    unit_norm = _NON_ALNUM_RE.sub("", unit.lower())
+    part_norm = _NON_ALNUM_RE.sub("", part_name.lower())
+    if unit_norm and unit_norm in part_norm:
         return part_name
+    if part_norm and part_norm in unit_norm:
+        return unit
     return f"{unit} {part_name}"
 
 
