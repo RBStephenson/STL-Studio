@@ -31,6 +31,26 @@ function renderPage() {
   return render(<MemoryRouter><Triage /></MemoryRouter>);
 }
 
+describe("Triage loading skeleton", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("shows the loading skeleton while pending, then swaps to real content", async () => {
+    const { api } = await import("../api/client");
+    let resolveList!: (v: Awaited<ReturnType<typeof api.models.list>>) => void;
+    vi.mocked(api.models.list).mockReturnValueOnce(
+      new Promise((resolve) => { resolveList = resolve; })
+    );
+    renderPage();
+
+    expect(screen.getByTestId("triage-loading-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText("Widget")).toBeNull();
+
+    resolveList({ items: [MODEL] } as unknown as Awaited<ReturnType<typeof api.models.list>>);
+    expect(await screen.findByText("Widget")).toBeInTheDocument();
+    expect(screen.queryByTestId("triage-loading-skeleton")).toBeNull();
+  });
+});
+
 describe("Triage error state", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 

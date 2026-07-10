@@ -8,6 +8,7 @@ import { api, Model } from "../api/client";
 import ScanButton from "../components/ScanButton";
 import HelpLink from "../components/HelpLink";
 import ErrorState from "../components/ErrorState";
+import { SkeletonBlock, SkeletonPanel } from "../components/SkeletonBlock";
 
 const BATCH_SIZE = 50;
 
@@ -109,8 +110,25 @@ export default function Triage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96 text-text-secondary">
-        Loading review queue…
+      <div className="max-w-5xl mx-auto px-6 py-6 flex flex-col gap-5" data-testid="triage-loading-skeleton">
+        <div className="flex items-center justify-between">
+          <SkeletonBlock className="h-6 w-40" />
+          <SkeletonBlock className="h-8 w-24" />
+        </div>
+        <div className="w-full bg-panel-secondary rounded-full h-1" />
+        <SkeletonPanel className="bg-panel border border-border-subtle rounded-xl flex min-h-[400px]">
+          <div className="w-72 shrink-0 bg-panel-inset" />
+          <div className="flex-1 p-6 flex flex-col gap-4">
+            <SkeletonBlock className="h-3 w-24" />
+            <SkeletonBlock className="h-6 w-1/2" />
+            <SkeletonBlock className="h-3 w-full" />
+            <div className="mt-auto flex items-center gap-2">
+              <SkeletonBlock className="h-9 w-20" />
+              <SkeletonBlock className="h-9 w-20" />
+              <SkeletonBlock className="h-9 w-28 ml-auto" />
+            </div>
+          </div>
+        </SkeletonPanel>
       </div>
     );
   }
