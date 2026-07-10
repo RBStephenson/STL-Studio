@@ -64,11 +64,23 @@ export default function GuidesPage() {
       )}
 
       {!loading && !error && guides.length === 0 && (
-        <div className="bg-panel border border-border-subtle rounded-lg px-6 py-12 text-center">
-          <p className="text-sm text-text-secondary mb-1">No guides yet</p>
-          <p className="text-xs text-text-muted">
-            Guides you create or import will appear here, with color recipes, techniques, and printable exports.
+        <div
+          className="flex flex-col items-center text-center rounded-[14px] border border-dashed px-8 py-16"
+          style={{ borderColor: "#1e2027", background: "#0e0f13" }}
+        >
+          <div
+            className="flex items-center justify-center w-14 h-14 rounded-full mb-4"
+            style={{ background: "#26163a" }}
+          >
+            <Paintbrush size={22} strokeWidth={1.6} style={{ color: "var(--color-status-fuchsia)" }} />
+          </div>
+          <p className="text-base font-bold text-text-primary-alt mb-2">No painting guides yet</p>
+          <p className="text-[13px] leading-relaxed text-text-secondary-alt max-w-[320px] mb-6">
+            Guides walk through a model step by step, with paint recipes pulled straight from your shelf.
           </p>
+          <Link to="/painting/guides/new" className="btn-cta inline-flex items-center gap-1.5 text-white text-sm px-4 py-2 rounded">
+            <Plus size={15} /> New guide
+          </Link>
         </div>
       )}
 

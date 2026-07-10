@@ -1,5 +1,33 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { triggerBlobDownload } from "./base";
+import { request, triggerBlobDownload } from "./base";
+
+describe("request", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves without parsing a body on 204 No Content", async () => {
+    // Regression: several DELETE endpoints (e.g. AI API config) return 204
+    // with an empty body. Calling res.json() unconditionally on it throws
+    // ("Unexpected end of JSON input"), surfacing as a JSON error on an
+    // otherwise-successful delete.
+    const jsonSpy = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, status: 204, statusText: "No Content", json: jsonSpy,
+    }));
+
+    await expect(request("/settings/ai-apis/1", { method: "DELETE" })).resolves.toBeUndefined();
+    expect(jsonSpy).not.toHaveBeenCalled();
+  });
+
+  it("still parses the body for a normal 200 JSON response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, status: 200, statusText: "OK", json: vi.fn().mockResolvedValue({ id: 1 }),
+    }));
+
+    await expect(request("/settings/ai-apis")).resolves.toEqual({ id: 1 });
+  });
+});
 
 describe("triggerBlobDownload (STUDIO-94)", () => {
   afterEach(() => {

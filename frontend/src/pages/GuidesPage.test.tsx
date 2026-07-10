@@ -51,7 +51,11 @@ describe("GuidesPage", () => {
       total: 0, page: 1, page_size: 200, items: [],
     });
     renderPage();
-    expect(await screen.findByText("No guides yet")).toBeInTheDocument();
+    expect(await screen.findByText("No painting guides yet")).toBeInTheDocument();
+    // Header always has a "New guide" link; the empty-state CTA adds a second.
+    const newGuideLinks = screen.getAllByRole("link", { name: /new guide/i });
+    expect(newGuideLinks).toHaveLength(2);
+    newGuideLinks.forEach((l) => expect(l).toHaveAttribute("href", "/painting/guides/new"));
   });
 
   it("opens the import modal from the header button (#277)", async () => {

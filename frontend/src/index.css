@@ -63,6 +63,19 @@
     border-color: var(--color-accent-start);
     box-shadow: var(--shadow-focus-ring);
   }
+
+  /* Keyboard-only focus ring for interactive primitives (design/README.md
+     "New Since Last Handoff" — Focus-visible accessibility ring). Covers nav
+     buttons, tabs, chips, and cards without per-component classes, since
+     those primitives are all rendered as <button>/<a>/role="tab" elements. */
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  [role="tab"]:focus-visible {
+    outline: 2px solid var(--color-accent-start);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
 }
 
 /* Global micro-interaction utilities (design/README.md Micro-interactions
@@ -95,6 +108,28 @@
   }
   .card-interactive:hover .drag-grip {
     opacity: 1;
+  }
+
+  /* Skeleton shimmer sweep (design/README.md "New Since Last Handoff" — Guide
+     Reader loading state). One absolutely-positioned overlay per skeleton
+     panel; the diagonal highlight passes over every block underneath together
+     instead of animating each block individually. */
+  @keyframes stl-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .stl-shimmer-overlay {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .stl-shimmer-overlay::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.06) 50%, transparent 65%);
+    animation: stl-shimmer 1.4s linear infinite;
   }
 }
 
