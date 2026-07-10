@@ -61,20 +61,20 @@ export default function CollectionsSection({ modelId, initialIds }: { modelId: n
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+        <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
           <FolderOpen size={14} />
           Collections
         </h3>
         <button
           onClick={() => setOpen((v) => !v)}
-          className="text-xs text-gray-500 hover:text-indigo-400 transition-colors"
+          className="text-xs text-text-secondary-alt hover:text-indigo-400 transition-colors"
         >
           {open ? "Done" : "Manage"}
         </button>
       </div>
 
       {memberCollections.length === 0 && !open && (
-        <p className="text-xs text-gray-600">Not in any collections</p>
+        <p className="text-xs text-text-muted">Not in any collections</p>
       )}
 
       {memberCollections.length > 0 && (
@@ -92,26 +92,26 @@ export default function CollectionsSection({ modelId, initialIds }: { modelId: n
       )}
 
       {open && (
-        <div className="flex flex-col gap-1 bg-gray-900 border border-gray-800 rounded-lg p-2">
+        <div className="flex flex-col gap-1 bg-panel border border-border-subtle rounded-lg p-2">
           {collections.map((c) => (
             <button
               key={c.id}
               onClick={() => toggle(c)}
-              className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-800 text-sm text-left transition-colors"
+              className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-panel-secondary text-sm text-left transition-colors"
             >
               <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
                 memberIds.has(c.id)
-                  ? "bg-indigo-600 border-indigo-500"
-                  : "border-gray-600"
+                  ? "bg-accent-end border-accent-start"
+                  : "border-border-divider"
               }`}>
                 {memberIds.has(c.id) && <Check size={10} className="text-white" strokeWidth={3} />}
               </span>
-              <span className="text-gray-200 truncate">{c.name}</span>
-              <span className="text-xs text-gray-600 ml-auto">{c.model_count}</span>
+              <span className="text-text-primary-alt truncate">{c.name}</span>
+              <span className="text-xs text-text-muted ml-auto">{c.model_count}</span>
             </button>
           ))}
           {collections.length === 0 && (
-            <p className="text-xs text-gray-600 px-2 py-1">No collections yet</p>
+            <p className="text-xs text-text-muted px-2 py-1">No collections yet</p>
           )}
           {creating ? (
             <div className="flex gap-1 mt-1 px-1">
@@ -122,15 +122,15 @@ export default function CollectionsSection({ modelId, initialIds }: { modelId: n
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && createAndAdd()}
-                className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                className="flex-1 bg-panel-secondary border border-border rounded px-2 py-1 text-xs text-text-primary focus:outline-none focus:border-accent-start"
               />
-              <button onClick={createAndAdd} className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs">Create</button>
-              <button onClick={() => setCreating(false)} className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs text-gray-400">Cancel</button>
+              <button onClick={createAndAdd} className="px-2 py-1 rounded bg-accent-end hover:bg-accent-start text-xs">Create</button>
+              <button onClick={() => setCreating(false)} className="px-2 py-1 rounded bg-panel-secondary hover:bg-panel-secondary text-xs text-text-secondary">Cancel</button>
             </div>
           ) : (
             <button
               onClick={() => setCreating(true)}
-              className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-gray-800 text-xs text-gray-500 hover:text-indigo-400 transition-colors mt-0.5"
+              className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-panel-secondary text-xs text-text-secondary-alt hover:text-indigo-400 transition-colors mt-0.5"
             >
               <Plus size={12} /> New collection
             </button>
