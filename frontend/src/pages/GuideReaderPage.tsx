@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Printer, Globe, Undo2, Trash2, Pencil, ListTree } from "lucide-react";
 import { api, Guide } from "../api/client";
 import GuideReader from "../components/guide/GuideReader";
+import GuideReaderSkeleton from "../components/guide/GuideReaderSkeleton";
 import GuideExportMenu from "../components/guide/GuideExportMenu";
 import ModelLink from "../components/guide/ModelLink";
 import { useToast } from "../context/ToastContext";
@@ -120,7 +121,7 @@ export default function GuideReaderPage() {
         )}
       </div>
 
-      {loading && <p className="max-w-5xl mx-auto px-4 py-8 text-sm text-text-secondary-alt">Loading…</p>}
+      {loading && <GuideReaderSkeleton />}
       {error && (
         <p role="alert" className="max-w-5xl mx-auto px-4 py-8 text-sm text-rose-400">{error}</p>
       )}
