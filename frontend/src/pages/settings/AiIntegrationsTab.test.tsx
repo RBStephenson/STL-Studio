@@ -64,7 +64,7 @@ describe("AiIntegrationsTab – add an AI API config", () => {
     vi.mocked(api.settings.aiApis.create).mockResolvedValue({
       id: 1, name: "Ollama Crawlspace", api_type: "anthropic", url: null,
       model: "claude-haiku-4-5", effort: "low", request_timeout: 10,
-      key_set: true, key_hint: "…cret",
+      batch_size: null, key_set: true, key_hint: "…cret",
     });
 
     renderTab();

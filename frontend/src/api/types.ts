@@ -299,6 +299,8 @@ export interface AiApiConfig {
   effort: string | null;
   // Per-connection request timeout in seconds (default 10).
   request_timeout: number;
+  // Max files per AI Organize LLM request/batch. null = service default.
+  batch_size: number | null;
   key_set: boolean;
   key_hint: string | null;
 }

@@ -320,6 +320,11 @@ class AiApiConfig(Base):
     # Ollama box loading a model cold) can take far longer than a local one, so
     # this is tunable per config rather than a single global. Default 10s.
     request_timeout = Column(Integer, nullable=False, default=10, server_default="10")
+    # Max files sent to the LLM per AI Organize request/batch. None = use the
+    # service's built-in defaults (ai_organize._LLM_FILE_CAP / _UNIT_LLM_FILE_CAP).
+    # Tunable per connection since a fast/reliable endpoint can safely take
+    # bigger batches than a slow local one prone to running out of max_tokens.
+    batch_size = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
 

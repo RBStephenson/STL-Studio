@@ -304,6 +304,7 @@ def _config_to_read(db: Session, c: AiApiConfig) -> AiApiConfigRead:
         model=c.model,
         effort=c.effort,
         request_timeout=c.request_timeout,
+        batch_size=c.batch_size,
         key_set=hint is not None,
         key_hint=hint,
     )
@@ -325,6 +326,7 @@ def create_ai_api_config(body: AiApiConfigCreate, db: Session = Depends(get_db))
         model=body.model or "",
         effort=body.effort,
         request_timeout=body.request_timeout,
+        batch_size=body.batch_size,
         created_at=_now(),
     )
     db.add(c)

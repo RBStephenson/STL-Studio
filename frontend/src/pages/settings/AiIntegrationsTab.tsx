@@ -17,6 +17,7 @@ interface DraftConfig {
   model: string;
   effort: string;
   request_timeout: number;
+  batch_size: number | null;
   api_key: string;
 }
 
@@ -27,6 +28,7 @@ const EMPTY_DRAFT: DraftConfig = {
   model: "",
   effort: "low",
   request_timeout: 10,
+  batch_size: null,
   api_key: "",
 };
 
@@ -188,6 +190,23 @@ function ConfigForm({
         />
       </div>
 
+      {/* AI Organize batch size — files per LLM request/batch. Blank uses the
+          service's built-in default (currently 15 for "parts", 5 for "unit"). */}
+      <div>
+        <label className="block text-xs text-text-secondary mb-1">
+          Organize batch size <span className="text-text-muted ml-1">(files per LLM call — blank uses the default)</span>
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={50}
+          placeholder="default"
+          value={draft.batch_size ?? ""}
+          onChange={(e) => onChange({ batch_size: e.target.value === "" ? null : Number(e.target.value) })}
+          className={`max-w-[8rem] ${INPUT}`}
+        />
+      </div>
+
       {/* API Key */}
       <div>
         <label className="block text-xs text-text-secondary mb-1">
@@ -257,6 +276,7 @@ function ConfigCard({
     model: config.model,
     effort: config.effort ?? "low",
     request_timeout: config.request_timeout ?? 10,
+    batch_size: config.batch_size ?? null,
     api_key: "",
   });
   const [modelList, setModelList] = useState<string[]>([]);
@@ -292,6 +312,7 @@ function ConfigCard({
         model: draft.model,
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
         request_timeout: draft.request_timeout,
+        batch_size: draft.batch_size,
         ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
       });
       setLocalConfig(updated);
@@ -345,6 +366,7 @@ function ConfigCard({
             {localConfig.url && <span className="truncate max-w-[200px]">{localConfig.url}</span>}
             {localConfig.effort && localConfig.api_type === "anthropic" && <span>effort: {localConfig.effort}</span>}
             <span>timeout: {localConfig.request_timeout}s</span>
+            {localConfig.batch_size != null && <span>batch: {localConfig.batch_size}</span>}
             <span>{localConfig.key_set ? `Key ••••${localConfig.key_hint?.replace(/^…/, "")}` : "No key"}</span>
           </div>
         </div>
@@ -438,6 +460,7 @@ function AddConfigCard({
         model: draft.model,
         effort: draft.api_type === "anthropic" ? (draft.effort || null) : null,
         request_timeout: draft.request_timeout,
+        batch_size: draft.batch_size,
         ...(draft.api_key.trim() ? { api_key: draft.api_key.trim() } : {}),
       });
       flash(`"${created.name}" added`, "ok");

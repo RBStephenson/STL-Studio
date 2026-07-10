@@ -707,14 +707,23 @@ def _llm_refine_openai(
         "temperature": 0.1,
         "response_format": response_format,
         "max_tokens": _OPENAI_MAX_TOKENS,
-        # Some locally-served models (DeepSeek-R1-style, QwQ, etc.) support an
-        # extended "thinking"/reasoning phase before the real answer. There's
-        # nothing to reason about for this task — it's filename pattern-
-        # matching — and a thinking model can spend its *entire* max_tokens
-        # budget on hidden reasoning and emit nothing into content at all
-        # (#903-follow-up: exactly this — 78s, status 200, empty content).
-        # Ignored by servers/models that don't recognize the field.
+        # Some locally-served models (DeepSeek-R1-style, QwQ, Gemma reasoning
+        # variants, etc.) support an extended "thinking"/reasoning phase
+        # before the real answer. There's nothing to reason about for this
+        # task — it's filename pattern-matching — and a thinking model can
+        # spend its *entire* max_tokens budget on hidden reasoning and emit
+        # nothing into content at all (#903-follow-up: exactly this — 78s,
+        # status 200, empty content).
+        #
+        # "think" is the native Ollama /api/chat field — it is NOT read by
+        # Ollama's OpenAI-compatible /v1/chat/completions endpoint at all
+        # (ollama/ollama#15288), so kept here only in case some other
+        # OpenAI-compatible server (llama.cpp, etc.) honors it. The field
+        # this endpoint actually reads is "reasoning_effort" (ollama/ollama
+        # #14820); "none" is the documented value to disable thinking.
+        # Ignored by servers/models that don't recognize either field.
         "think": False,
+        "reasoning_effort": "none",
     }
 
     endpoint = f"{base_url}/v1/chat/completions"
@@ -747,7 +756,7 @@ def _llm_refine_openai(
     # Retry once per optional field a strict server rejects outright (rather
     # than just ignoring) — checked in sequence so a server that objects to
     # both fields sheds each in turn instead of only ever trying the first.
-    for optional_key in ("response_format", "think"):
+    for optional_key in ("response_format", "think", "reasoning_effort"):
         if resp.status_code == 400 and optional_key in payload and optional_key in resp.text:
             payload.pop(optional_key, None)
             try:
@@ -812,12 +821,13 @@ _UNIT_LLM_FILE_CAP = 5
 def _run_unit_batches(
     candidates: list[dict[str, Any]],
     call_llm: Callable[[list[dict[str, Any]], str, str], LlmOutcome],
+    batch_size: int = _UNIT_LLM_FILE_CAP,
 ) -> LlmOutcome:
     """Send every unit-strategy candidate to the LLM in chunks of
-    _UNIT_LLM_FILE_CAP, one call per chunk, instead of a single capped call
-    that silently drops everything past the first cap's worth of files
-    (#884) — the unit strategy has no heuristic fallback to catch what a
-    single call misses, unlike "parts".
+    ``batch_size`` (defaults to _UNIT_LLM_FILE_CAP), one call per chunk,
+    instead of a single capped call that silently drops everything past the
+    first cap's worth of files (#884) — the unit strategy has no heuristic
+    fallback to catch what a single call misses, unlike "parts".
 
     Each chunk after the first is told which unit names earlier chunks
     already established, so the same physical unit doesn't get renamed
@@ -830,8 +840,8 @@ def _run_unit_batches(
     known_units: list[str] = []  # insertion order, for a stable/readable hint
     total = len(candidates)
 
-    for start in range(0, total, _UNIT_LLM_FILE_CAP):
-        chunk = candidates[start:start + _UNIT_LLM_FILE_CAP]
+    for start in range(0, total, batch_size):
+        chunk = candidates[start:start + batch_size]
         prefix = ""
         if known_units:
             prefix = (
@@ -842,7 +852,7 @@ def _run_unit_batches(
             )
         _log_step(
             "llm_batch", sending=len(chunk), of=total,
-            batch=start // _UNIT_LLM_FILE_CAP + 1,
+            batch=start // batch_size + 1,
         )
         outcome = call_llm(chunk, _UNIT_SYSTEM_PROMPT, prefix)
         if outcome.status != "ok":
@@ -868,6 +878,7 @@ def run(
     api_type: str = "openai",
     effort: str | None = None,
     strategy: str = "parts",
+    batch_size: int | None = None,
 ) -> OrganizeResult:
     """Return merged suggestions plus the outcome of the optional LLM pass.
 
@@ -905,6 +916,12 @@ def run(
     at ``base_url``, e.g. Ollama) or "anthropic" (the Anthropic Messages API,
     which needs no URL but requires ``api_key``; ``effort`` maps to a thinking
     budget).
+
+    ``batch_size``, when given, overrides the per-request file cap for
+    whichever strategy runs (_LLM_FILE_CAP for "parts", _UNIT_LLM_FILE_CAP for
+    "unit") — configurable per AiApiConfig so a fast/reliable endpoint can send
+    more files per call and a slow/flaky one can send fewer. ``None`` keeps
+    the built-in defaults.
     """
     # An Anthropic config carries no URL; an OpenAI-compatible one needs one.
     llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
@@ -1000,9 +1017,12 @@ def run(
             # Batched (#884): a single _LLM_FILE_CAP-sized call would silently
             # drop every file past the cap, since unit strategy has no
             # heuristic fallback to catch the rest (unlike "parts" below).
-            outcome = _run_unit_batches(representatives, _call_llm)
+            outcome = _run_unit_batches(
+                representatives, _call_llm,
+                batch_size=batch_size or _UNIT_LLM_FILE_CAP,
+            )
         else:
-            candidates = representatives[:_LLM_FILE_CAP]
+            candidates = representatives[:(batch_size or _LLM_FILE_CAP)]
             _log_step("llm_batch", sending=len(candidates), of=len(files))
             outcome = _call_llm(candidates, _SYSTEM_PROMPT)
 

@@ -530,6 +530,7 @@ class _OrganizeConfig:
     timeout: int
     api_type: str
     effort: str | None
+    batch_size: int | None
 
 
 def _load_organize_config(db) -> "_OrganizeConfig":
@@ -566,14 +567,14 @@ def _load_organize_config(db) -> "_OrganizeConfig":
                     status_code=400,
                     detail="The Anthropic API assigned to organizing has no model selected.",
                 )
-            return _OrganizeConfig("", cfg.model, key, cfg.request_timeout, "anthropic", cfg.effort)
+            return _OrganizeConfig("", cfg.model, key, cfg.request_timeout, "anthropic", cfg.effort, cfg.batch_size)
         # OpenAI-compatible (Ollama, LM Studio, …).
         if not cfg.url:
             raise HTTPException(
                 status_code=400,
                 detail="This OpenAI-compatible API has no URL set — add one in Settings.",
             )
-        return _OrganizeConfig(cfg.url, cfg.model or "", key, cfg.request_timeout, "openai", None)
+        return _OrganizeConfig(cfg.url, cfg.model or "", key, cfg.request_timeout, "openai", None, cfg.batch_size)
 
     # Legacy fallback: standalone ai_organize_* app_settings.
     url_row = db.get(AppSetting, "ai_organize_url")
@@ -584,6 +585,7 @@ def _load_organize_config(db) -> "_OrganizeConfig":
         _secrets.get_organize_api_key(db) or "",
         10,
         "openai",
+        None,
         None,
     )
 
@@ -670,7 +672,7 @@ def ai_organize_model(model_id: int, body: AiOrganizeRequest = AiOrganizeRequest
         organize_result = ai_organize.run(
             file_dicts, org_cfg.url, org_cfg.model, org_cfg.api_key,
             timeout=org_cfg.timeout, api_type=org_cfg.api_type, effort=org_cfg.effort,
-            strategy=body.strategy,
+            strategy=body.strategy, batch_size=org_cfg.batch_size,
         )
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc))

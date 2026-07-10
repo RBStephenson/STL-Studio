@@ -658,6 +658,8 @@ class AiApiConfigRead(BaseModel):
     effort: Optional[str] = None
     # Per-connection request timeout (seconds). Default 10.
     request_timeout: int = 10
+    # Max files per AI Organize LLM request/batch. None = service default.
+    batch_size: Optional[int] = None
     key_set: bool
     key_hint: Optional[str] = None
 
@@ -669,6 +671,7 @@ class AiApiConfigCreate(BaseModel):
     model: str = Field("", max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     request_timeout: int = Field(10, ge=1, le=600)
+    batch_size: Optional[int] = Field(None, ge=1, le=50)
     # Optional so a config can still be created key-less (e.g. Ollama), but lets
     # the client set the key in the same request instead of a follow-up call.
     api_key: Optional[str] = Field(None, max_length=400)
@@ -680,6 +683,7 @@ class AiApiConfigUpdate(BaseModel):
     model: Optional[str] = Field(None, max_length=200)
     effort: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     request_timeout: Optional[int] = Field(None, ge=1, le=600)
+    batch_size: Optional[int] = Field(None, ge=1, le=50)
     api_key: Optional[str] = Field(None, max_length=400)
 
 
