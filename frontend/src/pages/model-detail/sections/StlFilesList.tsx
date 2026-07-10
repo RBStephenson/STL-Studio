@@ -17,7 +17,7 @@ import { PartTypeCombo } from "../../../components/PartTypeCombo";
 import { useAppSettings } from "../../../context/AppSettingsContext";
 import type { ViewMode } from "../utils";
 import {
-  PART_TYPE_SUGGESTIONS, toPascalCase, buildFileHierarchy, groupAlphabetically,
+  PART_TYPE_SUGGESTIONS, toPascalCase, buildFileHierarchy, groupAlphabetically, naturalCompare,
 } from "../utils";
 
 type StlFiles = ModelDetailType["stl_files"];
@@ -194,7 +194,7 @@ export default function StlFilesList({
                     <option value="" disabled>Select supported-version file…</option>
                     {model.stl_files
                       .filter((sf) => sf.id !== f.id)
-                      .sort((a, b) => a.filename.localeCompare(b.filename))
+                      .sort((a, b) => naturalCompare(a.filename, b.filename))
                       .map((sf) => {
                         const alreadyHere = sf.sup_of_id === f.id;
                         const linkedElsewhere = sf.sup_of_id != null && !alreadyHere;
@@ -264,7 +264,7 @@ export default function StlFilesList({
                 )}
               </>
             ) : (
-              groupAlphabetically([...model.stl_files].sort((a, b) => a.filename.localeCompare(b.filename))).map(([band, bandFiles]) =>
+              groupAlphabetically([...model.stl_files].sort((a, b) => naturalCompare(a.filename, b.filename))).map(([band, bandFiles]) =>
                 renderSection(
                   band,
                   <span className="text-xs font-medium text-text-secondary font-mono">{band}</span>,

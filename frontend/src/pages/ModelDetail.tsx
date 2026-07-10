@@ -33,6 +33,7 @@ import TagsPanel from "./model-detail/sections/TagsPanel";
 import { errMsg } from "../utils/err";
 import {
   toPascalCase,
+  naturalCompare,
   parseLibraryOrigin,
   type ViewMode,
   type NavTarget,
@@ -167,7 +168,7 @@ export default function ModelDetail() {
         unlabeled.push(f);
       }
     }
-    const sortedLabeled = [...labeled.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const sortedLabeled = [...labeled.entries()].sort(([a], [b]) => naturalCompare(a, b));
     return { labeled: sortedLabeled, unlabeled };
   }, [model?.stl_files]);
 
