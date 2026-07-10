@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Paintbrush, Plus, Upload } from "lucide-react";
 import { api, GuideListItem } from "../api/client";
 import ImportGuideModal from "../components/guide/ImportGuideModal";
+import ErrorState from "../components/ErrorState";
 
 export default function GuidesPage() {
   const [guides, setGuides] = useState<GuideListItem[]>([]);
@@ -12,6 +13,7 @@ export default function GuidesPage() {
 
   const load = useCallback(() => {
     let alive = true;
+    setError(null);
     api.painting.guides
       .list({ page_size: 200 })
       .then((data) => { if (alive) setGuides(data.items); })
@@ -58,9 +60,7 @@ export default function GuidesPage() {
       )}
 
       {error && (
-        <p role="alert" className="text-sm text-rose-400 bg-rose-950/30 border border-rose-900/50 rounded px-3 py-2">
-          {error}
-        </p>
+        <ErrorState title="Couldn't load guides" message={error} onRetry={load} />
       )}
 
       {!loading && !error && guides.length === 0 && (

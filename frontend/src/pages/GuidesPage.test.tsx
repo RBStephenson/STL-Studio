@@ -58,6 +58,21 @@ describe("GuidesPage", () => {
     newGuideLinks.forEach((l) => expect(l).toHaveAttribute("href", "/painting/guides/new"));
   });
 
+  it("shows the shared error state on load failure, with a working Retry", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.painting.guides.list).mockRejectedValueOnce(new Error("Network down"));
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Network down");
+    expect(screen.getByText("Couldn't load guides")).toBeInTheDocument();
+
+    vi.mocked(api.painting.guides.list).mockResolvedValueOnce({
+      total: 0, page: 1, page_size: 200, items: [],
+    });
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByText("No painting guides yet")).toBeInTheDocument();
+  });
+
   it("opens the import modal from the header button (#277)", async () => {
     renderPage();
     await screen.findByRole("link", { name: /RoboCop/ });
