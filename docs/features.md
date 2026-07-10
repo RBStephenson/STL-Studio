@@ -264,10 +264,16 @@ strategy:
   keyword pre-pass for this — it goes straight to the AI. Unit names are
   derived per model, so they aren't limited to the standard category list;
   each one is title-cased for consistency across a unit's files. Large kits
-  are sent to the AI in batches rather than one capped call, so every file
-  gets a suggestion, not just the first ~15 — later batches are told which
-  unit names earlier ones already settled on, so the same unit isn't renamed
-  partway through a big kit.
+  are sent to the AI in small batches (5 files at a time) rather than one
+  capped call, so every file gets a suggestion, not just the first several —
+  later batches are told which unit names earlier ones already settled on, so
+  the same unit isn't renamed partway through a big kit.
+
+On a local model via an OpenAI-compatible endpoint (Ollama, etc.), requests use
+schema-constrained output and an explicit instruction against extended
+reasoning — local "thinking"-style models can otherwise spend their whole
+response budget on hidden reasoning and never produce an answer, or drift
+into inventing their own JSON shape instead of the one requested.
 
 Either way, review the suggestions in a modal before applying — nothing is
 written to a file until you confirm.
