@@ -86,11 +86,12 @@ export default function Navbar() {
         <button
           onClick={toggle}
           title={showNSFW ? "Hide NSFW content" : "Show NSFW content"}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm transition-colors border ${
+          className="flex items-center gap-1.5 text-[13px] px-[13px] py-[7px] rounded-lg border transition-colors"
+          style={
             showNSFW
-              ? "bg-red-950/60 border-red-800 text-red-400 hover:bg-red-900/60"
-              : "bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600"
-          }`}
+              ? { borderColor: "var(--color-status-rose-dark)", background: "rgba(244,63,94,.12)", color: "var(--color-status-rose)" }
+              : { borderColor: "#202329", background: "#181a20", color: "var(--color-text-secondary-alt)" }
+          }
         >
           {showNSFW ? <Eye size={14} /> : <EyeOff size={14} />}
           {showNSFW ? "NSFW On" : "NSFW Off"}
