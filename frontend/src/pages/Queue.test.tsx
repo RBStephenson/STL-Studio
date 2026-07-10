@@ -70,6 +70,23 @@ function renderQueue() {
   );
 }
 
+describe("Queue loading skeleton", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("shows the loading skeleton while pending, then swaps to real content", async () => {
+    let resolveList!: (v: { items: Model[]; total: number }) => void;
+    list.mockReturnValue(new Promise((resolve) => { resolveList = resolve; }));
+    renderQueue();
+
+    expect(screen.getByTestId("queue-loading-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText("Dragon")).toBeNull();
+
+    resolveList({ items: [queuedModel], total: 1 });
+    expect(await screen.findAllByText("Dragon")).not.toHaveLength(0);
+    expect(screen.queryByTestId("queue-loading-skeleton")).toBeNull();
+  });
+});
+
 describe("Queue error state", () => {
   beforeEach(() => {
     vi.clearAllMocks();

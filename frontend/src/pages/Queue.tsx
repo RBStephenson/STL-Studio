@@ -14,6 +14,7 @@ import { api, Model, ModelList } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import BulkTagBar from "../components/BulkTagBar";
 import ErrorState from "../components/ErrorState";
+import { SkeletonPanel } from "../components/SkeletonBlock";
 import { useToast } from "../context/ToastContext";
 import { useCollections } from "../hooks/queries/collections";
 import { invalidateModelViews } from "../hooks/queries/invalidation";
@@ -132,9 +133,9 @@ export default function Queue() {
       )}
 
       {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4" data-testid="queue-loading-skeleton">
           {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="aspect-square bg-panel rounded-lg animate-pulse" />
+            <SkeletonPanel key={i} className="aspect-square rounded-lg" style={{ background: "#1a1c22" }} />
           ))}
         </div>
       ) : isError ? (

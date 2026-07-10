@@ -4,6 +4,7 @@ import { Paintbrush, Plus, Upload } from "lucide-react";
 import { api, GuideListItem } from "../api/client";
 import ImportGuideModal from "../components/guide/ImportGuideModal";
 import ErrorState from "../components/ErrorState";
+import { SkeletonBlock, SkeletonPanel } from "../components/SkeletonBlock";
 
 export default function GuidesPage() {
   const [guides, setGuides] = useState<GuideListItem[]>([]);
@@ -59,7 +60,18 @@ export default function GuidesPage() {
         />
       )}
 
-      {error && (
+      {loading && (
+        <div className="grid gap-3 sm:grid-cols-2" data-testid="guides-loading-skeleton">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonPanel key={i} className="bg-panel border border-border-subtle rounded-lg px-4 py-3">
+              <SkeletonBlock className="h-4 w-2/3 mb-2" />
+              <SkeletonBlock className="h-2.5 w-1/3" />
+            </SkeletonPanel>
+          ))}
+        </div>
+      )}
+
+      {!loading && error && (
         <ErrorState title="Couldn't load guides" message={error} onRetry={load} />
       )}
 

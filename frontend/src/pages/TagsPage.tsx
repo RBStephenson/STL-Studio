@@ -5,6 +5,7 @@ import { useToast } from "../context/ToastContext";
 import { useConfirm } from "../context/ConfirmContext";
 import HelpLink from "../components/HelpLink";
 import ErrorState from "../components/ErrorState";
+import { SkeletonBlock, SkeletonPanel } from "../components/SkeletonBlock";
 
 interface TagRow {
   tag: string;
@@ -142,9 +143,14 @@ export default function TagsPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 size={24} className="text-text-secondary-alt animate-spin" />
-        </div>
+        <SkeletonPanel className="flex flex-col gap-1" data-testid="tags-loading-skeleton">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-panel-secondary">
+              <SkeletonBlock className="h-3.5 w-24" />
+              <SkeletonBlock className="h-3 w-16" />
+            </div>
+          ))}
+        </SkeletonPanel>
       ) : error ? (
         <ErrorState title="Couldn't load tags" message={error} onRetry={load} />
       ) : filtered.length === 0 ? (

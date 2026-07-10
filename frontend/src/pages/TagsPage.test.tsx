@@ -42,6 +42,19 @@ describe("TagsPage (#165)", () => {
     await waitFor(() => expect(screen.getByText("figure")).toBeInTheDocument());
   });
 
+  it("shows the loading skeleton while pending, then swaps to real content", async () => {
+    let resolveTags!: (v: typeof TAGS) => void;
+    vi.mocked(api.models.tags).mockReturnValueOnce(new Promise((resolve) => { resolveTags = resolve; }));
+    renderPage();
+
+    expect(screen.getByTestId("tags-loading-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText("figure")).toBeNull();
+
+    resolveTags(TAGS);
+    await waitFor(() => expect(screen.getByText("figure")).toBeInTheDocument());
+    expect(screen.queryByTestId("tags-loading-skeleton")).toBeNull();
+  });
+
   it("loads and displays tags with counts", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("figure")).toBeInTheDocument());
