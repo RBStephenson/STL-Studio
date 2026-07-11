@@ -12,7 +12,7 @@ export default function GuideReaderSkeleton() {
     <div
       data-testid="guide-reader-skeleton"
       className="relative overflow-hidden rounded-b-2xl"
-      style={{ background: "linear-gradient(135deg, #2f2360, #0b0c10)" }}
+      style={{ background: "linear-gradient(160deg, #241a3d, #0e0f13 70%)" }}
     >
       <div className="stl-shimmer-overlay" />
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Printer, Globe, Undo2, Trash2, Pencil, ListTree } from "lucide-react";
+import { ArrowLeft, Printer, Globe, Undo2, Trash2, Pencil, ListTree, Paintbrush } from "lucide-react";
 import { api, Guide } from "../api/client";
 import GuideReader from "../components/guide/GuideReader";
 import GuideReaderSkeleton from "../components/guide/GuideReaderSkeleton";
@@ -139,11 +139,11 @@ export default function GuideReaderPage() {
             className="flex items-center justify-center w-14 h-14 rounded-full mb-4"
             style={{ background: "#26163a" }}
           >
-            <ListTree size={22} strokeWidth={1.6} style={{ color: "var(--color-status-fuchsia)" }} />
+            <Paintbrush size={24} strokeWidth={1.8} style={{ color: "var(--color-status-fuchsia)" }} />
           </div>
           <p className="text-base font-bold text-text-primary-alt mb-2">This guide has no content yet</p>
           <p className="text-[13px] leading-relaxed text-text-secondary-alt max-w-[320px] mb-6">
-            Add tabs and steps in the content editor to build out the painting recipe.
+            Add tabs and steps in the content editor to start writing this painting guide.
           </p>
           <Link
             to={`/painting/guides/${guide.id}/content`}

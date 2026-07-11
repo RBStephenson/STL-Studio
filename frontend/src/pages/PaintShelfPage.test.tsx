@@ -85,8 +85,8 @@ describe("PaintShelfPage", () => {
     vi.mocked(api.painting.paints.list).mockResolvedValueOnce({ total: 0, page: 1, page_size: 48, items: [] });
     renderPage();
 
-    expect(await screen.findByText("Your shelf is empty")).toBeInTheDocument();
-    expect(screen.getByText(/Import CSV with a PaintRack export/)).toBeInTheDocument();
+    expect(await screen.findByText("No paints on your shelf yet.")).toBeInTheDocument();
+    expect(screen.getByText(/import a CSV so guides can reference colors you actually own/)).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
 
     const addButtons = screen.getAllByRole("button", { name: /add paint/i });
@@ -99,7 +99,7 @@ describe("PaintShelfPage", () => {
     const { api } = await import("../api/client");
     vi.mocked(api.painting.paints.list).mockResolvedValueOnce({ total: 0, page: 1, page_size: 48, items: [] });
     renderPage();
-    await screen.findByText("Your shelf is empty");
+    await screen.findByText("No paints on your shelf yet.");
 
     vi.mocked(api.painting.paints.list).mockResolvedValueOnce({ total: 0, page: 1, page_size: 48, items: [] });
     fireEvent.change(screen.getByPlaceholderText("Search name or code…"), { target: { value: "zzz" } });
@@ -123,6 +123,21 @@ describe("PaintShelfPage", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: /retry/i }));
     expect(await screen.findByText("Coal Black")).toBeInTheDocument();
+  });
+
+  it("shows a header-only table with skeleton rows while loading", async () => {
+    const { api } = await import("../api/client");
+    let resolveList!: (v: Awaited<ReturnType<typeof api.painting.paints.list>>) => void;
+    vi.mocked(api.painting.paints.list).mockReturnValueOnce(
+      new Promise((resolve) => { resolveList = resolve; })
+    );
+    renderPage();
+
+    expect(screen.getByText("Code")).toBeInTheDocument();
+    expect(screen.queryByText("Coal Black")).toBeNull();
+
+    resolveList({ total: 0, page: 1, page_size: 48, items: [] } as unknown as Awaited<ReturnType<typeof api.painting.paints.list>>);
+    await screen.findByText("No paints on your shelf yet.");
   });
 
   it("lists paints with chips, line labels, and owned state", async () => {

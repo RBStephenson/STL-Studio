@@ -72,7 +72,7 @@ export default function GuidesPage() {
       )}
 
       {!loading && error && (
-        <ErrorState title="Couldn't load guides" message={error} onRetry={load} />
+        <ErrorState title="Couldn't load painting guides" message={error} onRetry={load} />
       )}
 
       {!loading && !error && guides.length === 0 && (
@@ -88,7 +88,7 @@ export default function GuidesPage() {
           </div>
           <p className="text-base font-bold text-text-primary-alt mb-2">No painting guides yet</p>
           <p className="text-[13px] leading-relaxed text-text-secondary-alt max-w-[320px] mb-6">
-            Guides walk through a model step by step, with paint recipes pulled straight from your shelf.
+            Write step-by-step guides for how you painted a model, with paint swatches pulled from your shelf.
           </p>
           <Link to="/painting/guides/new" className="btn-cta inline-flex items-center gap-1.5 text-white text-sm px-4 py-2 rounded">
             <Plus size={15} /> New guide
