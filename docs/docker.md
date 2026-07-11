@@ -335,6 +335,13 @@ Settings (AI provider keys, Cults3D, MyMiniFactory). Those are stored in the
 database as ciphertext, never plaintext; `STL_SECRET_KEY` is what decrypts
 them back into usable keys at runtime.
 
+> This section describes the manual/Docker deployment path. **The Windows
+> Electron build handles this automatically** — a key is generated on first
+> launch, shown to you once, and stored in
+> `%APPDATA%\STL Studio\secret-key.json` (survives uninstall/upgrade). Use the
+> app's **File → Regenerate Encryption Key…** menu item to rotate it; there's
+> nothing to configure by hand. The rest of this section doesn't apply to you.
+
 It's kept deliberately separate from the database itself: if the database file
 ever leaks (a backup uploaded somewhere, a misconfigured volume, a stolen
 disk), the ciphertext alone is useless without this key. If the key lived

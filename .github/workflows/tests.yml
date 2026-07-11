@@ -122,3 +122,36 @@ jobs:
       - name: Run Vitest
         working-directory: frontend
         run: npm test
+
+  desktop-vitest:
+    # Logic-only tests (sidecar lifecycle, window state, secret key, menu
+    # builders) run against injected fakes, not real Windows APIs, so this
+    # doesn't need windows-latest — build.yml's Windows leg already covers the
+    # real NSIS packaging path. build.yml only ran `tsc`, never `npm test`, so
+    # these were previously untested in CI (STUDIO-147).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: desktop
+        run: npx tsc --noEmit
+
+      - name: Run Vitest
+        working-directory: desktop
+        run: npm test
