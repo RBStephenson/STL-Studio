@@ -174,6 +174,31 @@ describe("StlFilesTable", () => {
     expect(screen.getByRole("option", { name: "Quetzlgor" })).toBeInTheDocument();
   });
 
+  it("link-sup picker shows the part name, not the filename, and lets you type to filter", () => {
+    const namedModel = {
+      id: 1,
+      stl_files: [
+        file(1, "arm.stl"),
+        file(2, "body.stl", { part_name: "Body Armor" }),
+        file(3, "head.stl", { part_name: "Head" }),
+      ],
+    } as unknown as ModelDetailType;
+    renderTable({
+      model: namedModel,
+      groupedStlFiles: { labeled: [], unlabeled: namedModel.stl_files },
+      linkingBaseId: 1,
+    });
+
+    const input = screen.getByPlaceholderText("Link sup…");
+    fireEvent.focus(input);
+
+    expect(screen.getByText("Body Armor")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "body" } });
+    expect(screen.getByText("Body Armor")).toBeInTheDocument();
+    expect(screen.queryByText("Head")).not.toBeInTheDocument();
+  });
+
   it("hides the recategorize dropdown entirely when part categories are disabled", () => {
     renderTable();
     const checkboxes = screen.getAllByRole("checkbox");

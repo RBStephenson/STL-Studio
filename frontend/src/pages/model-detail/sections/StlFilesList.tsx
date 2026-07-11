@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { api, ModelDetail as ModelDetailType } from "../../../api/client";
 import { PartTypeCombo } from "../../../components/PartTypeCombo";
+import { FileLinkCombo, FileLinkOption } from "../../../components/FileLinkCombo";
 import { useAppSettings } from "../../../context/AppSettingsContext";
 import type { ViewMode } from "../utils";
 import {
@@ -184,27 +185,26 @@ export default function StlFilesList({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <Link2 size={14} className="text-indigo-400 shrink-0" />
-                  <select
-                    autoFocus
-                    defaultValue=""
+                  <FileLinkCombo
+                    placeholder="Select supported-version file…"
                     className="flex-1 min-w-0 bg-panel-secondary text-xs text-text-primary-alt2 rounded px-1.5 py-0.5 border border-border-divider focus:outline-none focus:border-accent-start"
-                    onChange={(e) => { if (e.target.value) { linkSup(f.id, parseInt(e.target.value)); setLinkingBaseId(null); } }}
-                    onBlur={() => setLinkingBaseId(null)}
-                  >
-                    <option value="" disabled>Select supported-version file…</option>
-                    {model.stl_files
+                    options={model.stl_files
                       .filter((sf) => sf.id !== f.id)
-                      .sort((a, b) => naturalCompare(a.filename, b.filename))
-                      .map((sf) => {
+                      .sort((a, b) => naturalCompare(a.part_name || a.filename, b.part_name || b.filename))
+                      .map((sf): FileLinkOption => {
                         const alreadyHere = sf.sup_of_id === f.id;
                         const linkedElsewhere = sf.sup_of_id != null && !alreadyHere;
-                        return (
-                          <option key={sf.id} value={sf.id} disabled={alreadyHere}>
-                            {sf.filename}{alreadyHere ? " ✓ (already this file's sup)" : linkedElsewhere ? " (linked to another)" : ""}
-                          </option>
-                        );
+                        return {
+                          id: sf.id,
+                          label: sf.part_name || sf.filename,
+                          filename: sf.filename,
+                          disabled: alreadyHere,
+                          suffix: alreadyHere ? " ✓ (already this file's sup)" : linkedElsewhere ? " (linked to another)" : "",
+                        };
                       })}
-                  </select>
+                    onPick={(id) => { linkSup(f.id, id); setLinkingBaseId(null); }}
+                    onCancel={() => setLinkingBaseId(null)}
+                  />
                   <button onMouseDown={(e) => e.preventDefault()} onClick={() => setLinkingBaseId(null)} className="shrink-0 text-text-secondary-alt hover:text-text-primary-alt2">
                     <X size={11} />
                   </button>

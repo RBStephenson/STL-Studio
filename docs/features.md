@@ -225,6 +225,12 @@ the corresponding button in the part picker stay in sync in both directions,
 auto-unfolding collapsed sections as needed. Changing a part's category
 applies to every file linked to it (the base file and all its sups).
 
+Clicking the link icon to attach a sup opens a searchable picker: it lists
+each candidate by its **part name** (falling back to the filename if a file
+has none set) with the filename shown underneath for reference, and typing
+filters the list by either — much faster than scanning a plain dropdown of
+raw filenames on a kit with dozens of parts.
+
 The **part type** field is a combobox: start typing to filter a list of
 standard suggestions (listed alphabetically), or type any custom category
 name. The dropdown appears automatically, opening above the field instead of
@@ -255,26 +261,40 @@ both from disk and from the listing (with a confirmation first); if the file was
 already gone from disk (e.g. deleted outside the app), this still clears the
 stale listing.
 
-**AI Organize** (button on the model detail page, requires an AI API assigned
-under [Settings → AI & Integrations](#ai--integrations)) suggests a category
-and cleaned-up name for every STL file. Clicking it first asks you to pick a
-strategy:
+**AI Organize** (button on the model detail page) suggests a category and
+cleaned-up name for every STL file, or links supported variants to their base
+part. Clicking it first asks you to pick a strategy:
 
-- **Parts-based** — the standard approach. Fast keyword-based naming rules run
-  first, but the AI always runs too — even on files the naming rules already
-  resolved — since it can still catch a wrong guess or a name the rules got
-  half right. It only ever picks from the app's standard category list, so its
-  suggestions land in the same categories the Category combobox offers.
-- **Unit-based** — groups files by the in-game unit or character they belong
-  to instead of by physical part (e.g. every file for "Royal Guard 1" — head,
-  helmet, weapon — gets that as its category, not "Head"/"Weapon"). There's no
-  keyword pre-pass for this — it goes straight to the AI. Unit names are
-  derived per model, so they aren't limited to the standard category list;
-  each one is title-cased for consistency across a unit's files. Large kits
-  are sent to the AI in small batches (5 files at a time) rather than one
-  capped call, so every file gets a suggestion, not just the first several —
-  later batches are told which unit names earlier ones already settled on, so
-  the same unit isn't renamed partway through a big kit.
+- **Parts-based** — the standard approach. Requires an AI API assigned under
+  [Settings → AI & Integrations](#ai--integrations). Fast keyword-based naming
+  rules run first, but the AI always runs too — even on files the naming rules
+  already resolved — since it can still catch a wrong guess or a name the
+  rules got half right. It only ever picks from the app's standard category
+  list, so its suggestions land in the same categories the Category combobox
+  offers.
+- **Unit-based** — requires an AI API. Groups files by the in-game unit or
+  character they belong to instead of by physical part (e.g. every file for
+  "Royal Guard 1" — head, helmet, weapon — gets that as its category, not
+  "Head"/"Weapon"). There's no keyword pre-pass for this — it goes straight to
+  the AI. Unit names are derived per model, so they aren't limited to the
+  standard category list; each one is title-cased for consistency across a
+  unit's files. Large kits are sent to the AI in small batches (5 files at a
+  time) rather than one capped call, so every file gets a suggestion, not just
+  the first several — later batches are told which unit names earlier ones
+  already settled on, so the same unit isn't renamed partway through a big kit.
+- **Link supported parts** — no AI API needed; this is pure name matching, not
+  an AI call. Finds every file whose filename (or, failing that, its part
+  name) contains "Sup", "Supported", or "Hollowed" and isn't already linked to
+  a base, and matches it to a same-named plain file — e.g.
+  "icon-of-flame-2-supported.stl" links to "icon-of-flame-2.stl". Matching
+  goes by filename first specifically because part names can drift or get
+  mislabeled independently of the file (two different parts ending up with
+  the same, wrong, part name is a real thing that happens); part name is only
+  a fallback for a file matched with no useful filename signal. A file without
+  one of the keywords is only ever a possible match target, never linked to
+  another file itself, so it's safe to run on a whole kit without relabeling
+  anything that's already named correctly. An already-linked file is never
+  touched or re-matched.
 
 On a local model via an OpenAI-compatible endpoint (Ollama, etc.), requests use
 schema-constrained output and an explicit instruction against extended

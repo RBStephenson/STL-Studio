@@ -726,8 +726,10 @@ class AiOrganizeRequest(BaseModel):
     """``strategy`` selects the grouping mode (#878): "parts" (default) suggests
     a physical part_type category (Head, Weapon, ...); "unit" suggests an
     in-game unit/character name instead (e.g. "Royal Guard 1"), written into
-    the same part_type field but not constrained to the canonical category list."""
-    strategy: Literal["parts", "unit"] = "parts"
+    the same part_type field but not constrained to the canonical category list.
+    "link_sups" (#967) suggests sup_of_id links for currently-unlinked
+    sup/supported/hollowed-named files — a pure heuristic, no AI API needed."""
+    strategy: Literal["parts", "unit", "link_sups"] = "parts"
 
 
 class AiOrganizeSuggestion(BaseModel):

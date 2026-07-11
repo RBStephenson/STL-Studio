@@ -1539,3 +1539,133 @@ class TestNormalizeType:
 
     def test_no_existing_categories_returns_suggestion_unchanged(self):
         assert _normalize_type("Anything", []) == "Anything"
+
+
+class TestHeuristicLinkSups:
+    """Direct unit coverage for heuristic_link_sups (#967) — the endpoint
+    tests below exercise the full round trip; these pin down the matching
+    algorithm itself."""
+
+    def _f(self, id_, filename, part_name=None, sup_of_id=None):
+        return {"id": id_, "filename": filename, "part_name": part_name, "sup_of_id": sup_of_id}
+
+    def test_matches_a_supported_suffix_to_its_base(self):
+        files = [
+            self._f(1, "icon-of-flame-2.stl"),
+            self._f(2, "icon-of-flame-2-supported.stl"),
+        ]
+        sugs = ai.heuristic_link_sups(files)
+        assert sugs == [{"id": 2, "part_type": None, "part_name": None, "sup_base_filename": "icon-of-flame-2.stl"}]
+
+    def test_matches_by_part_name_when_set_rather_than_filename(self):
+        files = [
+            self._f(1, "a.stl", part_name="Icon of Flame 2"),
+            self._f(2, "b.stl", part_name="Icon of Flame 2 Supported"),
+        ]
+        sugs = ai.heuristic_link_sups(files)
+        assert sugs == [{"id": 2, "part_type": None, "part_name": None, "sup_base_filename": "a.stl"}]
+
+    def test_bare_sup_keyword_matches(self):
+        files = [self._f(1, "widget.stl"), self._f(2, "widget-sup.stl")]
+        assert ai.heuristic_link_sups(files) == [
+            {"id": 2, "part_type": None, "part_name": None, "sup_base_filename": "widget.stl"}
+        ]
+
+    def test_hollowed_keyword_matches(self):
+        files = [self._f(1, "gargoyle.stl"), self._f(2, "gargoyle-hollowed.stl")]
+        assert ai.heuristic_link_sups(files) == [
+            {"id": 2, "part_type": None, "part_name": None, "sup_base_filename": "gargoyle.stl"}
+        ]
+
+    def test_matches_by_filename_even_when_part_name_is_mislabeled_and_collides(self):
+        # Regression (#967-follow-up): real-world data had two *different*
+        # physical parts both labeled "Escaraba 1 Base" by part_name (a
+        # leftover from an earlier/buggier naming pass), while their
+        # filenames were still correct and consistent. Matching by part_name
+        # alone either missed this pair or matched it to the wrong base;
+        # filename must win.
+        files = [
+            self._f(1, "escaraba-1-base.stl", part_name="Escaraba 1 Base"),
+            self._f(2, "escaraba-hellfyre-base.stl", part_name="Escaraba 1 Base"),  # mislabeled, same as #1
+            self._f(3, "escaraba-hellfyre-base-supported.stl", part_name="Supported Escaraba Hellfyre Base"),
+        ]
+        sugs = ai.heuristic_link_sups(files)
+        assert sugs == [
+            {"id": 3, "part_type": None, "part_name": None, "sup_base_filename": "escaraba-hellfyre-base.stl"}
+        ]
+
+    def test_already_linked_candidate_is_skipped(self):
+        # sup_of_id already set (to some other file, id 9) — must not be
+        # touched or re-suggested even though a perfect name match exists.
+        files = [
+            self._f(1, "icon-of-flame-2.stl"),
+            self._f(2, "icon-of-flame-2-supported.stl", sup_of_id=9),
+        ]
+        assert ai.heuristic_link_sups(files) == []
+
+    def test_plain_named_file_is_never_treated_as_a_sup_candidate(self):
+        # Neither file has a link keyword — nothing to link, even though
+        # "widget" is a substring relationship of sorts.
+        files = [self._f(1, "widget.stl"), self._f(2, "widget-extra.stl")]
+        assert ai.heuristic_link_sups(files) == []
+
+    def test_no_matching_base_found_yields_no_suggestion(self):
+        files = [self._f(1, "orphan-supported.stl")]
+        assert ai.heuristic_link_sups(files) == []
+
+    def test_word_boundary_prevents_false_positive_on_superman(self):
+        # "sup" must not match inside "Superman" — no word boundary there.
+        files = [self._f(1, "hero.stl"), self._f(2, "superman.stl")]
+        assert ai.heuristic_link_sups(files) == []
+
+    def test_a_supported_named_file_is_never_used_as_someone_elses_base(self):
+        # Two "supported" files that would normally-name-collide with each
+        # other after stripping the keyword must not link to each other —
+        # only a plain-named file is eligible as a base.
+        files = [
+            self._f(1, "widget-supported.stl"),
+            self._f(2, "widget-hollowed.stl"),
+        ]
+        assert ai.heuristic_link_sups(files) == []
+
+
+def test_endpoint_link_sups_strategy_links_unlinked_supported_file(client, db):
+    """Full round trip, and critically: no AI API config needed at all for
+    this strategy (#967) — unlike "parts"/"unit", which 400 without one."""
+    m = Model(name="Flame Cultist", folder_path="/lib/flame-cultist")
+    db.add(m)
+    db.flush()
+    base = STLFile(model_id=m.id, filename="icon-of-flame-2.stl", path="/lib/flame-cultist/icon-of-flame-2.stl")
+    sup = STLFile(model_id=m.id, filename="icon-of-flame-2-supported.stl",
+                  path="/lib/flame-cultist/icon-of-flame-2-supported.stl")
+    db.add_all([base, sup])
+    db.commit()
+
+    # Deliberately no AI API config, no ai_organize_enabled — link_sups must
+    # not require either.
+    r = client.post(f"/models/{m.id}/ai-organize", json={"strategy": "link_sups"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["llm_status"] == "ok"
+    sug = {s["id"]: s for s in body["suggestions"]}
+    assert sug[sup.id]["sup_of_id"] == base.id
+
+
+def test_endpoint_link_sups_apply_writes_sup_of_id(client, db):
+    m = Model(name="Flame Cultist", folder_path="/lib/flame-cultist")
+    db.add(m)
+    db.flush()
+    base = STLFile(model_id=m.id, filename="icon-of-flame-2.stl", path="/lib/flame-cultist/icon-of-flame-2.stl")
+    sup = STLFile(model_id=m.id, filename="icon-of-flame-2-supported.stl",
+                  path="/lib/flame-cultist/icon-of-flame-2-supported.stl")
+    db.add_all([base, sup])
+    db.commit()
+
+    preview = client.post(f"/models/{m.id}/ai-organize", json={"strategy": "link_sups"}).json()
+    items = [{"id": s["id"], "sup_of_id": s["sup_of_id"]} for s in preview["suggestions"]]
+
+    r = client.post(f"/models/{m.id}/ai-organize/apply", json={"items": items})
+    assert r.status_code == 200
+
+    db.refresh(sup)
+    assert sup.sup_of_id == base.id

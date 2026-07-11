@@ -321,8 +321,10 @@ export interface AiOrganizeSettings {
 
 // "parts" (default) categorizes by physical part type (Head, Weapon, ...).
 // "unit" groups by in-game unit/character instead (#878) — freeform, not
-// limited to the standard category list.
-export type AiOrganizeStrategy = "parts" | "unit";
+// limited to the standard category list. "link_sups" (#967) suggests
+// sup_of_id links for currently-unlinked sup/supported/hollowed-named
+// files — pure heuristic, no AI API needed.
+export type AiOrganizeStrategy = "parts" | "unit" | "link_sups";
 
 export interface AiOrganizeSuggestion {
   id: number;

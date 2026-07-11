@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { api, ModelDetail as ModelDetailType } from "../../../api/client";
 import { PartTypeCombo } from "../../../components/PartTypeCombo";
+import { FileLinkCombo, FileLinkOption } from "../../../components/FileLinkCombo";
 import { useAppSettings } from "../../../context/AppSettingsContext";
 import type { ViewMode } from "../utils";
 import { PART_TYPE_SUGGESTIONS, toPascalCase, autoPartName, buildFileHierarchy, naturalCompare } from "../utils";
@@ -132,27 +133,26 @@ function DraggableFileRow({
             </button>
           ) : null}
           {isBase && linkingBaseId === f.id && (
-            <select
-              autoFocus
-              defaultValue=""
-              className="bg-panel-secondary text-xs text-text-primary-alt2 rounded px-1.5 py-0.5 border border-border-divider focus:outline-none focus:border-accent-start"
-              onChange={(e) => { if (e.target.value) { linkSup(f.id, parseInt(e.target.value)); setLinkingBaseId(null); } }}
-              onBlur={() => setLinkingBaseId(null)}
-            >
-              <option value="" disabled>Link sup…</option>
-              {allFiles
+            <FileLinkCombo
+              placeholder="Link sup…"
+              className="w-32 bg-panel-secondary text-xs text-text-primary-alt2 rounded px-1.5 py-0.5 border border-border-divider focus:outline-none focus:border-accent-start"
+              options={allFiles
                 .filter((sf) => sf.id !== f.id)
-                .sort((a, b) => naturalCompare(a.filename, b.filename))
-                .map((sf) => {
+                .sort((a, b) => naturalCompare(a.part_name || a.filename, b.part_name || b.filename))
+                .map((sf): FileLinkOption => {
                   const alreadyHere = sf.sup_of_id === f.id;
                   const linkedElsewhere = sf.sup_of_id != null && !alreadyHere;
-                  return (
-                    <option key={sf.id} value={sf.id} disabled={alreadyHere}>
-                      {sf.filename}{alreadyHere ? " ✓" : linkedElsewhere ? " (linked)" : ""}
-                    </option>
-                  );
+                  return {
+                    id: sf.id,
+                    label: sf.part_name || sf.filename,
+                    filename: sf.filename,
+                    disabled: alreadyHere,
+                    suffix: alreadyHere ? " ✓" : linkedElsewhere ? " (linked)" : "",
+                  };
                 })}
-            </select>
+              onPick={(id) => { linkSup(f.id, id); setLinkingBaseId(null); }}
+              onCancel={() => setLinkingBaseId(null)}
+            />
           )}
         </div>
       </td>

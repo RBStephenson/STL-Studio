@@ -1,4 +1,4 @@
-import { X, Layers, Puzzle } from "lucide-react";
+import { X, Layers, Puzzle, Link2 } from "lucide-react";
 import type { AiOrganizeStrategy } from "../api/client";
 
 interface Props {
@@ -17,6 +17,12 @@ const STRATEGY_TOOLTIPS: Record<AiOrganizeStrategy, string> = {
   parts:
     "The standard approach: categorizes each file by physical part type " +
     "(Head, Weapon, Base, etc.) picked from the app's standard category list.",
+  link_sups:
+    "Matches a currently-unlinked file named \"Sup\", \"Supported\", or " +
+    "\"Hollowed\" to its likely base part by name (e.g. \"Icon of Flame 2 " +
+    "Supported\" → \"Icon of Flame 2\") and suggests the link. A plain-named " +
+    "file is never linked to another file, only ever a possible match target. " +
+    "Pure name matching — no AI API needed, works even without one configured.",
 };
 
 export default function AiOrganizeStrategyModal({ onChoose, onClose }: Props) {
@@ -61,6 +67,20 @@ export default function AiOrganizeStrategyModal({ onChoose, onClose }: Props) {
               <span className="block text-sm font-medium text-gray-100">Parts-based</span>
               <span className="block text-xs text-gray-500 mt-0.5">
                 Categorize by physical part type (Head, Weapon, Base, etc.) — the standard approach.
+              </span>
+            </span>
+          </button>
+
+          <button
+            onClick={() => onChoose("link_sups")}
+            title={STRATEGY_TOOLTIPS.link_sups}
+            className="flex items-start gap-3 text-left px-4 py-3 rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 hover:border-indigo-500 transition-colors"
+          >
+            <Link2 size={18} className="text-indigo-400 shrink-0 mt-0.5" />
+            <span>
+              <span className="block text-sm font-medium text-gray-100">Link supported parts</span>
+              <span className="block text-xs text-gray-500 mt-0.5">
+                Match unlinked "Sup"/"Supported"/"Hollowed" files to their base part by name. No AI API needed.
               </span>
             </span>
           </button>
