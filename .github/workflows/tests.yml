@@ -37,6 +37,12 @@ jobs:
           pip install ruff==0.15.20
           ruff check app tests scripts
 
+      # scripts/ at repo root (build/CI tooling) is separate from backend/scripts.
+      - name: Ruff (repo-root scripts)
+        run: |
+          pip install ruff==0.15.20
+          ruff check scripts/smoke_boot.py scripts/test_smoke_boot.py
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -87,6 +93,11 @@ jobs:
       - name: Run pytest
         working-directory: backend
         run: pytest -v
+
+      # scripts/smoke_boot.py's poll/timeout/crash logic (STUDIO-102) — repo-root
+      # tooling, not part of the backend package, run separately from the above.
+      - name: Run smoke_boot tests
+        run: pytest -v scripts/test_smoke_boot.py
 
   vitest:
     runs-on: ubuntu-latest
