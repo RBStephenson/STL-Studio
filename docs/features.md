@@ -359,18 +359,27 @@ buttons in a model's header. *(Printed* is set from the model header.)
 ## Kit Builder
 
 Launched from any model's detail page. It groups that model's STL files by their
-**part label** (head, torso, arms, base…). Pick one file per part group to
-assemble a complete build, then copy the file list or download the selection as
-a zip. Handy when a model ships multiple head or pose options and you want to
-commit to one combination.
+**part label** (head, torso, arms, base…). Click any file to toggle it into
+your selection — any number of files can be selected at once, independently of
+each other — then copy the file list or download the selection as a zip. Handy
+when a model ships multiple head or pose options and you want to commit to a
+combination, or when you want to grab several parts from one category at once.
 
 The Kit Builder uses a two-panel layout:
 
-- **Left panel** — the part selector. Files are grouped by label; click a part
-  to toggle it in your selection.
+- **Left panel** — the part selector. Files are grouped by label; click any
+  file to toggle it in your selection — nothing is exclusive, so a part and
+  its own linked variants (see below) can all be selected together, or any
+  combination of files across different parts.
 - **Right panel** — a live 3D preview pane. Hover any part button to instantly
   load it in the viewer without affecting your selection. The pane stays pinned
   to the right side even as you scroll through a long parts list.
+
+**Linked variants** (a part with a supported/hollowed/other version linked via
+its [sup relationship](#model-detail)) render as one box instead of a separate
+pill per file: the base part on top, with each linked variant as a smaller row
+below it, labeled **Supported**, **Hollowed**, or **Other** by name-keyword
+match. Click any row — base or variant — to toggle just that one file.
 
 To make this useful, label your parts first: on the model detail page, each STL
 file has a small **Label** input with common suggestions.

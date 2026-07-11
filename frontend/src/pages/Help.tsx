@@ -319,9 +319,16 @@ const SECTIONS: Section[] = [
       <>
         <p>
           Launched from any model's detail page. It groups that model's STL files by their{" "}
-          <strong>part label</strong> (head, torso, arms, base…). Pick one file per part
-          group to assemble a complete build, then <strong>Copy list</strong> or{" "}
-          <strong>Download zip</strong> of the selection.
+          <strong>part label</strong> (head, torso, arms, base…). Click any file to toggle
+          it into your selection — any number can be selected at once, nothing is
+          exclusive — then <strong>Copy list</strong> or <strong>Download zip</strong> of
+          the selection.
+        </p>
+        <p>
+          A part with linked variants (Supported/Hollowed/other) renders as one box: the
+          base part on top, each linked variant as a smaller labeled row below it. Click
+          any row to toggle just that one file — the base and its variants can all be
+          selected together.
         </p>
         <p>
           To make this useful, label your parts first: on the model detail page, each STL
