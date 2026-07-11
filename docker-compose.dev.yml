@@ -1,5 +1,6 @@
 # Local development overlay. Opt-in — the base docker-compose.yml runs uvicorn
-# without --reload (production default, see backend/Dockerfile).
+# without --reload and serves the frontend as a static nginx build (production
+# defaults, see backend/Dockerfile and frontend/Dockerfile).
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
@@ -13,3 +14,23 @@ services:
       - ./backend/app:/app/app
     command:
       ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Runs the Vite dev server (with HMR) instead of the built nginx image.
+  # node_modules is a named volume, not bind-mounted, so the Linux-built deps
+  # in the image aren't shadowed by host (e.g. Windows) node_modules.
+  frontend:
+    build: !reset null
+    image: node:24.18.0-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    environment:
+      - VITE_API_URL=http://backend:8000
+      # Windows/macOS bind mounts don't propagate inotify events into the
+      # container, so Vite's watcher never fires without polling.
+      - CHOKIDAR_USEPOLLING=true
+    command: ["sh", "-c", "npm ci && npm run dev"]
+
+volumes:
+  frontend_node_modules:

@@ -18,6 +18,11 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 3000,
+    // Docker bind mounts on Windows/macOS don't propagate inotify events, so
+    // the watcher must poll (set via CHOKIDAR_USEPOLLING in docker-compose.dev.yml).
+    watch: process.env.CHOKIDAR_USEPOLLING
+      ? { usePolling: true, interval: 300 }
+      : undefined,
     proxy: {
       "/api": {
         // Docker: backend:8000 — Native: localhost:8000
