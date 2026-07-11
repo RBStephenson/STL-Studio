@@ -299,6 +299,106 @@ def heuristic_pass(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# link_sups strategy: pure heuristic, no LLM call — matches a currently-
+# unlinked "sup"/"supported"/"hollowed"-named file to its likely base part by
+# name, for the reviewer to confirm before it's saved as sup_of_id.
+# ---------------------------------------------------------------------------
+
+# Deliberately broader than _SUP_PREFIX_RE/_SUP_INFIX_RE above (which only
+# recognize "sup_"/"(s)_"/"s_sup_" prefixes and "(pre)supported" as an
+# infix): this strategy's own request is "sup", "supported", or "hollowed" as
+# a standalone word anywhere in the name, matched on the word boundary so
+# "Superman" or "Supply Crate" don't false-positive on the bare "sup" form.
+_LINK_KEYWORD_RE = re.compile(r"\b(?:sup|supported|hollowed)\b", re.IGNORECASE)
+
+
+def _norm_name(name: str) -> str:
+    """Lowercase, separator-normalized comparison key for link_sups matching."""
+    s = re.sub(r"[_\-]+", " ", name)
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _match_keys(f: dict[str, Any]) -> list[str]:
+    """Name(s) to check/match this file under, filename first.
+
+    The filename is the reliable signal for this pairing pattern — a sup and
+    its base almost always share the same filename stem plus a keyword,
+    even on a library where part_name has drifted (independently re-typed,
+    copy-pasted, or produced by an earlier/buggier AI Organize run — real
+    data has seen e.g. two *different* physical parts both labeled exactly
+    "Escaraba 1 Base" by part_name alone, #967-follow-up). part_name is
+    still checked second, for the rarer case where a file's name was fixed
+    up without renaming the file itself.
+    """
+    keys = []
+    fn_key = _norm_name(_stem(f.get("filename", "")))
+    if fn_key:
+        keys.append(fn_key)
+    pn = (f.get("part_name") or "").strip()
+    if pn:
+        pn_key = _norm_name(pn)
+        if pn_key and pn_key not in keys:
+            keys.append(pn_key)
+    return keys
+
+
+def heuristic_link_sups(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Match each currently-unlinked, sup/supported/hollowed-named file to
+    its likely base part by name.
+
+    Two deliberate restrictions, both from the feature request this
+    implements directly:
+      1. Only a file with no sup_of_id already set is considered a candidate
+         to link — an existing link (however it got there) is never
+         second-guessed or overwritten by this heuristic.
+      2. Only a file whose name contains one of the link keywords is ever
+         treated as the "sup" side of a match. A plain-named file is only
+         ever a match *target* (a base), never linked TO another file by
+         this pass — this is a rescue for the common "loose supported
+         variant, never linked" case, not a general fuzzy-matching pass
+         across the whole file list.
+
+    See _match_keys for why matching tries the filename before part_name.
+    """
+    suggestions: list[dict[str, Any]] = []
+
+    # Index every plain (non-keyword) file under each of its match keys —
+    # filename keys inserted first, so a part_name collision (two different
+    # files sharing a mislabeled part_name) can never displace a correct
+    # filename-based entry.
+    base_by_key: dict[str, dict[str, Any]] = {}
+    for f in files:
+        for key in _match_keys(f):
+            if not _LINK_KEYWORD_RE.search(key):
+                base_by_key.setdefault(key, f)
+
+    for f in files:
+        if f.get("sup_of_id") is not None:
+            continue
+        base: dict[str, Any] | None = None
+        for key in _match_keys(f):
+            if not _LINK_KEYWORD_RE.search(key):
+                continue
+            candidate_key = _norm_name(_LINK_KEYWORD_RE.sub(" ", key))
+            if not candidate_key:
+                continue
+            base = base_by_key.get(candidate_key)
+            if base is not None:
+                break
+        if base is None or base["id"] == f["id"]:
+            continue
+        suggestions.append({
+            "id": f["id"],
+            "part_type": None,
+            "part_name": None,
+            "sup_base_filename": base["filename"],
+        })
+
+    _log_step("link_sups_done", input=len(files), suggestions=len(suggestions))
+    return suggestions
+
+
+# ---------------------------------------------------------------------------
 # LLM refinement (optional)
 # ---------------------------------------------------------------------------
 
@@ -1029,7 +1129,18 @@ def run(
     because reasoning adds latency and risks the exact empty-content failure
     the suppression exists to avoid, for a task (filename pattern-matching)
     that gains little from it.
+
+    ``strategy="link_sups"`` (#967): matches a currently-unlinked
+    sup/supported/hollowed-named file to its likely base part by name — see
+    heuristic_link_sups. Pure heuristic, no LLM call and no API config
+    needed at all; this returns immediately, before ``base_url``/``model``
+    are even inspected.
     """
+    if strategy == "link_sups":
+        suggestions = heuristic_link_sups(files)
+        _log_step("start", file_count=len(files), has_llm=False, api_type=api_type, strategy=strategy)
+        return OrganizeResult(suggestions=suggestions, llm=LlmOutcome(status="ok", suggestions=suggestions))
+
     # An Anthropic config carries no URL; an OpenAI-compatible one needs one.
     llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
     _log_step("start", file_count=len(files), has_llm=llm_ready, api_type=api_type, strategy=strategy)
@@ -1163,6 +1274,32 @@ def run(
             if s.get("sup_base_filename"):
                 existing["sup_base_filename"] = s["sup_base_filename"]
             merged[fid] = existing
+
+    # Guarantee every file leaves organize with a real part_name, never just
+    # the filename-derived placeholder the STL files table shows (dimmed) for
+    # an empty one (#947). A file can reach here still nameless for several
+    # reasons — heuristics/LLM judged no change needed while a name was
+    # already missing, the LLM omitted the file from its response entirely,
+    # or it landed in "unknown" — this closes all of them in one place rather
+    # than chasing each upstream cause individually. Only fills a genuinely
+    # empty name; anything already set (by heuristics, the LLM, or a prior
+    # save) is left untouched.
+    #
+    # Skipped entirely on "error": success-via-API-or-nothing (#821) requires
+    # an errored run to return zero suggestions, never a partial mix — this
+    # loop must not manufacture suggestions out of an otherwise-empty result.
+    if outcome.status != "error":
+        for f in files:
+            fid = f["id"]
+            current_name = (merged.get(fid) or {}).get("part_name") or f.get("part_name")
+            if current_name:
+                continue
+            auto_name = _clean_name(f["filename"])
+            if not auto_name:
+                continue
+            if fid not in merged:
+                merged[fid] = {"id": fid, "sup_base_filename": None}
+            merged[fid]["part_name"] = auto_name
 
     result = list(merged.values())
     _log_step("done", total_suggestions=len(result), llm_status=outcome.status)

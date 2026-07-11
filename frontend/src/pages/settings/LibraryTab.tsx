@@ -450,6 +450,23 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
               </p>
             </div>
           </label>
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.reorganize_slugify_filenames}
+              onChange={() => update({ reorganize_slugify_filenames: !settings.reorganize_slugify_filenames })}
+              className="mt-0.5 accent-indigo-500"
+            />
+            <div>
+              <p className="text-sm text-text-primary-alt2">Lowercase, hyphenated filenames</p>
+              <p className="text-xs text-text-secondary-alt mt-0.5">
+                Also renames each STL file itself (e.g. <code className="text-text-secondary">cold-giant-hollowed.stl</code>{" "}
+                instead of <code className="text-text-secondary">Cold Giant Hollowed.stl</code>) on Reorganize and
+                import. No template — just normalization. Independent of the directory-name setting above; off by
+                default since it renames files on disk, not just folders.
+              </p>
+            </div>
+          </label>
         </div>
       </section>
 

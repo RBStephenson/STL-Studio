@@ -91,3 +91,17 @@ def slug_segment(name: str) -> str:
     s = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
     s = _SLUG_NON_ALNUM.sub("-", s.lower()).strip("-")
     return s or "_"
+
+
+def slug_filename(filename: str) -> str:
+    """Slug a filename's stem, preserving its extension: "Cold Giant.stl" ->
+    "cold-giant.stl". The extension is lowercased but not otherwise slugged —
+    it's a fixed token (".stl"), not free-form text worth hyphenating.
+
+    Uses the last dot as the extension boundary, so a name with no dot slugs
+    in full (no extension to preserve).
+    """
+    stem, dot, ext = filename.rpartition(".")
+    if not dot:
+        return slug_segment(filename)
+    return f"{slug_segment(stem)}.{ext.lower()}"

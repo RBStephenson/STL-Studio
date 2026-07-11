@@ -225,17 +225,32 @@ the corresponding button in the part picker stay in sync in both directions,
 auto-unfolding collapsed sections as needed. Changing a part's category
 applies to every file linked to it (the base file and all its sups).
 
+Clicking the link icon to attach a sup opens a searchable picker: it lists
+each candidate by its **part name** (falling back to the filename if a file
+has none set) with the filename shown underneath for reference, and typing
+filters the list by either — much faster than scanning a plain dropdown of
+raw filenames on a kit with dozens of parts.
+
 The **part type** field is a combobox: start typing to filter a list of
-standard suggestions (listed alphabetically), or type any custom category
-name. The dropdown appears automatically, opening above the field instead of
-below when there isn't room underneath, and can be dismissed with Escape;
-pressing Enter or clicking away commits the value.
+standard suggestions plus any custom category already used somewhere on this
+model (listed alphabetically together — the same combined list the bulk
+**Recategorize to…** dropdown offers), or type a brand new category name. The
+dropdown appears automatically, opening above the field instead of below when
+there isn't room underneath, and can be dismissed with Escape; pressing Enter
+or clicking away commits the value.
 
 **Settings → Preferences → Horizontal parts layout** (on by default) swaps the
 two-column model detail page for a full-width, scrollable files table below the
 main grid (with **Collections**, **Location**, and **Other Files** moved into the
 right column) — handy for models with a lot of parts. The part picker is hidden
-in this mode since the table serves the same purpose.
+in this mode since the table serves the same purpose. Checking one or more rows
+shows a **Recategorize to…** dropdown in the toolbar (next to Download
+selected) — offering the standard category suggestions plus any custom
+category already used on this model — so you can move several files into a
+category in one action instead of editing each row's Category field by hand.
+
+Files and categories in both layouts sort numerically where a name has an
+embedded number, so "Body 2" sorts before "Body 10" instead of after it.
 
 **Settings → Preferences → Enable part categories** turns on the Category field
 on each file in the model detail view. Files group into collapsible sections and
@@ -248,26 +263,40 @@ both from disk and from the listing (with a confirmation first); if the file was
 already gone from disk (e.g. deleted outside the app), this still clears the
 stale listing.
 
-**AI Organize** (button on the model detail page, requires an AI API assigned
-under [Settings → AI & Integrations](#ai--integrations)) suggests a category
-and cleaned-up name for every STL file. Clicking it first asks you to pick a
-strategy:
+**AI Organize** (button on the model detail page) suggests a category and
+cleaned-up name for every STL file, or links supported variants to their base
+part. Clicking it first asks you to pick a strategy:
 
-- **Parts-based** — the standard approach. Fast keyword-based naming rules run
-  first, but the AI always runs too — even on files the naming rules already
-  resolved — since it can still catch a wrong guess or a name the rules got
-  half right. It only ever picks from the app's standard category list, so its
-  suggestions land in the same categories the Category combobox offers.
-- **Unit-based** — groups files by the in-game unit or character they belong
-  to instead of by physical part (e.g. every file for "Royal Guard 1" — head,
-  helmet, weapon — gets that as its category, not "Head"/"Weapon"). There's no
-  keyword pre-pass for this — it goes straight to the AI. Unit names are
-  derived per model, so they aren't limited to the standard category list;
-  each one is title-cased for consistency across a unit's files. Large kits
-  are sent to the AI in small batches (5 files at a time) rather than one
-  capped call, so every file gets a suggestion, not just the first several —
-  later batches are told which unit names earlier ones already settled on, so
-  the same unit isn't renamed partway through a big kit.
+- **Parts-based** — the standard approach. Requires an AI API assigned under
+  [Settings → AI & Integrations](#ai--integrations). Fast keyword-based naming
+  rules run first, but the AI always runs too — even on files the naming rules
+  already resolved — since it can still catch a wrong guess or a name the
+  rules got half right. It only ever picks from the app's standard category
+  list, so its suggestions land in the same categories the Category combobox
+  offers.
+- **Unit-based** — requires an AI API. Groups files by the in-game unit or
+  character they belong to instead of by physical part (e.g. every file for
+  "Royal Guard 1" — head, helmet, weapon — gets that as its category, not
+  "Head"/"Weapon"). There's no keyword pre-pass for this — it goes straight to
+  the AI. Unit names are derived per model, so they aren't limited to the
+  standard category list; each one is title-cased for consistency across a
+  unit's files. Large kits are sent to the AI in small batches (5 files at a
+  time) rather than one capped call, so every file gets a suggestion, not just
+  the first several — later batches are told which unit names earlier ones
+  already settled on, so the same unit isn't renamed partway through a big kit.
+- **Link supported parts** — no AI API needed; this is pure name matching, not
+  an AI call. Finds every file whose filename (or, failing that, its part
+  name) contains "Sup", "Supported", or "Hollowed" and isn't already linked to
+  a base, and matches it to a same-named plain file — e.g.
+  "icon-of-flame-2-supported.stl" links to "icon-of-flame-2.stl". Matching
+  goes by filename first specifically because part names can drift or get
+  mislabeled independently of the file (two different parts ending up with
+  the same, wrong, part name is a real thing that happens); part name is only
+  a fallback for a file matched with no useful filename signal. A file without
+  one of the keywords is only ever a possible match target, never linked to
+  another file itself, so it's safe to run on a whole kit without relabeling
+  anything that's already named correctly. An already-linked file is never
+  touched or re-matched.
 
 On a local model via an OpenAI-compatible endpoint (Ollama, etc.), requests use
 schema-constrained output and an explicit instruction against extended
@@ -332,18 +361,27 @@ buttons in a model's header. *(Printed* is set from the model header.)
 ## Kit Builder
 
 Launched from any model's detail page. It groups that model's STL files by their
-**part label** (head, torso, arms, base…). Pick one file per part group to
-assemble a complete build, then copy the file list or download the selection as
-a zip. Handy when a model ships multiple head or pose options and you want to
-commit to one combination.
+**part label** (head, torso, arms, base…). Click any file to toggle it into
+your selection — any number of files can be selected at once, independently of
+each other — then copy the file list or download the selection as a zip. Handy
+when a model ships multiple head or pose options and you want to commit to a
+combination, or when you want to grab several parts from one category at once.
 
 The Kit Builder uses a two-panel layout:
 
-- **Left panel** — the part selector. Files are grouped by label; click a part
-  to toggle it in your selection.
+- **Left panel** — the part selector. Files are grouped by label; click any
+  file to toggle it in your selection — nothing is exclusive, so a part and
+  its own linked variants (see below) can all be selected together, or any
+  combination of files across different parts.
 - **Right panel** — a live 3D preview pane. Hover any part button to instantly
   load it in the viewer without affecting your selection. The pane stays pinned
   to the right side even as you scroll through a long parts list.
+
+**Linked variants** (a part with a supported/hollowed/other version linked via
+its [sup relationship](#model-detail)) render as one box instead of a separate
+pill per file: the base part on top, with each linked variant as a smaller row
+below it, labeled **Supported**, **Hollowed**, or **Other** by name-keyword
+match. Click any row — base or variant — to toggle just that one file.
 
 To make this useful, label your parts first: on the model detail page, each STL
 file has a small **Label** input with common suggestions.
@@ -680,7 +718,11 @@ off to keep each segment's original casing and spacing.
   each, with a move-kind chip (move / rename / case rename / in place / merge) and
   blocker chips for anything unsafe (collision, over-length or reserved name,
   unclassifiable, symlink, multi-directory, escapes-scan-root, missing files).
-  Nothing is touched until you apply.
+  Nothing is touched until you apply. A **missing files** chip means the app's
+  own record of that file's path doesn't resolve on disk — usually because it
+  was renamed or moved outside the app. A full [scan](scanning-and-folders.md#full-scan-vs-per-creator-rescan)
+  cleans up file records left behind by an out-of-app rename; run one before
+  trusting a persistent "missing files" chip.
 - **Resolve flagged rows.** Expand an ineligible row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an
   over-long/reserved name. The preview regenerates as you type.

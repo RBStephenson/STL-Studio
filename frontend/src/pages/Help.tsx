@@ -202,18 +202,43 @@ const SECTIONS: Section[] = [
             screen.
           </li>
           <li>Edit metadata, tags, source URL, and the NSFW flag (full form via <strong>Edit</strong>).</li>
-          <li>See and <strong>label each STL file</strong> (head, arm, base, etc.).</li>
+          <li>
+            See and <strong>label each STL file</strong> (head, arm, base, etc.) — the
+            Category field suggests the standard list plus any custom category
+            already used on this model, same as the bulk recategorize dropdown below.
+          </li>
           <li>
             A part can have multiple <strong>sup variants</strong> — alternate
             supported/cut versions — and the part picker shows one button per sup
             variant (s1, s2, …). The file list and part picker stay in sync in both
             directions; changing a part's category applies to the base file and all
-            its sups.
+            its sups. Clicking the link icon to attach a sup opens a searchable
+            picker — it lists each candidate by part name (or filename if it has
+            none set), with the filename shown underneath, and typing filters by
+            either.
+          </li>
+          <li>
+            <strong>AI Organize</strong> suggests a category and cleaned-up name for
+            every file, or links supported variants to their base part — pick a
+            strategy when you click it. <strong>Parts-based</strong> and{" "}
+            <strong>Unit-based</strong> both need an AI API assigned under Settings →
+            AI & Integrations. <strong>Link supported parts</strong> doesn't — it's
+            pure name matching (no AI call) that finds every currently-unlinked file
+            named "Sup", "Supported", or "Hollowed" and matches it to a same-named
+            plain file by filename. Either way, nothing is written until you review
+            and apply the suggestions.
           </li>
           <li>
             <strong>Settings → Preferences → Horizontal parts layout</strong> swaps
             the two-column page for a full-width scrollable files table — handy for
-            models with a lot of parts.
+            models with a lot of parts. Check one or more rows to reveal a{" "}
+            <strong>Recategorize to…</strong> dropdown in the toolbar — offering the
+            standard categories plus any custom category already used on this
+            model — to bulk-move several files into a category at once.
+          </li>
+          <li>
+            Files and categories sort numerically where a name has an embedded
+            number, so "Body 2" comes before "Body 10" instead of after it.
           </li>
           <li><strong>Download all</strong> files as a zip, or open the <strong>Kit Builder</strong>.</li>
           <li>
@@ -298,9 +323,16 @@ const SECTIONS: Section[] = [
       <>
         <p>
           Launched from any model's detail page. It groups that model's STL files by their{" "}
-          <strong>part label</strong> (head, torso, arms, base…). Pick one file per part
-          group to assemble a complete build, then <strong>Copy list</strong> or{" "}
-          <strong>Download zip</strong> of the selection.
+          <strong>part label</strong> (head, torso, arms, base…). Click any file to toggle
+          it into your selection — any number can be selected at once, nothing is
+          exclusive — then <strong>Copy list</strong> or <strong>Download zip</strong> of
+          the selection.
+        </p>
+        <p>
+          A part with linked variants (Supported/Hollowed/other) renders as one box: the
+          base part on top, each linked variant as a smaller labeled row below it. Click
+          any row to toggle just that one file — the base and its variants can all be
+          selected together.
         </p>
         <p>
           To make this useful, label your parts first: on the model detail page, each STL

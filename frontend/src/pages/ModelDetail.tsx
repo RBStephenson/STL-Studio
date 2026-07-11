@@ -34,6 +34,7 @@ import TagsPanel from "./model-detail/sections/TagsPanel";
 import { errMsg } from "../utils/err";
 import {
   toPascalCase,
+  naturalCompare,
   parseLibraryOrigin,
   type ViewMode,
   type NavTarget,
@@ -119,6 +120,7 @@ export default function ModelDetail() {
   } = usePartEditing(model, patchModel, selectedStlFileId);
   const [showKitBuilder, setShowKitBuilder] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [downloadingSelected, setDownloadingSelected] = useState(false);
   const [aiOrganizing, setAiOrganizing] = useState(false);
   const [aiOrganizeResult, setAiOrganizeResult] = useState<AiOrganizePreviewResult | null>(null);
   const [showAiOrganizeStrategy, setShowAiOrganizeStrategy] = useState(false);
@@ -167,7 +169,7 @@ export default function ModelDetail() {
         unlabeled.push(f);
       }
     }
-    const sortedLabeled = [...labeled.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const sortedLabeled = [...labeled.entries()].sort(([a], [b]) => naturalCompare(a, b));
     return { labeled: sortedLabeled, unlabeled };
   }, [model?.stl_files]);
 
@@ -237,6 +239,18 @@ export default function ModelDetail() {
       await api.downloadZip(model.stl_files.map((f) => f.id), `${name} ${date}`);
     } finally {
       setDownloadingAll(false);
+    }
+  };
+
+  const downloadSelectedFiles = async (fileIds: number[]) => {
+    if (!model || downloadingSelected || fileIds.length === 0) return;
+    setDownloadingSelected(true);
+    try {
+      const date = new Date().toISOString().slice(0, 10);
+      const name = model.title || model.name;
+      await api.downloadZip(fileIds, `${name} ${date}`);
+    } finally {
+      setDownloadingSelected(false);
     }
   };
 
@@ -921,6 +935,8 @@ export default function ModelDetail() {
         runAiOrganize={runAiOrganize}
         downloadingAll={downloadingAll}
         downloadAllFiles={downloadAllFiles}
+        downloadingSelected={downloadingSelected}
+        downloadSelectedFiles={downloadSelectedFiles}
         onOpenKitBuilder={() => setShowKitBuilder(true)}
       />
 

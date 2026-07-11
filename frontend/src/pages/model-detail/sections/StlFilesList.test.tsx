@@ -17,7 +17,9 @@ vi.mock("../../../context/AppSettingsContext", () => ({
   useAppSettings: () => ({ settings }),
 }));
 vi.mock("../../../components/PartTypeCombo", () => ({
-  PartTypeCombo: ({ value }: { value: string }) => <input data-testid="part-combo" defaultValue={value} />,
+  PartTypeCombo: ({ value, options }: { value: string; options: string[] }) => (
+    <input data-testid="part-combo" defaultValue={value} data-options={options.join("|")} />
+  ),
 }));
 
 import StlFilesList from "./StlFilesList";
@@ -90,6 +92,17 @@ describe("StlFilesList", () => {
     expect(screen.getAllByTestId("part-combo").length).toBeGreaterThan(0);
   });
 
+  it("per-row Category combo offers this model's custom categories too, not just the standard list", () => {
+    settings.part_categories_enabled = true;
+    renderList({
+      groupedStlFiles: { labeled: [["Quetzlgor", [model.stl_files[0]]]], unlabeled: [model.stl_files[1]] },
+    });
+    const combo = screen.getAllByTestId("part-combo")[0];
+    const options = combo.getAttribute("data-options")?.split("|") ?? [];
+    expect(options).toContain("Quetzlgor");
+    expect(options).toContain("Head");
+  });
+
   it("wires the Download all and Kit Builder actions", () => {
     const downloadAllFiles = vi.fn();
     const onOpenKitBuilder = vi.fn();
@@ -105,5 +118,30 @@ describe("StlFilesList", () => {
     renderList({ setLinkingBaseId });
     fireEvent.click(screen.getAllByTitle("Link a supported version")[0]);
     expect(setLinkingBaseId).toHaveBeenCalledWith(1);
+  });
+
+  it("link-sup picker shows the part name, not the filename, and lets you type to filter", () => {
+    const namedModel = {
+      id: 1,
+      stl_files: [
+        file(1, "arm.stl"),
+        file(2, "body.stl", { part_name: "Body Armor" }),
+        file(3, "head.stl", { part_name: "Head" }),
+      ],
+    } as unknown as ModelDetailType;
+    renderList({
+      model: namedModel,
+      groupedStlFiles: { labeled: [], unlabeled: namedModel.stl_files },
+      linkingBaseId: 1,
+    });
+
+    const input = screen.getByPlaceholderText("Select supported-version file…");
+    fireEvent.focus(input);
+
+    expect(screen.getByText("Body Armor")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "body" } });
+    expect(screen.getByText("Body Armor")).toBeInTheDocument();
+    expect(screen.queryByText("Head")).not.toBeInTheDocument();
   });
 });

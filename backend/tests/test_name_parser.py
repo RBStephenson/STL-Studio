@@ -307,6 +307,17 @@ class TestCharacterKey:
     def test_plain_name_unchanged(self):
         assert character_key("Catwoman") == "Catwoman"
 
+    def test_release_number_marker_stripped_entirely(self):
+        # "#1234"-style Patreon post-ID suffix — the digits alone would already be
+        # stripped as junk, but the "#" must go too, not survive as a stray char.
+        assert character_key("Cold Giant#4521") == "Cold Giant"
+        assert character_key("Cold Giant#") == "Cold Giant"
+
+    def test_release_number_variants_still_group_together(self):
+        # Two scrapes of the same product with different post IDs must reduce to
+        # the same key, same as any other variant-only difference.
+        assert character_key("Catfolk Rogues#187") == character_key("Catfolk Rogues#204")
+
     def test_scale_word_does_not_split_variants(self):
         # CA3D-style: the word "scale" survives after "1-9" is stripped from
         # "1-9 scale ...". It must not produce a different key from "1-6 ...".
@@ -520,3 +531,12 @@ class TestDisplayName:
     def test_falls_back_to_raw_when_empty(self):
         # Pure variant descriptor → nothing identifying → keep the raw folder name.
         assert display_name("75mm Unsupported") == "75mm Unsupported"
+
+    @pytest.mark.parametrize("folder,expected", [
+        ("Cold Giant#4521", "Cold Giant"),  # Cast N Play-style Patreon post-ID suffix
+        ("Catfolk Rogues Cast N Play#187", "Catfolk Rogues Cast N Play"),
+        ("Product #7 Special", "Product Special"),  # marker mid-name, not just trailing
+        ("Cold Giant#", "Cold Giant"),  # bare marker, no digits
+    ])
+    def test_strips_release_number_marker_without_leaving_a_stray_hash(self, folder, expected):
+        assert display_name(folder) == expected

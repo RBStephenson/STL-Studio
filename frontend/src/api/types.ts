@@ -280,6 +280,9 @@ export interface AppSettings {
   // lowercase/hyphenated (import-style) rather than case-preserving.
   reorganize_template: string;
   reorganize_slugify: boolean;
+  // Independent of reorganize_slugify (directory segments only): also renders
+  // each STL's own filename lowercase/hyphenated on reorganize/import-apply.
+  reorganize_slugify_filenames: boolean;
   // Feature flag: gates the Reorganize Library feature end-to-end (UI + the
   // destructive apply/undo writes). Off by default; toggled on the Library tab.
   reorganize_enabled: boolean;
@@ -318,8 +321,10 @@ export interface AiOrganizeSettings {
 
 // "parts" (default) categorizes by physical part type (Head, Weapon, ...).
 // "unit" groups by in-game unit/character instead (#878) — freeform, not
-// limited to the standard category list.
-export type AiOrganizeStrategy = "parts" | "unit";
+// limited to the standard category list. "link_sups" (#967) suggests
+// sup_of_id links for currently-unlinked sup/supported/hollowed-named
+// files — pure heuristic, no AI API needed.
+export type AiOrganizeStrategy = "parts" | "unit" | "link_sups";
 
 export interface AiOrganizeSuggestion {
   id: number;

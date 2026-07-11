@@ -75,6 +75,52 @@ class TestPreviewHappyPath:
         assert entry["escapes_scan_root"] is False
 
 
+class TestSlugifyFilenames:
+    """reorganize_slugify_filenames (#946) is off by default and independent
+    of reorganize_slugify (directory segments only) — it renders each STL's
+    own filename lowercase/hyphenated too."""
+
+    def test_filename_unchanged_by_default(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, filename="Cold Giant last time hollowed.stl")
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        assert entry["files"][0]["proposed_path"].endswith(
+            "/Cold Giant last time hollowed.stl"
+        )
+
+    def test_filename_slugified_when_setting_on(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, filename="Cold Giant last time hollowed.stl")
+        client.patch("/settings", json={"reorganize_slugify_filenames": True})
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        assert entry["files"][0]["proposed_path"].endswith(
+            "/cold-giant-last-time-hollowed.stl"
+        )
+
+    def test_already_in_place_directory_reclassified_as_rename_when_filename_needs_slugging(
+        self, client, db, tmp_path,
+    ):
+        """A model whose directory is already correctly placed must not be
+        reported as "in_place" (nothing to do) when its filename still needs
+        slugging — the Reorganize page excludes "in_place" entries from
+        selection entirely, so this would otherwise never get applied."""
+        _root(db, tmp_path)
+        # Already-lowercase directory placement — reorganize_slugify defaults
+        # to on, so this is exactly what preview would propose, making the
+        # directory itself "in_place" before slugify_filenames enters into it.
+        _model_with_file(
+            db, tmp_path, creator_name="abe3d", character="joker", title="bust",
+            filename="Cold Giant.stl",
+        )
+        client.patch("/settings", json={"reorganize_slugify_filenames": True})
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        assert entry["kind"] == "rename"
+        assert entry["files"][0]["proposed_path"].endswith("/cold-giant.stl")
+
+
 class TestHiddenDirImagesExcluded:
     def test_image_inside_hidden_directory_never_becomes_a_move_entry(self, client, db, tmp_path):
         """A stale image_paths reference into a hidden directory (e.g. a

@@ -554,6 +554,11 @@ class AppSettingsRead(BaseModel):
     # lowercase/hyphenated (import-style) rather than case-preserving.
     reorganize_template: str = ""
     reorganize_slugify: bool = True
+    # Independent of reorganize_slugify (directory segments only): also
+    # renders each STL's own filename lowercase/hyphenated on reorganize and
+    # import-apply. Off by default — renaming files on disk is a bigger step
+    # than renaming directories, so this is opt-in.
+    reorganize_slugify_filenames: bool = False
     # Feature flag: gates the Library reorganize feature end-to-end — the UI
     # (nav link, /reorganize route/page) AND the destructive apply/undo writes.
     # Default off; toggled from the Library settings tab. Retires the old
@@ -599,6 +604,7 @@ class AppSettingsUpdate(BaseModel):
     log_level: Optional[str] = Field(None, pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
     reorganize_template: Optional[str] = Field(None, max_length=500)
     reorganize_slugify: Optional[bool] = None
+    reorganize_slugify_filenames: Optional[bool] = None
     reorganize_enabled: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
 
@@ -720,8 +726,10 @@ class AiOrganizeRequest(BaseModel):
     """``strategy`` selects the grouping mode (#878): "parts" (default) suggests
     a physical part_type category (Head, Weapon, ...); "unit" suggests an
     in-game unit/character name instead (e.g. "Royal Guard 1"), written into
-    the same part_type field but not constrained to the canonical category list."""
-    strategy: Literal["parts", "unit"] = "parts"
+    the same part_type field but not constrained to the canonical category list.
+    "link_sups" (#967) suggests sup_of_id links for currently-unlinked
+    sup/supported/hollowed-named files — a pure heuristic, no AI API needed."""
+    strategy: Literal["parts", "unit", "link_sups"] = "parts"
 
 
 class AiOrganizeSuggestion(BaseModel):

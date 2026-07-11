@@ -268,6 +268,7 @@ def download_zip(
     tmp = Path(tmp_name)
 
     used_arcnames: set[str] = set()
+    written = 0
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
             for f in files:
@@ -279,9 +280,17 @@ def download_zip(
                 if not p.exists():
                     continue
                 zf.write(p, arcname=_unique_arcname(f.filename, used_arcnames))
+                written += 1
     except Exception:
         _safe_unlink(tmp)
         raise
+
+    if written == 0:
+        _safe_unlink(tmp)
+        raise HTTPException(
+            status_code=404,
+            detail="No requested files were available on disk.",
+        )
 
     safe_name = "".join(c if c.isalnum() or c in " .-_()" else "_" for c in zip_name).strip()
     filename = f"{safe_name}.zip"

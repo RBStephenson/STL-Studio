@@ -10,6 +10,14 @@ export const PART_TYPE_SUGGESTIONS = [
   "Hair", "Wings", "Tail", "Accessories",
 ];
 
+// Embedded-number-aware compare (Intl's `numeric` collation option) so
+// "Body_2" sorts before "Body_10" — plain localeCompare treats digit runs
+// character-by-character, so "10" and "11" both sort right after "1" and
+// before "2". Every filename/label sort in this page should go through
+// this rather than a bare localeCompare.
+export const naturalCompare = (a: string, b: string): number =>
+  a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+
 export const toPascalCase = (s: string): string =>
   s.trim().split(/\s+/).filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
@@ -55,9 +63,9 @@ export function buildFileHierarchy<T extends { id: number; filename: string; sup
 ): FileEntry<T>[] {
   const supIds = new Set(files.filter((f) => f.sup_of_id != null).map((f) => f.id));
   const result: FileEntry<T>[] = [];
-  for (const f of files.filter((f) => !supIds.has(f.id)).sort((a, b) => a.filename.localeCompare(b.filename))) {
+  for (const f of files.filter((f) => !supIds.has(f.id)).sort((a, b) => naturalCompare(a.filename, b.filename))) {
     result.push({ file: f, depth: 0 });
-    const sups = files.filter((s) => s.sup_of_id === f.id).sort((a, b) => a.filename.localeCompare(b.filename));
+    const sups = files.filter((s) => s.sup_of_id === f.id).sort((a, b) => naturalCompare(a.filename, b.filename));
     for (const sup of sups) result.push({ file: sup, depth: 1 });
   }
   // Orphaned sup files (parent not in this group) fall through as top-level.

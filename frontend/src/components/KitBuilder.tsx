@@ -15,9 +15,29 @@ function cleanName(filename: string): string {
   return filename.replace(/\.(stl|3mf|obj)$/i, "").replace(/[_-]+/g, " ").trim();
 }
 
+// Word for a linked variant, chosen by keyword match against its name —
+// mirrors the backend's link_sups keyword set (sup/supported/hollowed).
+const _VARIANT_KEYWORD_RE = /\b(?:sup|supported|hollow|hollowed)\b/i;
+const _HOLLOW_RE = /\bhollow(?:ed)?\b/i;
+
+function variantWord(f: STLFile): "Hollowed" | "Supported" | "Other" {
+  const text = `${f.part_name ?? ""} ${f.filename}`;
+  if (_HOLLOW_RE.test(text)) return "Hollowed";
+  if (_VARIANT_KEYWORD_RE.test(text)) return "Supported";
+  return "Other";
+}
+
+function variantLabel(f: STLFile) {
+  const word = variantWord(f);
+  return word === "Other" ? "Linked version" : `${word} version`;
+}
+
 export default function KitBuilder({ modelName, files, onClose }: Props) {
-  // selection: partType → fileId (one per group)
-  const [selection, setSelection] = useState<Record<string, number>>({});
+  // Selection is a flat set of file ids — was one-per-part-type, which
+  // forced a part and its own linked variants (base/Supported/Hollowed) to
+  // fight over the same slot. Any file can be picked independently of any
+  // other, in or out of a variant cluster.
+  const [selection, setSelection] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
   // previewFile: locked by click; hoveredFile: overrides while hovering
@@ -43,19 +63,38 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
     return sorted;
   }, [files]);
 
-  const toggle = (partType: string, file: STLFile) => {
+  // Linked variants (sup_of_id) grouped under their base file's id, so each
+  // base renders as one extended box with a labeled row per variant instead
+  // of every version showing as its own separate pill. A sup whose base
+  // doesn't actually exist in this file list (data inconsistency) falls
+  // back to rendering as its own standalone entry rather than silently
+  // disappearing.
+  const allFileIds = useMemo(() => new Set(files.map((f) => f.id)), [files]);
+  const supsByBaseId = useMemo(() => {
+    const map = new Map<number, STLFile[]>();
+    for (const f of files) {
+      if (f.sup_of_id != null && allFileIds.has(f.sup_of_id)) {
+        if (!map.has(f.sup_of_id)) map.set(f.sup_of_id, []);
+        map.get(f.sup_of_id)!.push(f);
+      }
+    }
+    return map;
+  }, [files, allFileIds]);
+  const isOrphanedSup = (f: STLFile) => f.sup_of_id != null && !allFileIds.has(f.sup_of_id);
+
+  const toggle = (file: STLFile) => {
     setPreviewFile(file);
-    setSelection((prev) =>
-      prev[partType] === file.id
-        ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== partType))
-        : { ...prev, [partType]: file.id }
-    );
+    setSelection((prev) => {
+      const next = new Set(prev);
+      next.has(file.id) ? next.delete(file.id) : next.add(file.id);
+      return next;
+    });
   };
 
-  const selectedFiles = useMemo(() => {
-    const idSet = new Set(Object.values(selection));
-    return files.filter((f) => idSet.has(f.id));
-  }, [selection, files]);
+  const selectedFiles = useMemo(
+    () => files.filter((f) => selection.has(f.id)),
+    [selection, files]
+  );
 
   const copyToClipboard = async () => {
     const text = selectedFiles.map((f) => f.filename).join("\n");
@@ -105,28 +144,92 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
                   <h3 className="text-sm font-semibold text-text-primary-alt2 uppercase tracking-wider">{label}</h3>
                   <span className="text-xs text-text-muted">{groupFiles.length} file{groupFiles.length !== 1 ? "s" : ""}</span>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {groupFiles.map((f) => {
-                    const isSelected = selection[key] === f.id;
-                    const isHovered = hoveredFile?.id === f.id;
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] items-start gap-2">
+                  {/* Only primaries (not a sup, or an orphaned sup with no real
+                      base) get their own entry — a normal sup renders nested
+                      inside its base's box instead. */}
+                  {groupFiles
+                    .filter((f) => f.sup_of_id == null || isOrphanedSup(f))
+                    .map((f) => {
+                    const variants = supsByBaseId.get(f.id) ?? [];
+                    const isBaseSelected = selection.has(f.id);
+                    const isBaseHovered = hoveredFile?.id === f.id;
+                    const isAnySelected = isBaseSelected || variants.some((v) => selection.has(v.id));
+
+                    if (variants.length === 0) {
+                      return (
+                        <button
+                          key={f.id}
+                          onClick={() => toggle(f)}
+                          onMouseEnter={() => setHoveredFile(f)}
+                          onMouseLeave={() => setHoveredFile(null)}
+                          title={f.filename}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm transition-all ${
+                            isBaseSelected
+                              ? "bg-accent-end border-accent-start text-white"
+                              : isBaseHovered
+                              ? "bg-panel-secondary border-indigo-400/50 text-text-primary-alt"
+                              : "bg-panel border-border text-text-secondary hover:border-border-divider hover:text-text-primary-alt"
+                          }`}
+                        >
+                          <Check size={12} strokeWidth={3} className={`shrink-0 ${isBaseSelected ? "" : "opacity-0"}`} />
+                          {cleanName(f.filename)}
+                        </button>
+                      );
+                    }
+
+                    // Has linked variants — one box, stacked vertically: the
+                    // base is the top row (normal weight, matches a plain
+                    // pill), each variant is a smaller indented row below it.
+                    // Every row is independently toggleable, not exclusive.
                     return (
-                      <button
+                      <div
                         key={f.id}
-                        onClick={() => toggle(key, f)}
-                        onMouseEnter={() => setHoveredFile(f)}
-                        onMouseLeave={() => setHoveredFile(null)}
-                        title={f.filename}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm transition-all ${
-                          isSelected
-                            ? "bg-accent-end border-accent-start text-white"
-                            : isHovered
-                            ? "bg-panel-secondary border-indigo-400/50 text-text-primary-alt"
-                            : "bg-panel border-border text-text-secondary hover:border-border-divider hover:text-text-primary-alt"
+                        className={`flex flex-col rounded-lg border text-sm transition-all overflow-hidden ${
+                          isAnySelected ? "border-accent-start" : "border-border"
                         }`}
                       >
-                        {isSelected && <Check size={12} strokeWidth={3} />}
-                        {cleanName(f.filename)}
-                      </button>
+                        <button
+                          onClick={() => toggle(f)}
+                          onMouseEnter={() => setHoveredFile(f)}
+                          onMouseLeave={() => setHoveredFile(null)}
+                          title={f.filename}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 text-left transition-all ${
+                            isBaseSelected
+                              ? "bg-accent-end text-white"
+                              : isBaseHovered
+                              ? "bg-panel-secondary text-text-primary-alt"
+                              : "bg-panel text-text-secondary hover:text-text-primary-alt"
+                          }`}
+                        >
+                          <Check size={12} strokeWidth={3} className={`shrink-0 ${isBaseSelected ? "" : "opacity-0"}`} />
+                          {cleanName(f.filename)}
+                        </button>
+                        {variants.map((v) => {
+                          const isVariantSelected = selection.has(v.id);
+                          const isVariantHovered = hoveredFile?.id === v.id;
+                          return (
+                            <button
+                              key={v.id}
+                              onClick={() => toggle(v)}
+                              onMouseEnter={() => setHoveredFile(v)}
+                              onMouseLeave={() => setHoveredFile(null)}
+                              title={`${variantLabel(v)} — ${v.filename}`}
+                              className={`flex items-center gap-1 pl-5 pr-3 py-1 text-left text-xs border-t whitespace-nowrap transition-all ${
+                                isVariantSelected
+                                  ? "bg-accent-end border-accent-start/60 text-white"
+                                  : isVariantHovered
+                                  ? "bg-panel-secondary border-border-divider text-text-primary-alt"
+                                  : "bg-panel border-border text-text-muted hover:text-text-primary-alt"
+                              }`}
+                            >
+                              <span className="text-text-muted-alt shrink-0">↳</span>
+                              <Check size={10} strokeWidth={3} className={`shrink-0 ${isVariantSelected ? "" : "opacity-0"}`} />
+                              {variantWord(v)}
+                            </button>
+                          );
+                        })}
+                      </div>
                     );
                   })}
                 </div>
@@ -184,7 +287,7 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
           <div className="flex gap-2 shrink-0">
             {selectedFiles.length > 0 && (
               <button
-                onClick={() => setSelection({})}
+                onClick={() => setSelection(new Set())}
                 className="px-3 py-1.5 rounded bg-panel-secondary border border-border text-sm text-text-secondary hover:text-white transition-colors"
               >
                 Clear

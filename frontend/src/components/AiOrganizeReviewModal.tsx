@@ -4,6 +4,11 @@ import { api, AiOrganizePreviewResult, AiOrganizeSuggestionPreview, STLFile } fr
 import { errMsg } from "../utils/err";
 import { PART_TYPE_SUGGESTIONS } from "../pages/model-detail/utils";
 
+// PART_TYPE_SUGGESTIONS is ordered by physical grouping (head, torso, limbs,
+// ...) for readability in code — the dropdown itself needs alphabetical
+// order so a specific category is easy to scan for.
+const SORTED_PART_TYPE_SUGGESTIONS = [...PART_TYPE_SUGGESTIONS].sort((a, b) => a.localeCompare(b));
+
 interface EditableRow extends AiOrganizeSuggestionPreview {
   checked: boolean;
   editedPartType: string;
@@ -177,7 +182,7 @@ export default function AiOrganizeReviewModal({
                         className="bg-panel border border-border-subtle rounded px-2 py-1 text-text-primary focus:border-violet-600 focus:outline-none w-28"
                       >
                         <option value="">—</option>
-                        {PART_TYPE_SUGGESTIONS.map((t) => (
+                        {SORTED_PART_TYPE_SUGGESTIONS.map((t) => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                         {row.editedPartType && !PART_TYPE_SUGGESTIONS.includes(row.editedPartType) && (

@@ -32,7 +32,7 @@ from app.services.tag_sync import sync_model_tags
 from app.services import ai_organize, reorganize
 from app.services.reorganize_template import ReorganizeTemplateError
 from app.services.scanner import resolve_creator
-from app.routers.reorganize import _stored_template, _slugify_all
+from app.routers.reorganize import _stored_template, _slugify_all, _slugify_filenames
 from app.config import settings
 from app.utils import utcnow, like_escape
 
@@ -592,20 +592,15 @@ def _load_organize_config(db) -> "_OrganizeConfig":
     )
 
 
-def _normalize_type(suggested: str, existing: list[str]) -> str:
-    """Snap a suggested category to the closest existing one.
-
-    Handles case differences and singular/plural variants so the AI's "Accessory"
-    maps to an existing "Accessories" (and vice-versa) rather than creating a
-    duplicate category with a slightly different name.
-    """
-    if not existing:
-        return suggested
+def _snap_within(suggested: str, cats: list[str]) -> str | None:
+    """Exact (case-insensitive) match, then singular/plural fuzzy match,
+    against a single candidate list — shared by both passes in
+    _normalize_type below."""
     low = suggested.lower()
-    for cat in existing:
+    for cat in cats:
         if cat.lower() == low:
             return cat
-    for cat in existing:
+    for cat in cats:
         cl = cat.lower()
         if cl == low + "s" or cl == low + "es":
             return cat
@@ -615,7 +610,30 @@ def _normalize_type(suggested: str, existing: list[str]) -> str:
             return cat
         if cl.endswith("y") and low == cl[:-1] + "ies":
             return cat
-    return suggested
+    return None
+
+
+def _normalize_type(suggested: str, existing: list[str]) -> str:
+    """Snap a suggested category to the closest existing one.
+
+    Handles case differences and singular/plural variants so the AI's "Accessory"
+    maps to an existing "Accessories" (and vice-versa) rather than creating a
+    duplicate category with a slightly different name.
+
+    Canonical categories (ai_organize.CANONICAL_PART_TYPES) are checked
+    before any other already-in-DB category (#963): a stale, non-canonical
+    value left behind by an earlier bug — e.g. "Hand" applied before this
+    normalization existed — must never "shadow" the real canonical match
+    ("Hands") just because it happens to already be sitting in the database.
+    Without this split, "Hand" would exact-match itself in `existing` and
+    never reach the singular/plural check that maps it to "Hands".
+    """
+    if not existing:
+        return suggested
+    canonical_hit = _snap_within(suggested, ai_organize.CANONICAL_PART_TYPES)
+    if canonical_hit:
+        return canonical_hit
+    return _snap_within(suggested, existing) or suggested
 
 
 # User-facing copy for LLM outcomes that aren't a technical error (which
@@ -643,7 +661,11 @@ def ai_organize_model(model_id: int, body: AiOrganizeRequest = AiOrganizeRequest
     type, snapped to the canonical list below. "unit" groups by in-game
     unit/character instead — those suggestions are freeform (already
     Pascal-cased by the service) and skip the canonical-list snap, since
-    there's no fixed list of unit names to snap to.
+    there's no fixed list of unit names to snap to. "link_sups" (#967) is a
+    pure heuristic, no LLM/API involved at all — it matches a currently-
+    unlinked sup/supported/hollowed-named file to its likely base part by
+    name; unlike the other two strategies it works even with no AI API
+    configured (the config load below is skipped entirely for it).
     """
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
@@ -651,34 +673,38 @@ def ai_organize_model(model_id: int, body: AiOrganizeRequest = AiOrganizeRequest
     if not model.stl_files:
         raise HTTPException(status_code=400, detail="Model has no STL files to organize")
 
-    org_cfg = _load_organize_config(db)
-
     file_dicts = [
-        {"id": f.id, "filename": f.filename, "part_type": f.part_type, "part_name": f.part_name}
+        {"id": f.id, "filename": f.filename, "part_type": f.part_type,
+         "part_name": f.part_name, "sup_of_id": f.sup_of_id}
         for f in model.stl_files
     ]
     by_filename = {f.filename: f.id for f in model.stl_files}
     by_id_filename = {f.id: f.filename for f in model.stl_files}
 
-    # Collect all category names AI suggestions should snap to: the app's
-    # fixed canonical list (so a fresh library still gets clean names, not
-    # just whatever's already stored) plus any custom categories already in
-    # this library (e.g. "Accessory" → "Accessories"). Unit-based suggestions
-    # are freeform and never snapped, so this list is unused for that strategy.
-    existing_types: list[str] = sorted(set(ai_organize.CANONICAL_PART_TYPES) | {
-        row[0] for row in
-        db.query(STLFile.part_type).filter(STLFile.part_type.isnot(None)).distinct().all()
-    })
+    if body.strategy == "link_sups":
+        organize_result = ai_organize.run(file_dicts, "", "", "", strategy="link_sups")
+    else:
+        org_cfg = _load_organize_config(db)
 
-    try:
-        organize_result = ai_organize.run(
-            file_dicts, org_cfg.url, org_cfg.model, org_cfg.api_key,
-            timeout=org_cfg.timeout, api_type=org_cfg.api_type, effort=org_cfg.effort,
-            strategy=body.strategy, batch_size=org_cfg.batch_size,
-            reasoning_enabled=org_cfg.reasoning_enabled,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        # Collect all category names AI suggestions should snap to: the app's
+        # fixed canonical list (so a fresh library still gets clean names, not
+        # just whatever's already stored) plus any custom categories already in
+        # this library (e.g. "Accessory" → "Accessories"). Unit-based suggestions
+        # are freeform and never snapped, so this list is unused for that strategy.
+        existing_types: list[str] = sorted(set(ai_organize.CANONICAL_PART_TYPES) | {
+            row[0] for row in
+            db.query(STLFile.part_type).filter(STLFile.part_type.isnot(None)).distinct().all()
+        })
+
+        try:
+            organize_result = ai_organize.run(
+                file_dicts, org_cfg.url, org_cfg.model, org_cfg.api_key,
+                timeout=org_cfg.timeout, api_type=org_cfg.api_type, effort=org_cfg.effort,
+                strategy=body.strategy, batch_size=org_cfg.batch_size,
+                reasoning_enabled=org_cfg.reasoning_enabled,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
 
     llm = organize_result.llm
     if llm.status != "ok":
@@ -985,7 +1011,8 @@ def get_model(model_id: int, db: Session = Depends(get_db)):
     try:
         template = _stored_template(db, None)
         manifest = reorganize.build_manifest(
-            db, template, model_ids=[model.id], slugify_all=_slugify_all(db)
+            db, template, model_ids=[model.id], slugify_all=_slugify_all(db),
+            slugify_filenames=_slugify_filenames(db),
         )
         entry = manifest.entries[0] if manifest.entries else None
         result.unorganized = bool(entry and entry.kind != "in_place")

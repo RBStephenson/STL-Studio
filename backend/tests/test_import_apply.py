@@ -300,6 +300,54 @@ class TestImportApplySlugify:
         assert m.image_paths[0].startswith(m.folder_path)
 
 
+class TestImportApplySlugifyFilenames:
+    """reorganize_slugify_filenames (#946) is an independent opt-in setting
+    from reorganize_slugify — the latter only ever touches directory
+    segments, never the STL's own filename."""
+
+    def _set(self, db, value: bool) -> None:
+        from app.models import AppSetting
+        db.merge(AppSetting(key="reorganize_slugify_filenames", value=value))
+        db.commit()
+
+    def test_filename_slugified_when_setting_on(self, db, client, tmp_path, write_mode):
+        self._set(db, True)
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "Cold Giant last time hollowed.stl"
+        f.write_bytes(b"solid\nendsolid\n")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 1
+        db.refresh(m)
+        stl = db.query(STLFile).filter(STLFile.model_id == m.id).first()
+        assert stl.filename == "cold-giant-last-time-hollowed.stl"
+        assert stl.path.endswith("/cold-giant-last-time-hollowed.stl")
+
+    def test_filename_kept_as_authored_when_setting_off(self, db, client, tmp_path, write_mode):
+        self._set(db, False)
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "Cold Giant last time hollowed.stl"
+        f.write_bytes(b"solid\nendsolid\n")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 1
+        db.refresh(m)
+        stl = db.query(STLFile).filter(STLFile.model_id == m.id).first()
+        assert stl.filename == "Cold Giant last time hollowed.stl"
+
+
 class TestImportApplyCollisionRetry:
     """A stray file already sitting at the computed destination (e.g. left
     over from an earlier interrupted import) must not hard-fail the whole
