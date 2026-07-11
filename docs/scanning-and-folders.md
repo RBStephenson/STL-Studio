@@ -6,6 +6,7 @@ laid out unusually or aren't being detected the way you'd expect.
 - [The folder layout it expects](#the-folder-layout-it-expects)
 - [Custom folder layouts](#custom-folder-layouts)
 - [How a "model" is detected](#how-a-model-is-detected)
+- [STL file part names](#stl-file-part-names)
 - [Thumbnails](#thumbnails)
 - [Automatic tagging](#automatic-tagging)
 - [needs_review](#needs_review)
@@ -92,6 +93,17 @@ When the heuristic gets it wrong, you can fix it by
 [merging the model into a group](features.md#fixing-mis-grouped-models) —
 the correction is a durable group membership, so future rescans leave it
 alone instead of re-deriving it from the heuristic.
+
+## STL file part names
+
+Each STL file's **Name** (`part_name`, shown in the model detail file list) is
+auto-derived from its filename the first time the scanner indexes it —
+underscores/hyphens become spaces, each word is title-cased, and a
+`Sup_`-prefixed or `-supported`-suffixed file gets a leading "Supported ". This
+happens for both a regular library scan and an [imported](features.md#import-folder)
+folder — both go through the same indexer. It's a one-time default: once set,
+a rescan never overwrites it, so a manual rename or an
+[AI Organize](features.md#model-detail) suggestion always sticks.
 
 ## Thumbnails
 

@@ -206,6 +206,9 @@ const SECTIONS: Section[] = [
             See and <strong>label each STL file</strong> (head, arm, base, etc.) — the
             Category field suggests the standard list plus any custom category
             already used on this model, same as the bulk recategorize dropdown below.
+            The Name field starts out filled in automatically from the filename the
+            first time a file is scanned; editing it (or applying an AI Organize
+            suggestion) overrides that for good — a later rescan never resets it.
           </li>
           <li>
             A part can have multiple <strong>sup variants</strong> — alternate
