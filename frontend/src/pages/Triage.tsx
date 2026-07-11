@@ -8,6 +8,7 @@ import { api, Model } from "../api/client";
 import ScanButton from "../components/ScanButton";
 import HelpLink from "../components/HelpLink";
 import ErrorState from "../components/ErrorState";
+import EmptyState from "../components/EmptyState";
 import { SkeletonBlock, SkeletonPanel } from "../components/SkeletonBlock";
 
 const BATCH_SIZE = 50;
@@ -136,19 +137,26 @@ export default function Triage() {
   if (error) {
     return (
       <div className="max-w-5xl mx-auto px-6 py-6">
-        <ErrorState title="Couldn't load the review queue" message={error} onRetry={() => loadBatch()} />
+        <ErrorState
+          title="Couldn't load the review queue"
+          message="Something went wrong fetching models to review. Try again."
+          onRetry={() => loadBatch()}
+        />
       </div>
     );
   }
 
   if (done || total === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-96 gap-4 text-text-secondary">
-        <CheckCircle size={48} className="text-green-500" />
-        <p className="text-lg">All caught up — nothing needs review.</p>
-        <Link to="/" className="text-indigo-400 hover:underline text-sm">
-          Back to Library
-        </Link>
+      <div className="max-w-5xl mx-auto px-6 py-6">
+        <EmptyState
+          icon={CheckCircle}
+          tint="green"
+          heading="All caught up"
+          body="Nothing needs review right now. New scans will show up here for a quick check."
+          padding="72px 32px"
+          secondaryAction={{ label: "Scan library", onClick: () => api.scan.start() }}
+        />
       </div>
     );
   }

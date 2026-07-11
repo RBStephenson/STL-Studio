@@ -30,11 +30,23 @@ const renderPage = () => render(<MemoryRouter><TagsPage /></MemoryRouter>);
 describe("TagsPage (#165)", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
+  it("shows the filtered-empty state with a Clear filter CTA", async () => {
+    vi.mocked(api.models.tags).mockResolvedValueOnce(TAGS);
+    renderPage();
+
+    await screen.findByText("figure");
+    fireEvent.change(screen.getByPlaceholderText("Filter tags…"), { target: { value: "nonexistent" } });
+
+    expect(await screen.findByText('No tags match "nonexistent"')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filter" }));
+    expect(await screen.findByText("figure")).toBeInTheDocument();
+  });
+
   it("shows the shared error state on load failure, with a working Retry", async () => {
     vi.mocked(api.models.tags).mockRejectedValueOnce(new Error("Server unreachable"));
     renderPage();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Server unreachable");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong reading your tag index.");
     expect(screen.getByText("Couldn't load tags")).toBeInTheDocument();
 
     vi.mocked(api.models.tags).mockResolvedValueOnce(TAGS);

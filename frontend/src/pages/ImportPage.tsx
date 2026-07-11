@@ -161,13 +161,30 @@ export default function ImportPage() {
 
         {phase === "error" && (
           <div className="space-y-4">
-            <div className="flex items-start gap-2 text-sm text-red-400">
-              <AlertCircle size={16} className="shrink-0 mt-0.5" />
-              <span>{statusMsg}</span>
+            <div
+              role="alert"
+              className="flex items-start gap-2.5"
+              style={{
+                border: "1px solid rgba(244,63,94,.3)",
+                background: "rgba(244,63,94,.06)",
+                borderRadius: 10,
+                padding: "14px 16px",
+              }}
+            >
+              <AlertCircle size={16} strokeWidth={2} className="shrink-0 mt-0.5" style={{ color: "#fda4af" }} />
+              <div>
+                <p style={{ margin: 0, color: "#fda4af", fontWeight: 600, fontSize: "13.5px" }}>
+                  Couldn't reach /import
+                </p>
+                <p style={{ margin: "2px 0 0", color: "#fca5b5", fontSize: "12.5px", lineHeight: 1.6 }}>
+                  The path doesn't exist, or STL Studio doesn't have permission to read it. Check the
+                  folder is spelled correctly and is accessible.
+                </p>
+              </div>
             </div>
             <button
               onClick={reset}
-              className="px-4 py-2 rounded-lg bg-panel-secondary hover:bg-panel-secondary text-text-primary-alt2 text-sm transition-colors"
+              className="btn-cta px-4 py-2 rounded-lg text-white text-sm font-semibold"
             >
               Try again
             </button>
