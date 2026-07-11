@@ -45,6 +45,25 @@ docker pull ghcr.io/rbstephenson/stl-inventory-frontend:latest
 
 ---
 
+## Local development (hot reload)
+
+The base `docker-compose.yml` builds production images — backend runs
+`uvicorn` without `--reload`, frontend is a static nginx build. Neither picks
+up code edits without a rebuild. For a live-reload dev loop, layer the dev
+overlay:
+
+```
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
+This bind-mounts backend source with `uvicorn --reload`, and swaps the
+frontend for a Vite dev server (with HMR) bind-mounted to `./frontend`. On
+Windows/macOS, bind-mount file changes don't reach the container's file
+watcher via inotify, so the overlay also sets `CHOKIDAR_USEPOLLING=true` to
+force polling — see `docker-compose.dev.yml` for details.
+
+---
+
 ## Networking: the frontend is the single entry point
 
 The **frontend** container serves the web UI **and** reverse-proxies `/api` to
