@@ -8,7 +8,7 @@ from app.database import get_db
 from app.models import Model
 from app.schemas import (
     BulkExcludeUpdate, BulkReviewUpdate, FavoriteUpdate, RatingUpdate,
-    QueueReorder, PrintStatusUpdate, ExcludeUpdate,
+    QueueReorder, PrintStatusUpdate, ExcludeUpdate, LockedUpdate,
 )
 from app.utils import utcnow
 
@@ -69,6 +69,20 @@ def set_favorite(model_id: int, body: FavoriteUpdate, db: Session = Depends(get_
     model.is_favorite = body.is_favorite
     db.commit()
     return {"ok": True, "is_favorite": model.is_favorite}
+
+
+@router.patch("/{model_id}/locked")
+def set_locked(model_id: int, body: LockedUpdate, db: Session = Depends(get_db)):
+    """Toggle a model's lock (#978, shown as "Organized" in the UI) — unlike
+    other flags, this one is never blocked by itself: locking or unlocking
+    always succeeds so a mistaken lock can always be undone."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    model.locked = body.locked
+    model.updated_at = utcnow()
+    db.commit()
+    return {"ok": True, "locked": model.locked}
 
 
 @router.patch("/{model_id}/rating")

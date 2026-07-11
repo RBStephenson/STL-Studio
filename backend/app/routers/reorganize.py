@@ -67,6 +67,7 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
         is_symlink=e.is_symlink,
         escapes_scan_root=e.escapes_scan_root,
         missing_files_on_disk=e.missing_files_on_disk,
+        locked=e.locked,
     )
 
 

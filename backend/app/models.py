@@ -154,6 +154,15 @@ class Model(Base):
 
     # User curation — independent flags
     is_favorite = Column(Boolean, default=False, index=True)
+    # Lock (shown as "Organized" in the UI — don't confuse with the unrelated
+    # ModelDetail.unorganized computed field in schemas.py, a folder-location
+    # mismatch indicator with no relation to this one): not just a status
+    # label — while set, no process may alter this model's STL files,
+    # categories, or part names (manual edit, bulk recategorize, AI Organize
+    # apply, drag-to-categorize) or move/rename them via Reorganize. Toggled
+    # from the library card; enforced server-side at every write path that
+    # touches those fields, not just hidden in the UI.
+    locked = Column(Boolean, default=False, server_default="0", nullable=False, index=True)
     # User-designated display thumbnail for the model's variant group (#193).
     # When set on a member, that model becomes the group's representative card
     # (overriding the id/has-thumbnail heuristic). Survives rescans like other
