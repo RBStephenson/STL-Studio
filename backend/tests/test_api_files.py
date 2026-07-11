@@ -275,8 +275,9 @@ class TestDownloadZip:
         disposition = resp.headers.get("content-disposition", "")
         assert "Chaos Warriors 2026-05-30.zip" in disposition
 
-    def test_missing_files_skipped_gracefully(self, client, db, monkeypatch):
-        """Files whose paths don't exist on disk are silently skipped."""
+    def test_all_files_missing_returns_404(self, client, db, monkeypatch):
+        """STUDIO-88: if every requested file is skipped (missing on disk or
+        outside the allowlist), return 404 instead of a valid-but-empty zip."""
         import app.routers.files as files_module
         monkeypatch.setattr(files_module, "_allowed_roots", lambda: [Path("/")])
 
@@ -289,10 +290,33 @@ class TestDownloadZip:
             "/files/download-zip",
             json={"file_ids": [row.id], "zip_name": "Empty Build"},
         )
-        # Should still return 200 with an empty (but valid) zip
+        assert resp.status_code == 404
+
+    def test_mixed_available_and_missing_files_zips_available_only(
+        self, client, db, tmp_path, monkeypatch
+    ):
+        """STUDIO-88: when some requested files exist and some don't, the zip
+        still succeeds and contains only the available files."""
+        import app.routers.files as files_module
+        monkeypatch.setattr(files_module, "_allowed_roots", lambda: [tmp_path])
+
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        stl = tmp_path / "real.stl"
+        stl.write_bytes(b"solid\nendsolid\n")
+        present = make_stl_file(db, model, filename="real.stl", path=str(stl))
+        missing = make_stl_file(
+            db, model, filename="ghost.stl", path=str(tmp_path / "ghost.stl")
+        )
+        db.commit()
+
+        resp = client.post(
+            "/files/download-zip",
+            json={"file_ids": [present.id, missing.id], "zip_name": "Mixed"},
+        )
         assert resp.status_code == 200
-        z = zipfile.ZipFile(io.BytesIO(resp.content))
-        assert z.namelist() == []
+        names = zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
+        assert names == ["real.stl"]
 
     def test_duplicate_filenames_are_deduplicated(self, client, db, tmp_path, monkeypatch):
         """Two files sharing a basename in different folders must both survive in
