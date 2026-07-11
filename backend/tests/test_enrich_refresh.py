@@ -320,6 +320,68 @@ def test_refresh_error_isolation_reports_errors_and_keeps_others(db, monkeypatch
     assert b.category == "Creatures"
 
 
+def test_refresh_chunks_candidates_and_updates_progress_mid_job(db, monkeypatch):
+    """STUDIO-89: candidates are processed in bounded pages, not materialized
+    and committed all at once. With chunk size forced to 1, every model gets
+    its own fetch/commit and progress counters advance across chunks."""
+    creator = make_creator(db)
+    a = _enriched_model(db, creator, name="a", url="https://www.myminifactory.com/object/a-1")
+    b = _enriched_model(db, creator, name="b", url="https://www.myminifactory.com/object/b-2")
+    c = _enriched_model(db, creator, name="c", url="https://www.myminifactory.com/object/c-3")
+    db.commit()
+
+    monkeypatch.setattr(enrich_refresh, "_CHUNK_SIZE", 1)
+
+    seen_progress = []
+
+    async def _fetch(url, mmf_api_key=None):
+        # Snapshot progress mid-job — later chunks must see earlier chunks' work.
+        status = enrich_refresh.runner.status(enrich_refresh._JOB_KEY)
+        seen_progress.append(status["progress"].get("refreshed", 0))
+        return _deep(source_url=url, external_id=url)
+
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", _fetch)
+
+    result = enrich_refresh.run_refresh(db=db)
+    assert result == {
+        "running": False, "message": result["message"],
+        "candidates": 3, "refreshed": 3, "failed": 0, "errors": 0,
+    }
+    # Each of the 3 chunks saw the running count from the chunks before it —
+    # progress was visible mid-job, not just at the very end.
+    assert seen_progress == [0, 1, 2]
+
+    db.refresh(a); db.refresh(b); db.refresh(c)
+    assert a.category == b.category == c.category == "Creatures"
+
+
+def test_refresh_chunk_failure_does_not_block_later_chunks(db, monkeypatch):
+    """STUDIO-89: a fetch failure in an earlier chunk must not prevent later
+    chunks from being processed."""
+    creator = make_creator(db)
+    a = _enriched_model(db, creator, name="a", url="https://www.myminifactory.com/object/a-1")
+    b = _enriched_model(db, creator, name="b", url="https://www.myminifactory.com/object/b-2")
+    db.commit()
+
+    monkeypatch.setattr(enrich_refresh, "_CHUNK_SIZE", 1)
+
+    async def _fetch(url, mmf_api_key=None):
+        if url.endswith("a-1"):
+            return None  # first chunk's fetch fails
+        return _deep(source_url=url, external_id=url)
+
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", _fetch)
+
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["candidates"] == 2
+    assert result["failed"] == 1
+    assert result["refreshed"] == 1
+
+    db.refresh(a); db.refresh(b)
+    assert a.category is None          # failed chunk left untouched
+    assert b.category == "Creatures"   # later chunk still processed
+
+
 def test_run_refresh_updates_status_while_and_after_running(db, monkeypatch):
     monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
     assert enrich_refresh.get_status()["running"] is False

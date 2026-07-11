@@ -91,6 +91,12 @@ class Model(Base):
         Index("ix_models_character_name", "character", "name"),
         # `sort=added` orders by created_at desc (#170).
         Index("ix_models_created_at", "created_at"),
+        # STUDIO-89: common Library filters that previously did a full scan —
+        # source_site (source filter), needs_review (Triage), source_last_fetched
+        # (enrich refresh's staleness filter).
+        Index("ix_models_source_site", "source_site"),
+        Index("ix_models_needs_review", "needs_review"),
+        Index("ix_models_source_last_fetched", "source_last_fetched"),
     )
 
     id = Column(Integer, primary_key=True)
