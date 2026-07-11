@@ -17,7 +17,9 @@ vi.mock("../../../context/AppSettingsContext", () => ({
   useAppSettings: () => ({ settings }),
 }));
 vi.mock("../../../components/PartTypeCombo", () => ({
-  PartTypeCombo: ({ value }: { value: string }) => <input data-testid="part-combo" defaultValue={value} />,
+  PartTypeCombo: ({ value, options }: { value: string; options: string[] }) => (
+    <input data-testid="part-combo" defaultValue={value} data-options={options.join("|")} />
+  ),
 }));
 
 import StlFilesTable from "./StlFilesTable";
@@ -109,6 +111,17 @@ describe("StlFilesTable", () => {
     });
     expect(screen.getByText("Category")).toBeInTheDocument();
     expect(screen.getAllByTestId("part-combo").length).toBeGreaterThan(0);
+  });
+
+  it("per-row Category combo offers this model's custom categories too, not just the standard list", () => {
+    settings.part_categories_enabled = true;
+    renderTable({
+      groupedStlFiles: { labeled: [["Quetzlgor", [model.stl_files[0]]]], unlabeled: [model.stl_files[1]] },
+    });
+    const combo = screen.getAllByTestId("part-combo")[0];
+    const options = combo.getAttribute("data-options")?.split("|") ?? [];
+    expect(options).toContain("Quetzlgor");
+    expect(options).toContain("Head"); // still offers the standard list too
   });
 
   it("wires Download all and Kit Builder actions", () => {

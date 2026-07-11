@@ -75,6 +75,16 @@ export default function StlFilesList({
 
   if (settings.horizontal_parts_layout) return null;
 
+  // Standard suggestions plus whatever categories this model already uses
+  // (groupedStlFiles.labeled keys are the persisted, Pascal-cased part_type
+  // values in use) — deduped and alphabetized. Matches the horizontal
+  // layout's per-row combo and bulk "Recategorize to…" dropdown, so a custom
+  // category typed in one place is pickable everywhere else too.
+  const categoryOptions = [...new Set([
+    ...PART_TYPE_SUGGESTIONS,
+    ...groupedStlFiles.labeled.map(([cat]) => cat),
+  ])].sort(naturalCompare);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
@@ -143,7 +153,7 @@ export default function StlFilesList({
                 {withCategory && (
                   <PartTypeCombo
                     value={pt}
-                    options={PART_TYPE_SUGGESTIONS}
+                    options={categoryOptions}
                     placeholder="Category…"
                     onChange={(v) => setPartTypes((prev) => ({ ...prev, [f.id]: toPascalCase(v) + (v.endsWith(" ") ? " " : "") }))}
                     onCommit={(v) => savePartType(f.id, v)}
