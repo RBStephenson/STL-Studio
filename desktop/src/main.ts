@@ -83,10 +83,11 @@ function installApplicationMenu(): void {
 function showKeyRevealWindow(key: string): void {
   const win = new BrowserWindow({
     width: 560,
-    height: 320,
+    height: 400,
     resizable: false,
     minimizable: false,
     maximizable: false,
+    autoHideMenuBar: true,
     parent: mainWindow ?? undefined,
     title: "STL Studio — encryption key",
     icon: APP_ICON,
@@ -96,6 +97,10 @@ function showKeyRevealWindow(key: string): void {
       nodeIntegration: false,
     },
   });
+  // The app menu (installApplicationMenu) is process-global in Electron, not
+  // per-window — without this the reveal window inherits File/Navigate/View/
+  // Window and its content gets clipped by the extra bar height.
+  win.setMenu(null);
   void win.loadFile(KEY_REVEAL_HTML, { query: { key } });
 }
 
