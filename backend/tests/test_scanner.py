@@ -1433,6 +1433,40 @@ class TestSlicerFileExclusion:
         filenames = {f.filename for f in db.query(STLFile).all()}
         assert filenames == {"dragon.stl"}
 
+    def test_indexed_stl_gets_a_part_name_derived_from_its_filename(self, db, tmp_path):
+        """A freshly indexed file gets a real, saved part_name immediately —
+        not just the dimmed filename-derived placeholder the UI otherwise
+        shows for a genuinely empty one."""
+        creator_dir = tmp_path / "Creator"
+        folder = creator_dir / "Dragon"
+        _stl(folder, "blazing-quartz-lanterns-and-horseshoes.stl")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        f = db.query(STLFile).filter(STLFile.filename == "blazing-quartz-lanterns-and-horseshoes.stl").one()
+        assert f.part_name == "Blazing Quartz Lanterns And Horseshoes"
+
+    def test_reindexing_never_overwrites_an_already_set_part_name(self, db, tmp_path):
+        """_index_stl_files is additive-only — it must never touch an
+        existing row, including one whose part_name a user has since edited
+        by hand (or an AI Organize suggestion changed) to something that
+        no longer matches the filename-derived auto-name."""
+        creator_dir = tmp_path / "Creator"
+        folder = creator_dir / "Dragon"
+        _stl(folder, "dragon.stl")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+
+        f = db.query(STLFile).filter(STLFile.filename == "dragon.stl").one()
+        f.part_name = "Custom Renamed Part"
+        db.commit()
+
+        _walk(db, creator, creator_dir)  # rescan — file already indexed
+
+        db.refresh(f)
+        assert f.part_name == "Custom Renamed Part"
+
     def test_prune_removes_indexed_slicer_rows_only(self, db):
         """Rows indexed by older scanner versions are pruned; printable rows
         and the owning model survive."""

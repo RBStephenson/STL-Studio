@@ -40,6 +40,7 @@ from app.services.scan_rules import (
 )
 from app.services.tag_sync import sync_model_tags
 from app.services import write_lock
+from app.services.ai_organize import clean_name
 from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -1638,11 +1639,18 @@ def _index_stl_files(model: Model, folder: Path, db: Session):
     for stl, path_str in zip(candidates, candidate_paths):
         if path_str in existing:
             continue
+        # part_name is auto-derived once, at first discovery, so a freshly
+        # scanned/imported file has a real saved name immediately instead of
+        # just the dimmed filename-derived placeholder the UI shows for a
+        # genuinely empty one. Never touched again after this insert — a
+        # later manual rename (or an AI Organize suggestion) always wins,
+        # since existing rows are skipped entirely above.
         db.add(STLFile(
             model_id=model.id,
             path=path_str,
             filename=stl.name,
             size_bytes=stl.stat().st_size,
+            part_name=clean_name(stl.name) or None,
         ))
         existing.add(path_str)  # prevent duplicates within the same session
         _bump(files_found=1)

@@ -217,7 +217,10 @@ Click a card to open the model. From here you can:
 ### File parts, sup variants & label naming
 
 Each STL file can be labeled with a **part type** (head, arm, base…) and an
-editable **Name**. A part can have multiple **sup variants** — alternate
+editable **Name**. The Name is filled in automatically from the filename the
+first time a file is scanned (see [scanning](scanning-and-folders.md#stl-file-part-names))
+— editing it or applying an AI Organize suggestion always overrides that
+default for good, a later rescan never resets it. A part can have multiple **sup variants** — alternate
 supported/cut versions of the same part (`s1`, `s2`, …) — and the part picker
 renders one button per sup variant so you can switch which cut you're viewing
 without hunting through the file list. Selecting a row in the file list and

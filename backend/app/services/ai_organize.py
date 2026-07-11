@@ -181,12 +181,17 @@ def _stem(filename: str) -> str:
     return re.sub(r"\.[^.]+$", "", filename).lower()
 
 
-def _clean_name(filename: str) -> str:
+def clean_name(filename: str) -> str:
     """Turn a raw filename into a readable label.
 
     Works on the original filename (before lowercasing) so CamelCase can be
     detected. Extension and Sup_ prefix/infix are stripped, then "Supported"
     is prepended to the final name if the file was a supported variant.
+
+    Public (no leading underscore): also used by scanner.py to auto-fill
+    STLFile.part_name the first time a file is indexed, so a freshly
+    scanned/imported file gets a real, saved name — not just the dimmed
+    filename-derived placeholder the UI shows for a genuinely empty one.
     """
     # Remove extension
     s = re.sub(r"\.[^.]+$", "", filename)
@@ -278,7 +283,7 @@ def heuristic_pass(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         is_sup         = _is_sup(filename)
         new_type       = _infer_part_type(stem) or cur_type
-        new_name       = _clean_name(filename) or cur_name
+        new_name       = clean_name(filename) or cur_name
         sup_base       = _find_base(filename, all_filenames) if is_sup else None
 
         changed = (
@@ -1206,7 +1211,7 @@ def run(
         # _LLM_FILE_CAP instead of the cap being spent on duplicates.
         groups: dict[str, list[dict[str, Any]]] = {}
         for f in all_candidates:
-            groups.setdefault(_clean_name(f["filename"]), []).append(f)
+            groups.setdefault(clean_name(f["filename"]), []).append(f)
         representatives = [members[0] for members in groups.values()]
         if len(representatives) < len(all_candidates):
             _log_step("llm_dedupe", candidates=len(all_candidates), unique=len(representatives))
@@ -1294,7 +1299,7 @@ def run(
             current_name = (merged.get(fid) or {}).get("part_name") or f.get("part_name")
             if current_name:
                 continue
-            auto_name = _clean_name(f["filename"])
+            auto_name = clean_name(f["filename"])
             if not auto_name:
                 continue
             if fid not in merged:
