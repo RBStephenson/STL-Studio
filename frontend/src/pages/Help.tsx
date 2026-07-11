@@ -208,7 +208,21 @@ const SECTIONS: Section[] = [
             supported/cut versions — and the part picker shows one button per sup
             variant (s1, s2, …). The file list and part picker stay in sync in both
             directions; changing a part's category applies to the base file and all
-            its sups.
+            its sups. Clicking the link icon to attach a sup opens a searchable
+            picker — it lists each candidate by part name (or filename if it has
+            none set), with the filename shown underneath, and typing filters by
+            either.
+          </li>
+          <li>
+            <strong>AI Organize</strong> suggests a category and cleaned-up name for
+            every file, or links supported variants to their base part — pick a
+            strategy when you click it. <strong>Parts-based</strong> and{" "}
+            <strong>Unit-based</strong> both need an AI API assigned under Settings →
+            AI & Integrations. <strong>Link supported parts</strong> doesn't — it's
+            pure name matching (no AI call) that finds every currently-unlinked file
+            named "Sup", "Supported", or "Hollowed" and matches it to a same-named
+            plain file by filename. Either way, nothing is written until you review
+            and apply the suggestions.
           </li>
           <li>
             <strong>Settings → Preferences → Horizontal parts layout</strong> swaps
