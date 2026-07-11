@@ -77,64 +77,85 @@ async def fetch_unique_deep(
     return dict(await asyncio.gather(*(_one(u) for u in urls)))
 
 
+# STUDIO-89: process candidates in bounded pages instead of materializing the
+# whole library refresh in memory / committing once at the end. Failed fetches
+# in one chunk can't block later chunks, and progress advances mid-job instead
+# of jumping straight to 100% at the very end.
+_CHUNK_SIZE = 100
+
+
 async def _do_refresh(
     db: Session,
     creator_id: Optional[int],
     model_ids: Optional[list[int]],
     stale_days: Optional[int],
+    job: Optional[JobHandle] = None,
 ) -> dict:
-    query = db.query(Model).filter(Model.source_url.isnot(None))
+    id_query = db.query(Model.id).filter(Model.source_url.isnot(None))
     if creator_id is not None:
-        query = query.filter(Model.creator_id == creator_id)
+        id_query = id_query.filter(Model.creator_id == creator_id)
     if model_ids:
-        query = query.filter(Model.id.in_(model_ids))
+        id_query = id_query.filter(Model.id.in_(model_ids))
     if stale_days is not None:
         cutoff = utcnow() - timedelta(days=stale_days)
-        query = query.filter(
+        id_query = id_query.filter(
             or_(
                 Model.source_last_fetched.is_(None),
                 Model.source_last_fetched < cutoff,
             )
         )
-
-    models = query.all()
-    if not models:
+    # Stable order so paging by offset can't skip or repeat rows across chunks.
+    all_ids = [row[0] for row in id_query.order_by(Model.id).all()]
+    if not all_ids:
         return {"candidates": 0, "refreshed": 0, "failed": 0, "errors": 0}
 
     mmf_key = secrets_service.resolve_mmf_api_key(db)
-    unique_urls = {m.source_url for m in models if m.source_url}
-    fetched = await fetch_unique_deep(unique_urls, mmf_key)
-
+    candidates = len(all_ids)
     refreshed = failed = errors = 0
-    for model in models:
-        base = fetched.get(model.source_url)
-        if base is None:
-            failed += 1
-            continue
-        # Keep the model's existing source identity without mutating the shared
-        # ScrapedModel — it's reused across every sibling on the same URL (#699 2.2).
-        scraped = dataclasses.replace(
-            base,
-            source_url=base.source_url or model.source_url,
-            source_site=base.source_site or model.source_site,
-            external_id=base.external_id or model.external_id,
-        )
-        try:
-            # Refresh operates on already-matched data, so it overwrites aggressively —
-            # but still never re-points creator_id (#699 1.1); a refresh isn't a review.
-            await apply_scraped_to_model(
-                db, model, scraped,
-                overwrite_title=True, thumbnail_fill_only=False,
-                reassign_creator=False, clear_needs_review=True,
-            )
-            refreshed += 1
-        except Exception as e:
-            logger.warning(f"Enrich: refresh apply failed for model {model.id} ({model.source_url}): {e}")
-            errors += 1
 
-    db.commit()
+    for start in range(0, candidates, _CHUNK_SIZE):
+        chunk_ids = all_ids[start:start + _CHUNK_SIZE]
+        chunk_models = (
+            db.query(Model).filter(Model.id.in_(chunk_ids)).order_by(Model.id).all()
+        )
+        unique_urls = {m.source_url for m in chunk_models if m.source_url}
+        fetched = await fetch_unique_deep(unique_urls, mmf_key)
+
+        for model in chunk_models:
+            base = fetched.get(model.source_url)
+            if base is None:
+                failed += 1
+                continue
+            # Keep the model's existing source identity without mutating the shared
+            # ScrapedModel — it's reused across every sibling on the same URL (#699 2.2).
+            scraped = dataclasses.replace(
+                base,
+                source_url=base.source_url or model.source_url,
+                source_site=base.source_site or model.source_site,
+                external_id=base.external_id or model.external_id,
+            )
+            try:
+                # Refresh operates on already-matched data, so it overwrites aggressively —
+                # but still never re-points creator_id (#699 1.1); a refresh isn't a review.
+                await apply_scraped_to_model(
+                    db, model, scraped,
+                    overwrite_title=True, thumbnail_fill_only=False,
+                    reassign_creator=False, clear_needs_review=True,
+                )
+                refreshed += 1
+            except Exception as e:
+                logger.warning(f"Enrich: refresh apply failed for model {model.id} ({model.source_url}): {e}")
+                errors += 1
+
+        db.commit()
+        if job is not None:
+            job.update(
+                message=f"refreshing — {start + len(chunk_ids)}/{candidates}",
+                candidates=candidates, refreshed=refreshed, failed=failed, errors=errors,
+            )
+
     return {
-        "candidates": len(models),
+        "candidates": candidates,
         "refreshed": refreshed,
         "failed": failed,
         "errors": errors,
@@ -164,7 +185,7 @@ def _refresh_body(
     own_db = db is None
     _db = db or SessionLocal()
     try:
-        result = asyncio.run(_do_refresh(_db, creator_id, model_ids, stale_days))
+        result = asyncio.run(_do_refresh(_db, creator_id, model_ids, stale_days, job=job))
         job.update(
             state=JobState.DONE,
             message=(

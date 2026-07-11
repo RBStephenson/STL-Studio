@@ -404,32 +404,33 @@ def create_creator(body: CreatorCreate, db: Session = Depends(get_db)):
     return result
 
 
+def _stat_count(condition):
+    """A single conditional-sum column for model_stats' one-pass query."""
+    return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
+
+
 @router.get("/stats")
 def model_stats(db: Session = Depends(get_db)):
-    # All counts ignore user-excluded models so the stats match the visible grid.
-    base = db.query(func.count(Model.id)).filter(Model.excluded == False)
-    total = base.scalar()
-    needs_review = base.filter(Model.needs_review == True).scalar()
-    no_thumbnail = db.query(func.count(Model.id)).filter(
-        Model.excluded == False, Model.thumbnail_path == None, Model.thumbnail_url == None
-    ).scalar()
-    favorites = db.query(func.count(Model.id)).filter(
-        Model.excluded == False, Model.is_favorite == True
-    ).scalar()
-    queued = db.query(func.count(Model.id)).filter(
-        Model.excluded == False, Model.print_status == "queued"
-    ).scalar()
-    printing = db.query(func.count(Model.id)).filter(
-        Model.excluded == False, Model.print_status == "printing"
-    ).scalar()
-    printed = db.query(func.count(Model.id)).filter(
-        Model.excluded == False, Model.print_status == "printed"
-    ).scalar()
-    excluded = db.query(func.count(Model.id)).filter(Model.excluded == True).scalar()
+    # STUDIO-89: a single pass over the table with conditional sums, instead of
+    # 8 independent count() queries. All counts (other than `excluded` itself)
+    # ignore user-excluded models so the stats match the visible grid.
+    not_excluded = Model.excluded == False
+    row = db.query(
+        _stat_count(not_excluded).label("total"),
+        _stat_count(not_excluded & (Model.needs_review == True)).label("needs_review"),
+        _stat_count(
+            not_excluded & (Model.thumbnail_path == None) & (Model.thumbnail_url == None)
+        ).label("no_thumbnail"),
+        _stat_count(not_excluded & (Model.is_favorite == True)).label("favorites"),
+        _stat_count(not_excluded & (Model.print_status == "queued")).label("queued"),
+        _stat_count(not_excluded & (Model.print_status == "printing")).label("printing"),
+        _stat_count(not_excluded & (Model.print_status == "printed")).label("printed"),
+        _stat_count(Model.excluded == True).label("excluded"),
+    ).one()
     return {
-        "total": total, "needs_review": needs_review, "no_thumbnail": no_thumbnail,
-        "favorites": favorites, "queued": queued, "printing": printing,
-        "printed": printed, "excluded": excluded,
+        "total": row.total, "needs_review": row.needs_review, "no_thumbnail": row.no_thumbnail,
+        "favorites": row.favorites, "queued": row.queued, "printing": row.printing,
+        "printed": row.printed, "excluded": row.excluded,
     }
 
 
