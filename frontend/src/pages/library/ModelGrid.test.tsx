@@ -20,6 +20,10 @@ const models = [mk(1, "Alpha"), mk(2, "Beta")];
 
 const base: React.ComponentProps<typeof ModelGrid> = {
   loading: false,
+  isError: false,
+  onRetry: vi.fn(),
+  onClearFilters: vi.fn(),
+  onScanLibrary: vi.fn(),
   models,
   selection: new Set<number>(),
   onSelect: vi.fn(),
@@ -49,13 +53,20 @@ const renderGrid = (over: Partial<React.ComponentProps<typeof ModelGrid>> = {}) 
 describe("ModelGrid", () => {
   it("shows skeleton placeholders while loading", () => {
     const { container } = renderGrid({ loading: true });
-    expect(container.querySelectorAll(".animate-pulse").length).toBe(24);
+    expect(container.querySelectorAll(".stl-shimmer-overlay").length).toBe(10);
     expect(screen.queryByTestId("model-card")).not.toBeInTheDocument();
   });
 
   it("shows the empty state when there are no models", () => {
     renderGrid({ models: [] });
     expect(screen.getByText("No models found")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Scan library/ })).toBeInTheDocument();
+  });
+
+  it("shows the error state when isError is true", () => {
+    renderGrid({ isError: true });
+    expect(screen.getByText("Couldn't load your library")).toBeInTheDocument();
   });
 
   it("renders one card per model without DnD when disabled", () => {

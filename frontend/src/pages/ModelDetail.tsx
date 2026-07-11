@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, Trash2, Lock } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, Trash2, Lock, AlertCircle } from "lucide-react";
 import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult, AiOrganizeStrategy } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
 import AiOrganizeStrategyModal from "../components/AiOrganizeStrategyModal";
@@ -19,6 +19,7 @@ import { queryKeys } from "../hooks/queries/keys";
 import { invalidateModelViews } from "../hooks/queries/invalidation";
 import { useModel, useModelVariants, useModelNeighbors } from "../hooks/queries/models";
 import ErrorState from "../components/ErrorState";
+import EmptyState from "../components/EmptyState";
 import { useModelGuideId } from "../hooks/queries/guides";
 import { useModelTags } from "./model-detail/hooks/useModelTags";
 import { usePartEditing } from "./model-detail/hooks/usePartEditing";
@@ -434,7 +435,23 @@ export default function ModelDetail() {
     openMergePicker, cancelMerge, mergeIntoGroup, removeFromGroup,
   } = useGroupMerge(model, numericId, load);
 
-  if (loading) return <div className="p-8 text-text-secondary-alt animate-pulse">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="relative aspect-square rounded-lg overflow-hidden" style={{ background: "#141519", border: "1px solid #1a1b21" }}>
+          <div className="stl-shimmer-overlay" />
+        </div>
+        <div className="relative overflow-hidden flex flex-col gap-3">
+          <div className="h-7 w-2/3 rounded" style={{ background: "#1a1c22" }} />
+          <div className="h-4 w-1/3 rounded" style={{ background: "#131419" }} />
+          <div className="h-4 w-full rounded mt-4" style={{ background: "#131419" }} />
+          <div className="h-4 w-5/6 rounded" style={{ background: "#131419" }} />
+          <div className="h-4 w-2/3 rounded" style={{ background: "#131419" }} />
+          <div className="stl-shimmer-overlay" />
+        </div>
+      </div>
+    );
+  }
   if (loadError === "network") {
     return (
       <div className="p-8">
@@ -446,7 +463,19 @@ export default function ModelDetail() {
       </div>
     );
   }
-  if (!model) return <div className="p-8 text-text-secondary-alt">Model not found.</div>;
+  if (!model) {
+    return (
+      <div className="p-8">
+        <EmptyState
+          icon={AlertCircle}
+          heading="Model not found"
+          body="It may have been removed, renamed, or excluded from the library."
+          padding="72px 32px"
+          secondaryAction={{ label: "Back to Library", onClick: () => navigate(backTo) }}
+        />
+      </div>
+    );
+  }
 
   const allImages = [
     model.thumbnail_path ? api.fileUrl(model.thumbnail_path, model.updated_at) : model.thumbnail_url,
