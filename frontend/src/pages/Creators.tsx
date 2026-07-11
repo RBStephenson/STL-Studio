@@ -7,6 +7,7 @@ import RefreshEnrich from "../components/RefreshEnrich";
 import CreateCreatorModal from "../components/CreateCreatorModal";
 import { useToast } from "../context/ToastContext";
 import ErrorState from "../components/ErrorState";
+import EmptyState from "../components/EmptyState";
 import { errMsg } from "../utils/err";
 
 export default function Creators() {
@@ -118,9 +119,26 @@ export default function Creators() {
       )}
 
       {loading ? (
-        <div className="flex justify-center py-24 text-text-secondary-alt text-sm">Loading…</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+          {Array.from({ length: 15 }).map((_, i) => (
+            <div
+              key={i}
+              className="relative overflow-hidden rounded-lg"
+              style={{ height: 98, background: "#141519", border: "1px solid #1a1b21" }}
+            >
+              <div className="stl-shimmer-overlay" />
+            </div>
+          ))}
+        </div>
       ) : loadError ? (
         <ErrorState title="Couldn't load creators" message={loadError} onRetry={loadCreators} />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={Users}
+          heading="No creators found"
+          body="Nothing matches your search or filters. Try a different term, or add a creator manually."
+          primaryAction={{ label: "Add creator", onClick: () => setAdding(true), icon: Plus }}
+        />
       ) : (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {filtered.map((c) => (

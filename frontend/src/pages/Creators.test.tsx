@@ -43,4 +43,16 @@ describe("Creators error state", () => {
     await userEvent.click(screen.getByRole("button", { name: /retry/i }));
     expect(await screen.findByText("Toon Studios")).toBeInTheDocument();
   });
+
+  it("shows the empty state when a search matches no creators", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.models.creators).mockResolvedValueOnce(CREATORS);
+    renderPage();
+
+    await screen.findByText("Toon Studios");
+    await userEvent.type(screen.getByPlaceholderText("Search creators…"), "nonexistent");
+
+    expect(screen.getByText("No creators found")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Add creator/ })).toBeInTheDocument();
+  });
 });

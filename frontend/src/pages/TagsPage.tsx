@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { Tag, Pencil, GitMerge, Trash2, Check, X, Loader2, Search } from "lucide-react";
+import { Tag, Pencil, GitMerge, Trash2, Check, X, Loader2, Search, Filter } from "lucide-react";
 import { api } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import { useConfirm } from "../context/ConfirmContext";
 import HelpLink from "../components/HelpLink";
 import ErrorState from "../components/ErrorState";
+import EmptyState from "../components/EmptyState";
 import { SkeletonBlock, SkeletonPanel } from "../components/SkeletonBlock";
 
 interface TagRow {
@@ -152,11 +153,22 @@ export default function TagsPage() {
           ))}
         </SkeletonPanel>
       ) : error ? (
-        <ErrorState title="Couldn't load tags" message={error} onRetry={load} />
+        <ErrorState
+          title="Couldn't load tags"
+          message="Something went wrong reading your tag index. Try again."
+          onRetry={load}
+        />
       ) : filtered.length === 0 ? (
-        <p className="text-center text-text-secondary-alt py-16">
-          {search ? `No tags match "${search}"` : "No tags found."}
-        </p>
+        search ? (
+          <EmptyState
+            icon={Filter}
+            heading={`No tags match "${search}"`}
+            body="Try a different filter term, or clear it to see all tags."
+            secondaryAction={{ label: "Clear filter", onClick: () => setSearch("") }}
+          />
+        ) : (
+          <p className="text-center text-text-secondary-alt py-16">No tags found.</p>
+        )
       ) : (
         <div className="flex flex-col gap-1">
           {filtered.map((row) => {

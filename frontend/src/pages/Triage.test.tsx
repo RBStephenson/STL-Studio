@@ -51,6 +51,20 @@ describe("Triage loading skeleton", () => {
   });
 });
 
+describe("Triage empty state", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("shows the 'all caught up' empty state when nothing needs review", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.models.list).mockResolvedValueOnce({ items: [] } as unknown as Awaited<ReturnType<typeof api.models.list>>);
+    renderPage();
+
+    expect(await screen.findByText("All caught up")).toBeInTheDocument();
+    expect(screen.getByText(/Nothing needs review right now/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scan library" })).toBeInTheDocument();
+  });
+});
+
 describe("Triage error state", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -59,7 +73,7 @@ describe("Triage error state", () => {
     vi.mocked(api.models.list).mockRejectedValueOnce(new Error("Network down"));
     renderPage();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Network down");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong fetching models to review.");
     expect(screen.getByText("Couldn't load the review queue")).toBeInTheDocument();
 
     vi.mocked(api.models.list).mockResolvedValueOnce(

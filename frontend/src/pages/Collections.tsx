@@ -8,6 +8,7 @@ import CollectionCoverPicker from "../components/CollectionCoverPicker";
 import CreateCollectionModal from "../components/CreateCollectionModal";
 import { errMsg } from "../utils/err";
 import ErrorState from "../components/ErrorState";
+import EmptyState from "../components/EmptyState";
 
 function CollectionCard({
   col,
@@ -247,14 +248,30 @@ export default function Collections() {
       )}
 
       {loading ? (
-        <div className="flex justify-center py-24 text-text-secondary-alt text-sm">Loading…</div>
-      ) : loadError ? (
-        <ErrorState title="Couldn't load collections" message={loadError} onRetry={load} />
-      ) : collections.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-text-muted">
-          <FolderOpen size={48} />
-          <p className="mt-3">No collections yet</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div
+              key={i}
+              className="relative overflow-hidden rounded-lg"
+              style={{ aspectRatio: "4/3", background: "#141519", border: "1px solid #1a1b21" }}
+            >
+              <div className="stl-shimmer-overlay" />
+            </div>
+          ))}
         </div>
+      ) : loadError ? (
+        <ErrorState
+          title="Couldn't load collections"
+          message="Something went wrong loading your collections. Try again."
+          onRetry={load}
+        />
+      ) : collections.length === 0 ? (
+        <EmptyState
+          icon={FolderOpen}
+          heading="No collections yet"
+          body="Group related models together — by project, army, or shelf — to keep your library organized."
+          primaryAction={{ label: "New collection", onClick: () => setCreating(true), icon: Plus }}
+        />
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
           {collections.map((col) => (

@@ -33,7 +33,7 @@ describe("Collections error state", () => {
     vi.mocked(api.collections.list).mockRejectedValueOnce(new Error("Server unreachable"));
     renderPage();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Server unreachable");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong loading your collections.");
     expect(screen.getByText("Couldn't load collections")).toBeInTheDocument();
 
     vi.mocked(api.collections.list).mockResolvedValueOnce([
