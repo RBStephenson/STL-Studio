@@ -95,13 +95,14 @@ export function runtimeDeps(userDataDir: string, lockfileName: string): SidecarD
   const lockPath = join(userDataDir, lockfileName);
 
   return {
-    spawn(exePath: string, args: string[]): SidecarProcess {
+    spawn(exePath: string, args: string[], env?: Record<string, string>): SidecarProcess {
       // Detached false: the child stays in our process group so a hard crash of
       // Electron is still followed by OS cleanup where supported. stdout/stderr
       // are piped to our logger; a dedicated logfile lands in a later phase.
       const child = nodeSpawn(exePath, args, {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
+        env: env ? { ...process.env, ...env } : process.env,
       });
       child.stdout?.on("data", (d) => process.stdout.write(`[backend] ${d}`));
       child.stderr?.on("data", (d) => process.stderr.write(`[backend] ${d}`));

@@ -37,6 +37,12 @@ jobs:
           pip install ruff==0.15.20
           ruff check app tests scripts
 
+      # scripts/ at repo root (build/CI tooling) is separate from backend/scripts.
+      - name: Ruff (repo-root scripts)
+        run: |
+          pip install ruff==0.15.20
+          ruff check scripts/smoke_boot.py scripts/test_smoke_boot.py
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -88,6 +94,11 @@ jobs:
         working-directory: backend
         run: pytest -v
 
+      # scripts/smoke_boot.py's poll/timeout/crash logic (STUDIO-102) — repo-root
+      # tooling, not part of the backend package, run separately from the above.
+      - name: Run smoke_boot tests
+        run: pytest -v scripts/test_smoke_boot.py
+
   vitest:
     runs-on: ubuntu-latest
     permissions:
@@ -110,4 +121,37 @@ jobs:
 
       - name: Run Vitest
         working-directory: frontend
+        run: npm test
+
+  desktop-vitest:
+    # Logic-only tests (sidecar lifecycle, window state, secret key, menu
+    # builders) run against injected fakes, not real Windows APIs, so this
+    # doesn't need windows-latest — build.yml's Windows leg already covers the
+    # real NSIS packaging path. build.yml only ran `tsc`, never `npm test`, so
+    # these were previously untested in CI (STUDIO-147).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: desktop
+        run: npx tsc --noEmit
+
+      - name: Run Vitest
+        working-directory: desktop
         run: npm test

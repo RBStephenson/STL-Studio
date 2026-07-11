@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>STL Studio — encryption key</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #070b16;
+        overflow: hidden;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        color: #e6edf7;
+      }
+      .wrap {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        padding: 32px;
+        box-sizing: border-box;
+        text-align: center;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0;
+      }
+      p {
+        margin: 0;
+        color: #9fb3d1;
+        font-size: 14px;
+        max-width: 480px;
+        line-height: 1.5;
+      }
+      .key-box {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: #0f1526;
+        border: 1px solid #24304a;
+        border-radius: 8px;
+        padding: 12px 16px;
+      }
+      #key {
+        font-family: "Cascadia Code", Consolas, monospace;
+        font-size: 14px;
+        letter-spacing: 0.02em;
+        user-select: all;
+      }
+      button {
+        font-family: inherit;
+        font-size: 14px;
+        border-radius: 6px;
+        border: none;
+        padding: 10px 18px;
+        cursor: pointer;
+      }
+      #copy {
+        background: #24304a;
+        color: #e6edf7;
+      }
+      #copy:hover {
+        background: #2e3c5c;
+      }
+      #done {
+        background: #3b82f6;
+        color: white;
+      }
+      #done:hover {
+        background: #2f6fdb;
+      }
+      #copied {
+        font-size: 12px;
+        color: #4ade80;
+        visibility: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Save your encryption key</h1>
+      <p>
+        This key encrypts your saved AI/API credentials. It is stored on this
+        computer and will not be shown again — if you lose it, saved API keys
+        can no longer be decrypted and you'll need to re-enter them.
+      </p>
+      <div class="key-box">
+        <span id="key"></span>
+        <button id="copy">Copy</button>
+      </div>
+      <span id="copied">Copied to clipboard</span>
+      <button id="done">I've saved it — close</button>
+    </div>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      document.getElementById("key").textContent = params.get("key") || "";
+
+      document.getElementById("copy").addEventListener("click", () => {
+        navigator.clipboard.writeText(params.get("key") || "").then(() => {
+          const el = document.getElementById("copied");
+          el.style.visibility = "visible";
+          setTimeout(() => (el.style.visibility = "hidden"), 2000);
+        });
+      });
+
+      document.getElementById("done").addEventListener("click", () => {
+        window.close();
+      });
+    </script>
+  </body>
+</html>

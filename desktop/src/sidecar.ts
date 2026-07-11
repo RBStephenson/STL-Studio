@@ -32,8 +32,9 @@ export interface LockRecord {
 
 /** Injected I/O boundaries — real implementations live in `runtimeDeps()`. */
 export interface SidecarDeps {
-  /** Spawn the backend exe with the given args; returns a process handle. */
-  spawn(exePath: string, args: string[]): SidecarProcess;
+  /** Spawn the backend exe with the given args (and optional extra env vars,
+   *  merged over the current process env); returns a process handle. */
+  spawn(exePath: string, args: string[], env?: Record<string, string>): SidecarProcess;
   /** HTTP GET used for health polling; resolves ok=true on a 2xx response. */
   probe(url: string): Promise<boolean>;
   /** Terminate a process tree by pid (taskkill /T /F on Windows, signals on POSIX). */
@@ -50,6 +51,9 @@ export interface SidecarDeps {
 export interface StartOptions {
   exePath: string;
   args?: string[];
+  /** Extra env vars merged over the current process env for the spawned
+   *  backend — e.g. STL_SECRET_KEY (STUDIO-147). */
+  env?: Record<string, string>;
   port: number;
   timeoutMs?: number;
   intervalMs?: number;
@@ -130,7 +134,7 @@ export async function startSidecar(
 
   const args = opts.args ?? [];
   deps.log(`spawning backend: ${opts.exePath} ${args.join(" ")}`);
-  const proc = deps.spawn(opts.exePath, args);
+  const proc = deps.spawn(opts.exePath, args, opts.env);
 
   proc.on("error", (err) => deps.log(`sidecar process error: ${err.message}`));
   proc.on("exit", (code) => deps.log(`sidecar exited with code ${code}`));
