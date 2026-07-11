@@ -15,6 +15,7 @@ import { useCollections } from "../hooks/queries/collections";
 import { useScanRootCount, useUnavailableRoots } from "../hooks/queries/scan";
 import { useGuideModelIds } from "../hooks/queries/guides";
 import ScanButton from "../components/ScanButton";
+import { useScanStatus } from "../hooks/useScanStatus";
 import BulkTagBar from "../components/BulkTagBar";
 import { useToast } from "../context/ToastContext";
 import { nextSelection } from "../utils/selection";
@@ -89,9 +90,7 @@ export default function Library() {
     setSearchParams(searchInput ? { q: searchInput } : {});
   }, [setSearchParams, searchInput]);
 
-  const scanLibrary = useCallback(() => {
-    api.scan.start().then(fetchModels).catch((e) => toast(errMsg(e) || "Couldn't start the scan — try again.", "error"));
-  }, [fetchModels, toast]);
+  const emptyStateScan = useScanStatus(fetchModels);
 
   // Refresh just the count chips after a per-card mutation.
   const refreshStats = useCallback(() => {
@@ -476,7 +475,9 @@ export default function Library() {
           isError={isError}
           onRetry={fetchModels}
           onClearFilters={clearFilters}
-          onScanLibrary={scanLibrary}
+          onScanLibrary={emptyStateScan.start}
+          scanRunning={!!emptyStateScan.status?.running}
+          scanModelsFound={emptyStateScan.status?.models_found ?? undefined}
           models={models}
           selection={selection}
           onSelect={toggleSelect}

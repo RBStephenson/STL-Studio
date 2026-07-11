@@ -26,7 +26,7 @@ export default function EmptyState({
   tint?: EmptyStateTint;
   heading: ReactNode;
   body: ReactNode;
-  primaryAction?: { label: ReactNode; onClick: () => void; icon?: LucideIcon };
+  primaryAction?: { label: ReactNode; onClick: () => void; icon?: LucideIcon; disabled?: boolean };
   secondaryAction?: { label: ReactNode; onClick: () => void };
   padding?: string;
 }) {
@@ -75,7 +75,8 @@ export default function EmptyState({
           {primaryAction && (
             <button
               onClick={primaryAction.onClick}
-              className="btn-cta inline-flex items-center gap-1.5"
+              disabled={primaryAction.disabled}
+              className="btn-cta inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 padding: "9px 17px",
                 borderRadius: 8,
