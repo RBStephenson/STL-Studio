@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import type {
@@ -86,6 +86,7 @@ export default function ReorganizePage() {
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [applyErr, setApplyErr] = useState<string | null>(null);
   const [lastApply, setLastApply] = useState<ReorganizeApplyResult | null>(null);
+  const seededExpand = useRef(false);
 
   const hasOverrides = Object.keys(overrides).length > 0;
 
@@ -124,6 +125,19 @@ export default function ReorganizePage() {
   useEffect(() => {
     setSelected((prev) => new Set([...prev].filter((id) => eligibleIds.has(id))));
   }, [eligibleIds]);
+
+  // Auto-expand blocked-but-resolvable rows on the first preview so the Resolve
+  // fields are visible without the user having to discover the row is
+  // clickable (STUDIO-170). Only seeds once per mount — later re-previews
+  // (e.g. from typing an override) don't fight a user's manual collapse.
+  useEffect(() => {
+    if (preview && !seededExpand.current) {
+      seededExpand.current = true;
+      setExpanded(new Set(
+        preview.entries.filter((e) => !e.eligible && isResolvable(e)).map((e) => e.model_id),
+      ));
+    }
+  }, [preview]);
 
   const toggle = (id: number) =>
     setExpanded((prev) => {
@@ -276,6 +290,11 @@ export default function ReorganizePage() {
                         {c}
                       </span>
                     ))}
+                    {!e.eligible && isResolvable(e) && !isOpen && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 shrink-0">
+                        click to resolve
+                      </span>
+                    )}
                   </div>
                   {isOpen && (
                     <div className="px-3 pb-2 space-y-2 border-t border-border-subtle pt-2">
