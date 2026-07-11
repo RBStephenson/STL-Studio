@@ -7,7 +7,7 @@ _THEME_KEYS = [
 DEFAULTS = {
     "painting_guides_enabled": False,
     "show_nsfw": False,
-    "library_page_size": 48,
+    "library_page_size": 50,
     "filter_presets": [],
     "recent_days": 7,
     "library_sort": "name",
@@ -159,16 +159,16 @@ def test_show_nsfw_round_trips(client):
 
 
 def test_page_size_round_trips(client):
-    r = client.patch("/settings", json={"library_page_size": 96})
+    r = client.patch("/settings", json={"library_page_size": 100})
     assert r.status_code == 200
-    assert client.get("/settings").json()["library_page_size"] == 96
+    assert client.get("/settings").json()["library_page_size"] == 100
 
 
 def test_page_size_bounds_rejected(client):
     assert client.patch("/settings", json={"library_page_size": 4}).status_code == 422
     assert client.patch("/settings", json={"library_page_size": 999}).status_code == 422
     # Failed PATCH must not have stored anything.
-    assert client.get("/settings").json()["library_page_size"] == 48
+    assert client.get("/settings").json()["library_page_size"] == 50
 
 
 def test_filter_presets_round_trip(client):
