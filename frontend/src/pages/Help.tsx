@@ -202,6 +202,7 @@ const SECTIONS: Section[] = [
             screen.
           </li>
           <li>Edit metadata, tags, source URL, and the NSFW flag (full form via <strong>Edit</strong>).</li>
+          <li>Toggle <strong>Locked</strong> from the Lock button next to Favorite.</li>
           <li>
             See and <strong>label each STL file</strong> (head, arm, base, etc.) — the
             Category field suggests the standard list plus any custom category
@@ -335,7 +336,8 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          The 🔒 icon on a card's hover row (next to Favorite) marks a model{" "}
+          The 🔒 icon on a card's hover row (next to Favorite), and the matching{" "}
+          <strong>Lock</strong> button on a model's detail page, mark a model{" "}
           <strong>Locked</strong> — a hard lock, not just a status label. While
           it's on, nothing can change that model's STL files, categories, or part
           names: manual edits, bulk recategorize, drag-to-categorize, and AI

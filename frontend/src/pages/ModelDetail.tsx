@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GalleryRotatorHandle } from "../components/ModelCard";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Star, Tag, FileBox, Globe, Pencil, FolderDown, Folder, FolderSync, Copy, Check, Printer, Split, X, Paintbrush, Trash2, Lock } from "lucide-react";
 import { api, ApiError, ModelDetail as ModelDetailType, AiOrganizePreviewResult, AiOrganizeStrategy } from "../api/client";
 import AiOrganizeReviewModal from "../components/AiOrganizeReviewModal";
 import AiOrganizeStrategyModal from "../components/AiOrganizeStrategyModal";
@@ -106,6 +106,7 @@ export default function ModelDetail() {
   const [selectedStlFileId, setSelectedStlFileId] = useState<number | null>(null);
   const [nsfw, setNsfw] = useState(false);
   const [favorite, setFavorite] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
   const { printStatus, printCount, cyclePrintStatus, clearPrintStatus } = usePrintStatus(model, numericId);
   const {
@@ -202,6 +203,7 @@ export default function ModelDetail() {
     if (model) {
       setNsfw(model.nsfw);
       setFavorite(model.is_favorite);
+      setLocked(model.locked);
       setRating(model.user_rating ?? null);
     }
   }, [model]);
@@ -393,6 +395,18 @@ export default function ModelDetail() {
     }
   };
 
+  const toggleLocked = async () => {
+    const next = !locked;
+    setLocked(next);
+    try {
+      await api.models.setLocked(Number(id), next);
+      invalidateModelViews(queryClient, { modelId: Number(id), includeVariants: false });
+    } catch {
+      setLocked(!next);  // revert on failure
+      toast("Couldn't update lock — try again.", "error");
+    }
+  };
+
   const changeRating = async (next: number | null) => {
     const prev = rating;
     setRating(next);
@@ -564,6 +578,18 @@ export default function ModelDetail() {
               >
                 <Star size={14} fill={favorite ? "currentColor" : "none"} />
                 Favorite
+              </button>
+              <button
+                onClick={toggleLocked}
+                title={locked ? "Locked — unlock to allow file/category/name changes" : "Lock: block file, category, and part-name changes"}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm transition-colors ${
+                  locked
+                    ? "bg-cyan-950/60 border-cyan-800 text-cyan-400 hover:bg-cyan-900/60"
+                    : "bg-panel-secondary border-border text-text-secondary hover:text-text-primary-alt"
+                }`}
+              >
+                <Lock size={14} fill={locked ? "currentColor" : "none"} />
+                {locked ? "Locked" : "Lock"}
               </button>
               <div
                 className="flex items-center gap-1 px-2 py-1 rounded border bg-panel-secondary border-border"

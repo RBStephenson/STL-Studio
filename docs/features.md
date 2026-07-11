@@ -205,6 +205,7 @@ Click a card to open the model. From here you can:
   the **×** on any tag to remove it, without opening the full edit screen. The
   tag list autocompletes from all tags already in your library.
 - Edit metadata, tags, source URL, and the NSFW flag (full form via **Edit**).
+- Toggle [Locked](#locked) from the **Lock** button next to Favorite.
 - See and label each STL file (head, arm, base, etc.).
 - **Download all** files as a zip, or open the **Kit Builder**.
 - Add the model to one or more **Collections** (see below).
@@ -369,8 +370,9 @@ buttons in a model's header. *(Printed* is set from the model header.)
 
 ## Locked
 
-The 🔒 icon on a card's hover row (next to Favorite) marks a model
-**Locked** — a hard lock, not just a status label. While it's on, nothing
+The 🔒 icon on a card's hover row (next to Favorite), and the matching
+**Lock** button on a model's detail page (next to Favorite there too), mark a
+model **Locked** — a hard lock, not just a status label. While it's on, nothing
 can change that model's STL files, categories, or part names: manual edits,
 bulk recategorize, drag-to-categorize, and AI Organize apply are all rejected
 (server-side, not just hidden in the UI), and [Reorganize](#reorganize-library)
