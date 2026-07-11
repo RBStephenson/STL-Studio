@@ -465,7 +465,7 @@ def _build_entry(
         kind = "rename"
 
     unclassifiable = bool(missing)
-    # A locked (organized) model is never eligible, regardless of what else
+    # A locked model is never eligible, regardless of what else
     # is true about it — the lock means no process may move/rename its
     # files, full stop (#978). Distinct from every other blocker: those are
     # all "fix this and it becomes eligible" states; this one is "unlock the

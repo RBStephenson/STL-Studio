@@ -247,7 +247,7 @@ class TestMissingFile:
 
 class TestLockedFlag:
     def test_locked_model_is_ineligible_with_locked_flag(self, client, db, tmp_path):
-        """A locked (organized) model is blocked from Reorganize entirely
+        """A locked model is blocked from Reorganize entirely
         (#978) — same as a collision or unclassifiable row, but reported via
         its own `locked` flag rather than overloading an existing one."""
         _root(db, tmp_path)

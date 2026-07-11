@@ -154,10 +154,12 @@ class Model(Base):
 
     # User curation — independent flags
     is_favorite = Column(Boolean, default=False, index=True)
-    # Lock (shown as "Organized" in the UI — don't confuse with the unrelated
+    # Lock (shown as "Locked" in the UI — don't confuse with the unrelated
     # ModelDetail.unorganized computed field in schemas.py, a folder-location
-    # mismatch indicator with no relation to this one): not just a status
-    # label — while set, no process may alter this model's STL files,
+    # mismatch indicator with no relation to this one; that field means "this
+    # model's files aren't where the organize template would put them," while
+    # this one means "don't let anything move or rename them at all"): not
+    # just a status label — while set, no process may alter this model's STL files,
     # categories, or part names (manual edit, bulk recategorize, AI Organize
     # apply, drag-to-categorize) or move/rename them via Reorganize. Toggled
     # from the library card; enforced server-side at every write path that

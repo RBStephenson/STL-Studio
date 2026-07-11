@@ -74,14 +74,14 @@ export function usePartEditing(
       stl_files: prev.stl_files.map((f) => f.id === fileId ? { ...f, ...patch } : f),
     }));
 
-  // A locked ("Organized" in the UI) model blocks every edit this hook makes — one guard
+  // A locked model blocks every edit this hook makes — one guard
   // here covers manual edits, bulk recategorize, and drag-to-categorize
   // alike, since they all funnel through these same functions. The backend
   // rejects too (defense in depth); this just avoids the round trip and
   // gives a specific reason instead of a generic "try again" toast.
   const blockedByLock = (): boolean => {
     if (!model?.locked) return false;
-    toast("This model is marked Organized — unlock it to make changes.", "error");
+    toast("This model is locked — unlock it to make changes.", "error");
     return true;
   };
 

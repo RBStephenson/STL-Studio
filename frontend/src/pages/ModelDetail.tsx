@@ -262,7 +262,7 @@ export default function ModelDetail() {
     // apply on a locked model) — no point running a preview, possibly a real
     // LLM call, for a model whose changes can never be applied.
     if (model.locked) {
-      toast("This model is marked Organized — unlock it to run AI Organize.", "error");
+      toast("This model is locked — unlock it to run AI Organize.", "error");
       return;
     }
     setShowAiOrganizeStrategy(true);

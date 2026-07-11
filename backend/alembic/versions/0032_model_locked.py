@@ -1,6 +1,6 @@
 """Add models.locked (#978)
 
-Shown as "Organized" in the UI. Not just a status label: while set, no
+Shown as "Locked" in the UI. Not just a status label: while set, no
 process may alter this model's STL files, categories, or part names, or
 move/rename them via Reorganize. create_all handles fresh DBs; this brings
 already Alembic-stamped DBs up to the same schema.

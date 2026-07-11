@@ -55,7 +55,7 @@ function blockerChips(e: ReorganizeEntry): string[] {
   if (e.is_symlink) chips.push("symlink");
   if (e.escapes_scan_root) chips.push("escapes root");
   if (e.missing_files_on_disk) chips.push("missing files");
-  if (e.locked) chips.push("Organized");
+  if (e.locked) chips.push("locked");
   return chips;
 }
 

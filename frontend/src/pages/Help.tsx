@@ -249,6 +249,16 @@ const SECTIONS: Section[] = [
             (standalone only) click <strong>Open folder</strong> to jump to it in your
             file manager.
           </li>
+          <li>
+            An <strong>unorganized</strong> icon appears next to the title if the
+            model's current folder no longer matches where{" "}
+            <strong>Reorganize</strong> would put it (e.g. after changing its
+            creator or title) — hover it for a tooltip. Nothing moves
+            automatically; run Reorganize to actually move it. This is unrelated
+            to <strong>Locked</strong> (see below): unorganized just means the
+            files aren't where the template currently says they should be, not
+            that anything is blocked from changing.
+          </li>
         </ul>
       </>
     ),
@@ -319,25 +329,33 @@ const SECTIONS: Section[] = [
     ),
   },
   {
-    id: "organized-lock",
-    title: "Organized (lock)",
+    id: "locked",
+    title: "Locked",
     icon: Lock,
     body: (
       <>
         <p>
           The 🔒 icon on a card's hover row (next to Favorite) marks a model{" "}
-          <strong>Organized</strong> — a hard lock, not just a status label. While
+          <strong>Locked</strong> — a hard lock, not just a status label. While
           it's on, nothing can change that model's STL files, categories, or part
           names: manual edits, bulk recategorize, drag-to-categorize, and AI
           Organize apply are all rejected, and Reorganize treats it as ineligible
-          with its own <strong>Organized</strong> chip, refusing to move or rename
+          with its own <strong>locked</strong> chip, refusing to move or rename
           its files.
         </p>
         <p>
           New files dropped into its folder are still picked up by a scan —
-          marking a model Organized only protects what's already there.
-          Toggling it off always succeeds, even while it's on, so marking a
-          model Organized by mistake is never a dead end.
+          locking a model only protects what's already there. Toggling it off
+          always succeeds, even while it's on, so locking a model by mistake
+          is never a dead end.
+        </p>
+        <p>
+          This is not the same thing as the <strong>unorganized</strong>{" "}
+          indicator on a model's detail page — that's an unrelated flag for
+          whether a model's files currently sit where the organize template
+          says they should. Locked means nothing may touch this model's files
+          at all; unorganized means its files aren't currently where
+          Reorganize would put them. A model can be either, both, or neither.
         </p>
       </>
     ),
