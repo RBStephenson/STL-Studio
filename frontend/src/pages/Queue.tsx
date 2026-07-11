@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Printer, Check, History, GripVertical } from "lucide-react";
+import { Printer, Check, History, GripVertical, Inbox, ArrowLeft } from "lucide-react";
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
   useSensor, useSensors, DragEndEvent,
@@ -14,7 +15,8 @@ import { api, Model, ModelList } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import BulkTagBar from "../components/BulkTagBar";
 import ErrorState from "../components/ErrorState";
-import { SkeletonPanel } from "../components/SkeletonBlock";
+import EmptyState from "../components/EmptyState";
+import { SkeletonPanel, SkeletonBlock } from "../components/SkeletonBlock";
 import { useToast } from "../context/ToastContext";
 import { useCollections } from "../hooks/queries/collections";
 import { invalidateModelViews } from "../hooks/queries/invalidation";
@@ -61,6 +63,7 @@ function SortableCard({ model, onMutate, selected, onSelect }: {
 export default function Queue() {
   const [selection, setSelection] = useState<Set<number>>(new Set());
   const { toast } = useToast();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const queuedQuery = useQueuedModels();
   const printedQuery = useRecentlyPrintedModels();
@@ -69,9 +72,6 @@ export default function Queue() {
   const collections = useCollections().data ?? [];
   const loading = queuedQuery.isPending || printedQuery.isPending;
   const isError = queuedQuery.isError || printedQuery.isError;
-  const errorMessage = (queuedQuery.error as Error)?.message
-    || (printedQuery.error as Error)?.message
-    || "Could not load the print queue.";
   const retry = () => { queuedQuery.refetch(); printedQuery.refetch(); };
 
   const toggleSelect = useCallback((id: number) => {
@@ -134,18 +134,28 @@ export default function Queue() {
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4" data-testid="queue-loading-skeleton">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <SkeletonPanel key={i} className="aspect-square rounded-lg" style={{ background: "#1a1c22" }} />
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonPanel key={i} className="flex flex-col gap-2">
+              <div className="aspect-square rounded-lg" style={{ background: "#141519", border: "1px solid #1a1b21" }} />
+              <SkeletonBlock className="h-3 w-[70%]" style={{ background: "#131419" }} />
+              <SkeletonBlock className="h-3 w-[45%]" style={{ background: "#131419" }} />
+            </SkeletonPanel>
           ))}
         </div>
       ) : isError ? (
-        <ErrorState title="Couldn't load the print queue" message={errorMessage} onRetry={retry} />
+        <ErrorState
+          title="Couldn't load the print queue"
+          message="Something went wrong loading your queue. Try again."
+          onRetry={retry}
+        />
       ) : queued.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-text-muted">
-          <Printer size={40} className="mb-3 opacity-40" />
-          <p className="text-lg">Nothing queued to print</p>
-          <p className="text-sm mt-1">Add models to the queue from any model's card or detail page</p>
-        </div>
+        <EmptyState
+          icon={Inbox}
+          tint="sky"
+          heading="Your print queue is empty"
+          body="Add models from your library to line them up for printing."
+          primaryAction={{ label: "Browse library", onClick: () => navigate("/"), icon: ArrowLeft }}
+        />
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={queued.map((m) => m.id)} strategy={rectSortingStrategy}>

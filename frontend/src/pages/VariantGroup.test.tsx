@@ -49,8 +49,9 @@ describe("VariantGroup empty state", () => {
     vi.mocked(api.models.variants).mockResolvedValueOnce({ items: [] } as unknown as Awaited<ReturnType<typeof api.models.variants>>);
     renderPage();
 
-    expect(await screen.findByText("No variants found")).toBeInTheDocument();
-    expect(screen.getByText(/moved or removed elsewhere/)).toBeInTheDocument();
+    expect(await screen.findByText("No variants in this group.")).toBeInTheDocument();
+    expect(screen.getByText(/Move models into this group/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Go to Library" })).toBeInTheDocument();
   });
 });
 
@@ -62,7 +63,7 @@ describe("VariantGroup error state", () => {
     vi.mocked(api.models.variants).mockRejectedValueOnce(new Error("Network down"));
     renderPage();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Network down");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong loading variants.");
     expect(screen.getByText("Couldn't load this variant group")).toBeInTheDocument();
 
     vi.mocked(api.models.variants).mockResolvedValueOnce({ items: [MODEL] } as unknown as Awaited<ReturnType<typeof api.models.variants>>);
