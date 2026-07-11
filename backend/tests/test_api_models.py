@@ -77,6 +77,32 @@ class TestListModels:
         assert data["total"] == 1
         assert data["items"][0]["name"] == "Undead Knight"
 
+    def test_search_percent_not_wildcard(self, client, db):
+        """STUDIO-87: `%` in the q query param must be matched literally,
+        not as a SQL LIKE any-sequence wildcard."""
+        creator = make_creator(db)
+        make_model(db, creator, name="A", character="50% off today")
+        make_model(db, creator, name="B", character="no discount here")
+        commit_all(db)
+
+        resp = client.get("/models?q=50%25")
+        assert resp.status_code == 200
+        names = {item["name"] for item in resp.json()["items"]}
+        assert names == {"A"}
+
+    def test_search_underscore_not_wildcard(self, client, db):
+        """STUDIO-87: `_` in the q query param must be matched literally,
+        not as a SQL LIKE single-char wildcard."""
+        creator = make_creator(db)
+        make_model(db, creator, name="A", character="My_Guy stats")
+        make_model(db, creator, name="B", character="MyXGuy stats")
+        commit_all(db)
+
+        resp = client.get("/models?q=My_Guy")
+        assert resp.status_code == 200
+        names = {item["name"] for item in resp.json()["items"]}
+        assert names == {"A"}
+
     def test_filter_needs_review(self, client, db):
         creator = make_creator(db)
         make_model(db, creator, name="Clean Model", needs_review=False)

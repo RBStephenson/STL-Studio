@@ -66,12 +66,12 @@ def _apply_filters(
     """Apply standard Library filters to a Model query. Does not handle sort, page, or character."""
     q = q.filter(Model.excluded == excluded)
     if search:
-        like = f"%{search}%"
+        like = f"%{like_escape(search)}%"
         q = q.filter(
-            Model.title.ilike(like)
-            | Model.name.ilike(like)
-            | Model.description.ilike(like)
-            | Model.character.ilike(like)
+            Model.title.ilike(like, escape="\\")
+            | Model.name.ilike(like, escape="\\")
+            | Model.description.ilike(like, escape="\\")
+            | Model.character.ilike(like, escape="\\")
         )
     if creator_id:
         q = q.filter(Model.creator_id == creator_id)
