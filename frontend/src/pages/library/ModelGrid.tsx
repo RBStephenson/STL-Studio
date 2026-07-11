@@ -12,9 +12,11 @@ import {
   DragStartEvent, DragEndEvent, Announcements,
 } from "@dnd-kit/core";
 import type { SensorDescriptor, SensorOptions } from "@dnd-kit/core";
-import { Package, GripVertical } from "lucide-react";
+import { Package, GripVertical, Search, RefreshCw } from "lucide-react";
 import { api, Model } from "../../api/client";
 import ModelCard from "../../components/ModelCard";
+import EmptyState from "../../components/EmptyState";
+import ErrorState from "../../components/ErrorState";
 
 /** Wraps a library card so it can be dragged onto another card to form a variant
  *  group. The drag listeners live on a small hover grip (bottom-left) so plain
@@ -63,6 +65,10 @@ function DraggableCard({ model, draggingCreatorId, children }: {
 
 interface ModelGridProps {
   loading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  onClearFilters: () => void;
+  onScanLibrary: () => void;
   models: Model[];
   selection: Set<number>;
   onSelect: (id: number, shiftKey: boolean) => void;
@@ -109,15 +115,33 @@ function CardGrid({
 
 export default function ModelGrid(props: ModelGridProps) {
   const {
-    loading, models, gridRef, dndEnabled, dndSensors, dndAnnouncements,
+    loading, isError, onRetry, onClearFilters, onScanLibrary,
+    models, gridRef, dndEnabled, dndSensors, dndAnnouncements,
     onDragStart, onDragEnd, onDragCancel, draggingModel, dragCount,
   } = props;
+
+  if (isError) {
+    return (
+      <ErrorState
+        title="Couldn't load your library"
+        message="The library index couldn't be read. It may be missing, corrupted, or on a drive that's currently unavailable."
+        onRetry={onRetry}
+        padding="72px 32px"
+      />
+    );
+  }
 
   if (loading) {
     return (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        {Array.from({ length: 24 }).map((_, i) => (
-          <div key={i} className="aspect-square bg-panel rounded-lg animate-pulse" />
+        {Array.from({ length: 10 }).map((_, i) => (
+          <div
+            key={i}
+            className="relative aspect-square overflow-hidden rounded-[13px]"
+            style={{ background: "#141519", border: "1px solid #1a1b21" }}
+          >
+            <div className="stl-shimmer-overlay" />
+          </div>
         ))}
       </div>
     );
@@ -125,10 +149,14 @@ export default function ModelGrid(props: ModelGridProps) {
 
   if (models.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-text-muted">
-        <p className="text-lg">No models found</p>
-        <p className="text-sm mt-1">Try scanning your library or adjusting filters</p>
-      </div>
+      <EmptyState
+        icon={Search}
+        heading="No models found"
+        body="Nothing matches your current filters. Adjust your search, or scan your library folders for new models."
+        padding="72px 32px"
+        secondaryAction={{ label: "Clear filters", onClick: onClearFilters }}
+        primaryAction={{ label: "Scan library", onClick: onScanLibrary, icon: RefreshCw }}
+      />
     );
   }
 

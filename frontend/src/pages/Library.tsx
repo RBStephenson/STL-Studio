@@ -45,7 +45,7 @@ export default function Library() {
     searchParams, setSearchParams,
     page, creatorId, excludeCreatorId, site, activeTag, excludeTag,
     needsReview, favParam, printStatusParam, excludePrinted,
-    excludedParam, supportParam, addedDays, searchInputRef,
+    excludedParam, supportParam, addedDays, searchInputRef, searchInput,
     setPage, effectiveSort, changeSort, listParams,
   } = filters;
   const navigate = useNavigate();
@@ -66,6 +66,7 @@ export default function Library() {
   const models = useMemo(() => modelsQuery.data?.items ?? [], [modelsQuery.data]);
   const total = modelsQuery.data?.total ?? 0;
   const loading = modelsQuery.isPending;
+  const isError = modelsQuery.isError;
 
   const statsQuery = useModelStats();
   const stats = statsQuery.data ?? null;
@@ -83,6 +84,14 @@ export default function Library() {
   const fetchModels = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: queryKeys.models.all });
   }, [queryClient]);
+
+  const clearFilters = useCallback(() => {
+    setSearchParams(searchInput ? { q: searchInput } : {});
+  }, [setSearchParams, searchInput]);
+
+  const scanLibrary = useCallback(() => {
+    api.scan.start().then(fetchModels).catch((e) => toast(errMsg(e) || "Couldn't start the scan — try again.", "error"));
+  }, [fetchModels, toast]);
 
   // Refresh just the count chips after a per-card mutation.
   const refreshStats = useCallback(() => {
@@ -464,6 +473,10 @@ export default function Library() {
         {/* Grid */}
         <ModelGrid
           loading={loading}
+          isError={isError}
+          onRetry={fetchModels}
+          onClearFilters={clearFilters}
+          onScanLibrary={scanLibrary}
           models={models}
           selection={selection}
           onSelect={toggleSelect}

@@ -95,7 +95,8 @@ describe("ModelDetail error handling (#221)", () => {
   it("shows 'Model not found' on a 404", async () => {
     get.mockRejectedValue(new ApiError(404, "Not Found"));
     renderAt();
-    await waitFor(() => expect(screen.getByText("Model not found.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Model not found")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Back to Library" })).toBeInTheDocument();
   });
 
   it("shows the shared error state (not 'not found') on a network/5xx failure", async () => {
@@ -104,7 +105,7 @@ describe("ModelDetail error handling (#221)", () => {
     await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.getByText("Couldn't load this model")).toBeInTheDocument();
-    expect(screen.queryByText("Model not found.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Model not found")).not.toBeInTheDocument();
 
     // Retry refetches and renders the model.
     get.mockResolvedValueOnce(baseModel);
