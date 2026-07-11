@@ -377,6 +377,46 @@ describe("GalleryRotator label-timer cleanup on unmount (STUDIO-95)", () => {
   });
 });
 
+describe("ModelCard exclude-from-view feedback (STUDIO-167)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("disables the exclude button while the request is in flight", async () => {
+    let resolveCall: () => void;
+    vi.mocked(api.models.setExcluded).mockReturnValue(
+      new Promise((resolve) => { resolveCall = () => resolve({ ok: true, excluded: true }); })
+    );
+    renderCard();
+    const btn = screen.getByTitle("Exclude from the viewer (files kept on disk)");
+    fireEvent.click(btn);
+    expect(btn).toBeDisabled();
+    resolveCall!();
+    await waitFor(() => expect(btn).not.toBeDisabled());
+  });
+
+  it("ignores a repeat click while a previous exclude call is still pending", async () => {
+    let resolveCall: () => void;
+    vi.mocked(api.models.setExcluded).mockReturnValue(
+      new Promise((resolve) => { resolveCall = () => resolve({ ok: true, excluded: true }); })
+    );
+    renderCard();
+    const btn = screen.getByTitle("Exclude from the viewer (files kept on disk)");
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    resolveCall!();
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    expect(vi.mocked(api.models.setExcluded)).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-enables the button after a failed exclude call", async () => {
+    vi.mocked(api.models.setExcluded).mockRejectedValueOnce(new Error("boom"));
+    renderCard();
+    const btn = screen.getByTitle("Exclude from the viewer (files kept on disk)");
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn).not.toBeDisabled());
+  });
+});
+
 describe("ModelCard locked toggle (#978)", () => {
   it("shows the Lock button with the right title for an unlocked model", () => {
     renderCard({ locked: false });

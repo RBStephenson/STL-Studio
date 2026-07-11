@@ -90,6 +90,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
 
   const [favorite, setFavorite] = useState(model.is_favorite);
   const [locked, setLocked] = useState(model.locked);
+  const [excluding, setExcluding] = useState(false);
   const [printStatus, setPrintStatus] = useState<PrintStatus>(model.print_status ?? "none");
   const [localTags, setLocalTags] = useState<string[]>(model.tags ?? []);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -248,8 +249,10 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   const toggleExclude = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (excluding) return;  // already in flight — ignore repeat clicks (STUDIO-167)
     // In the normal library this hides the model; in the Excluded view it restores it.
     const next = !excludedView;
+    setExcluding(true);
     try {
       await api.models.setExcluded(model.id, next);
       invalidateModelViews(queryClient, { modelId: model.id, includeVariants: false });
@@ -258,6 +261,8 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
       toast(next ? "Model excluded from the viewer." : "Model restored.", "success");
     } catch {
       toast(next ? "Couldn't exclude the model — try again." : "Couldn't restore the model — try again.", "error");
+    } finally {
+      setExcluding(false);
     }
   };
 
@@ -472,14 +477,20 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             </button>
             <button
               onClick={toggleExclude}
+              disabled={excluding}
+              aria-busy={excluding}
               title={excludedView ? "Restore to the viewer" : "Exclude from the viewer (files kept on disk)"}
               className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
-                excludedView
+                excluding
+                  ? "text-text-secondary opacity-100 cursor-wait"
+                  : excludedView
                   ? "text-emerald-400 opacity-100 hover:text-emerald-300"
                   : "text-text-secondary hover:text-red-300 opacity-0 group-hover:opacity-100"
               }`}
             >
-              {excludedView ? <RotateCcw size={13} /> : <EyeOff size={13} />}
+              {excluding
+                ? <span className="block w-[13px] h-[13px] rounded-full border-2 border-current border-t-transparent animate-spin" />
+                : excludedView ? <RotateCcw size={13} /> : <EyeOff size={13} />}
             </button>
           </div>
         </div>
