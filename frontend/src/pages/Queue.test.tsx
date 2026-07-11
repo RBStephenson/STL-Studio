@@ -97,7 +97,7 @@ describe("Queue error state", () => {
     list.mockRejectedValueOnce(new Error("Network down"));
     renderQueue();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Network down");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong loading your queue.");
     expect(screen.getByText("Couldn't load the print queue")).toBeInTheDocument();
 
     list.mockImplementation(async (params: Record<string, unknown>) => {
@@ -132,7 +132,7 @@ describe("Queue cache coherence (#848)", () => {
     fireEvent.click(status);
 
     await waitFor(() => expect(setPrintStatus).toHaveBeenCalledWith(7, "printing"));
-    await waitFor(() => expect(screen.getByText("Nothing queued to print")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Your print queue is empty")).toBeInTheDocument());
     expect(list.mock.calls.filter(([params]) => params.print_status === "queued").length).toBeGreaterThan(1);
   });
 });
