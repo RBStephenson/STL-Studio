@@ -107,6 +107,12 @@ export const modelsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_favorite }),
     }),
+  setLocked: (id: number, locked: boolean) =>
+    request<{ ok: boolean; locked: boolean }>(`/models/${id}/locked`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locked }),
+    }),
   setRating: (id: number, rating: number | null) =>
     request<{ ok: boolean; user_rating: number | null }>(`/models/${id}/rating`, {
       method: "PATCH",

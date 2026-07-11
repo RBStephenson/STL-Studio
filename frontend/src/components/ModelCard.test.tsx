@@ -28,6 +28,7 @@ vi.mock("../api/client", async (importOriginal) => {
         ...actual.api.models,
         setPrintStatus: vi.fn(async () => ({ ok: true, print_status: "queued", print_count: 0 })),
         setFavorite: vi.fn(async () => ({ ok: true, is_favorite: false })),
+        setLocked: vi.fn(async () => ({ ok: true, locked: false })),
         setRating: vi.fn(async () => ({ ok: true, user_rating: 4 })),
         setNSFW: vi.fn(async () => ({ ok: true })),
         setExcluded: vi.fn(async () => ({ ok: true, excluded: false })),
@@ -43,7 +44,7 @@ import { api } from "../api/client";
 
 const MODEL = {
   id: 7, name: "robocop", title: "RoboCop", character: null, variant_count: 1,
-  nsfw: false, is_favorite: false, needs_review: false,
+  nsfw: false, is_favorite: false, locked: false, needs_review: false,
   print_status: "none", print_count: 0,
   auto_tags: [], tags: [], thumbnail_path: null, thumbnail_url: null,
   rating: null, source_site: null, creator_id: 1,
@@ -373,5 +374,29 @@ describe("GalleryRotator label-timer cleanup on unmount (STUDIO-95)", () => {
     );
     errorSpy.mockRestore();
     vi.useRealTimers();
+  });
+});
+
+describe("ModelCard organized/locked toggle (#978)", () => {
+  it("shows the Lock button with the right title for an unlocked model", () => {
+    renderCard({ locked: false });
+    expect(screen.getByTitle("Lock: block file, category, and part-name changes")).toBeInTheDocument();
+  });
+
+  it("shows the Lock button with the unlock title for a locked model", () => {
+    renderCard({ locked: true });
+    expect(screen.getByTitle("Locked — unlock to allow file/category/name changes")).toBeInTheDocument();
+  });
+
+  it("calls setLocked(true) when toggled on", async () => {
+    renderCard({ locked: false });
+    fireEvent.click(screen.getByTitle("Lock: block file, category, and part-name changes"));
+    await waitFor(() => expect(api.models.setLocked).toHaveBeenCalledWith(7, true));
+  });
+
+  it("calls setLocked(false) when toggled off", async () => {
+    renderCard({ locked: true });
+    fireEvent.click(screen.getByTitle("Locked — unlock to allow file/category/name changes"));
+    await waitFor(() => expect(api.models.setLocked).toHaveBeenCalledWith(7, false));
   });
 });

@@ -258,6 +258,13 @@ export default function ModelDetail() {
   // directly — the actual call happens in runAiOrganize once a strategy is chosen.
   const runAiOrganize = () => {
     if (!model || aiOrganizing) return;
+    // Blocked here rather than only at apply time (the backend also rejects
+    // apply on a locked model) — no point running a preview, possibly a real
+    // LLM call, for a model whose changes can never be applied.
+    if (model.locked) {
+      toast("This model is locked — unlock it to run AI Organize.", "error");
+      return;
+    }
     setShowAiOrganizeStrategy(true);
   };
 

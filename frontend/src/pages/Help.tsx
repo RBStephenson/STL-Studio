@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, Lock, type LucideIcon,
 } from "lucide-react";
 
 /** A keyboard key, styled like the hints elsewhere in the app. */
@@ -315,6 +315,30 @@ const SECTIONS: Section[] = [
           </li>
         </ul>
         <p>Set both from a card's hover icons or the model header.</p>
+      </>
+    ),
+  },
+  {
+    id: "organized-lock",
+    title: "Organized (lock)",
+    icon: Lock,
+    body: (
+      <>
+        <p>
+          The 🔒 icon on a card's hover row (next to Favorite) marks a model{" "}
+          <strong>Organized</strong> — a hard lock, not just a status label. While
+          it's on, nothing can change that model's STL files, categories, or part
+          names: manual edits, bulk recategorize, drag-to-categorize, and AI
+          Organize apply are all rejected, and Reorganize treats it as ineligible
+          with its own <strong>locked</strong> chip, refusing to move or rename its
+          files.
+        </p>
+        <p>
+          New files dropped into its folder are still picked up by a scan — the
+          lock only protects what's already there. Toggling it off always
+          succeeds, even while locked, so a lock set by mistake is never a dead
+          end.
+        </p>
       </>
     ),
   },

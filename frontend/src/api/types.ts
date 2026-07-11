@@ -57,6 +57,7 @@ export interface Model {
   nsfw: boolean;
   excluded: boolean;
   is_favorite: boolean;
+  locked: boolean;
   is_group_rep: boolean;
   variant_order: number | null;
   user_rating: number | null;
@@ -963,6 +964,7 @@ export interface ReorganizeEntry {
   is_symlink: boolean;
   escapes_scan_root: boolean;
   missing_files_on_disk: boolean;
+  locked: boolean;
 }
 
 export interface ReorganizeStats {
