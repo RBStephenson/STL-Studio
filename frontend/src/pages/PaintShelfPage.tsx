@@ -7,6 +7,8 @@ import {
 import { useToast } from "../context/ToastContext";
 import HelpLink from "../components/HelpLink";
 import ErrorState from "../components/ErrorState";
+import EmptyState from "../components/EmptyState";
+import { SkeletonBlock } from "../components/SkeletonBlock";
 import { errMsg } from "../utils/err";
 
 const PAGE_SIZE = 48;
@@ -436,40 +438,22 @@ export default function PaintShelfPage() {
         (() => {
           const filtered = q || brandId || lineId || finish || ownedParam;
           return (
-            <div
-              className="flex flex-col items-center text-center rounded-[14px] border border-dashed px-8 py-16"
-              style={{ borderColor: "#1e2027", background: "#0e0f13" }}
-            >
-              <div
-                className="flex items-center justify-center w-14 h-14 rounded-full mb-4"
-                style={{ background: "#26163a" }}
-              >
-                <Palette size={22} strokeWidth={1.6} style={{ color: "var(--color-status-fuchsia)" }} />
-              </div>
-              <p className="text-base font-bold text-text-primary-alt mb-2">
-                {filtered ? "No paints match" : "Your shelf is empty"}
-              </p>
-              <p className="text-[13px] leading-relaxed text-text-secondary-alt max-w-[320px] mb-6">
-                {filtered
-                  ? "Try adjusting or clearing your filters."
-                  : "Add a paint, or use Import CSV with a PaintRack export."}
-              </p>
-              {!filtered && (
-                <button
-                  onClick={() => setFormMode("add")}
-                  className="btn-cta inline-flex items-center gap-1.5 text-white text-sm px-4 py-2 rounded"
-                >
-                  <Plus size={15} /> Add paint
-                </button>
-              )}
-            </div>
+            <EmptyState
+              icon={Palette}
+              heading={filtered ? "No paints match" : "No paints on your shelf yet."}
+              body={filtered
+                ? "Try adjusting or clearing your filters."
+                : "Add paints manually or import a CSV so guides can reference colors you actually own."}
+              primaryAction={filtered ? undefined : { label: "Add paint", onClick: () => setFormMode("add"), icon: Plus }}
+            />
           );
         })()
       )}
 
       {/* Table */}
-      {!listError && !(!loading && paints.length === 0) && (
-      <div className="bg-panel border border-border-subtle rounded-lg overflow-hidden">
+      {!listError && (loading || paints.length > 0) && (
+      <div className="relative bg-panel border border-border-subtle rounded-lg overflow-hidden">
+        {loading && <div className="stl-shimmer-overlay" />}
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-text-secondary-alt uppercase tracking-wider border-b border-border-subtle">
@@ -483,7 +467,19 @@ export default function PaintShelfPage() {
             </tr>
           </thead>
           <tbody>
-            {paints.map((p) => {
+            {loading ? (
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i} className="relative border-b border-border-subtle last:border-0">
+                  <td className="px-4 py-2"><SkeletonBlock className="h-5 w-5 rounded-full" /></td>
+                  <td className="px-2 py-2"><SkeletonBlock className="h-3 w-12" /></td>
+                  <td className="px-2 py-2"><SkeletonBlock className="h-3 w-24" /></td>
+                  <td className="px-2 py-2"><SkeletonBlock className="h-3 w-20" /></td>
+                  <td className="px-2 py-2"><SkeletonBlock className="h-3 w-14" /></td>
+                  <td className="px-2 py-2"><SkeletonBlock className="h-3 w-8" /></td>
+                  <td className="px-2 py-2" />
+                </tr>
+              ))
+            ) : paints.map((p) => {
               const lineInfo = lineById.get(p.paint_line_id);
               return (
                 <tr key={p.id} className="border-b border-border-subtle last:border-0 hover:bg-panel-secondary/50 group">

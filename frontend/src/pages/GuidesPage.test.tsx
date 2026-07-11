@@ -87,7 +87,7 @@ describe("GuidesPage", () => {
     renderPage();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Network down");
-    expect(screen.getByText("Couldn't load guides")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't load painting guides")).toBeInTheDocument();
 
     vi.mocked(api.painting.guides.list).mockResolvedValueOnce({
       total: 0, page: 1, page_size: 200, items: [],
