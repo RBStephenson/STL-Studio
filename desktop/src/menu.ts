@@ -67,7 +67,7 @@ export function buildContextMenuTemplate(
  */
 export function buildApplicationMenuTemplate(
   nav: NavTarget,
-  opts: { isMac: boolean },
+  opts: { isMac: boolean; onRegenerateKey?: () => void },
 ): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
 
@@ -75,10 +75,15 @@ export function buildApplicationMenuTemplate(
     template.push({ role: "appMenu" });
   }
 
-  template.push({
-    label: "File",
-    submenu: [opts.isMac ? { role: "close" } : { role: "quit" }],
-  });
+  const fileSubmenu: MenuItemConstructorOptions[] = [];
+  if (opts.onRegenerateKey) {
+    fileSubmenu.push(
+      { label: "Regenerate Encryption Key…", click: () => opts.onRegenerateKey?.() },
+      { type: "separator" },
+    );
+  }
+  fileSubmenu.push(opts.isMac ? { role: "close" } : { role: "quit" });
+  template.push({ label: "File", submenu: fileSubmenu });
 
   template.push({
     label: "Navigate",

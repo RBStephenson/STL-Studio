@@ -19,6 +19,7 @@ files:
   - dist/**/*
   - index.html
   - splash.html
+  - keyReveal.html
   # Splash art (resources/splash.png) + app icon, referenced at runtime.
   - resources/**/*
 

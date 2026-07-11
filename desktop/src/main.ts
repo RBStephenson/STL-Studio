@@ -22,12 +22,14 @@ import {
 } from "./menu";
 import type { NavTarget } from "./menu";
 import { findFreePort, runtimeDeps } from "./runtime";
+import { getOrCreateSecretKey, regenerateSecretKey } from "./secretKey";
 import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
 import { readWindowState, saveWindowState } from "./windowState";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
 const SPLASH_HTML = join(__dirname, "..", "splash.html");
+const KEY_REVEAL_HTML = join(__dirname, "..", "keyReveal.html");
 const APP_ICON = join(__dirname, "..", "resources", "stl_studio.ico");
 // Matches splash.html's background so there's no white flash before it paints.
 const WINDOW_BG = "#070b16";
@@ -68,8 +70,63 @@ function installApplicationMenu(): void {
     reload: () => BrowserWindow.getFocusedWindow()?.webContents.reload(),
   };
   Menu.setApplicationMenu(
-    Menu.buildFromTemplate(buildApplicationMenuTemplate(nav, { isMac: IS_MAC })),
+    Menu.buildFromTemplate(
+      buildApplicationMenuTemplate(nav, { isMac: IS_MAC, onRegenerateKey: regenerateEncryptionKey }),
+    ),
   );
+}
+
+/** A small non-modal window showing the encryption key once, with a Copy
+ *  button. Used both on first-ever generation and after a manual regenerate
+ *  (STUDIO-147). The key is passed via query string — this window never talks
+ *  to the backend, so there's no network exposure of the key. */
+function showKeyRevealWindow(key: string): void {
+  const win = new BrowserWindow({
+    width: 560,
+    height: 320,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    parent: mainWindow ?? undefined,
+    title: "STL Studio — encryption key",
+    icon: APP_ICON,
+    backgroundColor: WINDOW_BG,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  void win.loadFile(KEY_REVEAL_HTML, { query: { key } });
+}
+
+/** Warn, generate a fresh key, restart the sidecar so the backend picks it up
+ *  (secrets.py caches its Fernet instance for the process lifetime), and show
+ *  the new key once. Regenerating invalidates every currently-stored
+ *  encrypted secret (AI/Cults3D/MMF API keys) — decrypt failures are treated
+ *  as "unset" by the backend, so the user simply re-enters them. */
+async function regenerateEncryptionKey(): Promise<void> {
+  if (!mainWindow) {
+    return;
+  }
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    buttons: ["Cancel", "Regenerate"],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Regenerate encryption key?",
+    message: "This will invalidate all saved API keys",
+    detail:
+      "Your AI, Cults3D, and MyMiniFactory API keys are encrypted with the current key and will stop decrypting once it's replaced. You'll need to re-enter them. This cannot be undone.",
+  });
+  if (response !== 1) {
+    return;
+  }
+  regenerateSecretKey(app.getPath("userData"));
+  if (sidecar && deps) {
+    await stopSidecar(deps, sidecar);
+    sidecar = null;
+  }
+  await bootBackendAndLoad(mainWindow, { forceReveal: true });
 }
 
 function createWindow(): BrowserWindow {
@@ -149,19 +206,28 @@ function createWindow(): BrowserWindow {
 }
 
 /** Spawn the backend, wait for health, and load it — or show an error dialog and
- *  fall back to the placeholder page so the window is never blank-and-silent. */
-async function bootBackendAndLoad(win: BrowserWindow): Promise<void> {
+ *  fall back to the placeholder page so the window is never blank-and-silent.
+ *  Resolves (generating on first run) the Fernet key the backend needs to
+ *  encrypt/decrypt saved API keys and injects it as STL_SECRET_KEY (STUDIO-147).
+ *  `forceReveal` shows the one-time key window even when the key already
+ *  existed on disk — used after a manual regenerate. */
+async function bootBackendAndLoad(
+  win: BrowserWindow,
+  opts: { forceReveal?: boolean } = {},
+): Promise<void> {
   deps = runtimeDeps(app.getPath("userData"), LOCKFILE_NAME);
   const exePath = resolveBackendExe({
     packaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     repoRoot: REPO_ROOT,
   });
+  const secretKey = getOrCreateSecretKey(app.getPath("userData"));
   try {
     const port = await findFreePort();
     const result = await startSidecar(deps, {
       exePath,
       args: ["--port", String(port)],
+      env: { STL_SECRET_KEY: secretKey.key },
       port,
     });
     sidecar = result.proc;
@@ -169,6 +235,9 @@ async function bootBackendAndLoad(win: BrowserWindow): Promise<void> {
     // never returns to it.
     await win.loadURL(baseUrl(result.port));
     win.webContents.navigationHistory.clear();
+    if (secretKey.isNew || opts.forceReveal) {
+      showKeyRevealWindow(secretKey.key);
+    }
   } catch (err) {
     const message =
       err instanceof SidecarStartError
