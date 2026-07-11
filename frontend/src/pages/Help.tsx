@@ -202,7 +202,11 @@ const SECTIONS: Section[] = [
             screen.
           </li>
           <li>Edit metadata, tags, source URL, and the NSFW flag (full form via <strong>Edit</strong>).</li>
-          <li>See and <strong>label each STL file</strong> (head, arm, base, etc.).</li>
+          <li>
+            See and <strong>label each STL file</strong> (head, arm, base, etc.) — the
+            Category field suggests the standard list plus any custom category
+            already used on this model, same as the bulk recategorize dropdown below.
+          </li>
           <li>
             A part can have multiple <strong>sup variants</strong> — alternate
             supported/cut versions — and the part picker shows one button per sup

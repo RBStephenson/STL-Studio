@@ -39,7 +39,7 @@ interface GroupedStlFiles {
 const UNCATEGORIZED_DROP_ID = "__uncategorized__";
 
 function DraggableFileRow({
-  f, isSup, isBase, pt, pn, isSelected, isChecked, partCategoriesEnabled,
+  f, isSup, isBase, pt, pn, isSelected, isChecked, partCategoriesEnabled, categoryOptions,
   onSelectFile, onToggleCheck, setPartNames, savePartName, setPartTypes, savePartType,
   linkingBaseId, setLinkingBaseId, linkSup, unlinkSup, allFiles,
 }: {
@@ -51,6 +51,7 @@ function DraggableFileRow({
   isSelected: boolean;
   isChecked: boolean;
   partCategoriesEnabled: boolean;
+  categoryOptions: string[];
   onSelectFile: () => void;
   onToggleCheck: () => void;
   setPartNames: Dispatch<SetStateAction<Record<number, string>>>;
@@ -106,7 +107,7 @@ function DraggableFileRow({
         <td className="px-3 py-1.5">
           <PartTypeCombo
             value={pt}
-            options={PART_TYPE_SUGGESTIONS}
+            options={categoryOptions}
             placeholder="Category…"
             onChange={(v) => setPartTypes((prev) => ({ ...prev, [f.id]: v }))}
             onCommit={(v) => savePartType(f.id, v)}
@@ -280,9 +281,12 @@ export default function StlFilesTable({
 
   // Standard suggestions plus whatever categories this model already uses
   // (groupedStlFiles.labeled keys are the persisted, Pascal-cased part_type
-  // values in use) — deduped and alphabetized, so a bulk recategorize offers
-  // both without the user having to retype a custom category by hand.
-  const recategorizeOptions = [...new Set([
+  // values in use) — deduped and alphabetized. Shared by the per-row Category
+  // combo and the bulk "Recategorize to…" dropdown, so neither ever offers a
+  // narrower list than the other — a custom category typed into one row's
+  // combo must be pickable from every other row's combo too, not just the
+  // bulk action.
+  const categoryOptions = [...new Set([
     ...PART_TYPE_SUGGESTIONS,
     ...groupedStlFiles.labeled.map(([cat]) => cat),
   ])].sort(naturalCompare);
@@ -306,6 +310,7 @@ export default function StlFilesTable({
         isSelected={selectedStlFileId === f.id}
         isChecked={selectedIds.has(f.id)}
         partCategoriesEnabled={settings.part_categories_enabled}
+        categoryOptions={categoryOptions}
         onSelectFile={() => { setSelectedStlFileId(f.id); setViewMode("3d"); }}
         onToggleCheck={() => toggleChecked(f.id)}
         setPartNames={setPartNames}
@@ -352,7 +357,7 @@ export default function StlFilesTable({
                 className="bg-panel-secondary border border-border hover:border-border-divider rounded px-2.5 py-1 text-xs text-text-secondary hover:text-text-primary-alt focus:outline-none focus:border-accent-start transition-colors"
               >
                 <option value="" disabled>Recategorize to…</option>
-                {recategorizeOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                {categoryOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
               </select>
             )}
             {selectedIds.size > 0 && (

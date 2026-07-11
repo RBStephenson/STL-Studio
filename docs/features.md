@@ -232,10 +232,12 @@ filters the list by either — much faster than scanning a plain dropdown of
 raw filenames on a kit with dozens of parts.
 
 The **part type** field is a combobox: start typing to filter a list of
-standard suggestions (listed alphabetically), or type any custom category
-name. The dropdown appears automatically, opening above the field instead of
-below when there isn't room underneath, and can be dismissed with Escape;
-pressing Enter or clicking away commits the value.
+standard suggestions plus any custom category already used somewhere on this
+model (listed alphabetically together — the same combined list the bulk
+**Recategorize to…** dropdown offers), or type a brand new category name. The
+dropdown appears automatically, opening above the field instead of below when
+there isn't room underneath, and can be dismissed with Escape; pressing Enter
+or clicking away commits the value.
 
 **Settings → Preferences → Horizontal parts layout** (on by default) swaps the
 two-column model detail page for a full-width, scrollable files table below the
