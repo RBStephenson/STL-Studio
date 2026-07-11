@@ -18,7 +18,11 @@ vi.mock("../api/client", () => ({
       tags: vi.fn().mockResolvedValue([]),
     },
     collections: { list: vi.fn().mockResolvedValue([]) },
-    scan: { roots: vi.fn().mockResolvedValue([{ id: 1 }]) },
+    scan: {
+      roots: vi.fn().mockResolvedValue([{ id: 1 }]),
+      status: vi.fn().mockResolvedValue({ running: false, message: "" }),
+      start: vi.fn(), cancel: vi.fn(),
+    },
     files: { driveStatus: (...args: unknown[]) => driveStatusMock(...args) },
     painting: { guides: { modelIds: vi.fn().mockResolvedValue({ model_ids: [] }) } },
   },
