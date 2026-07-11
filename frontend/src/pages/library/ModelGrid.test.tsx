@@ -24,6 +24,7 @@ const base: React.ComponentProps<typeof ModelGrid> = {
   onRetry: vi.fn(),
   onClearFilters: vi.fn(),
   onScanLibrary: vi.fn(),
+  scanRunning: false,
   models,
   selection: new Set<number>(),
   onSelect: vi.fn(),
@@ -62,6 +63,12 @@ describe("ModelGrid", () => {
     expect(screen.getByText("No models found")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Scan library/ })).toBeInTheDocument();
+  });
+
+  it("shows a scanning label and disables the button while a scan runs (STUDIO-166)", () => {
+    renderGrid({ models: [], scanRunning: true, scanModelsFound: 5 });
+    const btn = screen.getByRole("button", { name: /Scanning… 5 models/ });
+    expect(btn).toBeDisabled();
   });
 
   it("shows the error state when isError is true", () => {

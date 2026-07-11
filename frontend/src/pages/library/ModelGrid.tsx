@@ -69,6 +69,8 @@ interface ModelGridProps {
   onRetry: () => void;
   onClearFilters: () => void;
   onScanLibrary: () => void;
+  scanRunning: boolean;
+  scanModelsFound?: number;
   models: Model[];
   selection: Set<number>;
   onSelect: (id: number, shiftKey: boolean) => void;
@@ -115,7 +117,7 @@ function CardGrid({
 
 export default function ModelGrid(props: ModelGridProps) {
   const {
-    loading, isError, onRetry, onClearFilters, onScanLibrary,
+    loading, isError, onRetry, onClearFilters, onScanLibrary, scanRunning, scanModelsFound,
     models, gridRef, dndEnabled, dndSensors, dndAnnouncements,
     onDragStart, onDragEnd, onDragCancel, draggingModel, dragCount,
   } = props;
@@ -155,7 +157,12 @@ export default function ModelGrid(props: ModelGridProps) {
         body="Nothing matches your current filters. Adjust your search, or scan your library folders for new models."
         padding="72px 32px"
         secondaryAction={{ label: "Clear filters", onClick: onClearFilters }}
-        primaryAction={{ label: "Scan library", onClick: onScanLibrary, icon: RefreshCw }}
+        primaryAction={{
+          label: scanRunning ? `Scanning… ${scanModelsFound ?? 0} models` : "Scan library",
+          onClick: onScanLibrary,
+          icon: RefreshCw,
+          disabled: scanRunning,
+        }}
       />
     );
   }
