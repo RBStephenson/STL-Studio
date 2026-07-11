@@ -87,6 +87,17 @@ jobs:
       - name: Build executable
         run: pyinstaller packaging/stl-studio.spec --distpath dist-standalone
 
+      # ---- Smoke-test the frozen exe (STUDIO-102) ----
+      # Build-only steps never launch the exe, so a frozen-import crash (e.g.
+      # STUDIO-100: `No module named 'unittest'`) only surfaced once a user ran
+      # the installer. Boot it here and fail loud if /api/health never answers.
+      - name: Smoke-test standalone exe
+        shell: bash
+        run: |
+          exe="dist-standalone/stl-studio"
+          [ "${{ matrix.os }}" = "windows-latest" ] && exe="dist-standalone/stl-studio.exe"
+          python scripts/smoke_boot.py "$exe"
+
       # ---- Windows: wrap the backend exe in the Electron NSIS installer ----
       # (Phase 4, STUDIO-74). desktop/electron-builder.yml copies the sidecar from
       # dist-standalone/ via extraResources and emits desktop/release/*.exe.
