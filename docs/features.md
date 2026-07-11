@@ -283,14 +283,18 @@ part. Clicking it first asks you to pick a strategy:
   the first several — later batches are told which unit names earlier ones
   already settled on, so the same unit isn't renamed partway through a big kit.
 - **Link supported parts** — no AI API needed; this is pure name matching, not
-  an AI call. Finds every file whose name (part name if set, else filename)
-  contains "Sup", "Supported", or "Hollowed" and isn't already linked to a
-  base, and matches it to a same-named plain file — e.g. "Icon of Flame 2
-  Supported" links to "Icon of Flame 2". A file without one of those keywords
-  is only ever a possible match target, never linked to another file itself,
-  so it's safe to run on a whole kit without relabeling anything that's
-  already named correctly. An already-linked file is never touched or
-  re-matched.
+  an AI call. Finds every file whose filename (or, failing that, its part
+  name) contains "Sup", "Supported", or "Hollowed" and isn't already linked to
+  a base, and matches it to a same-named plain file — e.g.
+  "icon-of-flame-2-supported.stl" links to "icon-of-flame-2.stl". Matching
+  goes by filename first specifically because part names can drift or get
+  mislabeled independently of the file (two different parts ending up with
+  the same, wrong, part name is a real thing that happens); part name is only
+  a fallback for a file matched with no useful filename signal. A file without
+  one of the keywords is only ever a possible match target, never linked to
+  another file itself, so it's safe to run on a whole kit without relabeling
+  anything that's already named correctly. An already-linked file is never
+  touched or re-matched.
 
 On a local model via an OpenAI-compatible endpoint (Ollama, etc.), requests use
 schema-constrained output and an explicit instruction against extended

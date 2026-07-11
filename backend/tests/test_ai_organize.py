@@ -1577,6 +1577,23 @@ class TestHeuristicLinkSups:
             {"id": 2, "part_type": None, "part_name": None, "sup_base_filename": "gargoyle.stl"}
         ]
 
+    def test_matches_by_filename_even_when_part_name_is_mislabeled_and_collides(self):
+        # Regression (#967-follow-up): real-world data had two *different*
+        # physical parts both labeled "Escaraba 1 Base" by part_name (a
+        # leftover from an earlier/buggier naming pass), while their
+        # filenames were still correct and consistent. Matching by part_name
+        # alone either missed this pair or matched it to the wrong base;
+        # filename must win.
+        files = [
+            self._f(1, "escaraba-1-base.stl", part_name="Escaraba 1 Base"),
+            self._f(2, "escaraba-hellfyre-base.stl", part_name="Escaraba 1 Base"),  # mislabeled, same as #1
+            self._f(3, "escaraba-hellfyre-base-supported.stl", part_name="Supported Escaraba Hellfyre Base"),
+        ]
+        sugs = ai.heuristic_link_sups(files)
+        assert sugs == [
+            {"id": 3, "part_type": None, "part_name": None, "sup_base_filename": "escaraba-hellfyre-base.stl"}
+        ]
+
     def test_already_linked_candidate_is_skipped(self):
         # sup_of_id already set (to some other file, id 9) — must not be
         # touched or re-suggested even though a perfect name match exists.

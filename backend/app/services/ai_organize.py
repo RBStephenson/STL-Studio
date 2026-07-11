@@ -318,10 +318,28 @@ def _norm_name(name: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
-def _display_name(f: dict[str, Any]) -> str:
-    """Prefer a file's part_name (what the review UI actually shows); fall
-    back to its filename stem when unset."""
-    return (f.get("part_name") or "").strip() or _stem(f.get("filename", ""))
+def _match_keys(f: dict[str, Any]) -> list[str]:
+    """Name(s) to check/match this file under, filename first.
+
+    The filename is the reliable signal for this pairing pattern — a sup and
+    its base almost always share the same filename stem plus a keyword,
+    even on a library where part_name has drifted (independently re-typed,
+    copy-pasted, or produced by an earlier/buggier AI Organize run — real
+    data has seen e.g. two *different* physical parts both labeled exactly
+    "Escaraba 1 Base" by part_name alone, #967-follow-up). part_name is
+    still checked second, for the rarer case where a file's name was fixed
+    up without renaming the file itself.
+    """
+    keys = []
+    fn_key = _norm_name(_stem(f.get("filename", "")))
+    if fn_key:
+        keys.append(fn_key)
+    pn = (f.get("part_name") or "").strip()
+    if pn:
+        pn_key = _norm_name(pn)
+        if pn_key and pn_key not in keys:
+            keys.append(pn_key)
+    return keys
 
 
 def heuristic_link_sups(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -340,30 +358,33 @@ def heuristic_link_sups(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
          variant, never linked" case, not a general fuzzy-matching pass
          across the whole file list.
 
-    Matching is by name, not filename specifically: part_name is used when a
-    file has one (matching what the review UI actually shows), falling back
-    to the filename otherwise, normalized the same way on both sides so
-    "Icon_of_Flame_2_Supported.stl" and "icon-of-flame-2.stl" still line up.
+    See _match_keys for why matching tries the filename before part_name.
     """
     suggestions: list[dict[str, Any]] = []
 
+    # Index every plain (non-keyword) file under each of its match keys —
+    # filename keys inserted first, so a part_name collision (two different
+    # files sharing a mislabeled part_name) can never displace a correct
+    # filename-based entry.
     base_by_key: dict[str, dict[str, Any]] = {}
     for f in files:
-        name = _norm_name(_display_name(f))
-        if not name or _LINK_KEYWORD_RE.search(name):
-            continue
-        base_by_key.setdefault(name, f)
+        for key in _match_keys(f):
+            if not _LINK_KEYWORD_RE.search(key):
+                base_by_key.setdefault(key, f)
 
     for f in files:
         if f.get("sup_of_id") is not None:
             continue
-        name = _norm_name(_display_name(f))
-        if not name or not _LINK_KEYWORD_RE.search(name):
-            continue
-        candidate_key = _norm_name(_LINK_KEYWORD_RE.sub(" ", name))
-        if not candidate_key:
-            continue
-        base = base_by_key.get(candidate_key)
+        base: dict[str, Any] | None = None
+        for key in _match_keys(f):
+            if not _LINK_KEYWORD_RE.search(key):
+                continue
+            candidate_key = _norm_name(_LINK_KEYWORD_RE.sub(" ", key))
+            if not candidate_key:
+                continue
+            base = base_by_key.get(candidate_key)
+            if base is not None:
+                break
         if base is None or base["id"] == f["id"]:
             continue
         suggestions.append({
