@@ -330,14 +330,14 @@ const SECTIONS: Section[] = [
           it's on, nothing can change that model's STL files, categories, or part
           names: manual edits, bulk recategorize, drag-to-categorize, and AI
           Organize apply are all rejected, and Reorganize treats it as ineligible
-          with its own <strong>locked</strong> chip, refusing to move or rename its
-          files.
+          with its own <strong>Organized</strong> chip, refusing to move or rename
+          its files.
         </p>
         <p>
-          New files dropped into its folder are still picked up by a scan — the
-          lock only protects what's already there. Toggling it off always
-          succeeds, even while locked, so a lock set by mistake is never a dead
-          end.
+          New files dropped into its folder are still picked up by a scan —
+          marking a model Organized only protects what's already there.
+          Toggling it off always succeeds, even while it's on, so marking a
+          model Organized by mistake is never a dead end.
         </p>
       </>
     ),
