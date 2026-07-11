@@ -57,7 +57,7 @@ filtered view.
   follow you across browsers and devices.
 - **Pagination:** Prev / page number / Next, with a jump-to-page box — shown at
   both the top and bottom of the grid so you can page without scrolling. The
-  page size (24 / 48 / 96) is configurable under **Settings → Preferences**,
+  page size (25 / 50 / 100) is configurable under **Settings → Preferences**,
   along with the other server-side preferences (NSFW default, filter presets).
 
 Each card shows the thumbnail, name, tags, and small action icons (favorite ★

@@ -508,7 +508,7 @@ class AppSettingsRead(BaseModel):
     for the store's whitelist (routers/settings.py derives DEFAULTS from it)."""
     painting_guides_enabled: bool = False
     show_nsfw: bool = False
-    library_page_size: int = 48
+    library_page_size: int = 50
     filter_presets: list[FilterPreset] = []
     recent_days: int = 7  # "Recently added" window in days (#170)
     library_sort: str = "name"  # default Library order: name | added | creator (#247)

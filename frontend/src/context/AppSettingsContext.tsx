@@ -8,7 +8,7 @@ import { useToast } from "./ToastContext";
 const DEFAULTS: AppSettings = {
   painting_guides_enabled: false,
   show_nsfw: false,
-  library_page_size: 48,
+  library_page_size: 50,
   filter_presets: [],
   recent_days: 7,
   library_sort: "name",

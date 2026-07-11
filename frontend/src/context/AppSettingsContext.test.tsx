@@ -49,7 +49,7 @@ describe("AppSettingsProvider load-error surfacing (STUDIO-96)", () => {
     await waitFor(() => expect(screen.getByTestId("loaded")).toHaveTextContent("true"));
     expect(screen.getByTestId("error")).toHaveTextContent("true");
     // Hardcoded fallback, not server-confirmed — still usable, just flagged.
-    expect(screen.getByTestId("page-size")).toHaveTextContent("48");
+    expect(screen.getByTestId("page-size")).toHaveTextContent("50");
     expect(toastMock).toHaveBeenCalledWith(expect.stringContaining("Couldn't load settings"), "error");
   });
 });

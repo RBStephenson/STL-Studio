@@ -385,15 +385,15 @@ describe("Settings – Library page size (#32)", () => {
 
   it("highlights the server value and PATCHes a new size", async () => {
     const { api } = await import("../api/client");
-    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ library_page_size: 48 }));
-    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ library_page_size: 96 }));
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ library_page_size: 50 }));
+    vi.mocked(api.settings.update).mockResolvedValue(mkSettings({ library_page_size: 100 }));
 
     render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
     await goTab(/general/i);
 
-    await userEvent.click(await screen.findByRole("button", { name: "96" }));
+    await userEvent.click(await screen.findByRole("button", { name: "100" }));
 
-    expect(api.settings.update).toHaveBeenCalledWith({ library_page_size: 96 });
+    expect(api.settings.update).toHaveBeenCalledWith({ library_page_size: 100 });
   });
 });
 

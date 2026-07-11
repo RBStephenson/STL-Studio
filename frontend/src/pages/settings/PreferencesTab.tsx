@@ -46,7 +46,7 @@ export default function PreferencesTab() {
         <div className="flex items-center gap-3 bg-panel border border-border-subtle rounded-lg px-4 py-3 self-start">
           <span className="text-sm text-text-primary-alt">Library page size</span>
           <div className="flex rounded overflow-hidden border border-border">
-            {[24, 48, 96].map((n) => (
+            {[25, 50, 100].map((n) => (
               <button
                 key={n}
                 onClick={() => setPageSize(n)}
