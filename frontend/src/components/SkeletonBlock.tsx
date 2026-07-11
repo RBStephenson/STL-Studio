@@ -5,8 +5,8 @@ import { CSSProperties, ReactNode } from "react";
 // is a relative container with one .stl-shimmer-overlay sweep (defined in
 // index.css, introduced in STUDIO-131) plus one or more SkeletonBlock bars
 // sized to the real content they stand in for.
-export function SkeletonBlock({ className = "" }: { className?: string }) {
-  return <div className={`rounded ${className}`} style={{ background: "#1a1c22" }} />;
+export function SkeletonBlock({ className = "", style }: { className?: string; style?: CSSProperties }) {
+  return <div className={`rounded ${className}`} style={{ background: "#1a1c22", ...style }} />;
 }
 
 export function SkeletonPanel({

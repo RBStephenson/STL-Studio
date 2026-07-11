@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Layers, MoveRight, X, Keyboard, Pencil, Check, Image as ImageIcon, GripVertical, ListRestart, Link as LinkIcon } from "lucide-react";
+import { ArrowLeft, Layers, MoveRight, X, Keyboard, Pencil, Check, Image as ImageIcon, GripVertical, ListRestart, Link as LinkIcon, LayoutGrid } from "lucide-react";
 import {
   DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors,
   closestCenter, DragStartEvent, DragEndEvent,
@@ -19,6 +19,8 @@ import { reorderedIds } from "../utils/reorderList";
 import { useLibraryKeyboard } from "../hooks/useLibraryKeyboard";
 import { errMsg } from "../utils/err";
 import ErrorState from "../components/ErrorState";
+import EmptyState from "../components/EmptyState";
+import { SkeletonPanel } from "../components/SkeletonBlock";
 
 // Shared write paths for every group op (#678): move resolves (or creates) the
 // target durable group and merges ids into it; remove splits ids out of the
@@ -773,25 +775,28 @@ export default function VariantGroup() {
       )}
 
       {loading ? (
-        <div className="flex justify-center py-24 text-text-secondary-alt text-sm">Loading…</div>
-      ) : loadError ? (
-        <ErrorState title="Couldn't load this variant group" message={loadError} onRetry={loadVariants} />
-      ) : variants.length === 0 ? (
-        <div
-          className="flex flex-col items-center text-center rounded-[14px] border border-dashed px-8 py-16"
-          style={{ borderColor: "#1e2027", background: "#0e0f13" }}
-        >
-          <div
-            className="flex items-center justify-center w-14 h-14 rounded-full mb-4"
-            style={{ background: "#26163a" }}
-          >
-            <Layers size={22} strokeWidth={1.6} style={{ color: "var(--color-status-fuchsia)" }} />
-          </div>
-          <p className="text-base font-bold text-text-primary-alt mb-2">No variants found</p>
-          <p className="text-[13px] leading-relaxed text-text-secondary-alt max-w-[320px]">
-            This group has no variants — they may have been moved or removed elsewhere.
-          </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonPanel
+              key={i}
+              className="aspect-square rounded-lg"
+              style={{ background: "#141519", border: "1px solid #1a1b21" }}
+            />
+          ))}
         </div>
+      ) : loadError ? (
+        <ErrorState
+          title="Couldn't load this variant group"
+          message="Something went wrong loading variants. Try again."
+          onRetry={loadVariants}
+        />
+      ) : variants.length === 0 ? (
+        <EmptyState
+          icon={LayoutGrid}
+          heading="No variants in this group."
+          body="Move models into this group from the Library to start tracking them as variants."
+          primaryAction={{ label: "Go to Library", onClick: () => navigate("/") }}
+        />
       ) : (
         <DndContext
           sensors={dndSensors}
