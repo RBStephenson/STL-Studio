@@ -245,6 +245,28 @@ class TestMissingFile:
         assert entry["eligible"] is False
 
 
+class TestLockedFlag:
+    def test_locked_model_is_ineligible_with_locked_flag(self, client, db, tmp_path):
+        """A locked model is blocked from Reorganize entirely
+        (#978) — same as a collision or unclassifiable row, but reported via
+        its own `locked` flag rather than overloading an existing one."""
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path)
+        m.locked = True
+        db.commit()
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        assert entry["locked"] is True
+        assert entry["eligible"] is False
+
+    def test_unlocked_model_is_unaffected(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path)
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        assert entry["locked"] is False
+
+
 class TestTemplateValidation:
     def test_unknown_template_field_returns_400(self, client, db, tmp_path):
         _root(db, tmp_path)

@@ -81,6 +81,7 @@ class ModelRead(ModelBase):
     nsfw: bool = False
     excluded: bool = False
     is_favorite: bool = False
+    locked: bool = False
     is_group_rep: bool = False
     variant_order: Optional[int] = None
     user_rating: Optional[int] = None
@@ -213,6 +214,10 @@ class GroupRepUpdate(BaseModel):
 
 class FavoriteUpdate(BaseModel):
     is_favorite: bool
+
+
+class LockedUpdate(BaseModel):
+    locked: bool
 
 
 class RatingUpdate(BaseModel):
@@ -877,6 +882,7 @@ class ReorganizeEntry(BaseModel):
     is_symlink: bool
     escapes_scan_root: bool
     missing_files_on_disk: bool = False
+    locked: bool = False
 
 
 class ReorganizeStats(BaseModel):

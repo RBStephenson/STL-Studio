@@ -84,4 +84,36 @@ describe("usePartEditing", () => {
     expect(toast).toHaveBeenCalled();
     expect(result.current.partTypes[1] ?? "").toBe(""); // reverted to saved (none)
   });
+
+  describe("blocked by a locked model (#978)", () => {
+    const locked = { id: 1, locked: true, stl_files: [base, sup] } as unknown as ModelDetailType;
+
+    it("savePartType makes no API call and toasts", async () => {
+      const { result } = renderHook(() => usePartEditing(locked, patchModel, null));
+      await act(async () => { await result.current.savePartType(1, "Torso") });
+      expect(updateSTLFile).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining("locked"), "error");
+    });
+
+    it("savePartName makes no API call and toasts", async () => {
+      const { result } = renderHook(() => usePartEditing(locked, patchModel, null));
+      await act(async () => { await result.current.savePartName(1, "New Name") });
+      expect(updateSTLFile).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining("locked"), "error");
+    });
+
+    it("linkSup makes no API call and toasts", async () => {
+      const { result } = renderHook(() => usePartEditing(locked, patchModel, null));
+      await act(async () => { await result.current.linkSup(1, 2) });
+      expect(updateSTLFile).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining("locked"), "error");
+    });
+
+    it("unlinkSup makes no API call and toasts", async () => {
+      const { result } = renderHook(() => usePartEditing(locked, patchModel, null));
+      await act(async () => { await result.current.unlinkSup(2) });
+      expect(updateSTLFile).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining("locked"), "error");
+    });
+  });
 });

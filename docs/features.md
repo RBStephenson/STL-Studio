@@ -9,6 +9,7 @@ A tour of every screen and what it does.
 - [3D viewer](#3d-viewer)
 - [Image picker (thumbnails)](#image-picker-thumbnails)
 - [Favorites, print queue & printed tracking](#favorites-print-queue--printed-tracking)
+- [Locked](#locked)
 - [Kit Builder](#kit-builder)
 - [Metadata editing & web enrichment](#metadata-editing--web-enrichment)
 - [Triage queue](#triage-queue)
@@ -204,6 +205,7 @@ Click a card to open the model. From here you can:
   the **×** on any tag to remove it, without opening the full edit screen. The
   tag list autocompletes from all tags already in your library.
 - Edit metadata, tags, source URL, and the NSFW flag (full form via **Edit**).
+- Toggle [Locked](#locked) from the **Lock** button next to Favorite.
 - See and label each STL file (head, arm, base, etc.).
 - **Download all** files as a zip, or open the **Kit Builder**.
 - Add the model to one or more **Collections** (see below).
@@ -212,7 +214,12 @@ Click a card to open the model. From here you can:
 - An **unorganized** icon appears next to the title if the model's current
   folder no longer matches where [Reorganize](#reorganize-library) would put
   it (e.g. after changing its creator or title) — hover it for a tooltip.
-  Nothing moves automatically; run Reorganize to actually move it.
+  Nothing moves automatically; run Reorganize to actually move it. This is
+  purely informational and unrelated to [Locked](#locked): "unorganized"
+  means *where the files currently sit doesn't match the organize template*;
+  a model can be unorganized and unlocked (movable, just not yet moved),
+  organized and locked, or any other combination — the two say nothing about
+  each other.
 
 ### File parts, sup variants & label naming
 
@@ -360,6 +367,27 @@ combination of these.
 
 You can toggle favorite/queue right from a card (hover icons) or from the
 buttons in a model's header. *(Printed* is set from the model header.)
+
+## Locked
+
+The 🔒 icon on a card's hover row (next to Favorite), and the matching
+**Lock** button on a model's detail page (next to Favorite there too), mark a
+model **Locked** — a hard lock, not just a status label. While it's on, nothing
+can change that model's STL files, categories, or part names: manual edits,
+bulk recategorize, drag-to-categorize, and AI Organize apply are all rejected
+(server-side, not just hidden in the UI), and [Reorganize](#reorganize-library)
+treats it as ineligible with its own **locked** chip, refusing to move or
+rename its files. New files dropped into its folder are still picked up by a
+scan — locking a model only protects what's already there. Toggling it off
+always succeeds, even while it's on, so locking a model by mistake is never a
+dead end.
+
+**Not the same thing as "unorganized."** That's a separate, unrelated
+indicator on the [model detail](#model-detail) page for whether a model's
+files currently sit where the organize template says they should. Locked
+means *nothing may touch this model's files at all*; unorganized means *this
+model's files aren't where Reorganize would currently put them*. A model can
+be either, both, or neither independently.
 
 ## Kit Builder
 
@@ -720,12 +748,17 @@ off to keep each segment's original casing and spacing.
 - **Preview first.** The page shows exactly where every model *would* move, one row
   each, with a move-kind chip (move / rename / case rename / in place / merge) and
   blocker chips for anything unsafe (collision, over-length or reserved name,
-  unclassifiable, symlink, multi-directory, escapes-scan-root, missing files).
-  Nothing is touched until you apply. A **missing files** chip means the app's
-  own record of that file's path doesn't resolve on disk — usually because it
-  was renamed or moved outside the app. A full [scan](scanning-and-folders.md#full-scan-vs-per-creator-rescan)
+  unclassifiable, symlink, multi-directory, escapes-scan-root, missing files,
+  locked). Nothing is touched until you apply. A **missing files** chip means the
+  app's own record of that file's path doesn't resolve on disk — usually because
+  it was renamed or moved outside the app. A full [scan](scanning-and-folders.md#full-scan-vs-per-creator-rescan)
   cleans up file records left behind by an out-of-app rename; run one before
-  trusting a persistent "missing files" chip.
+  trusting a persistent "missing files" chip. A **locked** chip means the model
+  is [Locked](#locked) — unlock it from its card before Reorganize can touch
+  it; this isn't something you resolve from the Reorganize page itself. Don't
+  confuse this with the unrelated **unorganized** indicator mentioned above —
+  a locked chip blocks Reorganize outright, while an unorganized model is
+  exactly what Reorganize exists to fix.
 - **Resolve flagged rows.** Expand an ineligible row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an
   over-long/reserved name. The preview regenerates as you type.

@@ -97,6 +97,7 @@ class Entry:
     is_symlink: bool
     escapes_scan_root: bool
     missing_files_on_disk: bool
+    locked: bool
 
 
 @dataclass
@@ -464,9 +465,14 @@ def _build_entry(
         kind = "rename"
 
     unclassifiable = bool(missing)
+    # A locked model is never eligible, regardless of what else
+    # is true about it — the lock means no process may move/rename its
+    # files, full stop (#978). Distinct from every other blocker: those are
+    # all "fix this and it becomes eligible" states; this one is "unlock the
+    # model first," so it's checked and reported separately.
     eligible = not (
         unclassifiable or over_len or reserved or is_symlink
-        or spans_multiple_dirs or escapes or missing_files_on_disk
+        or spans_multiple_dirs or escapes or missing_files_on_disk or m.locked
     )
 
     return Entry(
@@ -489,6 +495,7 @@ def _build_entry(
         is_symlink=is_symlink,
         escapes_scan_root=escapes,
         missing_files_on_disk=missing_files_on_disk,
+        locked=m.locked,
     )
 
 

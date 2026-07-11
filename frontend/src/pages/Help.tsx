@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, Lock, type LucideIcon,
 } from "lucide-react";
 
 /** A keyboard key, styled like the hints elsewhere in the app. */
@@ -202,6 +202,7 @@ const SECTIONS: Section[] = [
             screen.
           </li>
           <li>Edit metadata, tags, source URL, and the NSFW flag (full form via <strong>Edit</strong>).</li>
+          <li>Toggle <strong>Locked</strong> from the Lock button next to Favorite.</li>
           <li>
             See and <strong>label each STL file</strong> (head, arm, base, etc.) — the
             Category field suggests the standard list plus any custom category
@@ -248,6 +249,16 @@ const SECTIONS: Section[] = [
             See the model's <strong>Location</strong> on disk — copy the path, or
             (standalone only) click <strong>Open folder</strong> to jump to it in your
             file manager.
+          </li>
+          <li>
+            An <strong>unorganized</strong> icon appears next to the title if the
+            model's current folder no longer matches where{" "}
+            <strong>Reorganize</strong> would put it (e.g. after changing its
+            creator or title) — hover it for a tooltip. Nothing moves
+            automatically; run Reorganize to actually move it. This is unrelated
+            to <strong>Locked</strong> (see below): unorganized just means the
+            files aren't where the template currently says they should be, not
+            that anything is blocked from changing.
           </li>
         </ul>
       </>
@@ -315,6 +326,39 @@ const SECTIONS: Section[] = [
           </li>
         </ul>
         <p>Set both from a card's hover icons or the model header.</p>
+      </>
+    ),
+  },
+  {
+    id: "locked",
+    title: "Locked",
+    icon: Lock,
+    body: (
+      <>
+        <p>
+          The 🔒 icon on a card's hover row (next to Favorite), and the matching{" "}
+          <strong>Lock</strong> button on a model's detail page, mark a model{" "}
+          <strong>Locked</strong> — a hard lock, not just a status label. While
+          it's on, nothing can change that model's STL files, categories, or part
+          names: manual edits, bulk recategorize, drag-to-categorize, and AI
+          Organize apply are all rejected, and Reorganize treats it as ineligible
+          with its own <strong>locked</strong> chip, refusing to move or rename
+          its files.
+        </p>
+        <p>
+          New files dropped into its folder are still picked up by a scan —
+          locking a model only protects what's already there. Toggling it off
+          always succeeds, even while it's on, so locking a model by mistake
+          is never a dead end.
+        </p>
+        <p>
+          This is not the same thing as the <strong>unorganized</strong>{" "}
+          indicator on a model's detail page — that's an unrelated flag for
+          whether a model's files currently sit where the organize template
+          says they should. Locked means nothing may touch this model's files
+          at all; unorganized means its files aren't currently where
+          Reorganize would put them. A model can be either, both, or neither.
+        </p>
       </>
     ),
   },

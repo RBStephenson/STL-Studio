@@ -1,7 +1,7 @@
 import { memo, useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
-import { Package, Star, Heart, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
+import { Package, Star, Heart, AlertCircle, Check, Layers, Printer, EyeOff, RotateCcw, Sparkles, Paintbrush, MoreHorizontal, ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import { Model, PrintStatus, PRINT_STATUS_CYCLE, api } from "../api/client";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -89,6 +89,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   const isNew = isRecentlyAdded(model.created_at, settings.recent_days);
 
   const [favorite, setFavorite] = useState(model.is_favorite);
+  const [locked, setLocked] = useState(model.locked);
   const [printStatus, setPrintStatus] = useState<PrintStatus>(model.print_status ?? "none");
   const [localTags, setLocalTags] = useState<string[]>(model.tags ?? []);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -210,6 +211,21 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     } catch {
       setFavorite(!next);  // revert on failure
       toast("Couldn't update favorite — try again.", "error");
+    }
+  };
+
+  const toggleLocked = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const next = !locked;
+    setLocked(next);
+    try {
+      await api.models.setLocked(model.id, next);
+      invalidateModelViews(queryClient, { modelId: model.id, includeVariants: false });
+      onMutate?.();
+    } catch {
+      setLocked(!next);  // revert on failure
+      toast("Couldn't update lock — try again.", "error");
     }
   };
 
@@ -442,6 +458,17 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
               }`}
             >
               <Star size={13} fill={favorite ? "currentColor" : "none"} />
+            </button>
+            <button
+              onClick={toggleLocked}
+              title={locked ? "Locked — unlock to allow file/category/name changes" : "Lock: block file, category, and part-name changes"}
+              className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
+                locked
+                  ? "text-cyan-400 opacity-100"
+                  : "text-text-secondary hover:text-cyan-300 opacity-0 group-hover:opacity-100"
+              }`}
+            >
+              <Lock size={13} fill={locked ? "currentColor" : "none"} />
             </button>
             <button
               onClick={toggleExclude}
