@@ -299,6 +299,85 @@ def heuristic_pass(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# link_sups strategy: pure heuristic, no LLM call — matches a currently-
+# unlinked "sup"/"supported"/"hollowed"-named file to its likely base part by
+# name, for the reviewer to confirm before it's saved as sup_of_id.
+# ---------------------------------------------------------------------------
+
+# Deliberately broader than _SUP_PREFIX_RE/_SUP_INFIX_RE above (which only
+# recognize "sup_"/"(s)_"/"s_sup_" prefixes and "(pre)supported" as an
+# infix): this strategy's own request is "sup", "supported", or "hollowed" as
+# a standalone word anywhere in the name, matched on the word boundary so
+# "Superman" or "Supply Crate" don't false-positive on the bare "sup" form.
+_LINK_KEYWORD_RE = re.compile(r"\b(?:sup|supported|hollowed)\b", re.IGNORECASE)
+
+
+def _norm_name(name: str) -> str:
+    """Lowercase, separator-normalized comparison key for link_sups matching."""
+    s = re.sub(r"[_\-]+", " ", name)
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _display_name(f: dict[str, Any]) -> str:
+    """Prefer a file's part_name (what the review UI actually shows); fall
+    back to its filename stem when unset."""
+    return (f.get("part_name") or "").strip() or _stem(f.get("filename", ""))
+
+
+def heuristic_link_sups(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Match each currently-unlinked, sup/supported/hollowed-named file to
+    its likely base part by name.
+
+    Two deliberate restrictions, both from the feature request this
+    implements directly:
+      1. Only a file with no sup_of_id already set is considered a candidate
+         to link — an existing link (however it got there) is never
+         second-guessed or overwritten by this heuristic.
+      2. Only a file whose name contains one of the link keywords is ever
+         treated as the "sup" side of a match. A plain-named file is only
+         ever a match *target* (a base), never linked TO another file by
+         this pass — this is a rescue for the common "loose supported
+         variant, never linked" case, not a general fuzzy-matching pass
+         across the whole file list.
+
+    Matching is by name, not filename specifically: part_name is used when a
+    file has one (matching what the review UI actually shows), falling back
+    to the filename otherwise, normalized the same way on both sides so
+    "Icon_of_Flame_2_Supported.stl" and "icon-of-flame-2.stl" still line up.
+    """
+    suggestions: list[dict[str, Any]] = []
+
+    base_by_key: dict[str, dict[str, Any]] = {}
+    for f in files:
+        name = _norm_name(_display_name(f))
+        if not name or _LINK_KEYWORD_RE.search(name):
+            continue
+        base_by_key.setdefault(name, f)
+
+    for f in files:
+        if f.get("sup_of_id") is not None:
+            continue
+        name = _norm_name(_display_name(f))
+        if not name or not _LINK_KEYWORD_RE.search(name):
+            continue
+        candidate_key = _norm_name(_LINK_KEYWORD_RE.sub(" ", name))
+        if not candidate_key:
+            continue
+        base = base_by_key.get(candidate_key)
+        if base is None or base["id"] == f["id"]:
+            continue
+        suggestions.append({
+            "id": f["id"],
+            "part_type": None,
+            "part_name": None,
+            "sup_base_filename": base["filename"],
+        })
+
+    _log_step("link_sups_done", input=len(files), suggestions=len(suggestions))
+    return suggestions
+
+
+# ---------------------------------------------------------------------------
 # LLM refinement (optional)
 # ---------------------------------------------------------------------------
 
@@ -1029,7 +1108,18 @@ def run(
     because reasoning adds latency and risks the exact empty-content failure
     the suppression exists to avoid, for a task (filename pattern-matching)
     that gains little from it.
+
+    ``strategy="link_sups"`` (#967): matches a currently-unlinked
+    sup/supported/hollowed-named file to its likely base part by name — see
+    heuristic_link_sups. Pure heuristic, no LLM call and no API config
+    needed at all; this returns immediately, before ``base_url``/``model``
+    are even inspected.
     """
+    if strategy == "link_sups":
+        suggestions = heuristic_link_sups(files)
+        _log_step("start", file_count=len(files), has_llm=False, api_type=api_type, strategy=strategy)
+        return OrganizeResult(suggestions=suggestions, llm=LlmOutcome(status="ok", suggestions=suggestions))
+
     # An Anthropic config carries no URL; an OpenAI-compatible one needs one.
     llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
     _log_step("start", file_count=len(files), has_llm=llm_ready, api_type=api_type, strategy=strategy)

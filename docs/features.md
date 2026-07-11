@@ -261,26 +261,36 @@ both from disk and from the listing (with a confirmation first); if the file was
 already gone from disk (e.g. deleted outside the app), this still clears the
 stale listing.
 
-**AI Organize** (button on the model detail page, requires an AI API assigned
-under [Settings → AI & Integrations](#ai--integrations)) suggests a category
-and cleaned-up name for every STL file. Clicking it first asks you to pick a
-strategy:
+**AI Organize** (button on the model detail page) suggests a category and
+cleaned-up name for every STL file, or links supported variants to their base
+part. Clicking it first asks you to pick a strategy:
 
-- **Parts-based** — the standard approach. Fast keyword-based naming rules run
-  first, but the AI always runs too — even on files the naming rules already
-  resolved — since it can still catch a wrong guess or a name the rules got
-  half right. It only ever picks from the app's standard category list, so its
-  suggestions land in the same categories the Category combobox offers.
-- **Unit-based** — groups files by the in-game unit or character they belong
-  to instead of by physical part (e.g. every file for "Royal Guard 1" — head,
-  helmet, weapon — gets that as its category, not "Head"/"Weapon"). There's no
-  keyword pre-pass for this — it goes straight to the AI. Unit names are
-  derived per model, so they aren't limited to the standard category list;
-  each one is title-cased for consistency across a unit's files. Large kits
-  are sent to the AI in small batches (5 files at a time) rather than one
-  capped call, so every file gets a suggestion, not just the first several —
-  later batches are told which unit names earlier ones already settled on, so
-  the same unit isn't renamed partway through a big kit.
+- **Parts-based** — the standard approach. Requires an AI API assigned under
+  [Settings → AI & Integrations](#ai--integrations). Fast keyword-based naming
+  rules run first, but the AI always runs too — even on files the naming rules
+  already resolved — since it can still catch a wrong guess or a name the
+  rules got half right. It only ever picks from the app's standard category
+  list, so its suggestions land in the same categories the Category combobox
+  offers.
+- **Unit-based** — requires an AI API. Groups files by the in-game unit or
+  character they belong to instead of by physical part (e.g. every file for
+  "Royal Guard 1" — head, helmet, weapon — gets that as its category, not
+  "Head"/"Weapon"). There's no keyword pre-pass for this — it goes straight to
+  the AI. Unit names are derived per model, so they aren't limited to the
+  standard category list; each one is title-cased for consistency across a
+  unit's files. Large kits are sent to the AI in small batches (5 files at a
+  time) rather than one capped call, so every file gets a suggestion, not just
+  the first several — later batches are told which unit names earlier ones
+  already settled on, so the same unit isn't renamed partway through a big kit.
+- **Link supported parts** — no AI API needed; this is pure name matching, not
+  an AI call. Finds every file whose name (part name if set, else filename)
+  contains "Sup", "Supported", or "Hollowed" and isn't already linked to a
+  base, and matches it to a same-named plain file — e.g. "Icon of Flame 2
+  Supported" links to "Icon of Flame 2". A file without one of those keywords
+  is only ever a possible match target, never linked to another file itself,
+  so it's safe to run on a whole kit without relabeling anything that's
+  already named correctly. An already-linked file is never touched or
+  re-matched.
 
 On a local model via an OpenAI-compatible endpoint (Ollama, etc.), requests use
 schema-constrained output and an explicit instruction against extended
