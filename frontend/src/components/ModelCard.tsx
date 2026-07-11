@@ -461,7 +461,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             </button>
             <button
               onClick={toggleLocked}
-              title={locked ? "Locked — unlock to allow file/category/name changes" : "Lock: block file, category, and part-name changes"}
+              title={locked ? "Organized — unlock to allow file/category/name changes" : "Mark Organized: block file, category, and part-name changes"}
               className={`p-1 rounded bg-black/60 hover:bg-black/80 transition-all ${
                 locked
                   ? "text-cyan-400 opacity-100"

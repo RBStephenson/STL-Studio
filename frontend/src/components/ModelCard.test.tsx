@@ -377,26 +377,26 @@ describe("GalleryRotator label-timer cleanup on unmount (STUDIO-95)", () => {
   });
 });
 
-describe("ModelCard organized/locked toggle (#978)", () => {
+describe("ModelCard Organized (locked field) toggle (#978)", () => {
   it("shows the Lock button with the right title for an unlocked model", () => {
     renderCard({ locked: false });
-    expect(screen.getByTitle("Lock: block file, category, and part-name changes")).toBeInTheDocument();
+    expect(screen.getByTitle("Mark Organized: block file, category, and part-name changes")).toBeInTheDocument();
   });
 
   it("shows the Lock button with the unlock title for a locked model", () => {
     renderCard({ locked: true });
-    expect(screen.getByTitle("Locked — unlock to allow file/category/name changes")).toBeInTheDocument();
+    expect(screen.getByTitle("Organized — unlock to allow file/category/name changes")).toBeInTheDocument();
   });
 
   it("calls setLocked(true) when toggled on", async () => {
     renderCard({ locked: false });
-    fireEvent.click(screen.getByTitle("Lock: block file, category, and part-name changes"));
+    fireEvent.click(screen.getByTitle("Mark Organized: block file, category, and part-name changes"));
     await waitFor(() => expect(api.models.setLocked).toHaveBeenCalledWith(7, true));
   });
 
   it("calls setLocked(false) when toggled off", async () => {
     renderCard({ locked: true });
-    fireEvent.click(screen.getByTitle("Locked — unlock to allow file/category/name changes"));
+    fireEvent.click(screen.getByTitle("Organized — unlock to allow file/category/name changes"));
     await waitFor(() => expect(api.models.setLocked).toHaveBeenCalledWith(7, false));
   });
 });

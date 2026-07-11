@@ -1,6 +1,7 @@
-"""Tests for the "organized" lock (#978): toggling it, and that it actually
-blocks every write path it's supposed to (STL file edits, AI Organize apply,
-Reorganize eligibility) — not just a status label.
+"""Tests for the `locked` field behind the "Organized" UI toggle (#978):
+toggling it, and that it actually blocks every write path it's supposed to
+(STL file edits, AI Organize apply, Reorganize eligibility) — not just a
+status label.
 """
 from tests.conftest import make_creator, make_model, make_stl_file
 

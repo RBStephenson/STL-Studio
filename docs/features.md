@@ -369,10 +369,11 @@ The 🔒 icon on a card's hover row (next to Favorite) marks a model
 can change that model's STL files, categories, or part names: manual edits,
 bulk recategorize, drag-to-categorize, and AI Organize apply are all rejected
 (server-side, not just hidden in the UI), and [Reorganize](#reorganize-library)
-treats it as ineligible with its own **locked** chip, refusing to move or
+treats it as ineligible with its own **Organized** chip, refusing to move or
 rename its files. New files dropped into its folder are still picked up by a
-scan — the lock only protects what's already there. Toggling it off always
-succeeds, even while locked, so a lock you set by mistake is never a dead end.
+scan — marking a model Organized only protects what's already there. Toggling
+it off always succeeds, even while it's on, so marking a model Organized by
+mistake is never a dead end.
 
 ## Kit Builder
 
@@ -734,12 +735,12 @@ off to keep each segment's original casing and spacing.
   each, with a move-kind chip (move / rename / case rename / in place / merge) and
   blocker chips for anything unsafe (collision, over-length or reserved name,
   unclassifiable, symlink, multi-directory, escapes-scan-root, missing files,
-  locked). Nothing is touched until you apply. A **missing files** chip means the
+  Organized). Nothing is touched until you apply. A **missing files** chip means the
   app's own record of that file's path doesn't resolve on disk — usually because
   it was renamed or moved outside the app. A full [scan](scanning-and-folders.md#full-scan-vs-per-creator-rescan)
   cleans up file records left behind by an out-of-app rename; run one before
-  trusting a persistent "missing files" chip. A **locked** chip means the model
-  is [Organized](#organized-lock) — unlock it from its card before Reorganize
+  trusting a persistent "missing files" chip. An **Organized** chip means the model
+  is marked [Organized](#organized-lock) — unlock it from its card before Reorganize
   can touch it; this isn't something you resolve from the Reorganize page itself.
 - **Resolve flagged rows.** Expand an ineligible row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an

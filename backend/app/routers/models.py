@@ -498,7 +498,7 @@ def update_stl_file(file_id: int, body: STLFileUpdate, db: Session = Depends(get
     if not f:
         raise HTTPException(status_code=404, detail="STL file not found")
     if f.model.locked:
-        raise HTTPException(status_code=409, detail="This model is locked (organized) — unlock it to edit its files")
+        raise HTTPException(status_code=409, detail="This model is marked Organized — unlock it to edit its files")
     data = body.model_dump(exclude_unset=True)
     if "part_type" in data:
         pt = data["part_type"]
@@ -757,7 +757,7 @@ def ai_organize_apply(model_id: int, body: AiOrganizeApplyRequest, db: Session =
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     if model.locked:
-        raise HTTPException(status_code=409, detail="This model is locked (organized) — unlock it to apply changes")
+        raise HTTPException(status_code=409, detail="This model is marked Organized — unlock it to apply changes")
 
     by_id = {f.id: f for f in model.stl_files}
 

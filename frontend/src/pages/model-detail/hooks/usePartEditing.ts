@@ -81,7 +81,7 @@ export function usePartEditing(
   // gives a specific reason instead of a generic "try again" toast.
   const blockedByLock = (): boolean => {
     if (!model?.locked) return false;
-    toast("This model is locked — unlock it to make changes.", "error");
+    toast("This model is marked Organized — unlock it to make changes.", "error");
     return true;
   };
 
