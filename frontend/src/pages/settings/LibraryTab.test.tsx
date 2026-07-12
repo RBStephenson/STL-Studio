@@ -71,6 +71,26 @@ describe("LibraryTab filename slugify setting", () => {
   });
 });
 
+describe("LibraryTab AI suggestions setting", () => {
+  beforeEach(() => {
+    settings = mkSettings();
+    vi.clearAllMocks();
+  });
+
+  it("toggling it on persists reorganize_ai_suggestions_enabled=true", async () => {
+    settings = mkSettings({ reorganize_ai_suggestions_enabled: false });
+    renderTab();
+    await userEvent.click(screen.getByRole("checkbox", { name: /ai-assisted field suggestions/i }));
+    expect(updateMock).toHaveBeenCalledWith({ reorganize_ai_suggestions_enabled: true });
+  });
+
+  it("reflects an already-on setting as checked", () => {
+    settings = mkSettings({ reorganize_ai_suggestions_enabled: true });
+    renderTab();
+    expect(screen.getByRole("checkbox", { name: /ai-assisted field suggestions/i })).toBeChecked();
+  });
+});
+
 describe("LibraryTab scan-running dim state", () => {
   beforeEach(() => {
     settings = mkSettings();

@@ -544,6 +544,127 @@ _UNIT_JSON_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+# Reorganize-field suggestion (STUDIO-186): infers creator/character/title for
+# a model whose folder name and filenames are too messy for the deterministic
+# reorganize preview (services/reorganize.py) to classify on its own — e.g. a
+# pack dumped flat as "KS_March_2024_v3". Advisory only: the caller only ever
+# feeds these into the reorganize preview's existing per-model override dict
+# (build_manifest's ``overrides`` param), which the user reviews before it
+# affects anything on disk. No new apply/undo code path.
+_REORG_SYSTEM_PROMPT = ("""You are an assistant that infers organizing metadata for 3D-printing STL model folders in a miniature figure library.
+
+Given a JSON list of models (each {"id": <int>, "folder_name": <str>, "filenames": [<str>, ...]}), infer for each: the creator (the studio/artist who made it), the character (the specific subject/character name), and a clean display title.
+
+Rules:
+1. creator: the creator/studio name if recognizable from the folder name or filenames (e.g. a Kickstarter/patreon studio tag). Null if truly unknowable — never guess a generic word like "Models" or a date as a creator.
+2. character: the specific character/subject name (e.g. "Goblin Warlord"), not a generic category. Null if truly unknowable.
+3. title: a clean, human-readable display name for the model, derived from the folder name and filenames with junk (version tags, dates, batch codes) stripped. Null only if nothing usable remains.
+4. Return ONLY the JSON object — no markdown, no explanation.
+
+Format: {{"models": [{{"id": <int>, "creator": <str|null>, "character": <str|null>, "title": <str|null>}}, ...]}}"""
+    + _NO_REASONING_SUFFIX)
+
+_REORG_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "models": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "creator": {"type": ["string", "null"]},
+                    "character": {"type": ["string", "null"]},
+                    "title": {"type": ["string", "null"]},
+                },
+                "required": ["id", "creator", "character", "title"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["models"],
+    "additionalProperties": False,
+}
+
+
+def _parse_reorg_suggestions(raw_text: str, source: str) -> LlmOutcome:
+    """Parse the reorganize-suggestion reply's ``{"models": [...]}`` shape."""
+    _log.debug("ai_organize llm_raw_response %s", raw_text[:2000])
+    data, err = _load_llm_json(raw_text, source)
+    if err:
+        return err
+
+    suggestions = data.get("models", []) if isinstance(data, dict) else []
+    if not isinstance(suggestions, list):
+        _log.warning(
+            "ai_organize llm_error malformed 'models' field from %s — parsed JSON was: %s",
+            source, repr(data)[:_RAW_RESPONSE_LOG_CAP],
+        )
+        return LlmOutcome(status="error",
+                          detail=f"Malformed 'models' field in response from {source}")
+
+    _log_step("llm_done", suggestions=len(suggestions))
+    return LlmOutcome(status="ok", suggestions=suggestions)
+
+
+_REORG_LLM_FILE_CAP = 10  # models per request — small, plain-text prompt (no schema soup)
+
+
+def suggest_reorganize_fields(
+    entries: list[dict[str, Any]],
+    base_url: str,
+    model: str,
+    api_key: str = "",
+    timeout: float = _DEFAULT_TIMEOUT,
+    api_type: str = "openai",
+    effort: str | None = None,
+    batch_size: int | None = None,
+    reasoning_enabled: bool = False,
+) -> OrganizeResult:
+    """Suggest creator/character/title for reorganize-preview entries the
+    deterministic pass couldn't classify (unclassifiable or in collision).
+
+    ``entries``: ``[{"id": <model_id>, "folder_name": <str>, "filenames": [<str>, ...]}, ...]``.
+
+    No heuristic stage — this is pure LLM inference over free-text names, unlike
+    the "parts"/"unit" strategies which have a keyword-driven fallback. Batched
+    like the "unit" strategy (no heuristic to catch what a single capped call
+    would silently drop): every entry gets a suggestion or the whole run is
+    reported as "error", never a partial silent mix (#821's success-via-API-
+    or-nothing contract, same as the other strategies).
+    """
+    llm_ready = bool(model) if api_type == "anthropic" else bool(base_url and model)
+    _log_step("start", file_count=len(entries), has_llm=llm_ready, api_type=api_type, strategy="reorganize")
+    if not llm_ready:
+        return OrganizeResult(suggestions=[], llm=LlmOutcome(status="disabled"))
+    if not entries:
+        return OrganizeResult(suggestions=[], llm=LlmOutcome(status="skipped"))
+
+    def _call_llm(chunk: list[dict[str, Any]]) -> LlmOutcome:
+        if api_type == "anthropic":
+            return _llm_refine_anthropic(
+                chunk, model, api_key, timeout, effort,
+                system_prompt=_REORG_SYSTEM_PROMPT, parser=_parse_reorg_suggestions,
+            )
+        return _llm_refine_openai(
+            chunk, base_url, model, api_key, timeout=timeout,
+            system_prompt=_REORG_SYSTEM_PROMPT, parser=_parse_reorg_suggestions,
+            response_schema=_REORG_JSON_SCHEMA, disable_reasoning=not reasoning_enabled,
+        )
+
+    size = batch_size or _REORG_LLM_FILE_CAP
+    all_suggestions: list[dict[str, Any]] = []
+    for start in range(0, len(entries), size):
+        chunk = entries[start:start + size]
+        _log_step("llm_batch", sending=len(chunk), of=len(entries), batch=start // size + 1)
+        outcome = _call_llm(chunk)
+        if outcome.status != "ok":
+            return OrganizeResult(suggestions=[], llm=outcome)
+        all_suggestions.extend(outcome.suggestions)
+
+    _log_step("done", total_suggestions=len(all_suggestions), llm_status="ok")
+    return OrganizeResult(suggestions=all_suggestions, llm=LlmOutcome(status="ok", suggestions=all_suggestions))
+
 
 def _to_pascal_case(s: str) -> str:
     """Title-case each whitespace/underscore/hyphen-separated word.

@@ -569,6 +569,13 @@ class AppSettingsRead(BaseModel):
     # Default off; toggled from the Library settings tab. Retires the old
     # deployment-level REORGANIZE_WRITE_ENABLED env var.
     reorganize_enabled: bool = False
+    # AI-assisted suggestions (STUDIO-186) for reorganize preview entries the
+    # deterministic pass can't classify (unclassifiable/collision): infers
+    # creator/character/title from folder name + filenames via the same
+    # AiApiConfig as ai_organize_api. Advisory only — suggestions only prefill
+    # the existing per-model override fields; the user must confirm before
+    # they affect the manifest. Default off; toggled from the Library tab.
+    reorganize_ai_suggestions_enabled: bool = False
     # Collections page: give every card the same box size (the one cover art
     # already uses) instead of a compact box for collections with no cover.
     collections_uniform_size: bool = True
@@ -611,6 +618,7 @@ class AppSettingsUpdate(BaseModel):
     reorganize_slugify: Optional[bool] = None
     reorganize_slugify_filenames: Optional[bool] = None
     reorganize_enabled: Optional[bool] = None
+    reorganize_ai_suggestions_enabled: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
@@ -957,3 +965,27 @@ class ReorganizeUndoResponse(BaseModel):
     manifest_id: str
     reversed_files: int
     skipped: list[ReorganizeUndoSkip]
+
+
+# --- Library reorganize, AI-assisted field suggestions (STUDIO-186) --------
+
+class ReorganizeAiSuggestRequest(BaseModel):
+    manifest_id: str
+    model_ids: list[int]               # restrict to these manifest entries
+
+    model_config = {"extra": "forbid"}
+
+
+class ReorganizeAiSuggestion(BaseModel):
+    """One model's inferred fields — a suggestion only. The caller must submit
+    it via ReorganizePreviewRequest.overrides for it to affect anything."""
+    model_id: int
+    creator: Optional[str] = None
+    character: Optional[str] = None
+    title: Optional[str] = None
+
+
+class ReorganizeAiSuggestResponse(BaseModel):
+    suggestions: list[ReorganizeAiSuggestion]
+    llm_status: str                    # ok | disabled | skipped | error
+    llm_detail: Optional[str] = None

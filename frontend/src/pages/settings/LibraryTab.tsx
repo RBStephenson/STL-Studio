@@ -461,6 +461,24 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
               </p>
             </div>
           </label>
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.reorganize_ai_suggestions_enabled}
+              onChange={() => update({ reorganize_ai_suggestions_enabled: !settings.reorganize_ai_suggestions_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+              className="mt-0.5 accent-indigo-500"
+            />
+            <div>
+              <p className="text-sm text-text-primary-alt2">AI-assisted field suggestions</p>
+              <p className="text-xs text-text-secondary-alt mt-0.5">
+                Adds a "Suggest with AI" action on unclassifiable/collision rows in the
+                Reorganize Library preview — infers creator/character/title from the folder
+                name and file names using the AI Organize endpoint (Settings → AI &amp;
+                Integrations). Suggestions only prefill the resolution form; nothing changes
+                until you confirm.
+              </p>
+            </div>
+          </label>
         </div>
       </section>
 

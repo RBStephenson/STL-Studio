@@ -18,10 +18,16 @@ vi.mock("../api/client", () => {
         previewWithOverrides: vi.fn(),
         apply: vi.fn(),
         undo: vi.fn(),
+        aiSuggest: vi.fn(),
       },
     },
   };
 });
+
+let aiSuggestionsEnabled = false;
+vi.mock("../context/AppSettingsContext", () => ({
+  useAppSettings: () => ({ settings: { reorganize_ai_suggestions_enabled: aiSuggestionsEnabled } }),
+}));
 
 import { api } from "../api/client";
 
@@ -30,6 +36,7 @@ const reorg = api.reorganize as unknown as {
   previewWithOverrides: ReturnType<typeof vi.fn>;
   apply: ReturnType<typeof vi.fn>;
   undo: ReturnType<typeof vi.fn>;
+  aiSuggest: ReturnType<typeof vi.fn>;
 };
 
 function entry(over: Record<string, unknown>) {
@@ -68,6 +75,7 @@ function previewFixture() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  aiSuggestionsEnabled = false;
   reorg.preview.mockResolvedValue(previewFixture());
 });
 
@@ -107,6 +115,50 @@ describe("ReorganizePage", () => {
     expect(await screen.findByLabelText("scale for Mystery")).toBeInTheDocument();
     // The eligible entry exposes a selection checkbox; the ineligible one doesn't.
     expect(screen.queryByLabelText("Select Mystery")).not.toBeInTheDocument();
+  });
+
+  it("hides Suggest with AI when the flag is off", async () => {
+    aiSuggestionsEnabled = false;
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Mystery");
+    fireEvent.click(screen.getByText("Mystery"));
+    await screen.findByLabelText("character for Mystery");
+    expect(screen.queryByRole("button", { name: /suggest with ai/i })).not.toBeInTheDocument();
+  });
+
+  it("prefills override fields from an AI suggestion", async () => {
+    aiSuggestionsEnabled = true;
+    reorg.aiSuggest.mockResolvedValue({
+      llm_status: "ok",
+      llm_detail: null,
+      suggestions: [{ model_id: 2, creator: "Some Studio", character: "Mystery Head", title: "Mystery Head" }],
+    });
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Mystery");
+    fireEvent.click(screen.getByText("Mystery"));
+    await screen.findByLabelText("character for Mystery");
+
+    fireEvent.click(screen.getByRole("button", { name: /suggest with ai/i }));
+
+    await waitFor(() => expect(reorg.aiSuggest).toHaveBeenCalledWith("deadbeef", [2]));
+    expect(await screen.findByLabelText("character for Mystery")).toHaveValue("Mystery Head");
+    expect(screen.getByLabelText("creator for Mystery")).toHaveValue("Some Studio");
+  });
+
+  it("shows an error when the AI suggestion call fails", async () => {
+    aiSuggestionsEnabled = true;
+    reorg.aiSuggest.mockResolvedValue({ llm_status: "error", llm_detail: "Timed out", suggestions: [] });
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Mystery");
+    fireEvent.click(screen.getByText("Mystery"));
+    await screen.findByLabelText("character for Mystery");
+
+    fireEvent.click(screen.getByRole("button", { name: /suggest with ai/i }));
+
+    expect(await screen.findByText("Timed out")).toBeInTheDocument();
   });
 
   it("starts every row collapsed on first load (STUDIO-183)", async () => {
