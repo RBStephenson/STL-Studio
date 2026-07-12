@@ -7,7 +7,7 @@ import { mkSettings } from "../../test/settings";
 import { AppSettings } from "../../api/client";
 
 let settings: AppSettings = mkSettings();
-const updateMock = vi.fn();
+const updateMock = vi.fn().mockResolvedValue(undefined);
 vi.mock("../../context/AppSettingsContext", () => ({
   useAppSettings: () => ({ settings, update: updateMock }),
 }));

@@ -91,7 +91,7 @@ export default function PreferencesTab() {
             <input
               type="checkbox"
               checked={settings.gallery_enabled}
-              onChange={() => update({ gallery_enabled: !settings.gallery_enabled })}
+              onChange={() => update({ gallery_enabled: !settings.gallery_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
               className="mt-0.5 accent-indigo-500"
             />
             <div>
@@ -108,7 +108,7 @@ export default function PreferencesTab() {
               type="checkbox"
               checked={settings.gallery_auto_rotate}
               disabled={!settings.gallery_enabled}
-              onChange={() => update({ gallery_auto_rotate: !settings.gallery_auto_rotate })}
+              onChange={() => update({ gallery_auto_rotate: !settings.gallery_auto_rotate }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
               className="mt-0.5 accent-indigo-500 disabled:opacity-40"
             />
             <div>
@@ -130,7 +130,7 @@ export default function PreferencesTab() {
                 <button
                   key={n}
                   disabled={!settings.gallery_enabled || !settings.gallery_auto_rotate}
-                  onClick={() => update({ gallery_rotation_seconds: n })}
+                  onClick={() => update({ gallery_rotation_seconds: n }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
                   className={`px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed ${
                     settings.gallery_rotation_seconds === n
                       ? "bg-accent-end text-white"
@@ -154,7 +154,7 @@ export default function PreferencesTab() {
           <input
             type="checkbox"
             checked={settings.collections_uniform_size}
-            onChange={() => update({ collections_uniform_size: !settings.collections_uniform_size })}
+            onChange={() => update({ collections_uniform_size: !settings.collections_uniform_size }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
             className="mt-0.5 accent-indigo-500"
           />
           <div>
@@ -177,7 +177,7 @@ export default function PreferencesTab() {
           <input
             type="checkbox"
             checked={settings.part_categories_enabled}
-            onChange={() => update({ part_categories_enabled: !settings.part_categories_enabled })}
+            onChange={() => update({ part_categories_enabled: !settings.part_categories_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
             className="mt-0.5 accent-indigo-500"
           />
           <div>
@@ -200,7 +200,7 @@ export default function PreferencesTab() {
           <input
             type="checkbox"
             checked={settings.horizontal_parts_layout}
-            onChange={() => update({ horizontal_parts_layout: !settings.horizontal_parts_layout })}
+            onChange={() => update({ horizontal_parts_layout: !settings.horizontal_parts_layout }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
             className="mt-0.5 accent-indigo-500"
           />
           <div>

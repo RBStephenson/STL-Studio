@@ -98,7 +98,20 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   }, [toast]);
 
   const update = async (patch: Partial<AppSettings>) => {
-    setSettings(await api.settings.update(patch));
+    // Optimistic: apply the patch to local state immediately so toggles
+    // reflect on click, not after a round-trip — a settings write can share
+    // the SQLite write lock with a long-running scan/reorganize job and
+    // block for several seconds (STUDIO-180). Reconciled with the server's
+    // merged response once it lands; rolled back on failure and rethrown so
+    // callers keep surfacing their own specific error message.
+    const previous = settings;
+    setSettings((s) => ({ ...s, ...patch }));
+    try {
+      setSettings(await api.settings.update(patch));
+    } catch (e) {
+      setSettings(previous);
+      throw e;
+    }
   };
 
   const upsertPreset = async (preset: FilterPreset) => {
