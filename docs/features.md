@@ -763,7 +763,13 @@ off to keep each segment's original casing and spacing.
   can't be reorganized.
 - **Resolve flagged rows.** Expand an ineligible row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an
-  over-long/reserved name. The preview regenerates as you type.
+  over-long/reserved name. The preview regenerates as you type. When the
+  **AI-assisted field suggestions** toggle is on (**Settings → Library →
+  Reorganize**, off by default), unclassifiable and collision rows also get a
+  **Suggest with AI** action that infers creator/character/title from the
+  folder name and file names via the AI Organize endpoint (**Settings → AI &
+  Integrations**). A suggestion only prefills the form fields above — nothing
+  changes until you review and confirm it, same as typing the values yourself.
 - **Apply.** Tick the eligible rows — or use **Select all eligible** to select
   every resolvable row in one click — and **Apply**. The app verifies each file
   hasn't changed since the preview (aborting the whole batch on any drift), moves

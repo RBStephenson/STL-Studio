@@ -296,6 +296,37 @@ export default function ReorganizePage() {
       return next;
     });
 
+  // AI-assisted field suggestions (STUDIO-186) — advisory only. A suggestion
+  // only prefills the override fields above; it never applies on its own.
+  const [aiSuggesting, setAiSuggesting] = useState<Set<number>>(new Set());
+  const [aiSuggestErr, setAiSuggestErr] = useState<Record<number, string>>({});
+  const suggestWithAi = async (id: number) => {
+    if (!preview) return;
+    setAiSuggesting((prev) => new Set(prev).add(id));
+    setAiSuggestErr((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    try {
+      const res = await api.reorganize.aiSuggest(preview.manifest_id, [id]);
+      if (res.llm_status !== "ok") {
+        setAiSuggestErr((prev) => ({ ...prev, [id]: res.llm_detail || "AI suggestion unavailable" }));
+        return;
+      }
+      const sug = res.suggestions.find((s) => s.model_id === id);
+      if (!sug) {
+        setAiSuggestErr((prev) => ({ ...prev, [id]: "No suggestion returned for this row" }));
+        return;
+      }
+      const patch: Partial<ReorganizeOverride> = {};
+      if (sug.creator) patch.creator = sug.creator;
+      if (sug.character) patch.character = sug.character;
+      if (sug.title) patch.title = sug.title;
+      setOverride(id, patch);
+    } catch (e) {
+      setAiSuggestErr((prev) => ({ ...prev, [id]: e instanceof ApiError ? e.message : "AI suggestion failed" }));
+    } finally {
+      setAiSuggesting((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    }
+  };
+
   const runApply = async () => {
     if (!preview || selected.size === 0) return;
     setBusy(true); setApplyMsg(null); setApplyErr(null);
@@ -571,7 +602,22 @@ export default function ReorganizePage() {
                       )}
                       {!e.eligible && isResolvable(e) && (
                         <div className="pt-2 border-t border-border-subtle/60">
-                          <div className="text-xs text-text-secondary mb-1">Resolve</div>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="text-xs text-text-secondary">Resolve</div>
+                            {settings.reorganize_ai_suggestions_enabled && (e.unclassifiable || e.collision) && (
+                              <button
+                                type="button"
+                                onClick={() => suggestWithAi(e.model_id)}
+                                disabled={aiSuggesting.has(e.model_id)}
+                                className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {aiSuggesting.has(e.model_id) ? "Suggesting…" : "Suggest with AI"}
+                              </button>
+                            )}
+                          </div>
+                          {aiSuggestErr[e.model_id] && (
+                            <div className="text-xs text-rose-400 mb-1">{aiSuggestErr[e.model_id]}</div>
+                          )}
                           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                             {(["creator", "character", "scale", "title", "suffix"] as const).map((field) => (
                               <input

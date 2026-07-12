@@ -1,5 +1,6 @@
 import { request } from "./base";
 import type {
+  ReorganizeAiSuggestResult,
   ReorganizeApplyResult,
   ReorganizeOverride,
   ReorganizePreview,
@@ -35,5 +36,11 @@ export const reorganizeApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ manifest_id }),
+    }),
+  aiSuggest: (manifest_id: string, model_ids: number[]) =>
+    request<ReorganizeAiSuggestResult>("/reorganize/ai-suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ manifest_id, model_ids }),
     }),
 };

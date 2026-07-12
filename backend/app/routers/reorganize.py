@@ -6,6 +6,7 @@ metadata, persists it as an identified artifact, and returns it. No files are
 modified under any code path here; the persisted manifest exists so Phase 2
 (#324) can execute the *approved* plan and verify non-drift.
 """
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -15,6 +16,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import AppSetting, ReorganizeManifest
 from app.schemas import (
+    ReorganizeAiSuggestRequest,
+    ReorganizeAiSuggestResponse,
+    ReorganizeAiSuggestion,
     ReorganizeApplyRequest,
     ReorganizeApplyResponse,
     ReorganizeEntry,
@@ -26,7 +30,7 @@ from app.schemas import (
     ReorganizeUndoResponse,
     ReorganizeUndoSkip,
 )
-from app.services import reorganize, reorganize_apply, write_lock
+from app.services import ai_organize, reorganize, reorganize_apply, write_lock
 from app.services.reorganize_apply import ApplyError
 from app.services.reorganize_template import ReorganizeTemplateError
 
@@ -228,3 +232,87 @@ def undo(body: ReorganizeUndoRequest, db: Session = Depends(get_db)) -> Reorgani
         reversed_files=result.reversed_files,
         skipped=[ReorganizeUndoSkip(**s) for s in result.skipped],
     )
+
+
+_AI_SUGGEST_MODEL_CAP = 40  # per-request cap — matches the AI batching in ai_organize
+
+
+@router.post("/ai-suggest", response_model=ReorganizeAiSuggestResponse)
+def ai_suggest(body: ReorganizeAiSuggestRequest, db: Session = Depends(get_db)) -> ReorganizeAiSuggestResponse:
+    """Suggest creator/character/title for entries the deterministic preview
+    couldn't classify (unclassifiable or in collision), via the AI organizer's
+    configured endpoint (STUDIO-186).
+
+    Advisory only — returns suggestions, never writes anything. The caller
+    resubmits accepted values through POST /reorganize/preview's ``overrides``
+    (the existing Phase 2c per-model resolution path) for them to affect the
+    manifest; this endpoint has no side effects of its own.
+
+    Gated by the ``reorganize_ai_suggestions_enabled`` flag AND requires an AI
+    organizer endpoint configured (same ``ai_organize_api``/``ai_organize_enabled``
+    settings used by the model-level AI Organize feature) — no separate API
+    config for this.
+    """
+    flag_row = db.get(AppSetting, "reorganize_ai_suggestions_enabled")
+    if not flag_row or not bool(flag_row.value):
+        raise HTTPException(status_code=400, detail="Reorganize AI suggestions are not enabled")
+
+    manifest_row = db.get(ReorganizeManifest, body.manifest_id)
+    if not manifest_row:
+        raise HTTPException(status_code=404, detail="Manifest not found")
+
+    wanted = set(body.model_ids)
+    if len(wanted) > _AI_SUGGEST_MODEL_CAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many entries requested ({len(wanted)}) — max {_AI_SUGGEST_MODEL_CAP} per call",
+        )
+
+    entries_by_id = {e["model_id"]: e for e in manifest_row.payload.get("entries", [])}
+    candidates: list[dict] = []
+    for mid in body.model_ids:
+        entry = entries_by_id.get(mid)
+        if not entry or not (entry.get("unclassifiable") or entry.get("collision")):
+            continue
+        filenames = [
+            os.path.basename(f["current_path"])
+            for f in entry.get("files", [])
+            if f.get("kind", "stl") == "stl" and f.get("current_path")
+        ]
+        candidates.append({
+            "id": mid,
+            "folder_name": entry.get("model_name") or "",
+            "filenames": filenames,
+        })
+
+    if not candidates:
+        return ReorganizeAiSuggestResponse(suggestions=[], llm_status="skipped")
+
+    from app.routers.models import _load_organize_config  # local import: avoids a router->router import cycle at module load
+
+    try:
+        org_cfg = _load_organize_config(db)
+    except HTTPException as e:
+        return ReorganizeAiSuggestResponse(suggestions=[], llm_status="disabled", llm_detail=str(e.detail))
+
+    try:
+        result = ai_organize.suggest_reorganize_fields(
+            candidates, org_cfg.url, org_cfg.model, org_cfg.api_key,
+            timeout=org_cfg.timeout, api_type=org_cfg.api_type, effort=org_cfg.effort,
+            batch_size=org_cfg.batch_size, reasoning_enabled=org_cfg.reasoning_enabled,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    if result.llm.status != "ok":
+        return ReorganizeAiSuggestResponse(suggestions=[], llm_status=result.llm.status, llm_detail=result.llm.detail)
+
+    suggestions = [
+        ReorganizeAiSuggestion(
+            model_id=s["id"], creator=s.get("creator"),
+            character=s.get("character"), title=s.get("title"),
+        )
+        for s in result.suggestions
+        if isinstance(s.get("id"), int)
+    ]
+    return ReorganizeAiSuggestResponse(suggestions=suggestions, llm_status="ok")
