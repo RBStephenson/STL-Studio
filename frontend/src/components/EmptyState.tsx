@@ -34,7 +34,7 @@ export default function EmptyState({
   const PrimaryIcon = primaryAction?.icon;
   return (
     <div
-      className="flex flex-col items-center justify-center text-center rounded-[14px] border border-dashed"
+      className="flex flex-col items-center justify-center text-center rounded-[14px] border border-dashed max-w-xl mx-auto"
       style={{ borderColor: "#1e2027", background: "#0e0f13", padding }}
     >
       <div
