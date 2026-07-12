@@ -884,12 +884,7 @@ def _llm_refine_openai(
     want the model's own judgment on ambiguous names badly enough to accept
     the added latency and max_tokens risk that comes with it.
     """
-    import re as _re
-    base_url = _re.sub(
-        r"(?i)(https?://)(?:localhost|127\.0\.0\.1)\b",
-        r"\1host.docker.internal",
-        base_url.rstrip("/"),
-    )
+    base_url = base_url.rstrip("/")
 
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
