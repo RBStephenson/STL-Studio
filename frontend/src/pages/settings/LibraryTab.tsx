@@ -397,7 +397,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             className="mt-0.5 accent-indigo-500"
           />
           <div>
-            <p className="text-sm text-text-primary-alt2">Enable Reorganize Library</p>
+            <p className="text-sm text-text-primary-alt2">Enable Reorganize Library (Experimental)</p>
             <p className="text-xs text-text-secondary-alt mt-0.5">
               Off by default. When on, "Reorganize Library" appears in the Library
               Tools menu (Creators toolbar) and can move files on disk to match your
