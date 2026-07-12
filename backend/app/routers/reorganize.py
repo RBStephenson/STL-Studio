@@ -75,7 +75,12 @@ def _compute_stats(entries: list[ReorganizeEntry]) -> ReorganizeStats:
     return ReorganizeStats(
         total=len(entries),
         eligible=sum(1 for e in entries if e.eligible),
-        moves_needed=sum(1 for e in entries if e.kind in ("move", "rename", "case_rename")),
+        # Only count moves that will actually happen on Apply right now — a
+        # move-kind entry that's still blocked (collision, unclassifiable,
+        # etc.) belongs to the Blocked/Collisions/Unclassifiable buckets, not
+        # this one, or the "Moves" count would include work nothing can act
+        # on yet (STUDIO-164).
+        moves_needed=sum(1 for e in entries if e.kind in ("move", "rename", "case_rename") and e.eligible),
         already_in_place=sum(1 for e in entries if e.kind == "in_place"),
         collisions=sum(1 for e in entries if e.collision),
         unclassifiable=sum(1 for e in entries if e.unclassifiable),

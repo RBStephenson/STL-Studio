@@ -375,3 +375,19 @@ class TestStats:
         assert stats["total"] == 2
         assert stats["unclassifiable"] == 1
         assert stats["blocked"] >= 1
+
+    def test_moves_needed_excludes_a_blocked_mover(self, client, db, tmp_path):
+        # A model missing its character still renders a "move"-kind entry (its
+        # proposed dir differs from its current one via the sentinel), but
+        # it's blocked (unclassifiable) — moves_needed should not count it as
+        # a pending move until that's resolved (STUDIO-164).
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust", filename="a.stl")
+        blocked = _model_with_file(db, tmp_path, character=None, title="Lost", filename="b.stl")
+
+        data = client.get("/reorganize/preview").json()
+        by_id = {e["model_id"]: e for e in data["entries"]}
+        blocked_entry = by_id[blocked.id]
+        assert blocked_entry["kind"] in ("move", "rename", "case_rename")
+        assert blocked_entry["eligible"] is False
+        assert data["stats"]["moves_needed"] == 1
