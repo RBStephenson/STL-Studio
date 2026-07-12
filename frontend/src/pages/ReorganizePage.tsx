@@ -393,10 +393,19 @@ export default function ReorganizePage() {
               const chips = blockerChips(e);
               const isOpen = expanded.has(e.model_id);
               const canSelect = eligibleIds.has(e.model_id);
+              // Resolvable rows (fixable here via the override fields) get amber;
+              // unresolvable ones (need a rescan or disk fix) stay rose (STUDIO-161)
+              // — previously both looked identical orange, so users couldn't tell
+              // at a glance what they could actually fix.
+              const rowStyle = e.eligible
+                ? "border-border-subtle"
+                : isResolvable(e)
+                  ? "border-amber-700/60 bg-amber-950/20"
+                  : "border-rose-900/60 bg-rose-950/20";
               return (
                 <div
                   key={e.model_id}
-                  className={`rounded border ${e.eligible ? "border-border-subtle" : "border-orange-900/60 bg-orange-950/20"}`}
+                  className={`rounded border ${rowStyle}`}
                 >
                   <div className="w-full flex items-center gap-3 px-3 py-2">
                     {canSelect && (
@@ -418,7 +427,12 @@ export default function ReorganizePage() {
                       </span>
                     </button>
                     {chips.map((c) => (
-                      <span key={c} className="text-xs px-2 py-0.5 rounded bg-rose-950 text-rose-300 shrink-0">
+                      <span
+                        key={c}
+                        className={`text-xs px-2 py-0.5 rounded shrink-0 ${
+                          isResolvable(e) ? "bg-amber-950 text-amber-300" : "bg-rose-950 text-rose-300"
+                        }`}
+                      >
                         {c}
                       </span>
                     ))}

@@ -321,3 +321,35 @@ describe("ReorganizePage select all eligible (STUDIO-160)", () => {
     expect(screen.queryByRole("checkbox", { name: /select all eligible/i })).not.toBeInTheDocument();
   });
 });
+
+describe("ReorganizePage resolvable vs unresolvable coloring (STUDIO-161)", () => {
+  it("gives resolvable and unresolvable ineligible rows different colors", async () => {
+    reorg.preview.mockResolvedValue({
+      manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
+      generated_at: "now",
+      entries: [
+        entry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
+        entry({
+          model_id: 2, model_name: "Mystery", eligible: false,
+          unclassifiable: true, missing_fields: ["character"],
+        }),
+        entry({
+          model_id: 4, model_name: "Locked Model", eligible: false,
+          locked: true,
+        }),
+      ],
+      stats: STATS,
+    });
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+
+    const resolvableRow = screen.getByText("Mystery").closest("div.rounded.border") as HTMLElement;
+    const unresolvableRow = screen.getByText("Locked Model").closest("div.rounded.border") as HTMLElement;
+
+    expect(resolvableRow.className).toContain("border-amber-700/60");
+    expect(unresolvableRow.className).toContain("border-rose-900/60");
+    expect(resolvableRow.className).not.toContain("border-rose-900/60");
+    expect(unresolvableRow.className).not.toContain("border-amber-700/60");
+  });
+});
