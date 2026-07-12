@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, RefreshCw, Square, AlertCircle } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
+import { useToast } from "../context/ToastContext";
 import type {
   ReorganizeEntry,
   ReorganizePreview,
@@ -96,10 +97,23 @@ export default function ReorganizePage() {
   const [applyErr, setApplyErr] = useState<string | null>(null);
   const [lastApply, setLastApply] = useState<ReorganizeApplyResult | null>(null);
   const seededExpand = useRef(false);
+  const { toast } = useToast();
+
+  // Scanning is a deliberate, user-triggered action (STUDIO-155) — nothing
+  // fetches until the user clicks Build/Retry/Rebuild. `runToken` bumps on
+  // each of those triggers; the debounced effect below only fires once
+  // `started` is true, so template/override edits still auto-refresh an
+  // *existing* plan without the page auto-scanning on mount.
+  const [started, setStarted] = useState(false);
+  const [runToken, setRunToken] = useState(0);
+  const cancelledRef = useRef(false);
+  const runReorgScan = () => { cancelledRef.current = false; setStarted(true); setRunToken((t) => t + 1); };
+  const cancelReorgScan = () => { cancelledRef.current = true; setLoading(false); setStarted(false); };
 
   const hasOverrides = Object.keys(overrides).length > 0;
 
   useEffect(() => {
+    if (!started) return;
     let cancelled = false;
     setLoading(true);
     const t = setTimeout(async () => {
@@ -107,9 +121,12 @@ export default function ReorganizePage() {
         const data = hasOverrides
           ? await api.reorganize.previewWithOverrides({ template, overrides })
           : await api.reorganize.preview(template);
-        if (!cancelled) { setPreview(data); setError(null); }
+        if (!cancelled && !cancelledRef.current) {
+          setPreview(data); setError(null);
+          toast("Reorganize plan ready.", "success");
+        }
       } catch (e) {
-        if (!cancelled) {
+        if (!cancelled && !cancelledRef.current) {
           setError(e instanceof ApiError ? e.message : "Failed to load preview");
           if (e instanceof ApiError && e.status === 400) setPreview(null);
         }
@@ -118,7 +135,8 @@ export default function ReorganizePage() {
       }
     }, DEBOUNCE_MS);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [template, overrides, hasOverrides]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, template, overrides, hasOverrides, runToken]);
 
   const visible = useMemo(
     () => preview?.entries.filter((e) => matchesFilter(e, tab)) ?? [],
@@ -216,8 +234,8 @@ export default function ReorganizePage() {
       <div>
         <h1 className="text-xl font-semibold text-text-primary">Reorganize Library</h1>
         <p className="text-sm text-text-secondary-alt mt-1">
-          Preview the proposed layout, resolve any flagged rows, then apply. Apply
-          moves files on disk and requires a writable standalone deployment.
+          Nothing is scanned until you build a plan. Building only reads your
+          library; applying is a separate, explicit step.
         </p>
       </div>
 
@@ -244,11 +262,77 @@ export default function ReorganizePage() {
           <code className="text-indigo-400">{"{scale}"}</code>{" "}
           <code className="text-indigo-400">{"{title}"}</code> — separate levels with <code>/</code>.
         </div>
-        {error && <div className="text-sm text-rose-400">{error}</div>}
+        {error && preview && <div className="text-sm text-rose-400">{error}</div>}
       </div>
+
+      {!started && !loading && (
+        <div className="flex flex-col items-center justify-center text-center py-14 px-8 border border-dashed border-border-subtle rounded-xl bg-panel/40">
+          <div className="w-13 h-13 rounded-full bg-indigo-950/60 flex items-center justify-center mb-4" style={{ width: 52, height: 52 }}>
+            <RefreshCw size={22} className="text-indigo-400" />
+          </div>
+          <p className="text-sm font-semibold text-text-primary mb-1">No plan yet</p>
+          <p className="text-sm text-text-secondary-alt max-w-sm mb-4">
+            Build a plan to see proposed moves against your template above. This reads
+            your library only — no files move until you apply.
+          </p>
+          <button
+            type="button"
+            onClick={runReorgScan}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-end hover:bg-accent-start text-white text-sm font-semibold transition-colors"
+          >
+            <RefreshCw size={14} /> Build Reorganize Plan
+          </button>
+        </div>
+      )}
+
+      {loading && !preview && (
+        <div className="flex items-center gap-3.5 bg-indigo-950/20 border border-indigo-900/50 rounded-xl px-4 py-4">
+          <Loader2 size={18} className="animate-spin text-indigo-400 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-text-primary">Building reorganize plan…</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              Scanning your library against the destination template. This can take a
+              few minutes on large libraries.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={cancelReorgScan}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-panel-secondary border border-border text-text-primary-alt2 text-xs shrink-0"
+          >
+            <Square size={11} /> Cancel
+          </button>
+        </div>
+      )}
+
+      {!loading && error && !preview && (
+        <div className="flex flex-col items-center justify-center text-center py-14 px-8 border border-dashed border-rose-900/40 rounded-xl bg-rose-950/10">
+          <div className="w-13 h-13 rounded-full bg-rose-950/40 flex items-center justify-center mb-4" style={{ width: 52, height: 52 }}>
+            <AlertCircle size={22} className="text-rose-300" />
+          </div>
+          <p className="text-sm font-semibold text-text-primary mb-1">Couldn't build the plan</p>
+          <p className="text-sm text-text-secondary-alt max-w-sm mb-4">{error}</p>
+          <button
+            type="button"
+            onClick={runReorgScan}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-end hover:bg-accent-start text-white text-sm font-semibold transition-colors"
+          >
+            <RefreshCw size={14} /> Retry
+          </button>
+        </div>
+      )}
 
       {preview && (
         <>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={runReorgScan}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-panel-secondary border border-border text-text-primary-alt2 text-xs"
+            >
+              <RefreshCw size={11} /> Rebuild Plan
+            </button>
+          </div>
           <ReorganizeStatsBar stats={preview.stats} />
 
           {/* Filter tabs */}
@@ -347,13 +431,6 @@ export default function ReorganizePage() {
             })}
           </div>
         </>
-      )}
-
-      {loading && !preview && (
-        <div className="flex flex-col items-center justify-center gap-3 py-16 text-text-secondary-alt">
-          <Loader2 size={28} className="animate-spin" />
-          <span className="text-sm">Loading preview — this can take a moment on large libraries…</span>
-        </div>
       )}
 
       {/* Apply / Undo */}

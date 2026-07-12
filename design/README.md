@@ -119,6 +119,9 @@ No new image/icon assets — all icons are inline SVGs matching the existing `lu
 
 ## Screenshots
 `screenshots/01-06.png` — reference captures of Guide Reader, Settings, Model Detail, Creators, Collections, and Library (sidebar layout).
+`screenshots/07-library-tools-menu.png` — Creators toolbar with the "Library Tools" dropdown open (Reorganize Library + Rescan All Folders).
+`screenshots/08–11-reorganize-*.png` — Reorganize Library screen in each of its four states: idle (no plan yet), scanning (progress banner + Cancel), content (built plan), error (failed + Retry).
+`screenshots/12-settings-library-tools-flag.png` — Settings → Library & Scanning tab, showing the Content/Scanning switcher (scroll down further in the live file to see the "Enable Reorganize Library" checkbox under Library Tools).
 
 ## Files
 - `STL Library.dc.html` — the full design reference (all 20 screens on one scrollable canvas, labeled via `data-screen-label` attributes for easy reference).

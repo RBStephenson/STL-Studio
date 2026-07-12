@@ -36,6 +36,13 @@
 
 
 
+<sc-if value="{{ toastMsg }}" hint-placeholder-val="{{ false }}">
+<div style="position:fixed; bottom:28px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; align-items:center; gap:10px; background:#15161b; border:1px solid #23252d; border-radius:10px; padding:12px 18px; box-shadow:0 12px 30px -8px rgba(0,0,0,.6);">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6ee7b7" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+  <span style="font-size:13px; color:#dcdde2;">{{ toastMsg }}</span>
+</div>
+</sc-if>
+
 <div style="display:flex; flex-wrap:wrap; gap:40px; align-items:flex-start; padding:40px;">
 
 <section data-screen-label="Guide Reader" style="position:relative; margin:0; width:940px; font-family:'Inter',sans-serif; background:#0b0c10; border-radius:16px; overflow:hidden; box-shadow:0 40px 80px -20px rgba(0,0,0,0.6);">
@@ -404,11 +411,18 @@
 
   <div style="padding:26px 32px 44px; display:flex; flex-direction:column; gap:20px;">
     <div>
-      <h1 style="margin:0; font-size:21px; font-weight:800; color:#f4f4f6; letter-spacing:-0.01em; display:flex; align-items:center; gap:9px;">
-        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/></svg>
-        Reorganize Library
-      </h1>
-      <p style="margin:7px 0 0; font-size:13px; color:#6b7080; line-height:1.6;">Preview the proposed layout, resolve any flagged rows, then apply. Apply moves files on disk and requires a writable standalone deployment.</p>
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap;">
+        <h1 style="margin:0; font-size:21px; font-weight:800; color:#f4f4f6; letter-spacing:-0.01em; display:flex; align-items:center; gap:9px;">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/></svg>
+          Reorganize Library
+        </h1>
+        <div style="display:flex; border-radius:8px; overflow:hidden; border:1px solid #1c1e24; flex-shrink:0;">
+          <sc-for list="{{ reorgStateOptions }}" as="o" hint-placeholder-count="2">
+            <button onClick="{{ o.onClick }}" style="padding:7px 13px; font-size:12px; border:none; cursor:pointer; background:{{ o.bg }}; color:{{ o.color }};">{{ o.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+      <p style="margin:7px 0 0; font-size:13px; color:#6b7080; line-height:1.6;">Nothing is scanned until you build a plan. Building only reads your library; applying is a separate, explicit step.</p>
     </div>
 
     <div style="display:flex; flex-direction:column; gap:8px;">
@@ -417,6 +431,56 @@
       <p style="margin:0; font-size:11.5px; color:#5c6070;">Tokens: <code style="color:#a5b4fc;">{creator}</code> <code style="color:#a5b4fc;">{character}</code> <code style="color:#a5b4fc;">{scale}</code> <code style="color:#a5b4fc;">{title}</code> — separate levels with /.</p>
     </div>
 
+    <sc-if value="{{ reorgIsIdle }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:56px 32px; border:1px dashed #1e2027; border-radius:14px; background:#0e0f13;">
+      <div style="width:52px; height:52px; border-radius:50%; background:#141726; display:flex; align-items:center; justify-content:center; margin-bottom:16px;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="1.8"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/></svg>
+      </div>
+      <p style="margin:0 0 5px; font-size:15px; font-weight:700; color:#e5e6ea;">No plan yet</p>
+      <p style="margin:0 0 18px; font-size:13px; color:#6b7080; max-width:380px; line-height:1.6;">Build a plan to see proposed moves against your template above. This reads your library only — no files move until you apply.</p>
+      <button onClick="{{ startReorgScan }}" class="stl-cta" style="display:flex; align-items:center; gap:7px; padding:10px 18px; border-radius:8px; background:linear-gradient(135deg,#6366f1,#4f46e5); border:none; color:#fff; font-size:13px; font-weight:600;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Build Reorganize Plan
+      </button>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ reorgIsError }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:56px 32px; border:1px dashed rgba(244,63,94,.3); border-radius:14px; background:#160c10;">
+      <div style="width:52px; height:52px; border-radius:50%; background:rgba(244,63,94,.12); display:flex; align-items:center; justify-content:center; margin-bottom:16px;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fda4af" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      </div>
+      <p style="margin:0 0 5px; font-size:15px; font-weight:700; color:#e5e6ea;">Couldn't build the plan</p>
+      <p style="margin:0 0 18px; font-size:13px; color:#6b7080; max-width:380px; line-height:1.6;">The scan failed before it could finish — check that your scan locations are reachable, then try again. Nothing on disk was changed.</p>
+      <button onClick="{{ startReorgScan }}" class="stl-cta" style="display:flex; align-items:center; gap:7px; padding:10px 18px; border-radius:8px; background:linear-gradient(135deg,#6366f1,#4f46e5); border:none; color:#fff; font-size:13px; font-weight:600;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Retry
+      </button>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ reorgIsScanning }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex; align-items:center; gap:14px; background:#131926; border:1px solid #1e2b45; border-radius:12px; padding:16px 18px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" style="animation:stl-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-9-9"/></svg>
+      <div style="flex:1;">
+        <p style="margin:0; font-size:13.5px; color:#dcdde2; font-weight:600;">Building reorganize plan…</p>
+        <p style="margin:3px 0 0; font-size:12px; color:#6b7080;">Scanning 312 models against your destination template. This can take a few minutes on large libraries.</p>
+      </div>
+      <button onClick="{{ cancelReorgScan }}" style="display:flex; align-items:center; gap:6px; padding:7px 13px; border-radius:8px; background:#181a20; border:1px solid #1c1e24; color:#c3c5cc; font-size:12.5px; flex-shrink:0;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14"/></svg>
+        Cancel
+      </button>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ reorgIsContent }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex; flex-direction:column; gap:20px;">
+    <div style="display:flex; align-items:center; justify-content:flex-end;">
+      <button onClick="{{ startReorgScan }}" style="display:flex; align-items:center; gap:6px; padding:7px 13px; border-radius:8px; background:#181a20; border:1px solid #1c1e24; color:#c3c5cc; font-size:12.5px;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Rebuild Plan
+      </button>
+    </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <div style="padding:8px 14px; border-radius:8px; background:#181a20; border:1px solid #1c1e24; font-size:13px;"><span style="font-weight:700; color:#e5e6ea;">312</span> <span style="color:#6b7080; font-size:11.5px;">total</span></div>
       <div style="padding:8px 14px; border-radius:8px; background:rgba(6,95,70,.2); border:1px solid rgba(6,95,70,.5); font-size:13px;"><span style="font-weight:700; color:#6ee7b7;">278</span> <span style="color:#6ee7b7; font-size:11.5px; opacity:.8;">eligible</span></div>
@@ -471,6 +535,8 @@
       <button style="padding:9px 16px; border-radius:8px; background:#181a20; border:1px solid #1c1e24; color:#c3c5cc; font-size:13px;">Undo last apply</button>
       <span style="font-size:12.5px; color:#6ee7b7;">Moved 41 file(s) across 12 model(s).</span>
     </div>
+    </div>
+    </sc-if>
   </div>
 </section>
 
@@ -1364,6 +1430,27 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
           Refresh enrich
         </button>
+        <div style="position:relative;">
+          <button onClick="{{ toggleLibraryTools }}" style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; background:#181a20; border:1px solid #1c1e24; color:#c3c5cc; font-size:13px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            Library Tools
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <sc-if value="{{ libraryToolsOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:220px; background:#15161b; border:1px solid #23252d; border-radius:10px; box-shadow:0 12px 30px -8px rgba(0,0,0,.6); padding:6px; display:flex; flex-direction:column;">
+            <sc-if value="{{ reorganizeEnabled }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ goReorganize }}" style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:7px; background:none; border:none; color:#dcdde2; font-size:13px; text-align:left; cursor:pointer;" style-hover="background:#1e2028;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/></svg>
+              Reorganize Library
+            </button>
+            </sc-if>
+            <button style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:7px; background:none; border:none; color:#dcdde2; font-size:13px; text-align:left; cursor:pointer;" style-hover="background:#1e2028;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              Rescan All Folders
+            </button>
+          </div>
+          </sc-if>
+        </div>
         <div style="display:flex; border-radius:8px; overflow:hidden; border:1px solid #1c1e24;">
           <span style="padding:8px 13px; font-size:12.5px; background:#4f46e5; color:#fff;">A–Z</span>
           <span style="padding:8px 13px; font-size:12.5px; background:#181a20; color:#6b7080;">Most models</span>
@@ -1384,6 +1471,29 @@
       </div>
     </div>
 
+    <sc-if value="{{ creatorsIsScanning }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex; align-items:center; gap:14px; background:#131926; border:1px solid #1e2b45; border-radius:12px; padding:16px 18px; margin-bottom:18px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" style="animation:stl-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-9-9"/></svg>
+      <div style="flex:1;">
+        <p style="margin:0; font-size:13.5px; color:#dcdde2; font-weight:600;">Scanning library…</p>
+        <p style="margin:3px 0 0; font-size:12px; color:#6b7080;">Checking D:\3D STLs\Sci-Fi for new and moved files. Creator counts may be out of date until this finishes.</p>
+      </div>
+      <div style="width:120px; height:6px; background:#1c1e26; border-radius:4px; overflow:hidden;">
+        <div style="width:55%; height:100%; background:linear-gradient(90deg,#6366f1,#818cf8);"></div>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:14px; opacity:.45; pointer-events:none;">
+      <sc-for list="{{ creators }}" as="c" hint-placeholder-count="15">
+        <div style="background:#131419; border:1px solid #1a1b21; border-radius:12px; overflow:hidden; display:flex; flex-direction:column;">
+          <div style="padding:16px; display:flex; flex-direction:column; gap:5px; flex:1;">
+            <span style="font-size:14px; font-weight:600; color:#e9eaee; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.name }}</span>
+            <span style="font-size:12px; color:#5c6070;">{{ c.count }} models →</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    </sc-if>
+
     <sc-if value="{{ creatorsIsContent }}" hint-placeholder-val="{{ true }}">
     <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:14px;">
       <sc-for list="{{ creators }}" as="c" hint-placeholder-count="15">
@@ -1393,9 +1503,9 @@
             <span style="font-size:12px; color:#5c6070;">{{ c.count }} models →</span>
           </div>
           <div style="display:flex; border-top:1px solid #17181d;">
-            <button style="flex:1; display:flex; align-items:center; justify-content:center; gap:5px; font-size:11.5px; color:#5c6070; padding:9px 0; background:none; border:none; border-right:1px solid #17181d;">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-              Rescan
+            <button onClick="{{ c.rescanClick }}" disabled="{{ c.rescanning }}" style="flex:1; display:flex; align-items:center; justify-content:center; gap:5px; font-size:11.5px; color:{{ c.rescanColor }}; padding:9px 0; background:none; border:none; border-right:1px solid #17181d; cursor:{{ c.rescanCursor }};">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="{{ c.rescanSpin }}"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              {{ c.rescanLabel }}
             </button>
             <button style="flex:1; display:flex; align-items:center; justify-content:center; gap:5px; font-size:11.5px; color:#5c6070; padding:9px 0; background:none; border:none;">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
@@ -1999,7 +2109,26 @@
 
     <!-- Library & Scanning tab -->
     <sc-if value="{{ isLibraryTab }}" hint-placeholder-val="{{ false }}">
-    <div style="display:flex; flex-direction:column; gap:28px;">
+    <div style="display:flex; align-items:center; justify-content:flex-end; margin-bottom:-10px;">
+      <div style="display:flex; border-radius:8px; overflow:hidden; border:1px solid #1c1e24;">
+        <sc-for list="{{ libraryTabStateOptions }}" as="o" hint-placeholder-count="2">
+          <button onClick="{{ o.onClick }}" style="padding:7px 13px; font-size:12px; border:none; cursor:pointer; background:{{ o.bg }}; color:{{ o.color }};">{{ o.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+    <sc-if value="{{ libraryTabIsScanning }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex; align-items:center; gap:14px; background:#131926; border:1px solid #1e2b45; border-radius:12px; padding:16px 18px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" style="animation:stl-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-9-9"/></svg>
+      <div style="flex:1;">
+        <p style="margin:0; font-size:13.5px; color:#dcdde2; font-weight:600;">Scanning D:\3D STLs\Sci-Fi…</p>
+        <p style="margin:3px 0 0; font-size:12px; color:#6b7080;">Checking for new, moved, and removed files. Scan locations and tools below are read-only until this finishes.</p>
+      </div>
+      <div style="width:120px; height:6px; background:#1c1e26; border-radius:4px; overflow:hidden;">
+        <div style="width:55%; height:100%; background:linear-gradient(90deg,#6366f1,#818cf8);"></div>
+      </div>
+    </div>
+    </sc-if>
+    <div style="display:flex; flex-direction:column; gap:28px; {{ libraryTabContentStyle }}">
       <div>
         <p style="margin:0 0 10px; font-size:11px; color:#5c6070; font-weight:600; letter-spacing:.04em; text-transform:uppercase;">Add a Folder</p>
         <div style="display:flex; gap:8px;">
@@ -2045,10 +2174,10 @@
       <div style="border-top:1px solid #17181d; padding-top:22px;">
         <p style="margin:0 0 12px; font-size:11px; color:#5c6070; font-weight:600; letter-spacing:.04em; text-transform:uppercase;">Library Tools</p>
         <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer;">
-          <input type="checkbox" style="margin-top:2px; accent-color:#6366f1;">
+          <input type="checkbox" checked="{{ reorganizeEnabled }}" onChange="{{ toggleReorganizeEnabled }}" style="margin-top:2px; accent-color:#6366f1;">
           <div>
             <p style="margin:0; font-size:13px; color:#c3c5cc;">Enable Reorganize Library</p>
-            <p style="margin:3px 0 0; font-size:12px; color:#5c6070;">Moves files on disk to match your template, including import moves.</p>
+            <p style="margin:3px 0 0; font-size:12px; color:#5c6070;">Off by default. When on, "Reorganize Library" appears in the Library Tools menu (Creators toolbar).</p>
           </div>
         </label>
       </div>
@@ -2616,6 +2745,15 @@
 class Component extends DCLogic {
   state = { collapsed: localStorage.getItem("stl_sidebar_collapsed") === "1", viewState: "content", paintShelfView: "content", queueView: "content", tagsView: "content", guidesView: "content", guideReaderView: "content", variantGroupView: "content", triageView: "content", ungroupConfirming: false, tagDeleteConfirmIdx: -1, deleteAllArmed: false, deleteAllTypedValue: "", settingsTab: "general", creatorsView: "content", collectionsView: "content", detailView: "content", importPhase: "idle" };
   renderVals() {
+    const libraryTabView = this.state.libraryTabView || "content";
+    const setLibraryTabView = (v) => this.setState({ libraryTabView: v });
+    const libraryTabIsScanning = libraryTabView === "scanning";
+    const libraryTabContentStyle = libraryTabIsScanning ? "opacity:.45; pointer-events:none;" : "";
+    const libraryTabStateBtn = (v, label) => ({ v, label, bg: libraryTabView === v ? "#4f46e5" : "#131419", color: libraryTabView === v ? "#fff" : "#6b7080", onClick: () => {
+      setLibraryTabView(v);
+      if (v === "scanning") setTimeout(() => { if (this.state.libraryTabView === "scanning") { setLibraryTabView("content"); showToast("Scan complete."); } }, 1400);
+    } });
+    const libraryTabStateOptions = [libraryTabStateBtn("content", "Content"), libraryTabStateBtn("scanning", "Scanning")];
     const settingsTab = this.state.settingsTab;
     const setSettingsTab = (t) => this.setState({ settingsTab: t });
     const settingsTabs = [
@@ -2649,15 +2787,48 @@ class Component extends DCLogic {
       badge: i % 3 === 0 ? (i % 6 === 0 ? "3 variants" : "New") : null,
     }));
     const creatorNames = ["Loot Studios", "Titan Forge", "Hero Forge", "Artisan Guild", "Dark Anvil", "Nomad Sculpts", "Abe3D", "Ravenholm Minis", "Ironclad Casting", "Grymlok Works", "Sable & Stone", "Wyrmwood Prints", "Cast Iron Creations", "Ninth Age Studio", "Pale Moon Miniatures"];
-    const creators = creatorNames.map((n, i) => ({ name: n, count: 20 + ((i * 37) % 180) }));
+    const toastMsg = this.state.toastMsg || "";
+    const showToast = (msg) => {
+      const id = (this._toastId = (this._toastId || 0) + 1);
+      this.setState({ toastMsg: msg });
+      setTimeout(() => { if (this._toastId === id) this.setState({ toastMsg: "" }); }, 3000);
+    };
+    const rescanningIdx = this.state.rescanningIdx;
+    const creators = creatorNames.map((n, i) => {
+      const rescanning = rescanningIdx === i;
+      return {
+        name: n, count: 20 + ((i * 37) % 180),
+        rescanning,
+        rescanLabel: rescanning ? "Scanning…" : "Rescan",
+        rescanColor: rescanning ? "#a5b4fc" : "#5c6070",
+        rescanCursor: rescanning ? "not-allowed" : "pointer",
+        rescanSpin: rescanning ? "animation:stl-spin 1s linear infinite;" : "",
+        rescanClick: () => {
+          this.setState({ rescanningIdx: i });
+          setTimeout(() => {
+            if (this.state.rescanningIdx === i) { this.setState({ rescanningIdx: -1 }); showToast(`Rescanned ${n}.`); }
+          }, 1400);
+        },
+      };
+    });
+    const reorganizeEnabled = this.state.reorganizeEnabled ?? false;
+    const toggleReorganizeEnabled = () => this.setState(s => ({ reorganizeEnabled: !(s.reorganizeEnabled ?? false) }));
+    const libraryToolsOpen = !!this.state.libraryToolsOpen;
+    const toggleLibraryTools = () => this.setState(s => ({ libraryToolsOpen: !s.libraryToolsOpen }));
+    const goReorganize = () => {
+      this.setState({ libraryToolsOpen: false });
+      const el = document.querySelector('[data-screen-label="Reorganize Library"]');
+      if (el) { const r = el.getBoundingClientRect(); window.scrollTo({ top: window.scrollY + r.top - 24, behavior: "smooth" }); }
+    };
     const creatorsView = this.state.creatorsView;
     const setCreatorsView = (v) => this.setState({ creatorsView: v });
     const creatorsIsContent = creatorsView === "content";
     const creatorsIsLoading = creatorsView === "loading";
     const creatorsIsEmpty = creatorsView === "empty";
     const creatorsIsError = creatorsView === "error";
+    const creatorsIsScanning = creatorsView === "scanning";
     const creatorsStateBtn = (v, label) => ({ v, label, bg: creatorsView === v ? "#4f46e5" : "#131419", color: creatorsView === v ? "#fff" : "#6b7080", onClick: () => setCreatorsView(v) });
-    const creatorsStateOptions = [creatorsStateBtn("content", "Content"), creatorsStateBtn("loading", "Loading"), creatorsStateBtn("empty", "Empty"), creatorsStateBtn("error", "Error")];
+    const creatorsStateOptions = [creatorsStateBtn("content", "Content"), creatorsStateBtn("scanning", "Scanning"), creatorsStateBtn("loading", "Loading"), creatorsStateBtn("empty", "Empty"), creatorsStateBtn("error", "Error")];
     const collectionNames = ["Painted Showcase", "Sci-Fi Terrain", "Con Prep 2026", "Bust Collection", "Kids' Prints", "Dungeon Crawler Set", "Wishlist", "Holiday Gifts"];
     const collections = collectionNames.map((n, i) => {
       const hasCover = i % 3 !== 2;
@@ -2765,6 +2936,21 @@ class Component extends DCLogic {
       deleteBg: this.state.tagDeleteConfirmIdx === i ? "#be123c" : "none",
       deleteColor: this.state.tagDeleteConfirmIdx === i ? "#fff" : "#6b7080",
     }));
+    const reorgView = this.state.reorgView || "idle";
+    const setReorgView = (v) => this.setState({ reorgView: v });
+    const reorgIsIdle = reorgView === "idle";
+    const reorgIsScanning = reorgView === "scanning";
+    const reorgIsContent = reorgView === "content";
+    const reorgIsError = reorgView === "error";
+    const startReorgScan = () => {
+      setReorgView("scanning");
+      setTimeout(() => {
+        if (this.state.reorgView === "scanning") { setReorgView("content"); showToast("Reorganize plan ready."); }
+      }, 1400);
+    };
+    const cancelReorgScan = () => setReorgView("idle");
+    const reorgStateBtn = (v, label) => ({ v, label, bg: reorgView === v ? "#4f46e5" : "#131419", color: reorgView === v ? "#fff" : "#6b7080", onClick: () => setReorgView(v) });
+    const reorgStateOptions = [reorgStateBtn("idle", "Idle"), reorgStateBtn("scanning", "Scanning"), reorgStateBtn("content", "Content"), reorgStateBtn("error", "Error")];
     const reorgTabLabels = ["All", "Moves", "Collisions", "Unclassifiable", "Blocked", "Already In Place"];
     const reorgTabs = reorgTabLabels.map((label, i) => ({
       label, borderColor: i === 0 ? "#6366f1" : "transparent", color: i === 0 ? "#f4f4f6" : "#6b7080",
@@ -2999,7 +3185,10 @@ class Component extends DCLogic {
       paletteSwatches, valueLadder, hueMatches, spineTabs, activeSpineTabData, previewSteps, kitGroups,
       collectionsIsContent, collectionsIsLoading, collectionsIsEmpty, collectionsStateOptions,
       detailIsContent, detailIsLoading, detailIsNotFound, detailStateOptions,
-      creatorsIsContent, creatorsIsLoading, creatorsIsEmpty, creatorsStateOptions,
+      creatorsIsContent, creatorsIsLoading, creatorsIsEmpty, creatorsIsScanning, creatorsStateOptions,
+      libraryToolsOpen, toggleLibraryTools, goReorganize, toastMsg, reorganizeEnabled, toggleReorganizeEnabled,
+      libraryTabIsScanning, libraryTabContentStyle, libraryTabStateOptions,
+      reorgIsIdle, reorgIsScanning, reorgIsContent, reorgIsError, reorgStateOptions, startReorgScan, cancelReorgScan,
       settingsTab, setSettingsTab, settingsTabs,
       isGeneralTab: settingsTab === "general",
       isLibraryTab: settingsTab === "library",

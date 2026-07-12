@@ -71,12 +71,19 @@ beforeEach(() => {
   reorg.preview.mockResolvedValue(previewFixture());
 });
 
+/** Scanning is explicit now (STUDIO-155) — every test that needs a preview
+ *  loaded has to click Build first, since the page no longer auto-scans on mount. */
+function buildPlan() {
+  fireEvent.click(screen.getByRole("button", { name: /Build Reorganize Plan/ }));
+}
+
 describe("ReorganizePage", () => {
   it("selects an eligible entry and applies it", async () => {
     reorg.apply.mockResolvedValue({
       manifest_id: "deadbeef", moved_files: 3, moved_models: 1, undo_log: "/x.log",
     });
     render(<ReorganizePage />);
+    buildPlan();
 
     const checkbox = await screen.findByLabelText("Select Joker Bust");
     fireEvent.click(checkbox);
@@ -93,6 +100,7 @@ describe("ReorganizePage", () => {
 
   it("shows resolve inputs only on an ineligible row", async () => {
     render(<ReorganizePage />);
+    buildPlan();
     // Blocked-and-resolvable rows auto-expand (STUDIO-170) — no click needed.
     expect(await screen.findByLabelText("character for Mystery")).toBeInTheDocument();
     expect(await screen.findByLabelText("scale for Mystery")).toBeInTheDocument();
@@ -102,6 +110,7 @@ describe("ReorganizePage", () => {
 
   it("auto-expands a blocked, resolvable row on first load", async () => {
     render(<ReorganizePage />);
+    buildPlan();
     expect(await screen.findByLabelText("character for Mystery")).toBeInTheDocument();
     // No "click to resolve" cue while already expanded.
     expect(screen.queryByText("click to resolve")).not.toBeInTheDocument();
@@ -109,6 +118,7 @@ describe("ReorganizePage", () => {
 
   it("shows a resolve cue on a blocked row collapsed by the user", async () => {
     render(<ReorganizePage />);
+    buildPlan();
     await screen.findByLabelText("character for Mystery");
     // Collapse the auto-expanded row.
     fireEvent.click(screen.getByText("Mystery"));
@@ -119,6 +129,7 @@ describe("ReorganizePage", () => {
   it("re-fetches via overrides endpoint when a resolution is entered", async () => {
     reorg.previewWithOverrides.mockResolvedValue(previewFixture());
     render(<ReorganizePage />);
+    buildPlan();
     fireEvent.change(await screen.findByLabelText("character for Mystery"), {
       target: { value: "Harley" },
     });
@@ -133,6 +144,7 @@ describe("ReorganizePage", () => {
 describe("ReorganizePage Moves tab bucketing (STUDIO-164)", () => {
   it("excludes a blocked move-kind entry from the Moves tab", async () => {
     render(<ReorganizePage />);
+    buildPlan();
     await screen.findByText("Joker Bust");
     // Mystery is kind "move" but eligible: false (unclassifiable) — it
     // should show under All but not under Moves until it's resolved.
@@ -146,6 +158,7 @@ describe("ReorganizePage Moves tab bucketing (STUDIO-164)", () => {
 
   it("shows an explanatory hint on each filter tab", async () => {
     render(<ReorganizePage />);
+    buildPlan();
     await screen.findByText("Joker Bust");
     expect(screen.getByRole("button", { name: "Moves" })).toHaveAttribute(
       "title",
@@ -160,15 +173,17 @@ describe("ReorganizePage loading indicator (STUDIO-165)", () => {
     reorg.preview.mockReturnValue(new Promise((resolve) => { resolvePreview = resolve; }));
 
     render(<ReorganizePage />);
+    buildPlan();
 
-    expect(await screen.findByText(/Loading preview/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Building reorganize plan/i)).toBeInTheDocument();
 
     resolvePreview!(previewFixture());
-    await waitFor(() => expect(screen.queryByText(/Loading preview/i)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/Building reorganize plan/i)).not.toBeInTheDocument());
   });
 
   it("shows an inline updating indicator on a re-fetch, keeping the stale preview visible", async () => {
     render(<ReorganizePage />);
+    buildPlan();
     await screen.findByText("Joker Bust");
 
     let resolveOverride: (v: unknown) => void;
@@ -185,5 +200,61 @@ describe("ReorganizePage loading indicator (STUDIO-165)", () => {
 
     resolveOverride!(previewFixture());
     await waitFor(() => expect(screen.queryByText(/Updating preview/i)).not.toBeInTheDocument());
+  });
+});
+
+describe("ReorganizePage explicit-trigger states (STUDIO-155)", () => {
+  it("shows the idle empty state on mount without scanning", () => {
+    render(<ReorganizePage />);
+    expect(screen.getByText("No plan yet")).toBeInTheDocument();
+    expect(reorg.preview).not.toHaveBeenCalled();
+  });
+
+  it("builds the plan only after clicking Build Reorganize Plan", async () => {
+    render(<ReorganizePage />);
+    expect(reorg.preview).not.toHaveBeenCalled();
+    buildPlan();
+    expect(await screen.findByText("Joker Bust")).toBeInTheDocument();
+    expect(reorg.preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an error panel with Retry when the initial build fails", async () => {
+    reorg.preview.mockReset();
+    reorg.preview.mockRejectedValueOnce(new Error("boom"));
+    render(<ReorganizePage />);
+    buildPlan();
+
+    expect(await screen.findByText("Couldn't build the plan")).toBeInTheDocument();
+
+    reorg.preview.mockResolvedValueOnce(previewFixture());
+    fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
+    expect(await screen.findByText("Joker Bust")).toBeInTheDocument();
+  });
+
+  it("returns to the idle empty state after Cancel, not a blank panel", async () => {
+    let resolvePreview: (v: unknown) => void;
+    reorg.preview.mockReturnValue(new Promise((resolve) => { resolvePreview = resolve; }));
+    render(<ReorganizePage />);
+    buildPlan();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Cancel/ }));
+
+    expect(screen.getByText("No plan yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Build Reorganize Plan/ })).toBeInTheDocument();
+
+    // The abandoned request resolving late shouldn't resurrect the scanning UI.
+    resolvePreview!(previewFixture());
+    await Promise.resolve();
+    expect(screen.getByText("No plan yet")).toBeInTheDocument();
+  });
+
+  it("re-runs the preview via Rebuild Plan once content is showing", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    expect(reorg.preview).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /Rebuild Plan/ }));
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledTimes(2));
   });
 });

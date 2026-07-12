@@ -11,7 +11,10 @@ const updateMock = vi.fn();
 vi.mock("../../context/AppSettingsContext", () => ({
   useAppSettings: () => ({ settings, update: updateMock }),
 }));
-vi.mock("../../api/client", () => ({ api: {} }));
+const scanStatusMock = vi.fn().mockResolvedValue({ running: false });
+vi.mock("../../api/client", () => ({
+  api: { scan: { status: () => scanStatusMock() } },
+}));
 
 const renderTab = () =>
   render(
@@ -26,16 +29,18 @@ describe("LibraryTab reorganize feature flag", () => {
     vi.clearAllMocks();
   });
 
-  it("hides the Reorganize Library link when the flag is off", () => {
+  // The Reorganize Library launch point moved to the Creators toolbar's
+  // "Library Tools" menu (STUDIO-155) — this tab is a pure flag now, with no
+  // <Link> of its own regardless of the flag's value.
+  it("never renders a Reorganize Library link, flag on or off", () => {
     settings = mkSettings({ reorganize_enabled: false });
-    renderTab();
+    const { unmount } = renderTab();
     expect(screen.queryByRole("link", { name: /reorganize library/i })).toBeNull();
-  });
+    unmount();
 
-  it("shows the Reorganize Library link when the flag is on", () => {
     settings = mkSettings({ reorganize_enabled: true });
     renderTab();
-    expect(screen.getByRole("link", { name: /reorganize library/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /reorganize library/i })).toBeNull();
   });
 
   it("toggling the flag on persists reorganize_enabled=true", async () => {
@@ -63,5 +68,28 @@ describe("LibraryTab filename slugify setting", () => {
     settings = mkSettings({ reorganize_slugify_filenames: true });
     renderTab();
     expect(screen.getByRole("checkbox", { name: /lowercase, hyphenated filenames/i })).toBeChecked();
+  });
+});
+
+describe("LibraryTab scan state switcher", () => {
+  beforeEach(() => {
+    settings = mkSettings();
+    vi.clearAllMocks();
+  });
+
+  it("shows Content and dims nothing while no scan is running", async () => {
+    scanStatusMock.mockResolvedValue({ running: false });
+    renderTab();
+    expect(await screen.findByText("Add a Folder")).toBeVisible();
+    expect(screen.getByText("Add a Folder").closest("div[style]")).toBeNull();
+  });
+
+  it("dims the folder list/tools while a scan is running", async () => {
+    scanStatusMock.mockResolvedValue({ running: true });
+    renderTab();
+    const dimmed = await screen.findByText("Add a Folder");
+    const wrapper = dimmed.closest("section")?.parentElement as HTMLElement;
+    expect(wrapper.style.opacity).toBe("0.45");
+    expect(wrapper.style.pointerEvents).toBe("none");
   });
 });
