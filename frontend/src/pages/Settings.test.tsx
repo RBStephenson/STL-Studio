@@ -331,6 +331,24 @@ describe("Settings – Scan tag rules (#31)", () => {
     });
   });
 
+  it("returns focus to the keyword field after adding a rule (STUDIO-169)", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ scan_tag_rules: [] }));
+    vi.mocked(api.settings.update).mockResolvedValue(
+      mkSettings({ scan_tag_rules: [{ keyword: "Aztec", tag: "civ" }] })
+    );
+
+    render(<AppSettingsProvider><Settings /></AppSettingsProvider>);
+    await goTab(/library/i);
+
+    const keywordInput = await screen.findByPlaceholderText(/keyword/i);
+    await userEvent.type(keywordInput, "Aztec");
+    await userEvent.type(screen.getByPlaceholderText(/tag \(/i), "civ");
+    await userEvent.click(screen.getAllByRole("button", { name: /^add$/i })[1]);
+
+    await waitFor(() => expect(keywordInput).toHaveFocus());
+  });
+
   it("removes a tag rule via its trash button", async () => {
     const { api } = await import("../api/client");
     vi.mocked(api.settings.get).mockResolvedValue(
