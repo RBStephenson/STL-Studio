@@ -16,13 +16,18 @@ const DEBOUNCE_MS = 500;
 
 type FilterTab = "all" | "moves" | "collisions" | "unclassifiable" | "blocked" | "in_place";
 
-const FILTERS: { key: FilterTab; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "moves", label: "Moves" },
-  { key: "collisions", label: "Collisions" },
-  { key: "unclassifiable", label: "Unclassifiable" },
-  { key: "blocked", label: "Blocked" },
-  { key: "in_place", label: "Already In Place" },
+// Tabs mix two dimensions: what KIND of change an entry needs (Moves,
+// Already In Place) and WHY it can't proceed yet (Collisions, Unclassifiable,
+// Blocked) — so a row can land in more than one tab, e.g. a would-be move
+// that's also a collision shows under Collisions and Blocked, not Moves,
+// until the collision is resolved. Hints spell this out (STUDIO-164).
+const FILTERS: { key: FilterTab; label: string; hint: string }[] = [
+  { key: "all", label: "All", hint: "Every model in this preview" },
+  { key: "moves", label: "Moves", hint: "Will move or rename on Apply right now — blocked movers show under Collisions/Unclassifiable/Blocked instead until resolved" },
+  { key: "collisions", label: "Collisions", hint: "Proposed destination collides with another model or file" },
+  { key: "unclassifiable", label: "Unclassifiable", hint: "Missing a value (e.g. character) the template needs — resolve it below" },
+  { key: "blocked", label: "Blocked", hint: "Can't be applied for any reason — collision, unclassifiable, over-length, locked, etc." },
+  { key: "in_place", label: "Already In Place", hint: "Already matches the destination template — nothing to do" },
 ];
 
 const KIND_LABEL: Record<ReorganizeMoveKind, string> = {
@@ -36,7 +41,10 @@ const KIND_LABEL: Record<ReorganizeMoveKind, string> = {
 function matchesFilter(e: ReorganizeEntry, tab: FilterTab): boolean {
   switch (tab) {
     case "all": return true;
-    case "moves": return ["move", "rename", "case_rename"].includes(e.kind);
+    // Only entries that will actually move on Apply right now — a move-kind
+    // entry that's still blocked belongs under Blocked/Collisions/
+    // Unclassifiable instead (STUDIO-164).
+    case "moves": return ["move", "rename", "case_rename"].includes(e.kind) && e.eligible;
     case "collisions": return e.collision;
     case "unclassifiable": return e.unclassifiable;
     case "blocked": return !e.eligible;
@@ -249,6 +257,7 @@ export default function ReorganizePage() {
               <button
                 key={f.key}
                 onClick={() => setTab(f.key)}
+                title={f.hint}
                 className={`px-3 py-1.5 text-sm rounded-t ${
                   tab === f.key
                     ? "bg-panel-secondary text-text-primary border-b-2 border-accent-start"

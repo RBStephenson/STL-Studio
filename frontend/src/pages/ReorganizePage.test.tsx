@@ -130,6 +130,30 @@ describe("ReorganizePage", () => {
   });
 });
 
+describe("ReorganizePage Moves tab bucketing (STUDIO-164)", () => {
+  it("excludes a blocked move-kind entry from the Moves tab", async () => {
+    render(<ReorganizePage />);
+    await screen.findByText("Joker Bust");
+    // Mystery is kind "move" but eligible: false (unclassifiable) — it
+    // should show under All but not under Moves until it's resolved.
+    expect(screen.getByText("Mystery")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Moves" }));
+
+    expect(screen.getByText("Joker Bust")).toBeInTheDocument();
+    expect(screen.queryByText("Mystery")).not.toBeInTheDocument();
+  });
+
+  it("shows an explanatory hint on each filter tab", async () => {
+    render(<ReorganizePage />);
+    await screen.findByText("Joker Bust");
+    expect(screen.getByRole("button", { name: "Moves" })).toHaveAttribute(
+      "title",
+      expect.stringContaining("blocked movers show under"),
+    );
+  });
+});
+
 describe("ReorganizePage loading indicator (STUDIO-165)", () => {
   it("shows a prominent spinner before the first preview resolves", async () => {
     let resolvePreview: (v: unknown) => void;
