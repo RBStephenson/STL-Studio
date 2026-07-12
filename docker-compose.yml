@@ -30,8 +30,14 @@ services:
       # lives only in memory and stored keys won't survive a restart — set a
       # stable value in .env to persist them (see docs/docker.md → STL_SECRET_KEY).
       - STL_SECRET_KEY=${STL_SECRET_KEY:-}
-    # Allows the backend to reach services on the host (e.g. Ollama at localhost:11434).
-    # host-gateway resolves to the host's IP as seen from the container's network.
+    # Maps these hostnames to the host machine's IP (host-gateway) so the
+    # backend can reach services running there (e.g. Ollama) — this only
+    # takes effect if you actually enter one of these hostnames yourself in
+    # an AI API's URL (Settings → AI & Integrations). The app never rewrites
+    # a configured URL: entering "localhost" there means the *container*,
+    # not the host, so to reach Ollama on the host machine, enter
+    # http://host.docker.internal:11434 (or http://ollama-host:11434)
+    # explicitly — either resolves via the mapping below.
     extra_hosts:
       - "host.docker.internal:host-gateway"
       - "ollama-host:host-gateway"
