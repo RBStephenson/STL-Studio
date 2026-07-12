@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import type {
@@ -214,7 +215,14 @@ export default function ReorganizePage() {
 
       {/* Template editor */}
       <div className="space-y-2">
-        <label className="block text-sm text-text-primary-alt2">Destination template</label>
+        <label className="flex items-center gap-2 text-sm text-text-primary-alt2">
+          Destination template
+          {loading && preview && (
+            <span className="flex items-center gap-1 text-xs text-text-secondary-alt">
+              <Loader2 size={12} className="animate-spin" /> Updating preview…
+            </span>
+          )}
+        </label>
         <input
           type="text"
           value={template}
@@ -332,7 +340,12 @@ export default function ReorganizePage() {
         </>
       )}
 
-      {loading && !preview && <div className="text-sm text-text-secondary-alt">Loading preview…</div>}
+      {loading && !preview && (
+        <div className="flex flex-col items-center justify-center gap-3 py-16 text-text-secondary-alt">
+          <Loader2 size={28} className="animate-spin" />
+          <span className="text-sm">Loading preview — this can take a moment on large libraries…</span>
+        </div>
+      )}
 
       {/* Apply / Undo */}
       <div className="pt-2 flex items-center gap-3 flex-wrap">

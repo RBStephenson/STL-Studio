@@ -129,3 +129,37 @@ describe("ReorganizePage", () => {
     );
   });
 });
+
+describe("ReorganizePage loading indicator (STUDIO-165)", () => {
+  it("shows a prominent spinner before the first preview resolves", async () => {
+    let resolvePreview: (v: unknown) => void;
+    reorg.preview.mockReturnValue(new Promise((resolve) => { resolvePreview = resolve; }));
+
+    render(<ReorganizePage />);
+
+    expect(await screen.findByText(/Loading preview/i)).toBeInTheDocument();
+
+    resolvePreview!(previewFixture());
+    await waitFor(() => expect(screen.queryByText(/Loading preview/i)).not.toBeInTheDocument());
+  });
+
+  it("shows an inline updating indicator on a re-fetch, keeping the stale preview visible", async () => {
+    render(<ReorganizePage />);
+    await screen.findByText("Joker Bust");
+
+    let resolveOverride: (v: unknown) => void;
+    reorg.previewWithOverrides.mockReturnValue(
+      new Promise((resolve) => { resolveOverride = resolve; }),
+    );
+    fireEvent.change(await screen.findByLabelText("character for Mystery"), {
+      target: { value: "Harley" },
+    });
+
+    expect(await screen.findByText(/Updating preview/i)).toBeInTheDocument();
+    // The stale table stays visible while the re-fetch is in flight.
+    expect(screen.getByText("Joker Bust")).toBeInTheDocument();
+
+    resolveOverride!(previewFixture());
+    await waitFor(() => expect(screen.queryByText(/Updating preview/i)).not.toBeInTheDocument());
+  });
+});
