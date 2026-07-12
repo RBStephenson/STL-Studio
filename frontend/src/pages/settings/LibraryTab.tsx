@@ -393,7 +393,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           <input
             type="checkbox"
             checked={settings.reorganize_enabled}
-            onChange={() => update({ reorganize_enabled: !settings.reorganize_enabled })}
+            onChange={() => update({ reorganize_enabled: !settings.reorganize_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
             className="mt-0.5 accent-indigo-500"
           />
           <div>
@@ -432,7 +432,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             <input
               type="checkbox"
               checked={settings.reorganize_slugify}
-              onChange={() => update({ reorganize_slugify: !settings.reorganize_slugify })}
+              onChange={() => update({ reorganize_slugify: !settings.reorganize_slugify }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
               className="mt-0.5 accent-indigo-500"
             />
             <div>
@@ -448,7 +448,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             <input
               type="checkbox"
               checked={settings.reorganize_slugify_filenames}
-              onChange={() => update({ reorganize_slugify_filenames: !settings.reorganize_slugify_filenames })}
+              onChange={() => update({ reorganize_slugify_filenames: !settings.reorganize_slugify_filenames }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
               className="mt-0.5 accent-indigo-500"
             />
             <div>
