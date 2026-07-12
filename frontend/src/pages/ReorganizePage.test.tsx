@@ -141,6 +141,34 @@ describe("ReorganizePage", () => {
   });
 });
 
+describe("ReorganizePage keeps a resolved row visible in its tab (STUDIO-182)", () => {
+  it("stays on the Blocked tab and shows a checkbox after an override resolves it", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+
+    fireEvent.click(screen.getByRole("button", { name: "Blocked" }));
+    expect(screen.getByText("Mystery")).toBeInTheDocument();
+
+    reorg.previewWithOverrides.mockResolvedValue({
+      ...previewFixture(),
+      entries: [
+        entry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
+        entry({ model_id: 2, model_name: "Mystery", eligible: true }),
+      ],
+    });
+    fireEvent.change(screen.getByLabelText("character for Mystery"), {
+      target: { value: "Harley" },
+    });
+
+    await waitFor(() => expect(reorg.previewWithOverrides).toHaveBeenCalled());
+    // Now eligible, so it no longer matches "Blocked" on its own — but the
+    // active override should keep it visible with its checkbox selectable.
+    expect(await screen.findByLabelText("Select Mystery")).toBeInTheDocument();
+    expect(screen.getByText("Mystery")).toBeInTheDocument();
+  });
+});
+
 describe("ReorganizePage Moves tab bucketing (STUDIO-164)", () => {
   it("excludes a blocked move-kind entry from the Moves tab", async () => {
     render(<ReorganizePage />);
