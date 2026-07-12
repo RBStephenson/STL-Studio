@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Plus, Trash2, FolderSearch } from "lucide-react";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import HelpLink from "../../components/HelpLink";
@@ -13,6 +13,7 @@ export default function ScanningTab() {
   const [newKeyword, setNewKeyword] = useState("");
   const [newTag, setNewTag] = useState("");
   const [newPartsName, setNewPartsName] = useState("");
+  const keywordInputRef = useRef<HTMLInputElement>(null);
 
   const addIgnorePattern = async () => {
     const pat = newPattern.trim();
@@ -41,11 +42,14 @@ export default function ScanningTab() {
     if (!keyword || !tag) return;
     const current = settings.scan_tag_rules;
     if (current.some((r) => r.keyword.toLowerCase() === keyword.toLowerCase() && r.tag.toLowerCase() === tag.toLowerCase())) {
-      setNewKeyword(""); setNewTag(""); return;
+      setNewKeyword(""); setNewTag(""); keywordInputRef.current?.focus(); return;
     }
     try {
       await update({ scan_tag_rules: [...current, { keyword, tag }] });
       setNewKeyword(""); setNewTag("");
+      // Return focus to the keyword field so adding several rules in a row
+      // doesn't require reaching for the mouse (STUDIO-169).
+      keywordInputRef.current?.focus();
     } catch (e) {
       flash(errMsg(e) || "Could not add tag rule", "err");
     }
@@ -172,6 +176,7 @@ export default function ScanningTab() {
           ))}
           <div className="flex items-center gap-2 mt-1">
             <input
+              ref={keywordInputRef}
               type="text"
               value={newKeyword}
               onChange={(e) => setNewKeyword(e.target.value)}
