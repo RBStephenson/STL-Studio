@@ -8,7 +8,7 @@ to resubmit through the existing /reorganize/preview overrides path.
 import json
 
 import app.services.ai_organize as ai
-from app.models import Creator, Model, ScanRoot, STLFile
+from app.models import Model, ScanRoot
 from tests.conftest import make_creator, make_model, make_stl_file
 
 
@@ -187,7 +187,7 @@ class TestAiSuggestEndpoint:
 
     def test_400_over_the_model_cap(self, client, db, tmp_path):
         _root(db, tmp_path)
-        m = _unclassifiable_model(db, tmp_path)
+        _unclassifiable_model(db, tmp_path)
         client.patch("/settings", json={"reorganize_ai_suggestions_enabled": True})
         manifest_id = client.get("/reorganize/preview").json()["manifest_id"]
 
