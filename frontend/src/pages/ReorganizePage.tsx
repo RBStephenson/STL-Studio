@@ -9,6 +9,7 @@ import type {
   ReorganizeMoveKind,
   ReorganizeOverride,
   ReorganizeApplyResult,
+  ReorganizeCollisionKind,
 } from "../api/client";
 import ReorganizeStatsBar from "../components/reorganize/ReorganizeStatsBar";
 
@@ -53,20 +54,65 @@ function matchesFilter(e: ReorganizeEntry, tab: FilterTab): boolean {
   }
 }
 
-/** Blocker/flag chips for a single entry — empty when the entry is clean. */
-function blockerChips(e: ReorganizeEntry): string[] {
-  const chips: string[] = [];
-  if (e.collision) chips.push(`collision: ${e.collision_kind}`);
-  if (e.unclassifiable) chips.push("unclassifiable");
-  if (e.over_length) chips.push("over-length");
-  if (e.reserved_name) chips.push("reserved name");
-  if (e.overlaps_other) chips.push("overlap");
-  if (e.spans_multiple_dirs) chips.push("multi-dir");
-  if (e.is_symlink) chips.push("symlink");
-  if (e.escapes_scan_root) chips.push("escapes root");
-  if (e.missing_files_on_disk) chips.push("missing files");
-  if (e.locked) chips.push("locked");
-  return chips;
+const COLLISION_EXPLANATIONS: Record<ReorganizeCollisionKind, string> = {
+  none: "",
+  exact: "Another model already resolves to this exact destination path.",
+  case_only: "Another model's destination path differs only by letter case — that collides on case-insensitive filesystems.",
+  unicode_only: "Another model's destination path differs only by Unicode normalization (e.g. accented characters) — that collides on some filesystems.",
+  legitimate_duplicate: "This looks like a genuine duplicate of another model already at that destination.",
+};
+
+interface BlockerFlag {
+  label: string;
+  explanation: string;
+}
+
+/** Blocker/flag chips for a single entry, each with a plain-English
+ *  explanation (STUDIO-162) — previously chips were bare codes like
+ *  "locked" or "over-length" with no way to know why or what to do. */
+function blockerFlags(e: ReorganizeEntry): BlockerFlag[] {
+  const flags: BlockerFlag[] = [];
+  if (e.collision) {
+    flags.push({
+      label: `collision: ${e.collision_kind}`,
+      explanation: `${COLLISION_EXPLANATIONS[e.collision_kind]}${
+        e.collision_with.length ? ` Conflicts with ${e.collision_with.length} other model(s).` : ""
+      }`,
+    });
+  }
+  if (e.unclassifiable) {
+    flags.push({
+      label: "unclassifiable",
+      explanation: e.missing_fields.length
+        ? `Missing a value for: ${e.missing_fields.join(", ")}. Fill it in below to resolve.`
+        : "The destination template needs a value this model doesn't have. Fill it in below to resolve.",
+    });
+  }
+  if (e.over_length) {
+    flags.push({ label: "over-length", explanation: "The proposed path is too long for the filesystem. Shorten a field below (e.g. use a suffix) to resolve." });
+  }
+  if (e.reserved_name) {
+    flags.push({ label: "reserved name", explanation: "The proposed name is reserved by the operating system (e.g. CON, NUL). Adjust a field below to resolve." });
+  }
+  if (e.overlaps_other) {
+    flags.push({ label: "overlap", explanation: "This model's files overlap with another model's files on disk. Needs a rescan or manual disk fix — not resolvable here." });
+  }
+  if (e.spans_multiple_dirs) {
+    flags.push({ label: "multi-dir", explanation: "This model's files are spread across multiple directories, so Reorganize can't safely move it as one unit. Needs a manual disk fix." });
+  }
+  if (e.is_symlink) {
+    flags.push({ label: "symlink", explanation: "One or more files are symlinks — Reorganize skips symlinked files to avoid moving something it doesn't actually own." });
+  }
+  if (e.escapes_scan_root) {
+    flags.push({ label: "escapes root", explanation: "The proposed destination would land outside the scan root, which Reorganize refuses to do for safety." });
+  }
+  if (e.missing_files_on_disk) {
+    flags.push({ label: "missing files", explanation: "One or more of this model's files are missing on disk. Rescan the library to refresh what's tracked." });
+  }
+  if (e.locked) {
+    flags.push({ label: "locked", explanation: "This model is locked and won't be touched by Reorganize until it's unlocked." });
+  }
+  return flags;
 }
 
 /** Which blockers a user can resolve here (the rest need a rescan / disk fix). */
@@ -390,7 +436,7 @@ export default function ReorganizePage() {
               <div className="text-sm text-text-muted py-6 text-center">No models in this view.</div>
             )}
             {visible.map((e) => {
-              const chips = blockerChips(e);
+              const flags = blockerFlags(e);
               const isOpen = expanded.has(e.model_id);
               const canSelect = eligibleIds.has(e.model_id);
               // Resolvable rows (fixable here via the override fields) get amber;
@@ -426,14 +472,15 @@ export default function ReorganizePage() {
                         <span className="block text-xs text-text-secondary-alt truncate font-mono">→ {e.proposed_dir}</span>
                       </span>
                     </button>
-                    {chips.map((c) => (
+                    {flags.map((f) => (
                       <span
-                        key={c}
+                        key={f.label}
+                        title={f.explanation}
                         className={`text-xs px-2 py-0.5 rounded shrink-0 ${
                           isResolvable(e) ? "bg-amber-950 text-amber-300" : "bg-rose-950 text-rose-300"
                         }`}
                       >
-                        {c}
+                        {f.label}
                       </span>
                     ))}
                     {!e.eligible && isResolvable(e) && !isOpen && (
@@ -451,6 +498,19 @@ export default function ReorganizePage() {
                           <span className="text-text-secondary">{f.proposed_path}</span>
                         </div>
                       ))}
+                      {!e.eligible && flags.length > 0 && (
+                        <div className="pt-2 border-t border-border-subtle/60">
+                          <div className="text-xs text-text-secondary mb-1">Why</div>
+                          <ul className="space-y-1">
+                            {flags.map((f) => (
+                              <li key={f.label} className="text-xs text-text-secondary-alt">
+                                <span className={isResolvable(e) ? "text-amber-300" : "text-rose-300"}>{f.label}:</span>{" "}
+                                {f.explanation}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                       {!e.eligible && isResolvable(e) && (
                         <div className="pt-2 border-t border-border-subtle/60">
                           <div className="text-xs text-text-secondary mb-1">Resolve</div>
