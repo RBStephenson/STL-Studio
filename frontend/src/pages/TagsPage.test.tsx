@@ -42,6 +42,13 @@ describe("TagsPage (#165)", () => {
     expect(await screen.findByText("figure")).toBeInTheDocument();
   });
 
+  it("shows the empty state when there are no tags at all (STUDIO-177)", async () => {
+    vi.mocked(api.models.tags).mockResolvedValueOnce([]);
+    renderPage();
+
+    expect(await screen.findByText("No tags yet")).toBeInTheDocument();
+  });
+
   it("shows the shared error state on load failure, with a working Retry", async () => {
     vi.mocked(api.models.tags).mockRejectedValueOnce(new Error("Server unreachable"));
     renderPage();

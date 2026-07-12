@@ -167,7 +167,11 @@ export default function TagsPage() {
             secondaryAction={{ label: "Clear filter", onClick: () => setSearch("") }}
           />
         ) : (
-          <p className="text-center text-text-secondary-alt py-16">No tags found.</p>
+          <EmptyState
+            icon={Tag}
+            heading="No tags yet"
+            body="Tags you add to models will show up here, with a running count of how many models use each one."
+          />
         )
       ) : (
         <div className="flex flex-col gap-1">
