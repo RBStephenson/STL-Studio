@@ -172,7 +172,6 @@ export default function ReorganizePage() {
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [applyErr, setApplyErr] = useState<string | null>(null);
   const [lastApply, setLastApply] = useState<ReorganizeApplyResult | null>(null);
-  const seededExpand = useRef(false);
   const { toast } = useToast();
 
   // Scanning is a deliberate, user-triggered action (STUDIO-155) — nothing
@@ -268,19 +267,6 @@ export default function ReorganizePage() {
   useEffect(() => {
     setSelected((prev) => new Set([...prev].filter((id) => eligibleIds.has(id))));
   }, [eligibleIds]);
-
-  // Auto-expand blocked-but-resolvable rows on the first preview so the Resolve
-  // fields are visible without the user having to discover the row is
-  // clickable (STUDIO-170). Only seeds once per mount — later re-previews
-  // (e.g. from typing an override) don't fight a user's manual collapse.
-  useEffect(() => {
-    if (preview && !seededExpand.current) {
-      seededExpand.current = true;
-      setExpanded(new Set(
-        preview.entries.filter((e) => !e.eligible && isResolvable(e)).map((e) => e.model_id),
-      ));
-    }
-  }, [preview]);
 
   const toggle = (id: number) =>
     setExpanded((prev) => {

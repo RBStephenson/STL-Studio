@@ -98,38 +98,42 @@ describe("ReorganizePage", () => {
     expect(await screen.findByText(/Moved 3 file/)).toBeInTheDocument();
   });
 
-  it("shows resolve inputs only on an ineligible row", async () => {
+  it("shows resolve inputs only on an ineligible row, once expanded", async () => {
     render(<ReorganizePage />);
     buildPlan();
-    // Blocked-and-resolvable rows auto-expand (STUDIO-170) — no click needed.
+    await screen.findByText("Mystery");
+    fireEvent.click(screen.getByText("Mystery"));
     expect(await screen.findByLabelText("character for Mystery")).toBeInTheDocument();
     expect(await screen.findByLabelText("scale for Mystery")).toBeInTheDocument();
     // The eligible entry exposes a selection checkbox; the ineligible one doesn't.
     expect(screen.queryByLabelText("Select Mystery")).not.toBeInTheDocument();
   });
 
-  it("auto-expands a blocked, resolvable row on first load", async () => {
+  it("starts every row collapsed on first load (STUDIO-183)", async () => {
     render(<ReorganizePage />);
     buildPlan();
-    expect(await screen.findByLabelText("character for Mystery")).toBeInTheDocument();
-    // No "click to resolve" cue while already expanded.
-    expect(screen.queryByText("click to resolve")).not.toBeInTheDocument();
+    await screen.findByText("Mystery");
+    // Resolve fields aren't shown until the row is clicked open.
+    expect(screen.queryByLabelText("character for Mystery")).not.toBeInTheDocument();
+    // A blocked-resolvable row shows the resolve cue by default since it starts collapsed.
+    expect(screen.getByText("click to resolve")).toBeInTheDocument();
   });
 
-  it("shows a resolve cue on a blocked row collapsed by the user", async () => {
+  it("expands a blocked row on click to reveal the resolve cue's fields", async () => {
     render(<ReorganizePage />);
     buildPlan();
-    await screen.findByLabelText("character for Mystery");
-    // Collapse the auto-expanded row.
+    await screen.findByText("Mystery");
     fireEvent.click(screen.getByText("Mystery"));
-    expect(await screen.findByText("click to resolve")).toBeInTheDocument();
-    expect(screen.queryByLabelText("character for Mystery")).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("character for Mystery")).toBeInTheDocument();
+    expect(screen.queryByText("click to resolve")).not.toBeInTheDocument();
   });
 
   it("re-fetches via overrides endpoint when a resolution is entered", async () => {
     reorg.previewWithOverrides.mockResolvedValue(previewFixture());
     render(<ReorganizePage />);
     buildPlan();
+    await screen.findByText("Mystery");
+    fireEvent.click(screen.getByText("Mystery"));
     fireEvent.change(await screen.findByLabelText("character for Mystery"), {
       target: { value: "Harley" },
     });
@@ -149,6 +153,7 @@ describe("ReorganizePage keeps a resolved row visible in its tab (STUDIO-182)", 
 
     fireEvent.click(screen.getByRole("button", { name: "Blocked" }));
     expect(screen.getByText("Mystery")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Mystery"));
 
     reorg.previewWithOverrides.mockResolvedValue({
       ...previewFixture(),
@@ -213,6 +218,7 @@ describe("ReorganizePage loading indicator (STUDIO-165)", () => {
     render(<ReorganizePage />);
     buildPlan();
     await screen.findByText("Joker Bust");
+    fireEvent.click(screen.getByText("Mystery"));
 
     let resolveOverride: (v: unknown) => void;
     reorg.previewWithOverrides.mockReturnValue(
@@ -422,7 +428,8 @@ describe("ReorganizePage error explanations (STUDIO-162)", () => {
     render(<ReorganizePage />);
     buildPlan();
     await screen.findByText("Mystery");
-    // Blocked-resolvable rows auto-expand (STUDIO-170); Locked Model needs a click.
+    // All rows start collapsed (STUDIO-183) — click both open.
+    fireEvent.click(screen.getByText("Mystery"));
     fireEvent.click(screen.getByText("Locked Model"));
 
     expect(screen.getAllByText("Why")).toHaveLength(2);
