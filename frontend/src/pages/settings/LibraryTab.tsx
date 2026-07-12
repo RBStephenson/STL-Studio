@@ -171,13 +171,6 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
     <div>
       <FlashBanner success={success} error={error} />
 
-      <div className="flex justify-end mb-2">
-        <div className="flex rounded border border-border overflow-hidden text-xs">
-          <span className={`px-3 py-1.5 ${!scanning ? "bg-accent-end text-white" : "text-text-secondary"}`}>Content</span>
-          <span className={`px-3 py-1.5 ${scanning ? "bg-accent-end text-white" : "text-text-secondary"}`}>Scanning</span>
-        </div>
-      </div>
-
       <div style={scanning ? { opacity: 0.45, pointerEvents: "none" } : undefined}>
 
       {/* Add new root */}

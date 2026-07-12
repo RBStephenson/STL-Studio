@@ -71,13 +71,13 @@ describe("LibraryTab filename slugify setting", () => {
   });
 });
 
-describe("LibraryTab scan state switcher", () => {
+describe("LibraryTab scan-running dim state", () => {
   beforeEach(() => {
     settings = mkSettings();
     vi.clearAllMocks();
   });
 
-  it("shows Content and dims nothing while no scan is running", async () => {
+  it("dims nothing while no scan is running", async () => {
     scanStatusMock.mockResolvedValue({ running: false });
     renderTab();
     expect(await screen.findByText("Add a Folder")).toBeVisible();
