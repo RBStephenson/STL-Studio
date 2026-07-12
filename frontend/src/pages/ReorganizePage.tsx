@@ -57,7 +57,13 @@ const KIND_LABEL: Record<ReorganizeMoveKind, string> = {
   merge: "merge",
 };
 
-function matchesFilter(e: ReorganizeEntry, tab: FilterTab): boolean {
+// A row the user is actively resolving via an override stays visible in
+// whatever tab they're on, even once the override makes it eligible and it
+// would otherwise fall out of that tab (e.g. Blocked) — otherwise the row
+// vanishes the moment it becomes selectable and the user never sees the
+// checkbox appear (STUDIO-182).
+function matchesFilter(e: ReorganizeEntry, tab: FilterTab, hasOverride: boolean): boolean {
+  if (hasOverride) return true;
   switch (tab) {
     case "all": return true;
     // Only entries that will actually move on Apply right now — a move-kind
@@ -214,8 +220,8 @@ export default function ReorganizePage() {
   }, [started, template, overrides, hasOverrides, runToken]);
 
   const visible = useMemo(
-    () => preview?.entries.filter((e) => matchesFilter(e, tab)) ?? [],
-    [preview, tab],
+    () => preview?.entries.filter((e) => matchesFilter(e, tab, Boolean(overrides[e.model_id]))) ?? [],
+    [preview, tab, overrides],
   );
 
   const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
