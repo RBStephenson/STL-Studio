@@ -13,6 +13,7 @@ relying on it would silently disable case-collision detection there.
 """
 import os
 import re
+import time
 import unicodedata
 from dataclasses import dataclass, field
 
@@ -131,6 +132,39 @@ def _stat_file(path: str) -> tuple[int, int, bool, bool]:
         return st.st_size, st.st_mtime_ns, is_link, False
     except OSError:
         return 0, 0, False, True
+
+
+# Preview-only stat cache (STUDIO-187): the Reorganize page re-previews the
+# WHOLE manifest on every resolved-field edit (collision detection is
+# inherently global — fixing one row can newly collide with an untouched
+# one, so every proposed_dir must be recomputed and compared). But a file's
+# on-disk stat never depends on override values — typing a character name
+# doesn't touch the file — so re-stat'ing every file in the library on every
+# keystroke is pure waste. Cached here by path alone, no override/model
+# tracking needed. A short TTL (not a manifest-scoped invalidation) is the
+# safety net for the rare case a file actually changes on disk mid-edit;
+# Phase 2's apply-time drift check (reorganize_apply.py) has its own,
+# uncached stat call and is the real safety boundary — this cache only
+# feeds the read-only preview.
+_STAT_CACHE_TTL = 5.0  # seconds
+_stat_cache: dict[str, tuple[float, int, int, bool, bool]] = {}  # path -> (cached_at, size, mtime_ns, is_symlink, missing)
+
+
+def _clear_stat_cache() -> None:
+    """Test/apply hook — drop every cached entry so the next _stat_file_cached
+    call re-stats from disk."""
+    _stat_cache.clear()
+
+
+def _stat_file_cached(path: str) -> tuple[int, int, bool, bool]:
+    """TTL-cached wrapper around _stat_file — see _stat_cache's comment."""
+    now = time.monotonic()
+    cached = _stat_cache.get(path)
+    if cached is not None and now - cached[0] < _STAT_CACHE_TTL:
+        return cached[1], cached[2], cached[3], cached[4]
+    result = _stat_file(path)
+    _stat_cache[path] = (now, *result)
+    return result
 
 
 def _scale_value(auto_tags: list | None) -> str:
@@ -360,7 +394,7 @@ def _build_entry(
     is_symlink = False
     missing_files_on_disk = False
     for f in m.stl_files:
-        size, mtime_ns, link, is_missing = _stat_file(f.path)
+        size, mtime_ns, link, is_missing = _stat_file_cached(f.path)
         is_symlink = is_symlink or link
         missing_files_on_disk = missing_files_on_disk or is_missing
         src_dirs.add(_key(_parent(f.path)))
@@ -418,7 +452,7 @@ def _build_entry(
                 image_candidates.append(p)
 
     for p in image_candidates:
-        size, mtime_ns, link, is_missing = _stat_file(p)
+        size, mtime_ns, link, is_missing = _stat_file_cached(p)
         if is_missing:
             continue
         is_symlink = is_symlink or link
