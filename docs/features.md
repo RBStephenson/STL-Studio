@@ -758,11 +758,14 @@ off to keep each segment's original casing and spacing.
   it; this isn't something you resolve from the Reorganize page itself. Don't
   confuse this with the unrelated **unorganized** indicator mentioned above —
   a locked chip blocks Reorganize outright, while an unorganized model is
-  exactly what Reorganize exists to fix.
+  exactly what Reorganize exists to fix. Resolvable and unresolvable rows are
+  color-distinguished in the preview, and each blocked row explains why it
+  can't be reorganized.
 - **Resolve flagged rows.** Expand an ineligible row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an
   over-long/reserved name. The preview regenerates as you type.
-- **Apply.** Tick the eligible rows and **Apply**. The app verifies each file
+- **Apply.** Tick the eligible rows — or use **Select all eligible** to select
+  every resolvable row in one click — and **Apply**. The app verifies each file
   hasn't changed since the preview (aborting the whole batch on any drift), moves
   files safely across drives, and repaths the index — packs and manual character
   groupings are carried along, not orphaned. A model's own gallery images

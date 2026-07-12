@@ -235,7 +235,7 @@ docker run --rm --workdir /app \
   -v "$(pwd)/backend:/app" \
   -v "$(pwd)/packaging:/packaging" \
   stl-inventory-backend:latest \
-  sh -c "pip install -q pytest==9.0.3 pytest-cov==7.1.0 && pytest tests/ -q --tb=short"
+  sh -c "pip install -q pytest==9.1.1 pytest-cov==7.1.0 && pytest tests/ -q --tb=short"
 ```
 
 Every PR to `main` (and every push to `main`) also runs the suite via the **Tests**
