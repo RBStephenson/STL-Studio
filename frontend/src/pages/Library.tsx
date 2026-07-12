@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useLocation, Link } from "react-router-dom";
-import { AlertTriangle, FolderPlus, ArrowRight, Layers, Keyboard } from "lucide-react";
+import { AlertTriangle, FolderPlus, ArrowRight, Layers, Keyboard, FolderTree, ChevronDown, RefreshCw } from "lucide-react";
 import {
   PointerSensor, KeyboardSensor, useSensor, useSensors,
   DragStartEvent, DragEndEvent, Announcements,
@@ -60,6 +60,19 @@ export default function Library() {
   const pageSize = settings.library_page_size;
 
   const scrollRestoredRef = useRef(false);
+
+  // "Library Tools" dropdown (Reorganize Library / Rescan All Folders) — moved
+  // here from the Creators toolbar since it's library-wide, not creator-scoped.
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) setToolsOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [toolsOpen]);
 
   const modelsQuery = useLibraryModels(listParams);
   // Memoized so the array ref is stable across renders — several callbacks/effects
@@ -442,7 +455,33 @@ export default function Library() {
 
         {/* Toolbar */}
         <div className="flex items-center justify-end gap-2.5 mb-4.5">
-          <label className="flex items-center gap-2 text-sm text-text-muted mr-auto sm:mr-0">
+          <div ref={toolsRef} className="relative mr-auto sm:mr-0">
+            <button
+              onClick={() => setToolsOpen((v) => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt2 text-sm transition-colors"
+            >
+              <FolderTree size={14} /> Library Tools <ChevronDown size={12} />
+            </button>
+            {toolsOpen && (
+              <div className="absolute top-[calc(100%+6px)] left-0 z-20 w-56 bg-panel border border-border-subtle rounded-lg shadow-xl p-1.5 flex flex-col">
+                {settings.reorganize_enabled && (
+                  <button
+                    onClick={() => { setToolsOpen(false); navigate("/reorganize"); }}
+                    className="flex items-center gap-2 px-2.5 py-2 rounded text-sm text-text-primary-alt2 hover:bg-panel-secondary transition-colors text-left"
+                  >
+                    <FolderTree size={14} className="text-indigo-400" /> Reorganize Library
+                  </button>
+                )}
+                <button
+                  onClick={() => setToolsOpen(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded text-sm text-text-primary-alt2 hover:bg-panel-secondary transition-colors text-left"
+                >
+                  <RefreshCw size={14} /> Rescan All Folders
+                </button>
+              </div>
+            )}
+          </div>
+          <label className="flex items-center gap-2 text-sm text-text-muted">
             Sort
             <select
               aria-label="Sort models"
