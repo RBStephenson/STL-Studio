@@ -402,3 +402,78 @@ describe("ReorganizePage error explanations (STUDIO-162)", () => {
     expect(screen.getByText(/locked and won't be touched by Reorganize/)).toBeInTheDocument();
   });
 });
+
+describe("ReorganizePage pagination (ADDENDUM §6)", () => {
+  function manyEligiblePreview(count: number) {
+    return {
+      manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
+      generated_at: "now",
+      entries: Array.from({ length: count }, (_, i) =>
+        entry({ model_id: i + 1, model_name: `Model ${i + 1}`, eligible: true })),
+      stats: { ...STATS, total: count, eligible: count, moves_needed: count, blocked: 0, unclassifiable: 0 },
+    };
+  }
+
+  it("shows only the first page (default 20) and a correct footer count", async () => {
+    reorg.preview.mockResolvedValue(manyEligiblePreview(45));
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Model 1");
+
+    expect(screen.getByText("Showing 1–20 of 45")).toBeInTheDocument();
+    expect(screen.getByText("Model 20")).toBeInTheDocument();
+    expect(screen.queryByText("Model 21")).not.toBeInTheDocument();
+  });
+
+  it("advances to the next page and shows the remainder", async () => {
+    reorg.preview.mockResolvedValue(manyEligiblePreview(45));
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Model 1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+
+    expect(screen.getByText("Showing 21–40 of 45")).toBeInTheDocument();
+    expect(screen.getByText("Model 21")).toBeInTheDocument();
+    expect(screen.queryByText("Model 1")).not.toBeInTheDocument();
+  });
+
+  it("resets to page 1 when the page size changes", async () => {
+    reorg.preview.mockResolvedValue(manyEligiblePreview(45));
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Model 1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.getByText("Showing 21–40 of 45")).toBeInTheDocument();
+
+    // 45 items at 50/page fits on one page — footer disappears, and page 1's
+    // rows (including the earlier ones page 2 hid) are all visible again.
+    fireEvent.click(screen.getByRole("button", { name: "50" }));
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
+    expect(screen.getByText("Model 1")).toBeInTheDocument();
+    expect(screen.getByText("Model 45")).toBeInTheDocument();
+  });
+
+  it("resets to page 1 when switching filter tabs", async () => {
+    reorg.preview.mockResolvedValue(manyEligiblePreview(45));
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Model 1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.getByText("Showing 21–40 of 45")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Already In Place" }));
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByText("Showing 1–20 of 45")).toBeInTheDocument();
+  });
+
+  it("does not render a pagination footer when everything fits on one page", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    expect(screen.queryByRole("button", { name: "Next page" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
+  });
+});

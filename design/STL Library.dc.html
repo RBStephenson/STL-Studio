@@ -493,7 +493,7 @@
 
     <div style="display:flex; gap:4px; border-bottom:1px solid #17181d; flex-wrap:wrap;">
       <sc-for list="{{ reorgTabs }}" as="t" hint-placeholder-count="6">
-        <span style="padding:9px 13px; font-size:13px; border-bottom:2px solid {{ t.borderColor }}; color:{{ t.color }}; margin-bottom:-1px;">{{ t.label }}</span>
+        <span onClick="{{ t.onClick }}" style="padding:9px 13px; font-size:13px; border-bottom:2px solid {{ t.borderColor }}; color:{{ t.color }}; margin-bottom:-1px; cursor:pointer;">{{ t.label }}</span>
       </sc-for>
     </div>
 
@@ -528,6 +528,32 @@
           </sc-if>
         </div>
       </sc-for>
+    </div>
+
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:14px;">
+        <span style="font-size:12px; color:#5c6070;">Showing {{ reorgRangeLabel }}</span>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span style="font-size:11.5px; color:#5c6070;">Per page</span>
+          <div style="display:flex; gap:3px; padding:3px; background:#131419; border:1px solid #1a1b21; border-radius:8px;">
+            <sc-for list="{{ reorgPageSizeOptions }}" as="ps" hint-placeholder-count="3">
+              <button onClick="{{ ps.onClick }}" style="padding:5px 10px; border-radius:6px; border:none; font-size:11.5px; cursor:pointer; background:{{ ps.bg }}; color:{{ ps.color }};">{{ ps.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:4px;">
+        <button onClick="{{ reorgPrevPage }}" disabled="{{ reorgPrevDisabled }}" style="padding:6px 11px; border-radius:7px; background:#181a20; border:1px solid #1c1e24; color:#c3c5cc; font-size:12.5px; cursor:pointer; opacity:{{ reorgPrevOpacity }};">‹ Prev</button>
+        <sc-for list="{{ reorgPageItems }}" as="pg" hint-placeholder-count="3">
+          <sc-if value="{{ pg.ellipsis }}" hint-placeholder-val="{{ false }}">
+            <span style="padding:6px 6px; font-size:12.5px; color:#5c6070;">…</span>
+          </sc-if>
+          <sc-if value="{{ pg.isPage }}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{ pg.onClick }}" style="min-width:30px; padding:6px 9px; border-radius:7px; background:{{ pg.bg }}; border:1px solid #1c1e24; color:{{ pg.color }}; font-size:12.5px; cursor:pointer;">{{ pg.label }}</button>
+          </sc-if>
+        </sc-for>
+        <button onClick="{{ reorgNextPage }}" disabled="{{ reorgNextDisabled }}" style="padding:6px 11px; border-radius:7px; background:#181a20; border:1px solid #1c1e24; color:#c3c5cc; font-size:12.5px; cursor:pointer; opacity:{{ reorgNextOpacity }};">Next ›</button>
+      </div>
     </div>
 
     <div style="display:flex; align-items:center; gap:12px; padding-top:6px; flex-wrap:wrap;">
@@ -1438,7 +1464,7 @@
           </button>
           <sc-if value="{{ libraryToolsOpen }}" hint-placeholder-val="{{ false }}">
           <div style="position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:220px; background:#15161b; border:1px solid #23252d; border-radius:10px; box-shadow:0 12px 30px -8px rgba(0,0,0,.6); padding:6px; display:flex; flex-direction:column;">
-            <sc-if value="{{ reorganizeEnabled }}" hint-placeholder-val="{{ false }}">
+            <sc-if value="{{ reorganizeEnabled }}" hint-placeholder-val="{{ true }}">
             <button onClick="{{ goReorganize }}" style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:7px; background:none; border:none; color:#dcdde2; font-size:13px; text-align:left; cursor:pointer;" style-hover="background:#1e2028;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/></svg>
               Reorganize Library
@@ -2811,8 +2837,8 @@ class Component extends DCLogic {
         },
       };
     });
-    const reorganizeEnabled = this.state.reorganizeEnabled ?? false;
-    const toggleReorganizeEnabled = () => this.setState(s => ({ reorganizeEnabled: !(s.reorganizeEnabled ?? false) }));
+    const reorganizeEnabled = this.state.reorganizeEnabled ?? true;
+    const toggleReorganizeEnabled = () => this.setState(s => ({ reorganizeEnabled: !(s.reorganizeEnabled ?? true) }));
     const libraryToolsOpen = !!this.state.libraryToolsOpen;
     const toggleLibraryTools = () => this.setState(s => ({ libraryToolsOpen: !s.libraryToolsOpen }));
     const goReorganize = () => {
@@ -2944,6 +2970,7 @@ class Component extends DCLogic {
     const reorgIsError = reorgView === "error";
     const startReorgScan = () => {
       setReorgView("scanning");
+      this.setState({ reorgPage: 0, reorgTab: "all" });
       setTimeout(() => {
         if (this.state.reorgView === "scanning") { setReorgView("content"); showToast("Reorganize plan ready."); }
       }, 1400);
@@ -2951,25 +2978,76 @@ class Component extends DCLogic {
     const cancelReorgScan = () => setReorgView("idle");
     const reorgStateBtn = (v, label) => ({ v, label, bg: reorgView === v ? "#4f46e5" : "#131419", color: reorgView === v ? "#fff" : "#6b7080", onClick: () => setReorgView(v) });
     const reorgStateOptions = [reorgStateBtn("idle", "Idle"), reorgStateBtn("scanning", "Scanning"), reorgStateBtn("content", "Content"), reorgStateBtn("error", "Error")];
-    const reorgTabLabels = ["All", "Moves", "Collisions", "Unclassifiable", "Blocked", "Already In Place"];
-    const reorgTabs = reorgTabLabels.map((label, i) => ({
-      label, borderColor: i === 0 ? "#6366f1" : "transparent", color: i === 0 ? "#f4f4f6" : "#6b7080",
-    }));
-    const reorgEntryData = [
-      { kind: "move", name: "Storm Titan", dir: "Nomad Sculpts/Storm Titan/Storm Titan", chip: null, checked: true, canSelect: true },
-      { kind: "rename", name: "ranger_elf_final", dir: "Dark Anvil/Ranger Elf/Ranger Elf", chip: null, checked: true, canSelect: true },
-      { kind: "in place", name: "Crystal Sentinel", dir: "Titan Forge/Crystal Sentinel/Crystal Sentinel", chip: null, checked: false, canSelect: false },
-      { kind: "move", name: "war_chief(2)_COPY", dir: "Loot Studios/War Chief/War Chief", chip: "collision: name", checked: false, canSelect: true, expanded: true,
-        oldPath: "/inbox/war_chief(2)_COPY", newPath: "/Loot Studios/War Chief/War Chief" },
-      { kind: "move", name: "unsorted_mesh_04", dir: "—", chip: "unclassifiable", checked: false, canSelect: true },
-      { kind: "move", name: "necro_priest v2", dir: "Dark Anvil/Necro Priest/Necro Priest", chip: null, checked: true, canSelect: true },
+    const reorgTabDefs = [
+      { label: "All", cat: "all" },
+      { label: "Moves", cat: "move" },
+      { label: "Collisions", cat: "collision" },
+      { label: "Unclassifiable", cat: "unclassifiable" },
+      { label: "Blocked", cat: "blocked" },
+      { label: "Already In Place", cat: "in place" },
     ];
-    const reorgEntries = reorgEntryData.map(e => ({
+    const reorgTab = this.state.reorgTab || "all";
+    const setReorgTab = (cat) => this.setState({ reorgTab: cat, reorgPage: 0 });
+    const reorgTabs = reorgTabDefs.map(t => ({
+      label: t.label,
+      borderColor: reorgTab === t.cat ? "#6366f1" : "transparent",
+      color: reorgTab === t.cat ? "#f4f4f6" : "#6b7080",
+      onClick: () => setReorgTab(t.cat),
+    }));
+    const creatorsPool = ["Nomad Sculpts", "Dark Anvil", "Titan Forge", "Loot Studios", "Ironclad Miniatures", "Wyrmwood Forge"];
+    const namesPool = [
+      "Storm Titan", "Ranger Elf", "Crystal Sentinel", "War Chief", "Necro Priest", "Frost Warden",
+      "Ember Drake", "Sky Corsair", "Iron Golem", "Moon Priestess", "Bone Reaver", "Star Seer",
+      "Thorn Druid", "Void Stalker", "Glass Knight", "Ash Wanderer", "Coral Warlock", "Grim Herald",
+    ];
+    const reorgEntryData = [];
+    for (let i = 0; i < 143; i++) {
+      const creator = creatorsPool[i % creatorsPool.length];
+      const base = namesPool[i % namesPool.length];
+      const name = i < namesPool.length ? base : `${base} v${Math.floor(i / namesPool.length) + 1}`;
+      const bucket = i % 17;
+      let kind = "move", chip = null, canSelect = true, checked = true, expanded = false, oldPath, newPath, cat = "move";
+      if (bucket === 0) { kind = "in place"; checked = false; canSelect = false; cat = "in place"; }
+      else if (bucket === 1) { chip = "collision: name"; checked = false; cat = "collision"; oldPath = `/inbox/${name.toLowerCase().replace(/ /g,"_")}(2)_COPY`; newPath = `/${creator}/${name}/${name}`; }
+      else if (bucket === 2) { chip = "unclassifiable"; checked = false; cat = "unclassifiable"; }
+      else if (bucket === 3) { chip = "blocked: in use"; checked = false; cat = "blocked"; }
+      else if (bucket === 4) { kind = "rename"; }
+      reorgEntryData.push({ kind, name, dir: cat === "unclassifiable" ? "—" : `${creator}/${name}/${name}`, chip, checked, canSelect, expanded, oldPath, newPath, cat });
+    }
+    const reorgFilteredEntries = reorgTab === "all" ? reorgEntryData : reorgEntryData.filter(e => e.cat === reorgTab);
+    const REORG_PAGE_SIZE = this.state.reorgPageSize || 20;
+    const setReorgPageSize = (n) => this.setState({ reorgPageSize: n, reorgPage: 0 });
+    const reorgPageSizeOptions = [20, 50, 100].map(n => ({
+      n, label: String(n), bg: REORG_PAGE_SIZE === n ? "#4f46e5" : "#181a20", color: REORG_PAGE_SIZE === n ? "#fff" : "#c3c5cc",
+      onClick: () => setReorgPageSize(n),
+    }));
+    const reorgTotalPages = Math.max(1, Math.ceil(reorgFilteredEntries.length / REORG_PAGE_SIZE));
+    const reorgPage = Math.min(this.state.reorgPage || 0, reorgTotalPages - 1);
+    const setReorgPage = (p) => this.setState({ reorgPage: Math.max(0, Math.min(p, reorgTotalPages - 1)) });
+    const reorgPageStart = reorgPage * REORG_PAGE_SIZE;
+    const reorgEntries = reorgFilteredEntries.slice(reorgPageStart, reorgPageStart + REORG_PAGE_SIZE).map(e => ({
       ...e,
       borderColor: e.chip ? "rgba(194,65,12,.4)" : "#1a1b21",
       rowBg: e.chip ? "rgba(154,52,18,.08)" : "#131419",
       expanded: !!e.expanded,
     }));
+    const reorgRangeLabel = reorgFilteredEntries.length === 0 ? "0 of 0" : `${reorgPageStart + 1}–${Math.min(reorgPageStart + REORG_PAGE_SIZE, reorgFilteredEntries.length)} of ${reorgFilteredEntries.length}`;
+    const reorgPageNums = Array.from({ length: reorgTotalPages }, (_, i) => i).filter(p => p === 0 || p === reorgTotalPages - 1 || Math.abs(p - reorgPage) <= 1);
+    const reorgPageItems = [];
+    let reorgLastP = -1;
+    for (const p of reorgPageNums) {
+      if (reorgLastP !== -1 && p - reorgLastP > 1) reorgPageItems.push({ ellipsis: true, isPage: false });
+      reorgPageItems.push({ ellipsis: false, isPage: true, num: p, label: String(p + 1),
+        bg: p === reorgPage ? "#4f46e5" : "#181a20", color: p === reorgPage ? "#fff" : "#c3c5cc",
+        onClick: () => setReorgPage(p) });
+      reorgLastP = p;
+    }
+    const reorgPrevPage = () => setReorgPage(reorgPage - 1);
+    const reorgNextPage = () => setReorgPage(reorgPage + 1);
+    const reorgPrevDisabled = reorgPage === 0;
+    const reorgNextDisabled = reorgPage >= reorgTotalPages - 1;
+    const reorgPrevOpacity = reorgPrevDisabled ? 0.4 : 1;
+    const reorgNextOpacity = reorgNextDisabled ? 0.4 : 1;
     const helpTopicTitles = [
       "Getting started", "The Library", "Variant grouping", "Model detail", "3D viewer",
       "Thumbnails (image picker)", "Favorites, queue & printed", "Kit Builder",
@@ -3171,6 +3249,7 @@ class Component extends DCLogic {
       queueIsContent, queueIsEmpty, queueIsLoading, queueSkeleton, queueStateOptions,
       importIsIdle, importIsRunning, importIsDone, importIsError, importPhaseOptions,
       variantGroupCards, paints, tagRows, reorgTabs, reorgEntries, helpTopics, guides,
+      reorgRangeLabel, reorgPageItems, reorgPrevPage, reorgNextPage, reorgPrevDisabled, reorgNextDisabled, reorgTotalPages, reorgPrevOpacity, reorgNextOpacity, reorgPageSizeOptions,
       variantGroupIsContent, variantGroupIsLoading, variantGroupIsEmpty, variantGroupStateOptions, variantGroupSkeleton,
       deleteAllArmed, deleteAllTypedValue, deleteAllNotReady, deleteAllClick, deleteAllCancel,
       deleteAllTypeChange, deleteAllConfirmClick, deleteAllLabel, deleteAllBg, deleteAllConfirmBg, deleteAllCursor,
