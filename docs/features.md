@@ -817,6 +817,16 @@ entry has:
   selectors below (e.g. "Ollama Local", "Anthropic Creative").
 - **Type** — `Anthropic` or `OpenAI-compatible` (covers Ollama, LM Studio,
   and any OpenAI-API-compatible endpoint).
+- **URL** — (OpenAI-compatible only) the base URL of the endpoint, e.g.
+  `http://localhost:11434`. Used **exactly as entered** — the app never
+  rewrites `localhost`/`127.0.0.1` to anything else, in Docker or otherwise.
+  If you're running this app in Docker and Ollama (or another endpoint) is on
+  the **host machine** rather than in its own container, enter
+  `http://host.docker.internal:11434` yourself — the bundled
+  `docker-compose.yml` already maps that hostname to the host machine, so it
+  resolves without any extra setup. If Ollama runs in its own container on
+  the same Docker network, use that container's service name instead
+  (e.g. `http://ollama:11434`).
 - **Model** — for Anthropic, a dropdown of supported Claude models; for
   OpenAI-compatible, the app fetches the available model list from the base
   URL automatically when you enter it.

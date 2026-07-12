@@ -90,6 +90,30 @@ project puts them on one network automatically, so the service name works).
 > The production image ignores it — remove it from your compose. Routing is
 > controlled entirely by `BACKEND_ORIGIN`.
 
+### Reaching Ollama (or any service) on the host machine
+
+If Ollama — or any other AI endpoint — runs directly on the machine hosting
+Docker rather than in its own container, the backend container can't reach it
+via `localhost`: `localhost` inside a container means the container itself,
+not the host. Use `host.docker.internal` instead when entering the endpoint's
+**URL** in Settings → AI & Integrations → AI APIs:
+
+```
+http://host.docker.internal:11434
+```
+
+The bundled `docker-compose.yml` already maps that hostname to the host
+machine's IP for you (see the `backend` service's `extra_hosts`), so it
+resolves with no extra setup. The app never rewrites URLs on your behalf —
+whatever you enter (`localhost`, `127.0.0.1`, `host.docker.internal`, a
+container service name, a LAN IP…) is used exactly as typed, so this is
+something you opt into by writing it yourself, not something that happens
+automatically.
+
+If Ollama instead runs in its **own container** on the same Docker network as
+this app, use that container's service name (e.g. `http://ollama:11434`)
+rather than `host.docker.internal`.
+
 ### Behind your own reverse proxy (Nginx Proxy Manager, Traefik, Caddy…)
 
 Point your proxy at the **frontend** container as a single upstream — do **not**

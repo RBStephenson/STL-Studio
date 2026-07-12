@@ -271,8 +271,7 @@ def get_organize_models(url: str = Query(""), db: Session = Depends(get_db)):
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    import re
-    base = re.sub(r"(?i)(https?://)(?:localhost|127\.0\.0\.1)\b", r"\1host.docker.internal", url.rstrip("/"))
+    base = url.rstrip("/")
     try:
         r = httpx.get(f"{base}/v1/models", headers=headers, timeout=10)
         if r.status_code == 200:
@@ -397,8 +396,7 @@ def get_ai_api_config_models(config_id: int, db: Session = Depends(get_db)):
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    import re
-    base = re.sub(r"(?i)(https?://)(?:localhost|127\.0\.0\.1)\b", r"\1host.docker.internal", c.url.rstrip("/"))
+    base = c.url.rstrip("/")
     timeout = c.request_timeout
     try:
         r = httpx.get(f"{base}/v1/models", headers=headers, timeout=timeout)

@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, Lock, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, Lock, Cpu, type LucideIcon,
 } from "lucide-react";
 
 /** A keyboard key, styled like the hints elsewhere in the app. */
@@ -823,6 +823,50 @@ const SECTIONS: Section[] = [
     ),
   },
   {
+    id: "ai-integrations",
+    title: "AI & Integrations",
+    icon: Cpu,
+    body: (
+      <>
+        <p>
+          <strong>Settings → AI & Integrations → AI APIs</strong> is a list of named
+          AI connections — add as many as you need (different models, local
+          Ollama instances, or separate keys for different purposes). Pick a{" "}
+          <strong>Type</strong>: <strong>Anthropic</strong>, or{" "}
+          <strong>OpenAI-compatible</strong> (covers Ollama, LM Studio, and any
+          OpenAI-API-compatible endpoint).
+        </p>
+        <p>
+          For an OpenAI-compatible connection, the <strong>URL</strong> field is
+          used <strong>exactly as you type it</strong> — the app never rewrites{" "}
+          <code>localhost</code> or <code>127.0.0.1</code> to anything else, in
+          Docker or otherwise. If you're running this app in Docker and Ollama
+          (or another endpoint) is on the <strong>host machine</strong> rather
+          than in its own container, enter{" "}
+          <code>http://host.docker.internal:11434</code> yourself — the bundled{" "}
+          <code>docker-compose.yml</code> already maps that hostname to the host
+          machine, so it resolves without any extra setup. If Ollama runs in its{" "}
+          <strong>own container</strong> on the same Docker network, use that
+          container's service name instead (e.g. <code>http://ollama:11434</code>).
+        </p>
+        <p>
+          <strong>Timeout</strong> defaults to 10s, which suits a local Ollama. A
+          remote Ollama loading a model cold can take much longer — raise this
+          per-connection, up to 600s. <strong>API key</strong> is stored
+          encrypted server-side and is optional for Ollama and similar local
+          endpoints.
+        </p>
+        <p>
+          <strong>AI Functions</strong> controls which AI features are active and
+          which named connection each one uses — AI Guide Drafts and AI Naming
+          &amp; Organizing. <strong>Metadata</strong> covers third-party
+          integrations (Cults3D, MyMiniFactory) that enrich your library with
+          creator details and thumbnails.
+        </p>
+      </>
+    ),
+  },
+  {
     id: "reorganize",
     title: "Reorganize library",
     icon: FolderSync,
@@ -933,6 +977,16 @@ const SECTIONS: Section[] = [
         <p>Auto-tags come from folder and file names. Check the scale appears in a recognizable form (<code>1:6</code>, <code>1_6</code>, <code>75mm</code>), then rescan that creator. You can always add or remove tags yourself.</p>
         <p className="font-medium text-text-primary-alt mt-4">The scan seems stuck or slow</p>
         <p>The first full scan of a large library takes a while, and a slow external/USB drive or NAS is limited by that drive's speed. You can <strong>Cancel</strong> at any time — already-indexed models are kept.</p>
+        <p className="font-medium text-text-primary-alt mt-4">Can't reach Ollama (or another AI endpoint) running in Docker</p>
+        <p>
+          The app never rewrites the URL you enter under{" "}
+          <a href="#ai-integrations">AI & Integrations</a> — if Ollama runs on
+          the host machine and you typed <code>localhost</code> or{" "}
+          <code>127.0.0.1</code>, that resolves to the container itself, not
+          your host. Use <code>http://host.docker.internal:11434</code>
+          instead; the bundled <code>docker-compose.yml</code> already maps
+          that hostname for you.
+        </p>
       </>
     ),
   },
