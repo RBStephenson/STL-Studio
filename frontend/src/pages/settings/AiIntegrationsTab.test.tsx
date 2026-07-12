@@ -83,6 +83,21 @@ describe("AiIntegrationsTab – add an AI API config", () => {
   });
 });
 
+describe("AiIntegrationsTab – Anthropic model list (STUDIO-175)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("offers Sonnet 5 in the model dropdown for a new Anthropic API", async () => {
+    const { api } = await import("../../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
+
+    renderTab();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add API" }));
+
+    expect(screen.getByRole("option", { name: "Sonnet 5 — balanced" })).toBeInTheDocument();
+  });
+});
+
 describe("AiIntegrationsTab – MyMiniFactory key", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 

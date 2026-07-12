@@ -36,6 +36,7 @@ const EMPTY_DRAFT: DraftConfig = {
 
 const ANTHROPIC_MODELS = [
   { value: "claude-opus-4-8", label: "Opus 4.8 — most capable" },
+  { value: "claude-sonnet-5", label: "Sonnet 5 — balanced" },
   { value: "claude-sonnet-4-6", label: "Sonnet 4.6 — balanced" },
   { value: "claude-haiku-4-5", label: "Haiku 4.5 — fastest" },
 ];
