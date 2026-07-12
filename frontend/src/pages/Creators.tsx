@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { Users, Zap, X, RefreshCw, Loader2, Plus } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Users, Zap, X, RefreshCw, Loader2, Plus, FolderTree, ChevronDown } from "lucide-react";
 import { api, Creator, ScanStatus } from "../api/client";
 import StorefrontEnrich from "../components/StorefrontEnrich";
 import RefreshEnrich from "../components/RefreshEnrich";
 import CreateCreatorModal from "../components/CreateCreatorModal";
 import { useToast } from "../context/ToastContext";
+import { useAppSettings } from "../context/AppSettingsContext";
 import ErrorState from "../components/ErrorState";
 import EmptyState from "../components/EmptyState";
 import { errMsg } from "../utils/err";
@@ -19,7 +20,20 @@ export default function Creators() {
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const { settings } = useAppSettings();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) setToolsOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [toolsOpen]);
 
   const loadCreators = () => {
     setLoading(true);
@@ -76,6 +90,32 @@ export default function Creators() {
         </div>
         <div className="flex items-center gap-2">
           <RefreshEnrich scopeLabel="your whole library" />
+          <div ref={toolsRef} className="relative">
+            <button
+              onClick={() => setToolsOpen((v) => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt2 text-sm transition-colors"
+            >
+              <FolderTree size={14} /> Library Tools <ChevronDown size={12} />
+            </button>
+            {toolsOpen && (
+              <div className="absolute top-[calc(100%+6px)] left-0 z-20 w-56 bg-panel border border-border-subtle rounded-lg shadow-xl p-1.5 flex flex-col">
+                {settings.reorganize_enabled && (
+                  <button
+                    onClick={() => { setToolsOpen(false); navigate("/reorganize"); }}
+                    className="flex items-center gap-2 px-2.5 py-2 rounded text-sm text-text-primary-alt2 hover:bg-panel-secondary transition-colors text-left"
+                  >
+                    <FolderTree size={14} className="text-indigo-400" /> Reorganize Library
+                  </button>
+                )}
+                <button
+                  onClick={() => setToolsOpen(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded text-sm text-text-primary-alt2 hover:bg-panel-secondary transition-colors text-left"
+                >
+                  <RefreshCw size={14} /> Rescan All Folders
+                </button>
+              </div>
+            )}
+          </div>
           <div className="flex rounded border border-border overflow-hidden text-xs">
             <button
               onClick={() => setSortBy("name")}

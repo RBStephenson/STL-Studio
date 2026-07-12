@@ -24,6 +24,7 @@ vi.mock("../api/client", () => ({
       addRoot: vi.fn().mockResolvedValue({}),
       updateRoot: vi.fn().mockResolvedValue({}),
       libraries: vi.fn().mockResolvedValue([]),
+      status: vi.fn().mockResolvedValue({ running: false }),
     },
     settings: {
       get: vi.fn().mockResolvedValue({

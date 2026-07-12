@@ -1,5 +1,4 @@
 import { useState, useRef } from "react";
-import { Link } from "react-router-dom";
 import { HardDrive, Plus, Trash2, FolderSearch, FolderTree, RefreshCw } from "lucide-react";
 import { api, ScanRoot } from "../../api/client";
 import FolderPicker from "../../components/FolderPicker";
@@ -7,6 +6,7 @@ import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
 import { errMsg } from "../../utils/err";
 import { useAppSettings } from "../../context/AppSettingsContext";
+import { useScanStatus } from "../../hooks/useScanStatus";
 
 const LAYOUT_SAMPLES: Record<string, string> = {
   "{creator}": "Abe3D",
@@ -56,6 +56,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
   const [reloadingEnv, setReloadingEnv] = useState(false);
   const [templateEdit, setTemplateEdit] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { status: scanStatus } = useScanStatus(onRootsChanged);
+  const scanning = !!scanStatus?.running;
 
   const saveReorganizeTemplate = async () => {
     const next = (templateEdit ?? settings.reorganize_template).trim();
@@ -168,6 +170,15 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
   return (
     <div>
       <FlashBanner success={success} error={error} />
+
+      <div className="flex justify-end mb-2">
+        <div className="flex rounded border border-border overflow-hidden text-xs">
+          <span className={`px-3 py-1.5 ${!scanning ? "bg-accent-end text-white" : "text-text-secondary"}`}>Content</span>
+          <span className={`px-3 py-1.5 ${scanning ? "bg-accent-end text-white" : "text-text-secondary"}`}>Scanning</span>
+        </div>
+      </div>
+
+      <div style={scanning ? { opacity: 0.45, pointerEvents: "none" } : undefined}>
 
       {/* Add new root */}
       <section className="mb-8">
@@ -395,23 +406,13 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           <div>
             <p className="text-sm text-text-primary-alt2">Enable Reorganize Library</p>
             <p className="text-xs text-text-secondary-alt mt-0.5">
-              Off by default. When on, the Reorganize Library tool appears below and
-              can move files on disk to match your template — including import moves.
-              A read-only deployment (e.g. Docker mounts) still can't write regardless.
+              Off by default. When on, "Reorganize Library" appears in the Library
+              Tools menu (Creators toolbar) and can move files on disk to match your
+              template — including import moves. A read-only deployment (e.g. Docker
+              mounts) still can't write regardless.
             </p>
           </div>
         </label>
-
-        {settings.reorganize_enabled && (
-        <Link
-          to="/reorganize"
-          className="flex items-center gap-2 text-sm text-text-primary-alt2 hover:text-indigo-300 bg-panel border border-border-subtle hover:border-indigo-700 rounded-lg px-4 py-3 self-start transition-colors w-fit"
-        >
-          <FolderTree size={15} className="text-indigo-400" />
-          Reorganize Library
-          <span className="text-xs text-text-muted">— preview a tidy layout, resolve flags, then apply</span>
-        </Link>
-        )}
 
         <div className="bg-panel/60 border border-border-subtle rounded-lg px-4 py-3 mt-4 flex flex-col gap-3">
           <div>
@@ -469,6 +470,8 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           </label>
         </div>
       </section>
+
+      </div>
 
       {picking && (
         <FolderPicker
