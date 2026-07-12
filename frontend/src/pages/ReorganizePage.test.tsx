@@ -353,3 +353,52 @@ describe("ReorganizePage resolvable vs unresolvable coloring (STUDIO-161)", () =
     expect(unresolvableRow.className).not.toContain("border-amber-700/60");
   });
 });
+
+describe("ReorganizePage error explanations (STUDIO-162)", () => {
+  function blockedPreview() {
+    return {
+      manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
+      generated_at: "now",
+      entries: [
+        entry({
+          model_id: 2, model_name: "Mystery", eligible: false,
+          unclassifiable: true, missing_fields: ["character"],
+        }),
+        entry({
+          model_id: 4, model_name: "Locked Model", eligible: false,
+          locked: true,
+        }),
+      ],
+      stats: STATS,
+    };
+  }
+
+  it("puts a specific explanation on the chip tooltip", async () => {
+    reorg.preview.mockResolvedValue(blockedPreview());
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Mystery");
+
+    expect(screen.getByText("unclassifiable")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Missing a value for: character"),
+    );
+    expect(screen.getByText("locked")).toHaveAttribute(
+      "title",
+      expect.stringContaining("locked and won't be touched"),
+    );
+  });
+
+  it("lists a Why section with the explanation when the row is expanded", async () => {
+    reorg.preview.mockResolvedValue(blockedPreview());
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Mystery");
+    // Blocked-resolvable rows auto-expand (STUDIO-170); Locked Model needs a click.
+    fireEvent.click(screen.getByText("Locked Model"));
+
+    expect(screen.getAllByText("Why")).toHaveLength(2);
+    expect(screen.getByText(/Missing a value for: character/)).toBeInTheDocument();
+    expect(screen.getByText(/locked and won't be touched by Reorganize/)).toBeInTheDocument();
+  });
+});
