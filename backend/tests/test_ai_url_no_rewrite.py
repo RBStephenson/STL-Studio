@@ -4,8 +4,6 @@ condition. Regression guard for the three call sites that used to do this
 rewrite unconditionally (get_organize_models, get_ai_api_config_models,
 _llm_refine_openai).
 """
-import httpx
-
 from app.models import AiApiConfig
 from app.services import ai_organize
 
