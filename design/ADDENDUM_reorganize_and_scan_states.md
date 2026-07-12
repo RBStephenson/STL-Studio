@@ -107,6 +107,35 @@ Library Tools menu (Creators toolbar)." Implementation is just the existing
 `settings.reorganize_enabled` conditional, moved from wrapping a `<Link>` in
 `LibraryTab.tsx` to wrapping the menu item's render.
 
+## 6. Reorganize Library: paginated results table
+
+**Problem it fixes:** the plan table rendered every proposed move/rename/skip
+in one long unpaginated list — unusable on large libraries (hundreds to
+thousands of entries).
+
+**Change (see updated `data-screen-label="Reorganize Library"` in
+`STL Library.dc.html`, `reorgEntries`/`reorgTabs` logic):**
+- Category tabs (**All / Moves / Collisions / Unclassifiable / Blocked /
+  Already In Place**) are now clickable filters over the full result set —
+  not just a visual label row. Switching tabs resets to page 1.
+- Results are paginated at a **page-size selector: 20 / 50 / 100 per page**
+  (segmented control, same style as the state switcher — active pill
+  `#4f46e5`/white, inactive `#181a20`/`#c3c5cc`). Default 20. Changing page
+  size resets to page 1.
+- Footer row below the table: left side "Showing X–Y of N" (count reflects
+  the *currently filtered* tab, not the whole plan); right side Prev/Next
+  buttons (disabled + dimmed at the ends) plus numbered page buttons with
+  ellipsis collapsing for large page counts (always show first, last, and ±1
+  around current page).
+- Real implementation should paginate/filter server-side once plan size is
+  non-trivial (the mock filters/slices an in-memory array since this is a
+  static prototype) — i.e. `api.reorganize.preview()` should accept
+  `tab`/`category`, `page`, `pageSize` params and return a total count,
+  rather than shipping the whole plan to the client.
+- Apply what's mentioned in item 2 above about keeping "Rebuild Plan"
+  explicit — rebuilding should reset to tab "All", page 1, and whatever page
+  size was last selected.
+
 ## 5b. Toast on scan completion
 
 Added a lightweight toast (bottom-center, auto-dismiss ~3s, `#15161b` panel,

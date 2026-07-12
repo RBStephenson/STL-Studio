@@ -15,8 +15,25 @@ import ReorganizeStatsBar from "../components/reorganize/ReorganizeStatsBar";
 
 const DEFAULT_TEMPLATE = "{creator}/{character}/{title}";
 const DEBOUNCE_MS = 500;
+const PAGE_SIZES = [20, 50, 100] as const;
 
 type FilterTab = "all" | "moves" | "collisions" | "unclassifiable" | "blocked" | "in_place";
+
+/** Page numbers to render, collapsing runs into a single "…" — always keeps
+ *  first, last, and the pages immediately around `current` (ADDENDUM §6). */
+function paginationRange(current: number, total: number): (number | "ellipsis")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set([1, total, current, current - 1, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out: (number | "ellipsis")[] = [];
+  let prev = 0;
+  for (const p of sorted) {
+    if (prev && p - prev > 1) out.push("ellipsis");
+    out.push(p);
+    prev = p;
+  }
+  return out;
+}
 
 // Tabs mix two dimensions: what KIND of change an entry needs (Moves,
 // Already In Place) and WHY it can't proceed yet (Collisions, Unclassifiable,
@@ -135,7 +152,14 @@ export default function ReorganizePage() {
   const [preview, setPreview] = useState<ReorganizePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<FilterTab>("all");
+  const [tab, setTabRaw] = useState<FilterTab>("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
+  // Switching tabs/rebuilding/changing page size always resets to page 1
+  // (ADDENDUM §6) — the row set underneath changed, so a stale page index
+  // would silently show an empty or wrong slice.
+  const setTab = (t: FilterTab) => { setTabRaw(t); setPage(1); };
+  const changePageSize = (size: number) => { setPageSize(size); setPage(1); };
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -153,7 +177,12 @@ export default function ReorganizePage() {
   const [started, setStarted] = useState(false);
   const [runToken, setRunToken] = useState(0);
   const cancelledRef = useRef(false);
-  const runReorgScan = () => { cancelledRef.current = false; setStarted(true); setRunToken((t) => t + 1); };
+  const runReorgScan = () => {
+    cancelledRef.current = false; setStarted(true); setRunToken((t) => t + 1);
+    // Rebuild Plan resets to tab "All", page 1 (ADDENDUM §6) — keeps whatever
+    // page size was last selected.
+    setTabRaw("all"); setPage(1);
+  };
   const cancelReorgScan = () => { cancelledRef.current = true; setLoading(false); setStarted(false); };
 
   const hasOverrides = Object.keys(overrides).length > 0;
@@ -189,17 +218,32 @@ export default function ReorganizePage() {
     [preview, tab],
   );
 
+  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
+  // Clamp when the filtered set shrinks out from under the current page
+  // (e.g. a resolved row moves tabs, or a smaller page size is picked).
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  const paged = useMemo(
+    () => visible.slice((page - 1) * pageSize, page * pageSize),
+    [visible, page, pageSize],
+  );
+  const rangeStart = visible.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, visible.length);
+  const pageNumbers = useMemo(() => paginationRange(page, totalPages), [page, totalPages]);
+
   const eligibleIds = useMemo(
     () => new Set((preview?.entries ?? []).filter((e) => e.eligible && e.kind !== "in_place").map((e) => e.model_id)),
     [preview],
   );
 
-  // Selectable rows in the *current* filter tab (STUDIO-160) — "select all"
-  // only touches what's visible, so switching tabs doesn't silently select
-  // rows the user never saw.
+  // Selectable rows on the *current page* (STUDIO-160, extended for
+  // pagination) — "select all" only touches what's visible on screen, so
+  // switching tabs or pages doesn't silently select rows the user never saw.
   const visibleSelectableIds = useMemo(
-    () => visible.filter((e) => eligibleIds.has(e.model_id)).map((e) => e.model_id),
-    [visible, eligibleIds],
+    () => paged.filter((e) => eligibleIds.has(e.model_id)).map((e) => e.model_id),
+    [paged, eligibleIds],
   );
   const allVisibleSelected =
     visibleSelectableIds.length > 0 && visibleSelectableIds.every((id) => selected.has(id));
@@ -419,6 +463,28 @@ export default function ReorganizePage() {
             ))}
           </div>
 
+          {/* Page-size selector (ADDENDUM §6) */}
+          <div className="flex items-center justify-end gap-2 text-xs text-text-secondary-alt">
+            <span>Per page</span>
+            <div className="flex rounded-lg overflow-hidden border border-border">
+              {PAGE_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  onClick={() => changePageSize(size)}
+                  aria-pressed={pageSize === size}
+                  className={`px-2.5 py-1 text-xs ${
+                    pageSize === size
+                      ? "bg-accent-start text-white"
+                      : "bg-panel-secondary text-text-primary-alt2 hover:text-text-primary"
+                  }`}
+                >
+                  {size}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Manifest table */}
           <div className="space-y-1">
             {visibleSelectableIds.length > 0 && (
@@ -435,7 +501,7 @@ export default function ReorganizePage() {
             {visible.length === 0 && (
               <div className="text-sm text-text-muted py-6 text-center">No models in this view.</div>
             )}
-            {visible.map((e) => {
+            {paged.map((e) => {
               const flags = blockerFlags(e);
               const isOpen = expanded.has(e.model_id);
               const canSelect = eligibleIds.has(e.model_id);
@@ -535,6 +601,57 @@ export default function ReorganizePage() {
               );
             })}
           </div>
+
+          {/* Pagination footer (ADDENDUM §6) — hidden when everything fits on one page */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between flex-wrap gap-2 pt-1 text-xs text-text-secondary-alt">
+              <span>
+                Showing {rangeStart}–{rangeEnd} of {visible.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  aria-label="Previous page"
+                  className="px-2.5 py-1 rounded bg-panel-secondary border border-border text-text-primary-alt2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                {pageNumbers.map((p, i) =>
+                  p === "ellipsis" ? (
+                    <span key={`ellipsis-${i}`} className="px-1.5 text-text-muted">
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setPage(p)}
+                      aria-label={`Page ${p}`}
+                      aria-current={p === page ? "page" : undefined}
+                      className={`px-2.5 py-1 rounded ${
+                        p === page
+                          ? "bg-accent-start text-white"
+                          : "bg-panel-secondary border border-border text-text-primary-alt2 hover:text-text-primary"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ),
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  aria-label="Next page"
+                  className="px-2.5 py-1 rounded bg-panel-secondary border border-border text-text-primary-alt2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 
