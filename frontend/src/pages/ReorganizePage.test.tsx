@@ -258,3 +258,66 @@ describe("ReorganizePage explicit-trigger states (STUDIO-155)", () => {
     await waitFor(() => expect(reorg.preview).toHaveBeenCalledTimes(2));
   });
 });
+
+describe("ReorganizePage select all eligible (STUDIO-160)", () => {
+  function twoEligiblePreview() {
+    return {
+      manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
+      generated_at: "now",
+      entries: [
+        entry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
+        entry({ model_id: 3, model_name: "Batman Bust", eligible: true }),
+        entry({
+          model_id: 2, model_name: "Mystery", eligible: false,
+          unclassifiable: true, missing_fields: ["character"],
+          proposed_dir: "/lib/Abe3D/_Unknown Character/Mystery",
+        }),
+      ],
+      stats: STATS,
+    };
+  }
+
+  it("selects every eligible row in the current tab, then deselects", async () => {
+    reorg.preview.mockResolvedValue(twoEligiblePreview());
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+
+    const selectAll = screen.getByRole("checkbox", { name: /Select all eligible/ });
+    fireEvent.click(selectAll);
+
+    expect(screen.getByLabelText("Select Joker Bust")).toBeChecked();
+    expect(screen.getByLabelText("Select Batman Bust")).toBeChecked();
+    expect(screen.getByRole("button", { name: /Apply 2/ })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: /Deselect all eligible/ })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Deselect all eligible/ }));
+    expect(screen.getByLabelText("Select Joker Bust")).not.toBeChecked();
+    expect(screen.getByLabelText("Select Batman Bust")).not.toBeChecked();
+  });
+
+  it("only selects rows visible in the active filter tab", async () => {
+    reorg.preview.mockResolvedValue(twoEligiblePreview());
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+
+    // Mystery is unclassifiable, not a move — Moves tab should only have
+    // the two eligible move entries, and select-all should stay scoped to them.
+    fireEvent.click(screen.getByRole("button", { name: "Moves" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select all eligible/ }));
+
+    expect(screen.getByLabelText("Select Joker Bust")).toBeChecked();
+    expect(screen.getByLabelText("Select Batman Bust")).toBeChecked();
+    expect(screen.getByRole("button", { name: /Apply 2/ })).toBeEnabled();
+  });
+
+  it("does not show a select-all control when nothing selectable is visible", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+
+    fireEvent.click(screen.getByRole("button", { name: "Unclassifiable" }));
+    expect(screen.queryByRole("checkbox", { name: /select all eligible/i })).not.toBeInTheDocument();
+  });
+});
