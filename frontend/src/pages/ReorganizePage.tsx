@@ -148,6 +148,26 @@ export default function ReorganizePage() {
     [preview],
   );
 
+  // Selectable rows in the *current* filter tab (STUDIO-160) — "select all"
+  // only touches what's visible, so switching tabs doesn't silently select
+  // rows the user never saw.
+  const visibleSelectableIds = useMemo(
+    () => visible.filter((e) => eligibleIds.has(e.model_id)).map((e) => e.model_id),
+    [visible, eligibleIds],
+  );
+  const allVisibleSelected =
+    visibleSelectableIds.length > 0 && visibleSelectableIds.every((id) => selected.has(id));
+  const toggleSelectAllVisible = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleSelectableIds.forEach((id) => next.delete(id));
+      } else {
+        visibleSelectableIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+
   // Drop selections that are no longer eligible after a re-preview.
   useEffect(() => {
     setSelected((prev) => new Set([...prev].filter((id) => eligibleIds.has(id))));
@@ -355,6 +375,17 @@ export default function ReorganizePage() {
 
           {/* Manifest table */}
           <div className="space-y-1">
+            {visibleSelectableIds.length > 0 && (
+              <label className="flex items-center gap-2 text-xs text-text-secondary-alt py-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleSelectAllVisible}
+                  aria-label={allVisibleSelected ? "Deselect all eligible" : "Select all eligible"}
+                />
+                {allVisibleSelected ? "Deselect all eligible" : `Select all eligible (${visibleSelectableIds.length})`}
+              </label>
+            )}
             {visible.length === 0 && (
               <div className="text-sm text-text-muted py-6 text-center">No models in this view.</div>
             )}
