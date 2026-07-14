@@ -933,7 +933,7 @@ export interface GroupScrapeResult {
 // --- Library reorganize, Phase 1 preview (#323) ---
 export type ReorganizeMoveKind = "move" | "rename" | "case_rename" | "in_place" | "merge";
 export type ReorganizeCollisionKind =
-  | "none" | "exact" | "case_only" | "unicode_only" | "legitimate_duplicate";
+  | "none" | "exact" | "case_only" | "unicode_only" | "same_destination";
 
 export interface ReorganizeFileMove {
   stl_file_id: number | null;
@@ -960,6 +960,7 @@ export interface ReorganizeEntry {
   collision: boolean;
   collision_kind: ReorganizeCollisionKind;
   collision_with: number[];
+  suggested_suffix?: string | null;
   unclassifiable: boolean;
   missing_fields: string[];
   over_length: boolean;

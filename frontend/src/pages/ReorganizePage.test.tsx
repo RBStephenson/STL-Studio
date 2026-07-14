@@ -44,7 +44,7 @@ function entry(over: Record<string, unknown>) {
     model_id: 1, model_name: "Joker Bust", files: [], kind: "move",
     proposed_dir: "/lib/Abe3D/Joker/Bust", eligible: true,
     pack_override_paths: [],
-    collision: false, collision_kind: "none", collision_with: [],
+    collision: false, collision_kind: "none", collision_with: [], suggested_suffix: null,
     unclassifiable: false, missing_fields: [], over_length: false,
     reserved_name: false, overlaps_other: false, spans_multiple_dirs: false,
     is_symlink: false, escapes_scan_root: false, missing_files_on_disk: false,
@@ -192,6 +192,35 @@ describe("ReorganizePage", () => {
     await waitFor(() =>
       expect(reorg.previewWithOverrides).toHaveBeenCalledWith(
         expect.objectContaining({ overrides: { 2: { character: "Harley" } } }),
+      ),
+    );
+  });
+
+  it("prefills a collision suffix from the source-folder suggestion", async () => {
+    reorg.preview.mockResolvedValue({
+      ...previewFixture(),
+      entries: [entry({
+        model_id: 2,
+        model_name: "Mystery",
+        eligible: false,
+        collision: true,
+        collision_kind: "same_destination",
+        collision_with: [1],
+        suggested_suffix: "alternative",
+      })],
+    });
+    reorg.previewWithOverrides.mockResolvedValue(previewFixture());
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Mystery");
+    fireEvent.click(screen.getByText("Mystery"));
+
+    fireEvent.click(await screen.findByRole("button", { name: /use suggested suffix: alternative/i }));
+
+    expect(screen.getByLabelText("suffix for Mystery")).toHaveValue("alternative");
+    await waitFor(() =>
+      expect(reorg.previewWithOverrides).toHaveBeenCalledWith(
+        expect.objectContaining({ overrides: { 2: { suffix: "alternative" } } }),
       ),
     );
   });

@@ -763,7 +763,11 @@ off to keep each segment's original casing and spacing.
   can't be reorganized.
 - **Resolve flagged rows.** Expand an ineligible row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an
-  over-long/reserved name. The preview regenerates as you type. When the
+  over-long/reserved name. A same-destination collision means only that two models
+  render to the same folder; it does not claim their files are duplicates. When a
+  source folder has a strong distinguishing variant name such as `Alternative` or
+  `v2`, the row offers that value as a reviewable suffix suggestion. Suggestions
+  never apply automatically. The preview regenerates as you type. When the
   **AI-assisted field suggestions** toggle is on (**Settings → Library →
   Reorganize**, off by default), unclassifiable and collision rows also get a
   **Suggest with AI** action that infers creator/character/title from the
