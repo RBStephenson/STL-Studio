@@ -13,7 +13,9 @@ Folder structure on disk (variable depth):
 
 A folder is only ever a model if its subtree contains STL files.
 Leaf detection priority:
-  1. Folder name contains scale/type/modifier signals (product boundary)
+  1. Folder name contains scale/type/modifier signals (product boundary), while
+     independently qualifying nested product/variant folders retain ownership
+     of their own subtrees
   2. Folder contains STLs and all child dirs look like parts sub-folders
   3. Folder contains STLs and has no children with STLs (deepest fallback)
 
@@ -22,6 +24,7 @@ needs_review=True is set when confidence is low.
 """
 import logging
 import os
+import re
 import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -63,6 +66,10 @@ SLICER_EXTENSIONS = {
     ".pw0", ".pwx", ".pws",  # Photon Workshop variants
     ".fhd",        # Formware
 }
+NESTED_VARIANT_BOUNDARY = re.compile(
+    r"^(?:alt(?:ernate|ernative)?|variant)(?:[\s_-].*)?$|^v\d+(?:\.\d+)?$",
+    re.I,
+)
 
 # The "one scan at a time" gate is the app-wide library write lock
 # (services/write_lock.py), so a scan and a reorganize apply/undo are mutually
@@ -1001,14 +1008,62 @@ def _walk_for_models(
         filenames=filenames,
         parent_names=parent_names,
     )
+    product_boundary_split = False
     if not is_creator_root and signals.is_product and has_any_stls:
-        _index_model(folder, creator, db, creator_boundary, character,
-                     stl_cache, auto_signals=signals, last_scanned=last_scanned,
-                     layout_tags=layout_tags, is_inbox=is_inbox)
-        return
+        # A product-like ancestor may also contain a nested variant/product that
+        # carries its own signals (Alternative, V2, another scale/type, etc.).
+        # Treat those children as ownership boundaries instead of letting this
+        # ancestor's recursive STL indexing claim their files. Parent-derived
+        # scale is deliberately excluded from this decision: the child must
+        # qualify from its own name or direct filenames, otherwise generic part
+        # folders beneath a scaled product would all become separate models.
+        boundary_children: list[Path] = []
+        for child in child_dirs:
+            child_key = str(child)
+            if child_key not in stl_cache:
+                stl_cache[child_key] = _has_stls(child, recurse=True)
+            if not stl_cache[child_key]:
+                continue
+            try:
+                child_filenames = [f.name for f in child.iterdir() if f.is_file()]
+            except OSError:
+                child_filenames = []
+            child_signals = name_parser.parse_folder(
+                str(child), filenames=child_filenames, parent_names=None,
+            )
+            if child_signals.is_product or _is_nested_variant_boundary(child.name):
+                boundary_children.append(child)
+
+        if not boundary_children:
+            _index_model(folder, creator, db, creator_boundary, character,
+                         stl_cache, auto_signals=signals, last_scanned=last_scanned,
+                         layout_tags=layout_tags, is_inbox=is_inbox)
+            return
+
+        boundary_keys = {str(child) for child in boundary_children}
+        parent_has_owned_stls = has_direct_stls
+        for child in child_dirs:
+            child_key = str(child)
+            if child_key in boundary_keys:
+                continue
+            if child_key not in stl_cache:
+                stl_cache[child_key] = _has_stls(child, recurse=True)
+            parent_has_owned_stls = parent_has_owned_stls or stl_cache[child_key]
+        if parent_has_owned_stls:
+            _index_model(
+                folder, creator, db, creator_boundary, character, stl_cache,
+                auto_signals=signals, last_scanned=last_scanned,
+                layout_tags=layout_tags, is_inbox=is_inbox,
+                excluded_stl_subtrees=boundary_children,
+            )
+
+        # Only recurse into the independently qualifying boundaries. Other
+        # descendants remain part of the parent model indexed above.
+        child_dirs = boundary_children
+        product_boundary_split = True
 
     # --- Step 2: has STLs + children look like parts ---
-    if not is_creator_root and has_any_stls:
+    if not product_boundary_split and not is_creator_root and has_any_stls:
         child_names = [d.name for d in child_dirs]
         if has_direct_stls and name_parser.children_look_like_parts(child_names):
             _index_model(folder, creator, db, creator_boundary, character,
@@ -1033,7 +1088,9 @@ def _walk_for_models(
     # buckets, which never carry product identity).
     keys: dict[str, str] = {}
     for c in child_dirs:
-        if name_parser.parse(c.name).is_parts or name_parser.is_structural_folder(c.name):
+        if (name_parser.parse(c.name).is_parts
+                or name_parser.is_structural_folder(c.name)
+                or _is_nested_variant_boundary(c.name)):
             continue
         keys[c.name] = name_parser.character_key(c.name, creator.name)
     nonempty = [k for k in keys.values() if k]
@@ -1049,6 +1106,7 @@ def _walk_for_models(
     if (not is_creator_root
             and not signals.is_parts
             and not name_parser.is_structural_folder(folder.name)
+            and not _is_nested_variant_boundary(folder.name)
             and name_parser.character_key(folder.name, creator.name)):
         own_character = folder.name
 
@@ -1114,6 +1172,7 @@ def _index_model(
     last_scanned: datetime | None = None,
     layout_tags: list[str] | None = None,
     is_inbox: bool = False,
+    excluded_stl_subtrees: list[Path] | None = None,
 ):
     folder_path = str(folder)
 
@@ -1184,7 +1243,8 @@ def _index_model(
         # no product identity — naming the model "STL"/"supported" produces junk
         # cards (#641). Name it after its product instead: the grouping character,
         # else the nearest non-structural ancestor folder.
-        if name_parser.is_structural_folder(folder.name):
+        if (name_parser.is_structural_folder(folder.name)
+                or _is_nested_variant_boundary(folder.name)):
             product = character
             if not product:
                 for anc in folder.parents:
@@ -1268,7 +1328,10 @@ def _index_model(
                     boundary=creator_boundary or folder,
                 )
 
-            _index_stl_files(model, folder, db)
+            _index_stl_files(
+                model, folder, db,
+                excluded_subtrees=excluded_stl_subtrees,
+            )
 
         if is_inbox:
             model.is_inbox = True
@@ -1328,6 +1391,11 @@ def _is_hidden(name: str) -> bool:
     gallery image.
     """
     return name.startswith(".")
+
+
+def _is_nested_variant_boundary(name: str) -> bool:
+    """True for a variant descriptor that should own its physical subtree."""
+    return bool(NESTED_VARIANT_BOUNDARY.fullmatch(name.strip()))
 
 
 def _has_hidden_ancestor(path: Path, within: Path) -> bool:
@@ -1611,11 +1679,28 @@ def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
         current = current.parent
 
 
-def _index_stl_files(model: Model, folder: Path, db: Session):
+def _index_stl_files(
+    model: Model,
+    folder: Path,
+    db: Session,
+    excluded_subtrees: list[Path] | None = None,
+):
     # Gather candidate STL files under this folder.
+    excluded = {
+        _normpath(str(path)) for path in (excluded_subtrees or [])
+    }
+
+    def is_excluded(path: Path) -> bool:
+        normalized = _normpath(str(path))
+        return any(
+            normalized == root or normalized.startswith(root + os.sep)
+            for root in excluded
+        )
+
     candidates = [
         stl for stl in sorted(folder.rglob("*"))
         if stl.is_file()
+        and not is_excluded(stl)
         and stl.suffix.lower() in STL_EXTENSIONS
         and stl.suffix.lower() not in SLICER_EXTENSIONS
     ]
@@ -1629,15 +1714,29 @@ def _index_stl_files(model: Model, folder: Path, db: Session):
     # limit) rather than a LIKE prefix — the stored paths use the OS separator
     # and folder names routinely contain '_', a LIKE wildcard.
     candidate_paths = [str(stl) for stl in candidates]
-    existing: set[str] = set()
+    model_key = _normpath(str(folder))
+    existing: dict[str, tuple[STLFile, str]] = {}
     for i in range(0, len(candidate_paths), 500):
         chunk = candidate_paths[i:i + 500]
-        existing.update(
-            row[0] for row in db.query(STLFile.path).filter(STLFile.path.in_(chunk))
-        )
+        existing.update({
+            row.path: (row, owner_folder)
+            for row, owner_folder in (
+                db.query(STLFile, Model.folder_path)
+                .join(Model, STLFile.model_id == Model.id)
+                .filter(STLFile.path.in_(chunk))
+            )
+        })
 
     for stl, path_str in zip(candidates, candidate_paths):
         if path_str in existing:
+            # A pre-fix ancestor model may already own this exact path. The
+            # current, deeper boundary is now authoritative; transfer the row
+            # in place so user-owned STL metadata survives the repair scan. A
+            # parent scan must never steal a path back from its child model.
+            row, owner_folder = existing[path_str]
+            owner_key = _normpath(owner_folder)
+            if model_key.startswith(owner_key + os.sep):
+                row.model_id = model.id
             continue
         # part_name is auto-derived once, at first discovery, so a freshly
         # scanned/imported file has a real saved name immediately instead of
@@ -1645,14 +1744,15 @@ def _index_stl_files(model: Model, folder: Path, db: Session):
         # genuinely empty one. Never touched again after this insert — a
         # later manual rename (or an AI Organize suggestion) always wins,
         # since existing rows are skipped entirely above.
-        db.add(STLFile(
+        row = STLFile(
             model_id=model.id,
             path=path_str,
             filename=stl.name,
             size_bytes=stl.stat().st_size,
             part_name=clean_name(stl.name) or None,
-        ))
-        existing.add(path_str)  # prevent duplicates within the same session
+        )
+        db.add(row)
+        existing[path_str] = (row, str(folder))
         _bump(files_found=1)
 
 

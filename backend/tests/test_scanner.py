@@ -389,6 +389,88 @@ class TestPartsNames:
         assert name_parser.is_structural_folder("Sprues") is False
 
 
+class TestNestedProductBoundaries:
+    """A qualifying product folder must not absorb an independently qualifying child."""
+
+    def test_product_parent_and_alternative_child_index_separately(self, db, tmp_path):
+        creator_dir = tmp_path / "Abe3d"
+        product = creator_dir / "2B" / "1_4 2B YoRHa - Abe3d"
+        alternative = product / "Alternative"
+        _stl(product, name="standard.stl")
+        _stl(alternative, name="alternative.stl")
+        creator = make_creator(db, "Abe3d")
+
+        _walk(db, creator, creator_dir)
+
+        by_path = {Path(m.folder_path): m for m in _models(db, creator)}
+        assert set(by_path) == {product, alternative}
+        assert {f.filename for f in by_path[product].stl_files} == {"standard.stl"}
+        assert {f.filename for f in by_path[alternative].stl_files} == {"alternative.stl"}
+
+    def test_empty_product_parent_does_not_become_phantom_model(self, db, tmp_path):
+        creator_dir = tmp_path / "Abe3d"
+        product = creator_dir / "2B" / "1_4 2B YoRHa"
+        alternative = product / "Alternative"
+        _stl(alternative, name="alternative.stl")
+        creator = make_creator(db, "Abe3d")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert [Path(m.folder_path) for m in models] == [alternative]
+        assert {f.filename for f in models[0].stl_files} == {"alternative.stl"}
+
+    def test_structural_child_remains_owned_by_product_parent(self, db, tmp_path):
+        creator_dir = tmp_path / "Abe3d"
+        product = creator_dir / "2B" / "1_4 2B YoRHa"
+        _stl(product / "STL", name="body.stl")
+        creator = make_creator(db, "Abe3d")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert [Path(m.folder_path) for m in models] == [product]
+        assert {f.filename for f in models[0].stl_files} == {"body.stl"}
+
+    def test_rescan_transfers_existing_child_file_without_losing_metadata(self, db, tmp_path):
+        creator_dir = tmp_path / "Abe3d"
+        product = creator_dir / "2B" / "1_4 2B YoRHa"
+        alternative = product / "Alternative"
+        _stl(product, name="standard.stl")
+        _stl(alternative, name="alternative.stl")
+        creator = make_creator(db, "Abe3d")
+
+        collapsed = Model(
+            name="2B YoRHa",
+            folder_path=str(product),
+            creator_id=creator.id,
+        )
+        db.add(collapsed)
+        db.flush()
+        db.add(STLFile(
+            model_id=collapsed.id,
+            path=str(product / "standard.stl"),
+            filename="standard.stl",
+        ))
+        child_file = STLFile(
+            model_id=collapsed.id,
+            path=str(alternative / "alternative.stl"),
+            filename="alternative.stl",
+            part_name="Custom alternate head",
+        )
+        db.add(child_file)
+        db.commit()
+        child_file_id = child_file.id
+
+        _walk(db, creator, creator_dir)
+
+        by_path = {Path(m.folder_path): m for m in _models(db, creator)}
+        transferred = db.get(STLFile, child_file_id)
+        assert transferred.model_id == by_path[alternative].id
+        assert transferred.part_name == "Custom alternate head"
+        assert {f.filename for f in by_path[product].stl_files} == {"standard.stl"}
+
+
 # ---------------------------------------------------------------------------
 # Configurable folder layouts — layout {tag} levels become model auto-tags
 # ---------------------------------------------------------------------------
