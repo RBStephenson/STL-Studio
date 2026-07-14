@@ -16,6 +16,15 @@ The two call sites differ in policy, exposed as flags:
     ``creator_id`` when it is NULL regardless of the flag.
   * ``clear_needs_review`` — the reviewed single-model path clears the flag;
     bulk apply leaves it since no human looked at the deep data (#699 1.3).
+
+Gallery images (``scraped.image_urls``, #1028) are downloaded the same way
+for both call sites, unlike the flags above: only when the model's
+``image_paths`` is currently empty, capped at 30. Unlike the thumbnail
+(single slot, always refreshed by the single-model path), a gallery has no
+single "current" image to compare against and no reliable way to tell which
+already-downloaded files came from which source URL — so both paths use the
+same conservative fill-only-when-empty policy to avoid ballooning a gallery
+on repeated fetches.
 """
 import logging
 
@@ -24,7 +33,7 @@ from sqlalchemy.orm import Session
 from app.models import Model
 from app.services.scanner import resolve_creator
 from app.services.scrapers.base import ScrapedModel
-from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
+from app.services.thumbnails import ThumbnailDownloadError, download_gallery_images, download_thumbnail
 from app.services.variant_sync import propagate_source_url
 from app.utils import utcnow
 
@@ -67,6 +76,11 @@ async def apply_scraped_to_model(
             # image actually takes display precedence.
             model.thumbnail_url = scraped.thumbnail_url
             model.thumbnail_path = None
+
+    if scraped.image_urls and not model.image_paths:
+        saved = await download_gallery_images(model.id, scraped.image_urls)
+        if saved:
+            model.image_paths = saved
 
     if scraped.tags:
         model.tags = list(set(model.tags or []) | set(scraped.tags))

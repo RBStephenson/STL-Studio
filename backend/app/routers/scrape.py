@@ -54,6 +54,7 @@ class ApplyRequest(BaseModel):
     external_id: Optional[str] = None
     creator_name: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    image_urls: list[str] = []
     tags: list[str] = []
     category: Optional[str] = None
     license: Optional[str] = None
@@ -134,6 +135,7 @@ async def _apply_request_to_model(db: Session, model: Model, body: ApplyRequest)
         external_id=body.external_id,
         creator_name=body.creator_name,
         thumbnail_url=body.thumbnail_url,
+        image_urls=body.image_urls or [],
         tags=body.tags or [],
         category=body.category,
         license=body.license,

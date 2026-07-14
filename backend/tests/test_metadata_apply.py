@@ -5,6 +5,7 @@ Focuses on the two policy flags that differ between the single-model
 """
 import asyncio
 
+from app.services import metadata_apply
 from app.services.metadata_apply import apply_scraped_to_model
 from app.services.scrapers.base import ScrapedModel
 from tests.conftest import make_creator, make_model
@@ -151,6 +152,94 @@ def test_clear_needs_review_true_clears_flag(db):
     _run(apply_scraped_to_model(db, model, _scraped(), clear_needs_review=True))
     db.commit(); db.refresh(model)
     assert model.needs_review is False
+
+
+class TestGalleryImages:
+    """#1028: apply_scraped_to_model downloads scraped.image_urls into
+    model.image_paths — but only when the model has no images yet, for both
+    the single-model and bulk call sites alike (no thumbnail_fill_only-style
+    per-caller flag, since a gallery has no single "current" slot to compare
+    against)."""
+
+    def test_fills_gallery_when_empty(self, db, monkeypatch):
+        calls = []
+
+        async def fake_download(model_id, urls, **kwargs):
+            calls.append((model_id, urls))
+            return [f"/data/gallery_images/{model_id}_{i}.jpg" for i in range(len(urls))]
+
+        monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+
+        creator = make_creator(db)
+        model = make_model(db, creator, name="m")
+        model.image_paths = []
+        db.commit()
+
+        urls = ["https://cdn/a.jpg", "https://cdn/b.jpg"]
+        _run(apply_scraped_to_model(db, model, _scraped(image_urls=urls)))
+        db.commit(); db.refresh(model)
+
+        assert calls == [(model.id, urls)]
+        assert model.image_paths == [
+            f"/data/gallery_images/{model.id}_0.jpg",
+            f"/data/gallery_images/{model.id}_1.jpg",
+        ]
+
+    def test_skips_download_when_gallery_already_has_images(self, db, monkeypatch):
+        calls = []
+
+        async def fake_download(model_id, urls, **kwargs):
+            calls.append((model_id, urls))
+            return ["/data/gallery_images/1_0.jpg"]
+
+        monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+
+        creator = make_creator(db)
+        model = make_model(db, creator, name="m")
+        model.image_paths = ["/library/existing.jpg"]
+        db.commit()
+
+        _run(apply_scraped_to_model(db, model, _scraped(image_urls=["https://cdn/a.jpg"])))
+        db.commit(); db.refresh(model)
+
+        assert calls == []
+        assert model.image_paths == ["/library/existing.jpg"]
+
+    def test_no_image_urls_leaves_gallery_untouched(self, db, monkeypatch):
+        calls = []
+
+        async def fake_download(model_id, urls, **kwargs):
+            calls.append((model_id, urls))
+            return []
+
+        monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+
+        creator = make_creator(db)
+        model = make_model(db, creator, name="m")
+        model.image_paths = []
+        db.commit()
+
+        _run(apply_scraped_to_model(db, model, _scraped(image_urls=[])))
+        db.commit(); db.refresh(model)
+
+        assert calls == []
+        assert model.image_paths == []
+
+    def test_all_downloads_failing_leaves_gallery_untouched(self, db, monkeypatch):
+        async def fake_download(model_id, urls, **kwargs):
+            return []  # every URL failed to download
+
+        monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+
+        creator = make_creator(db)
+        model = make_model(db, creator, name="m")
+        model.image_paths = []
+        db.commit()
+
+        _run(apply_scraped_to_model(db, model, _scraped(image_urls=["https://cdn/dead.jpg"])))
+        db.commit(); db.refresh(model)
+
+        assert model.image_paths == []
 
 
 def test_like_count_written_rating_untouched(db):

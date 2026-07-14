@@ -425,9 +425,14 @@ notes, source URL, license, category, tags, and NSFW flag.
 The **Source URL** field has a **Fetch** button: paste a product page from
 **Gumroad**, **Cults3D**, **MyMiniFactory**, or **Loot Studios** and it scrapes
 the page to fill in the title, description, creator, thumbnail, and tags
-automatically.
+automatically. If the model doesn't already have gallery images, Fetch also
+downloads the product page's other images into its gallery (up to 30) — a
+model that already has images keeps them as-is; Fetch never adds to or
+replaces an existing gallery.
 
-There's also bulk enrichment from the **Creators** page (see below).
+There's also bulk enrichment from the **Creators** page (see below) — it
+applies the same field set, including gallery images under the same
+fill-only-when-empty rule.
 
 ## Triage queue
 
@@ -580,9 +585,10 @@ can:
 - **Enrich from web** — match a creator's online storefront listings against
   your local models, then fetch each matched product's **full detail** and
   bulk-apply the complete metadata set: title, description, tags, category,
-  license, thumbnail, source URL, and external ID. One run enriches every
-  matched model — including all variants in a group — so you no longer have to
-  open each model and run *Find on Web* by hand. Expand any match (the chevron)
+  license, thumbnail, gallery images (only for models with no images yet, up
+  to 30), source URL, and external ID. One run enriches every matched model —
+  including all variants in a group — so you no longer have to open each
+  model and run *Find on Web* by hand. Expand any match (the chevron)
   to preview the description, tags, category, and license it would apply before
   committing. MyMiniFactory and Cults3D use their APIs when configured (see
   [Settings → AI & Integrations](#settings)); Gumroad is scraped. A product whose detail can't be fetched still receives the
