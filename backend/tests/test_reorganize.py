@@ -6,6 +6,8 @@ Focuses on the "dangerous population" the issue calls out — pack-split / share
 folders, collisions, sentinels, scan-root escape, override capture — not just
 the happy path. No test moves any files.
 """
+from pathlib import Path
+
 from app.models import Creator, PackOverride, ReorganizeManifest, ScanRoot
 from tests.conftest import make_creator, make_model, make_stl_file
 
@@ -223,6 +225,18 @@ class TestOverrideCapture:
 
 
 class TestSpansMultipleDirs:
+    def test_files_in_one_descendant_directory_are_not_flagged(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path, filename="a.stl", subdir="Alternative")
+        source_dir = Path(m.folder_path)
+        m.folder_path = str(source_dir.parent)
+        db.commit()
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+
+        assert entry["spans_multiple_dirs"] is False
+        assert entry["source_directories"] == [str(source_dir).replace("\\", "/")]
+
     def test_model_with_files_in_two_dirs_flagged(self, client, db, tmp_path):
         _root(db, tmp_path)
         m = _model_with_file(db, tmp_path, filename="a.stl")
@@ -236,6 +250,10 @@ class TestSpansMultipleDirs:
 
         entry = client.get("/reorganize/preview").json()["entries"][0]
         assert entry["spans_multiple_dirs"] is True
+        assert entry["source_directories"] == sorted([
+            m.folder_path.replace("\\", "/"),
+            str(other).replace("\\", "/"),
+        ], key=str.casefold)
         assert entry["eligible"] is False
 
 

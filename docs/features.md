@@ -753,7 +753,10 @@ off to keep each segment's original casing and spacing.
   app's own record of that file's path doesn't resolve on disk — usually because
   it was renamed or moved outside the app. A full [scan](scanning-and-folders.md#full-scan-vs-per-creator-rescan)
   cleans up file records left behind by an out-of-app rename; run one before
-  trusting a persistent "missing files" chip. A **locked** chip means the model
+  trusting a persistent "missing files" chip. A **multi-directory** chip lists
+  each physical directory containing the model's STL files so the conflicting
+  ownership can be repaired without guessing; gallery-image directories do not
+  count toward this blocker. A **locked** chip means the model
   is [Locked](#locked) — unlock it from its card before Reorganize can touch
   it; this isn't something you resolve from the Reorganize page itself. Don't
   confuse this with the unrelated **unorganized** indicator mentioned above —

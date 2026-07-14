@@ -46,7 +46,7 @@ function entry(over: Record<string, unknown>) {
     pack_override_paths: [],
     collision: false, collision_kind: "none", collision_with: [], suggested_suffix: null,
     unclassifiable: false, missing_fields: [], over_length: false,
-    reserved_name: false, overlaps_other: false, spans_multiple_dirs: false,
+    reserved_name: false, overlaps_other: false, spans_multiple_dirs: false, source_directories: [],
     is_symlink: false, escapes_scan_root: false, missing_files_on_disk: false,
     ...over,
   };
@@ -483,6 +483,11 @@ describe("ReorganizePage error explanations (STUDIO-162)", () => {
           model_id: 4, model_name: "Locked Model", eligible: false,
           locked: true,
         }),
+        entry({
+          model_id: 5, model_name: "Split Model", eligible: false,
+          spans_multiple_dirs: true,
+          source_directories: ["/library/Abe3D/Joker", "/library/Abe3D/Joker/Alternative"],
+        }),
       ],
       stats: STATS,
     };
@@ -502,6 +507,10 @@ describe("ReorganizePage error explanations (STUDIO-162)", () => {
       "title",
       expect.stringContaining("locked and won't be touched"),
     );
+    expect(screen.getByText("multi-dir")).toHaveAttribute(
+      "title",
+      expect.stringContaining("/library/Abe3D/Joker/Alternative"),
+    );
   });
 
   it("lists a Why section with the explanation when the row is expanded", async () => {
@@ -512,10 +521,12 @@ describe("ReorganizePage error explanations (STUDIO-162)", () => {
     // All rows start collapsed (STUDIO-183) — click both open.
     fireEvent.click(screen.getByText("Mystery"));
     fireEvent.click(screen.getByText("Locked Model"));
+    fireEvent.click(screen.getByText("Split Model"));
 
-    expect(screen.getAllByText("Why")).toHaveLength(2);
+    expect(screen.getAllByText("Why")).toHaveLength(3);
     expect(screen.getByText(/Missing a value for: character/)).toBeInTheDocument();
     expect(screen.getByText(/locked and won't be touched by Reorganize/)).toBeInTheDocument();
+    expect(screen.getByText(/Source directories: \/library\/Abe3D\/Joker;/)).toBeInTheDocument();
   });
 });
 

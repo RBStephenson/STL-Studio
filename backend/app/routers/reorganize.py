@@ -69,6 +69,7 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
         reserved_name=e.reserved_name,
         overlaps_other=e.overlaps_other,
         spans_multiple_dirs=e.spans_multiple_dirs,
+        source_directories=e.source_directories,
         is_symlink=e.is_symlink,
         escapes_scan_root=e.escapes_scan_root,
         missing_files_on_disk=e.missing_files_on_disk,
