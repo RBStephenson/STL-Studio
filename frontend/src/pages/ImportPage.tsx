@@ -195,7 +195,6 @@ export default function ImportPage() {
       {phase === "picking" && (
         <FolderPicker
           mode="inbox"
-          initialPath="/import"
           onSelect={(path) => {
             setSelectedPath(path);
             setPhase("idle");
