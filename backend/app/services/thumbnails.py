@@ -234,6 +234,71 @@ def store_thumbnail(model_id: int, ext: str, data: bytes) -> Path:
     return out
 
 
+def gallery_images_dir() -> Path:
+    """Return (and create) the fetched-gallery-image directory next to the DB.
+
+    Separate from the model's own library folder (unlike Import, which writes
+    gallery images straight into the pack folder pre-scan) — Fetch/Enrich act
+    on models already scanned into the library, so there's no pack folder to
+    drop files into. This directory is already allowlisted for /files/image,
+    the same way thumbnails_dir() is (#1028).
+    """
+    db_url = settings.database_url
+    if "sqlite:///" in db_url:
+        db_file = Path(db_url.split("sqlite:///", 1)[1])
+    else:
+        db_file = Path(db_url.split("sqlite://", 1)[1])
+    if db_file.name == ":memory:":
+        d = Path(tempfile.gettempdir()) / "stl_inventory_gallery_images"
+    else:
+        d = db_file.parent / "gallery_images"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def store_gallery_image(model_id: int, index: int, ext: str, data: bytes) -> Path:
+    """Write one fetched gallery image to its canonical per-model file."""
+    if ext not in IMAGE_EXTS:
+        raise ValueError(f"Unsafe gallery image extension: {ext!r}")
+    out_dir = gallery_images_dir()
+    out_dir_real = os.path.realpath(str(out_dir))
+    out_str = assert_within_roots(
+        os.path.join(out_dir_real, f"{model_id}_{index}{ext}"), [out_dir_real]
+    )
+    out = Path(out_str)
+    out.write_bytes(data)
+    return out
+
+
+def clear_gallery_images(model_id: int) -> None:
+    """Delete any previously fetched gallery image files for model_id."""
+    out_dir = gallery_images_dir()
+    for f in out_dir.glob(f"{model_id}_*"):
+        try:
+            f.unlink()
+        except OSError:
+            pass
+
+
+async def download_gallery_images(model_id: int, urls: list[str], *, cap: int = 30) -> list[str]:
+    """Fetch up to `cap` gallery image URLs and store them locally for model_id.
+
+    Best-effort per URL: a failed download is logged and skipped rather than
+    failing the whole batch, mirroring how a bad thumbnail URL degrades
+    gracefully in apply_scraped_to_model instead of blocking the save.
+    Returns the saved paths as strings, ready to merge into image_paths.
+    """
+    clear_gallery_images(model_id)
+    saved: list[str] = []
+    for i, url in enumerate(urls[:cap]):
+        try:
+            ext, data = await fetch_image_bytes(url)
+            saved.append(str(store_gallery_image(model_id, i, ext, data)))
+        except ThumbnailDownloadError as e:
+            logger.warning("Gallery image download failed for model %s (%r): %s", model_id, url, e)
+    return saved
+
+
 def collection_covers_dir() -> Path:
     """Return (and create) the collection-cover directory next to the DB."""
     db_url = settings.database_url

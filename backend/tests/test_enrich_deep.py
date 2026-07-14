@@ -14,7 +14,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 import app.routers.enrich as enrich
-from app.services import enrich_refresh
+from app.services import enrich_refresh, metadata_apply
 from app.services import secrets
 from app.services.scrapers.base import ScrapedModel
 from tests.conftest import make_creator, make_model
@@ -78,6 +78,65 @@ def test_apply_writes_deep_fields(client, db, monkeypatch):
     assert model.source_url == _URL
     assert model.external_id == "123"
     assert model.needs_review is False
+
+
+def test_apply_downloads_gallery_images_when_empty(client, db, monkeypatch):
+    """#1028: the deep fetch already carries image_urls — bulk apply needs no
+    schema change of its own, since it goes through the same shared writer
+    (apply_scraped_to_model) as the single-model Fetch path."""
+    creator = make_creator(db)
+    model = make_model(db, creator, name="dragon")
+    db.commit()
+
+    monkeypatch.setattr(
+        enrich_refresh.scrapers, "fetch_url",
+        AsyncMock(return_value=_deep(image_urls=["https://cdn/a.png", "https://cdn/b.png"])),
+    )
+
+    calls = []
+
+    async def fake_download(model_id, urls, **kwargs):
+        calls.append((model_id, urls))
+        return [f"/data/gallery_images/{model_id}_{i}.png" for i in range(len(urls))]
+
+    monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+
+    resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
+    assert resp.status_code == 200
+
+    db.refresh(model)
+    assert calls == [(model.id, ["https://cdn/a.png", "https://cdn/b.png"])]
+    assert model.image_paths == [
+        f"/data/gallery_images/{model.id}_0.png",
+        f"/data/gallery_images/{model.id}_1.png",
+    ]
+
+
+def test_apply_skips_gallery_download_when_model_already_has_images(client, db, monkeypatch):
+    creator = make_creator(db)
+    model = make_model(db, creator, name="dragon")
+    model.image_paths = ["/library/existing.jpg"]
+    db.commit()
+
+    monkeypatch.setattr(
+        enrich_refresh.scrapers, "fetch_url",
+        AsyncMock(return_value=_deep(image_urls=["https://cdn/a.png"])),
+    )
+
+    calls = []
+
+    async def fake_download(model_id, urls, **kwargs):
+        calls.append((model_id, urls))
+        return []
+
+    monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+
+    resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
+    assert resp.status_code == 200
+
+    db.refresh(model)
+    assert calls == []
+    assert model.image_paths == ["/library/existing.jpg"]
 
 
 def test_one_fetch_per_unique_url_fans_to_all_models(client, db, monkeypatch):

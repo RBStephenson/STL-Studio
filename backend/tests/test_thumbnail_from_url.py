@@ -9,7 +9,7 @@ import pytest
 from tests.conftest import make_creator, make_model
 
 import app.services.thumbnails as thumbnails
-from app.services.thumbnails import ThumbnailDownloadError, download_thumbnail
+from app.services.thumbnails import ThumbnailDownloadError, download_gallery_images, download_thumbnail
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfakepngdata"
 JPEG_BYTES = b"\xff\xd8\xff\xe0fakejpegdata"
@@ -21,6 +21,15 @@ def thumb_dir(tmp_path, monkeypatch):
     d = tmp_path / "thumbnails"
     d.mkdir()
     monkeypatch.setattr(thumbnails, "thumbnails_dir", lambda: d)
+    return d
+
+
+@pytest.fixture()
+def gallery_dir(tmp_path, monkeypatch):
+    """Isolate the fetched-gallery-image directory to this test (#1028)."""
+    d = tmp_path / "gallery_images"
+    d.mkdir()
+    monkeypatch.setattr(thumbnails, "gallery_images_dir", lambda: d)
     return d
 
 
@@ -191,6 +200,62 @@ class TestDownloadThumbnail:
 
 
 # ---------------------------------------------------------------------------
+# download_gallery_images service (#1028)
+# ---------------------------------------------------------------------------
+
+class TestDownloadGalleryImages:
+    @pytest.mark.anyio
+    async def test_downloads_each_url_to_its_own_indexed_file(self, gallery_dir, monkeypatch):
+        def handler(req):
+            body = PNG_BYTES if req.url.path == "/a.png" else JPEG_BYTES
+            ctype = "image/png" if req.url.path == "/a.png" else "image/jpeg"
+            return httpx.Response(200, content=body, headers={"content-type": ctype})
+        mock_http(monkeypatch, handler)
+
+        out = await download_gallery_images(5, [
+            "https://cdn.example.com/a.png", "https://cdn.example.com/b.jpg",
+        ])
+        assert out == [str(gallery_dir / "5_0.png"), str(gallery_dir / "5_1.jpg")]
+        assert (gallery_dir / "5_0.png").read_bytes() == PNG_BYTES
+        assert (gallery_dir / "5_1.jpg").read_bytes() == JPEG_BYTES
+
+    @pytest.mark.anyio
+    async def test_caps_at_given_limit(self, gallery_dir, monkeypatch):
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
+
+        urls = [f"https://cdn.example.com/{i}.png" for i in range(5)]
+        out = await download_gallery_images(9, urls, cap=2)
+        assert len(out) == 2
+
+    @pytest.mark.anyio
+    async def test_one_failure_does_not_block_the_rest(self, gallery_dir, monkeypatch):
+        def handler(req):
+            if req.url.path == "/bad.png":
+                return httpx.Response(403)
+            return httpx.Response(200, content=PNG_BYTES, headers={"content-type": "image/png"})
+        mock_http(monkeypatch, handler)
+
+        out = await download_gallery_images(3, [
+            "https://cdn.example.com/bad.png", "https://cdn.example.com/good.png",
+        ])
+        # Only the successful one is saved, and it still gets its own slot's
+        # index — no attempt to renumber around the gap.
+        assert out == [str(gallery_dir / "3_1.png")]
+
+    @pytest.mark.anyio
+    async def test_clears_stale_files_from_a_previous_call(self, gallery_dir, monkeypatch):
+        stale = gallery_dir / "4_0.png"
+        stale.write_bytes(b"old")
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}))
+
+        out = await download_gallery_images(4, ["https://cdn.example.com/new.jpg"])
+        assert out == [str(gallery_dir / "4_0.jpg")]
+        assert not stale.exists()
+
+
+# ---------------------------------------------------------------------------
 # POST /models/{id}/thumbnail/from-url
 # ---------------------------------------------------------------------------
 
@@ -300,6 +365,49 @@ class TestScrapeApplyThumbnail:
         db.refresh(model)
         assert model.thumbnail_url == "https://cdn.example.com/blocked.jpg"
         assert model.thumbnail_path is None
+
+
+# ---------------------------------------------------------------------------
+# POST /scrape/apply/{id} — gallery image handling (#1028)
+# ---------------------------------------------------------------------------
+
+class TestScrapeApplyGallery:
+    def test_image_urls_downloaded_when_gallery_empty(self, client, db, thumb_dir, gallery_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
+
+        resp = client.post(f"/scrape/apply/{model.id}", json={
+            "image_urls": ["https://cdn.example.com/a.png", "https://cdn.example.com/b.png"],
+        })
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.image_paths == [
+            str(gallery_dir / f"{model.id}_0.png"),
+            str(gallery_dir / f"{model.id}_1.png"),
+        ]
+
+    def test_image_urls_skipped_when_gallery_already_has_images(self, client, db, thumb_dir, gallery_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        model.image_paths = ["/library/existing.jpg"]
+        db.commit()
+
+        def fail(req):
+            raise AssertionError("should not fetch when the gallery already has images")
+        mock_http(monkeypatch, fail)
+
+        resp = client.post(f"/scrape/apply/{model.id}", json={
+            "image_urls": ["https://cdn.example.com/a.png"],
+        })
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.image_paths == ["/library/existing.jpg"]
 
 
 # ---------------------------------------------------------------------------
