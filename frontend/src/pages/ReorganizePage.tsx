@@ -121,7 +121,13 @@ function blockerFlags(e: ReorganizeEntry): BlockerFlag[] {
     flags.push({ label: "overlap", explanation: "This model's files overlap with another model's files on disk. Needs a rescan or manual disk fix — not resolvable here." });
   }
   if (e.spans_multiple_dirs) {
-    flags.push({ label: "multi-dir", explanation: "This model's files are spread across multiple directories, so Reorganize can't safely move it as one unit. Needs a manual disk fix." });
+    const directories = e.source_directories.length
+      ? ` Source directories: ${e.source_directories.join("; ")}.`
+      : "";
+    flags.push({
+      label: "multi-dir",
+      explanation: `This model's STL files are spread across multiple directories, so Reorganize can't safely move it as one unit.${directories} Needs a manual disk fix.`,
+    });
   }
   if (e.is_symlink) {
     flags.push({ label: "symlink", explanation: "One or more files are symlinks — Reorganize skips symlinked files to avoid moving something it doesn't actually own." });

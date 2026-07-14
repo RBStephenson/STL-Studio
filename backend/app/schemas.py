@@ -888,6 +888,7 @@ class ReorganizeEntry(BaseModel):
     reserved_name: bool
     overlaps_other: bool
     spans_multiple_dirs: bool
+    source_directories: list[str] = Field(default_factory=list)
     is_symlink: bool
     escapes_scan_root: bool
     missing_files_on_disk: bool = False

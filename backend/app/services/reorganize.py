@@ -103,6 +103,7 @@ class Entry:
     reserved_name: bool
     overlaps_other: bool
     spans_multiple_dirs: bool
+    source_directories: list[str]
     is_symlink: bool
     escapes_scan_root: bool
     missing_files_on_disk: bool
@@ -398,14 +399,18 @@ def _build_entry(
 
     # Per-file moves + fingerprints.
     files: list[FileMove] = []
-    src_dirs: set[str] = set()
+    src_dirs: dict[str, str] = {}
     is_symlink = False
     missing_files_on_disk = False
     for f in m.stl_files:
         size, mtime_ns, link, is_missing = _stat_file_cached(f.path)
         is_symlink = is_symlink or link
         missing_files_on_disk = missing_files_on_disk or is_missing
-        src_dirs.add(_key(_parent(f.path)))
+        source_dir = _canon(_parent(f.path))
+        source_key = _key(source_dir)
+        current_display = src_dirs.get(source_key)
+        if current_display is None or source_dir < current_display:
+            src_dirs[source_key] = source_dir
         dest_filename = f.filename or os.path.basename(f.path or "")
         if slugify_filenames and dest_filename:
             dest_filename = slug_filename(dest_filename)
@@ -420,6 +425,7 @@ def _build_entry(
             missing_file=is_missing,
         ))
     spans_multiple_dirs = len(src_dirs) > 1
+    source_directories = [src_dirs[key] for key in sorted(src_dirs)]
 
     # Local gallery images move alongside the STLs. Scoped to images that live
     # inside the model's OWN folder tree — a gallery image inherited from a
@@ -536,6 +542,7 @@ def _build_entry(
         reserved_name=reserved,
         overlaps_other=False,
         spans_multiple_dirs=spans_multiple_dirs,
+        source_directories=source_directories,
         is_symlink=is_symlink,
         escapes_scan_root=escapes,
         missing_files_on_disk=missing_files_on_disk,

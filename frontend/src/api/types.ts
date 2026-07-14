@@ -967,6 +967,7 @@ export interface ReorganizeEntry {
   reserved_name: boolean;
   overlaps_other: boolean;
   spans_multiple_dirs: boolean;
+  source_directories: string[];
   is_symlink: boolean;
   escapes_scan_root: boolean;
   missing_files_on_disk: boolean;
