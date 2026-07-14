@@ -32,6 +32,12 @@ UNKNOWN_CREATOR = "_Unknown Creator"
 UNKNOWN_CHARACTER = "_Unknown Character"
 UNKNOWN_SCALE = "_Unknown Scale"
 _SCALE_TAG_RE = re.compile(r"^(\d{1,4}mm|1[:/\-_]\d{1,2})$", re.I)
+_SOURCE_SUFFIX_RE = re.compile(
+    r"^(?:alt(?:ernate|ernative)?|variant)(?:[\s_-].*)?$"
+    r"|^v\d+(?:\.\d+)?$"
+    r"|^version[\s_-]*\d+(?:\.\d+)?$",
+    re.I,
+)
 
 
 def _canon(path: str) -> str:
@@ -83,12 +89,14 @@ class Entry:
     model_name: str
     files: list[FileMove]
     kind: str
+    source_dir: str
     proposed_dir: str
     eligible: bool
     pack_override_paths: list[str]
     collision: bool
     collision_kind: str
     collision_with: list[int]
+    suggested_suffix: str | None
     unclassifiable: bool
     missing_fields: list[str]
     over_length: bool
@@ -514,12 +522,14 @@ def _build_entry(
         model_name=m.name or "",
         files=files,
         kind=kind,
+        source_dir=current_dir,
         proposed_dir=proposed_dir,
         eligible=eligible,
         pack_override_paths=pack_refs,
         collision=False,
         collision_kind="none",
         collision_with=[],
+        suggested_suffix=None,
         unclassifiable=unclassifiable,
         missing_fields=missing,
         over_length=over_len,
@@ -592,20 +602,41 @@ def _detect_collisions(entries: list[Entry]) -> None:
             continue
         raws = {e.proposed_dir for e in group}
         if len(raws) == 1:
-            # Same canonical destination from distinct models — a real merge.
-            kind = "legitimate_duplicate"
+            # Same canonical destination proves a collision, not duplicate content.
+            kind = "same_destination"
         elif len({r.casefold() for r in raws}) == 1:
             kind = "case_only"
         else:
             kind = "exact"
         ids = [e.model_id for e in group]
+        suggestions = {e.model_id: _source_suffix(e.source_dir) for e in group}
+        suggestion_counts = {
+            suffix: sum(1 for value in suggestions.values() if value == suffix)
+            for suffix in suggestions.values()
+            if suffix is not None
+        }
         for e in group:
             e.collision = True
             e.collision_kind = kind
             e.collision_with = [i for i in ids if i != e.model_id]
+            suggestion = suggestions[e.model_id]
+            e.suggested_suffix = (
+                suggestion
+                if suggestion is not None and suggestion_counts[suggestion] == 1
+                else None
+            )
             # A merge/collision is a blocker in Phase 1.
             e.kind = "merge"
             e.eligible = False
+
+
+def _source_suffix(source_dir: str) -> str | None:
+    """Return a safe suffix for a strong variant-like source-folder name."""
+    leaf = _canon(source_dir).rsplit("/", 1)[-1].strip()
+    if not leaf or not _SOURCE_SUFFIX_RE.fullmatch(leaf):
+        return None
+    suffix = sanitize_segment(leaf, slugify=True).value
+    return suffix or None
 
 
 def _detect_overlaps(entries: list[Entry]) -> None:

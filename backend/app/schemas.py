@@ -844,7 +844,7 @@ class CultsSearchResponse(BaseModel):
 FingerprintMethod = Literal["stat", "content_hash"]
 MoveKind = Literal["move", "rename", "case_rename", "in_place", "merge"]
 CollisionKind = Literal[
-    "none", "exact", "case_only", "unicode_only", "legitimate_duplicate"
+    "none", "exact", "case_only", "unicode_only", "same_destination"
 ]
 
 
@@ -881,6 +881,7 @@ class ReorganizeEntry(BaseModel):
     collision: bool
     collision_kind: CollisionKind
     collision_with: list[int]
+    suggested_suffix: Optional[str] = None
     unclassifiable: bool
     missing_fields: list[str]
     over_length: bool

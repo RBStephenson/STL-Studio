@@ -82,7 +82,7 @@ const COLLISION_EXPLANATIONS: Record<ReorganizeCollisionKind, string> = {
   exact: "Another model already resolves to this exact destination path.",
   case_only: "Another model's destination path differs only by letter case — that collides on case-insensitive filesystems.",
   unicode_only: "Another model's destination path differs only by Unicode normalization (e.g. accented characters) — that collides on some filesystems.",
-  legitimate_duplicate: "This looks like a genuine duplicate of another model already at that destination.",
+  same_destination: "Another model resolves to this same destination. This does not mean their files are duplicates.",
 };
 
 interface BlockerFlag {
@@ -617,6 +617,15 @@ export default function ReorganizePage() {
                           </div>
                           {aiSuggestErr[e.model_id] && (
                             <div className="text-xs text-rose-400 mb-1">{aiSuggestErr[e.model_id]}</div>
+                          )}
+                          {e.suggested_suffix && !overrides[e.model_id]?.suffix && (
+                            <button
+                              type="button"
+                              onClick={() => setOverride(e.model_id, { suffix: e.suggested_suffix ?? undefined })}
+                              className="text-xs text-indigo-400 hover:text-indigo-300 mb-2"
+                            >
+                              Use suggested suffix: {e.suggested_suffix}
+                            </button>
                           )}
                           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                             {(["creator", "character", "scale", "title", "suffix"] as const).map((field) => (

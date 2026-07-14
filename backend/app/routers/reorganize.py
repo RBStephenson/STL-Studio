@@ -62,6 +62,7 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
         collision=e.collision,
         collision_kind=e.collision_kind,
         collision_with=e.collision_with,
+        suggested_suffix=e.suggested_suffix,
         unclassifiable=e.unclassifiable,
         missing_fields=e.missing_fields,
         over_length=e.over_length,

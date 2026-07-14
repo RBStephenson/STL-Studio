@@ -173,7 +173,18 @@ class TestCollisions:
         assert all(e["collision"] for e in entries)
         assert all(e["kind"] == "merge" for e in entries)
         assert all(e["eligible"] is False for e in entries)
-        assert all(e["collision_kind"] == "legitimate_duplicate" for e in entries)
+        assert all(e["collision_kind"] == "same_destination" for e in entries)
+        assert {e["suggested_suffix"] for e in entries} == {"v1", "v2"}
+
+    def test_generic_source_folders_do_not_produce_suffix_suggestions(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust", filename="a.stl", subdir="files")
+        _model_with_file(db, tmp_path, title="Bust", filename="b.stl", subdir="stl")
+
+        entries = client.get("/reorganize/preview").json()["entries"]
+
+        assert all(e["collision_kind"] == "same_destination" for e in entries)
+        assert all(e["suggested_suffix"] is None for e in entries)
 
 
 class TestScanRootEscape:
