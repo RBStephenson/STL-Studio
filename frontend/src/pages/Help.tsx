@@ -402,10 +402,11 @@ const SECTIONS: Section[] = [
           The <strong>Source URL</strong> field has a <strong>Fetch</strong> button: paste
           a product page from <strong>Gumroad</strong>, <strong>Cults3D</strong>, or{" "}
           <strong>MyMiniFactory</strong> and it fills in the title, description, creator,
-          thumbnail, tags, category, and license. If the model doesn't already have gallery
-          images, Fetch also downloads the product page's other images into its gallery (up
-          to 30) — a model that already has images is left alone, so re-fetching never adds
-          duplicates or replaces what's there.
+          thumbnail, tags, category, and license. Fetch also downloads the product page's
+          other images into its gallery (up to 30) — every time, whether or not the model
+          already has images. Re-fetching only replaces images a previous fetch put there
+          (not any scan-discovered images already in the model's own folder), so it never
+          loses anything else already in the gallery.
         </p>
         <p>
           To do this in bulk, use <strong>Enrich from web</strong> on the{" "}

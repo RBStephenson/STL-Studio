@@ -156,19 +156,28 @@ def test_clear_needs_review_true_clears_flag(db):
 
 class TestGalleryImages:
     """#1028: apply_scraped_to_model downloads scraped.image_urls into
-    model.image_paths — but only when the model has no images yet, for both
-    the single-model and bulk call sites alike (no thumbnail_fill_only-style
-    per-caller flag, since a gallery has no single "current" slot to compare
-    against)."""
+    model.image_paths unconditionally, every run, capped at 30 — matching
+    Import's own gallery cap, no fill-only-when-empty gate. Only the subset
+    of image_paths previously written by a fetch (paths under
+    gallery_images_dir()) is replaced; anything else already in the gallery
+    (e.g. scan-discovered images) is left alone."""
 
-    def test_fills_gallery_when_empty(self, db, monkeypatch):
+    @staticmethod
+    def _mock_gallery_dir(monkeypatch, tmp_path):
+        d = tmp_path / "gallery_images"
+        d.mkdir()
+        monkeypatch.setattr(metadata_apply.thumbnails, "gallery_images_dir", lambda: d)
+        return d
+
+    def test_downloads_and_sets_gallery_when_empty(self, db, monkeypatch, tmp_path):
+        gallery_dir = self._mock_gallery_dir(monkeypatch, tmp_path)
         calls = []
 
         async def fake_download(model_id, urls, **kwargs):
             calls.append((model_id, urls))
-            return [f"/data/gallery_images/{model_id}_{i}.jpg" for i in range(len(urls))]
+            return [str(gallery_dir / f"{model_id}_{i}.jpg") for i in range(len(urls))]
 
-        monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+        monkeypatch.setattr(metadata_apply.thumbnails, "download_gallery_images", fake_download)
 
         creator = make_creator(db)
         model = make_model(db, creator, name="m")
@@ -181,29 +190,59 @@ class TestGalleryImages:
 
         assert calls == [(model.id, urls)]
         assert model.image_paths == [
-            f"/data/gallery_images/{model.id}_0.jpg",
-            f"/data/gallery_images/{model.id}_1.jpg",
+            str(gallery_dir / f"{model.id}_0.jpg"),
+            str(gallery_dir / f"{model.id}_1.jpg"),
         ]
 
-    def test_skips_download_when_gallery_already_has_images(self, db, monkeypatch):
+    def test_downloads_even_when_gallery_already_has_non_fetched_images(self, db, monkeypatch, tmp_path):
+        """A scan-discovered image already sitting in the gallery must not
+        block a fetch from adding the scraped ones too (the exact bug
+        reported: a model with one promo image bundled in its download
+        never got the rest of the product page's gallery)."""
+        gallery_dir = self._mock_gallery_dir(monkeypatch, tmp_path)
         calls = []
 
         async def fake_download(model_id, urls, **kwargs):
             calls.append((model_id, urls))
-            return ["/data/gallery_images/1_0.jpg"]
+            return [str(gallery_dir / f"{model_id}_0.jpg")]
 
-        monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+        monkeypatch.setattr(metadata_apply.thumbnails, "download_gallery_images", fake_download)
 
         creator = make_creator(db)
         model = make_model(db, creator, name="m")
-        model.image_paths = ["/library/existing.jpg"]
+        model.image_paths = ["/library/scanned-promo.jpg"]
         db.commit()
 
         _run(apply_scraped_to_model(db, model, _scraped(image_urls=["https://cdn/a.jpg"])))
         db.commit(); db.refresh(model)
 
-        assert calls == []
-        assert model.image_paths == ["/library/existing.jpg"]
+        assert calls == [(model.id, ["https://cdn/a.jpg"])]
+        assert model.image_paths == ["/library/scanned-promo.jpg", str(gallery_dir / f"{model.id}_0.jpg")]
+
+    def test_refetch_replaces_previously_fetched_images_but_keeps_scanned_ones(self, db, monkeypatch, tmp_path):
+        gallery_dir = self._mock_gallery_dir(monkeypatch, tmp_path)
+
+        async def fake_download(model_id, urls, **kwargs):
+            # Simulates a shrinking source gallery: only one image this time,
+            # where a prior fetch had left two files behind.
+            return [str(gallery_dir / f"{model_id}_0.jpg")]
+
+        monkeypatch.setattr(metadata_apply.thumbnails, "download_gallery_images", fake_download)
+
+        creator = make_creator(db)
+        model = make_model(db, creator, name="m")
+        db.commit()  # assigns model.id
+        model.image_paths = [
+            "/library/scanned.jpg",
+            str(gallery_dir / f"{model.id}_0.jpg"),
+            str(gallery_dir / f"{model.id}_1.jpg"),
+        ]
+        db.commit()
+
+        _run(apply_scraped_to_model(db, model, _scraped(image_urls=["https://cdn/a.jpg"])))
+        db.commit(); db.refresh(model)
+
+        assert model.image_paths == ["/library/scanned.jpg", str(gallery_dir / f"{model.id}_0.jpg")]
 
     def test_no_image_urls_leaves_gallery_untouched(self, db, monkeypatch):
         calls = []
@@ -212,7 +251,7 @@ class TestGalleryImages:
             calls.append((model_id, urls))
             return []
 
-        monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+        monkeypatch.setattr(metadata_apply.thumbnails, "download_gallery_images", fake_download)
 
         creator = make_creator(db)
         model = make_model(db, creator, name="m")
@@ -229,7 +268,7 @@ class TestGalleryImages:
         async def fake_download(model_id, urls, **kwargs):
             return []  # every URL failed to download
 
-        monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+        monkeypatch.setattr(metadata_apply.thumbnails, "download_gallery_images", fake_download)
 
         creator = make_creator(db)
         model = make_model(db, creator, name="m")

@@ -391,15 +391,18 @@ class TestScrapeApplyGallery:
             str(gallery_dir / f"{model.id}_1.png"),
         ]
 
-    def test_image_urls_skipped_when_gallery_already_has_images(self, client, db, thumb_dir, gallery_dir, monkeypatch):
+    def test_image_urls_downloaded_even_when_gallery_already_has_non_fetched_images(
+        self, client, db, thumb_dir, gallery_dir, monkeypatch,
+    ):
+        """#1028: no fill-only-when-empty gate — a scan-discovered image
+        already in the gallery must not block fetching the rest."""
         creator = make_creator(db)
         model = make_model(db, creator)
         model.image_paths = ["/library/existing.jpg"]
         db.commit()
 
-        def fail(req):
-            raise AssertionError("should not fetch when the gallery already has images")
-        mock_http(monkeypatch, fail)
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
 
         resp = client.post(f"/scrape/apply/{model.id}", json={
             "image_urls": ["https://cdn.example.com/a.png"],
@@ -407,7 +410,36 @@ class TestScrapeApplyGallery:
         assert resp.status_code == 200
 
         db.refresh(model)
-        assert model.image_paths == ["/library/existing.jpg"]
+        assert model.image_paths == ["/library/existing.jpg", str(gallery_dir / f"{model.id}_0.png")]
+
+    def test_refetch_replaces_previously_fetched_images_only(self, client, db, thumb_dir, gallery_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
+
+        # First fetch: two images.
+        client.post(f"/scrape/apply/{model.id}", json={
+            "image_urls": ["https://cdn.example.com/a.png", "https://cdn.example.com/b.png"],
+        })
+        db.refresh(model)
+        assert len(model.image_paths) == 2
+
+        # A scan-discovered image lands in the gallery independently.
+        model.image_paths = model.image_paths + ["/library/scanned.jpg"]
+        db.commit()
+
+        # Second fetch: source page now only has one image.
+        resp = client.post(f"/scrape/apply/{model.id}", json={
+            "image_urls": ["https://cdn.example.com/c.png"],
+        })
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        # The stale second fetched file is gone; the scanned one survives.
+        assert model.image_paths == ["/library/scanned.jpg", str(gallery_dir / f"{model.id}_0.png")]
 
 
 # ---------------------------------------------------------------------------
@@ -439,15 +471,14 @@ class TestScrapeApplyImages:
             str(gallery_dir / f"{model.id}_1.png"),
         ]
 
-    def test_skips_when_gallery_already_has_images(self, client, db, gallery_dir, monkeypatch):
+    def test_downloads_even_when_gallery_already_has_non_fetched_images(self, client, db, gallery_dir, monkeypatch):
         creator = make_creator(db)
         model = make_model(db, creator)
         model.image_paths = ["/library/existing.jpg"]
         db.commit()
 
-        def fail(req):
-            raise AssertionError("should not fetch when the gallery already has images")
-        mock_http(monkeypatch, fail)
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
 
         resp = client.post(f"/scrape/apply-images/{model.id}", json={
             "image_urls": ["https://cdn.example.com/a.png"],
@@ -455,7 +486,7 @@ class TestScrapeApplyImages:
         assert resp.status_code == 200
 
         db.refresh(model)
-        assert model.image_paths == ["/library/existing.jpg"]
+        assert model.image_paths == ["/library/existing.jpg", str(gallery_dir / f"{model.id}_0.png")]
 
     def test_does_not_touch_other_fields(self, client, db, gallery_dir, monkeypatch):
         """This endpoint exists precisely because the Edit Metadata panel

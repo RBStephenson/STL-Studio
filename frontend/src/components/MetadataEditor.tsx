@@ -121,8 +121,7 @@ export default function MetadataEditor({ model, currentTags, onSaved, onCancel }
       tags:          [...new Set([...prev.tags, ...scraped.tags])],
     }));
     // Gallery images have no form field to merge into (they're not
-    // user-editable text) — queued here and sent on Save. The backend only
-    // actually fills them if the model has no gallery yet (#1028).
+    // user-editable text) — queued here and sent on Save (#1028).
     if (scraped.image_urls.length > 0) setPendingImageUrls(scraped.image_urls);
     setScraped(null);
   };
@@ -220,7 +219,7 @@ export default function MetadataEditor({ model, currentTags, onSaved, onCancel }
               )}
               {scraped.image_urls.length > 1 && (
                 <p className="text-xs text-gray-600 mt-0.5">
-                  {scraped.image_urls.length} images found — added to this model's gallery on Save if it doesn't already have images
+                  {scraped.image_urls.length} images found — added to this model's gallery on Save
                 </p>
               )}
             </div>
