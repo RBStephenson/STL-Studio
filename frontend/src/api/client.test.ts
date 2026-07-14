@@ -24,7 +24,7 @@ const EXPECTED_SLICE_METHODS: Record<string, string[]> = {
   ],
   files: ["openFolder", "driveStatus"],
   reorganize: ["preview", "previewWithOverrides", "apply", "undo"],
-  scrape: ["fetchUrl", "applyMetadata", "applyGroup"],
+  scrape: ["fetchUrl", "applyMetadata", "applyImages", "applyGroup"],
   scan: [
     "start", "startCreator", "cancel", "status", "browse", "startInboxScan",
     "roots", "libraries", "addRoot", "updateRoot", "removeRoot",

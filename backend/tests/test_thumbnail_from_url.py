@@ -411,6 +411,89 @@ class TestScrapeApplyGallery:
 
 
 # ---------------------------------------------------------------------------
+# POST /scrape/apply-images/{id} — for the Edit Metadata panel's own inline
+# Fetch/Apply, which never goes through /scrape/apply at all (#1028)
+# ---------------------------------------------------------------------------
+
+class TestScrapeApplyImages:
+    def test_downloads_and_fills_empty_gallery(self, client, db, gallery_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
+
+        resp = client.post(f"/scrape/apply-images/{model.id}", json={
+            "image_urls": ["https://cdn.example.com/a.png", "https://cdn.example.com/b.png"],
+        })
+        assert resp.status_code == 200
+        assert resp.json()["image_paths"] == [
+            str(gallery_dir / f"{model.id}_0.png"),
+            str(gallery_dir / f"{model.id}_1.png"),
+        ]
+
+        db.refresh(model)
+        assert model.image_paths == [
+            str(gallery_dir / f"{model.id}_0.png"),
+            str(gallery_dir / f"{model.id}_1.png"),
+        ]
+
+    def test_skips_when_gallery_already_has_images(self, client, db, gallery_dir, monkeypatch):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        model.image_paths = ["/library/existing.jpg"]
+        db.commit()
+
+        def fail(req):
+            raise AssertionError("should not fetch when the gallery already has images")
+        mock_http(monkeypatch, fail)
+
+        resp = client.post(f"/scrape/apply-images/{model.id}", json={
+            "image_urls": ["https://cdn.example.com/a.png"],
+        })
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.image_paths == ["/library/existing.jpg"]
+
+    def test_does_not_touch_other_fields(self, client, db, gallery_dir, monkeypatch):
+        """This endpoint exists precisely because the Edit Metadata panel
+        writes every other field itself — it must never overwrite title/
+        description/etc, unlike /scrape/apply."""
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        model.title = "Kept Title"
+        model.description = "Kept description"
+        db.commit()
+
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/png"}))
+
+        resp = client.post(f"/scrape/apply-images/{model.id}", json={
+            "image_urls": ["https://cdn.example.com/a.png"],
+        })
+        assert resp.status_code == 200
+
+        db.refresh(model)
+        assert model.title == "Kept Title"
+        assert model.description == "Kept description"
+
+    def test_unknown_model_returns_404(self, client, gallery_dir):
+        resp = client.post("/scrape/apply-images/999999", json={"image_urls": []})
+        assert resp.status_code == 404
+
+    def test_empty_image_urls_is_a_no_op(self, client, db, gallery_dir):
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        db.commit()
+
+        resp = client.post(f"/scrape/apply-images/{model.id}", json={"image_urls": []})
+        assert resp.status_code == 200
+        assert resp.json()["image_paths"] == []
+
+
+# ---------------------------------------------------------------------------
 # PATCH /models/{id} — thumbnail_url handling in the metadata editor
 # ---------------------------------------------------------------------------
 

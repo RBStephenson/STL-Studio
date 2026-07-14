@@ -40,6 +40,21 @@ from app.utils import utcnow
 logger = logging.getLogger(__name__)
 
 
+async def fill_gallery_images(model: Model, image_urls: list[str]) -> None:
+    """Download ``image_urls`` into ``model.image_paths`` (no commit), but only
+    when the model has no gallery images yet (#1028) — see the module
+    docstring for why this has no per-caller policy flag. Standalone (not
+    folded silently into apply_scraped_to_model's body) so the Edit Metadata
+    panel's own inline Fetch/Apply flow — which merges scraped fields into
+    its local form and saves via a plain PATCH /models/{id}, never going
+    through apply_scraped_to_model at all — can call it too."""
+    if not image_urls or model.image_paths:
+        return
+    saved = await download_gallery_images(model.id, image_urls)
+    if saved:
+        model.image_paths = saved
+
+
 async def apply_scraped_to_model(
     db: Session,
     model: Model,
@@ -77,10 +92,7 @@ async def apply_scraped_to_model(
             model.thumbnail_url = scraped.thumbnail_url
             model.thumbnail_path = None
 
-    if scraped.image_urls and not model.image_paths:
-        saved = await download_gallery_images(model.id, scraped.image_urls)
-        if saved:
-            model.image_paths = saved
+    await fill_gallery_images(model, scraped.image_urls)
 
     if scraped.tags:
         model.tags = list(set(model.tags or []) | set(scraped.tags))
