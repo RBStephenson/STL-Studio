@@ -12,8 +12,11 @@ from app.models import Model, ScanRoot
 from tests.conftest import make_creator, make_model, make_stl_file
 
 
-def _fake_openai_post(content: dict):
+def _fake_openai_post(content: dict, captured_request: dict | None = None):
     def _post(url, **kwargs):
+        if captured_request is not None:
+            captured_request.update(kwargs["json"])
+
         class _Resp:
             status_code = 200
             is_success = True
@@ -164,7 +167,8 @@ class TestAiSuggestEndpoint:
         canned = {"models": [
             {"id": m.id, "creator": "Some Studio", "character": "Mystery Head", "title": "Mystery Head"},
         ]}
-        monkeypatch.setattr(ai.httpx, "post", _fake_openai_post(canned))
+        captured_request: dict = {}
+        monkeypatch.setattr(ai.httpx, "post", _fake_openai_post(canned, captured_request))
 
         manifest_id = client.get("/reorganize/preview").json()["manifest_id"]
         r = client.post("/reorganize/ai-suggest", json={
@@ -177,6 +181,14 @@ class TestAiSuggestEndpoint:
         assert body["suggestions"] == [
             {"model_id": m.id, "creator": "Some Studio", "character": "Mystery Head", "title": "Mystery Head"},
         ]
+        sent_entries = json.loads(captured_request["messages"][1]["content"])
+        assert sent_entries == [{
+            "id": m.id,
+            "folder_name": "KS_March_2024_v3",
+            "source_path": str(tmp_path / "KS_March_2024_v3").replace("\\", "/"),
+            "filenames": ["mystery_head.stl"],
+        }]
+        assert "distinguishing path segments" in captured_request["messages"][0]["content"]
 
     def test_404_on_unknown_manifest(self, client, db):
         client.patch("/settings", json={"reorganize_ai_suggestions_enabled": True})

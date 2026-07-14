@@ -767,14 +767,16 @@ off to keep each segment's original casing and spacing.
 - **Resolve flagged rows.** Expand an ineligible row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an
   over-long/reserved name. A same-destination collision means only that two models
-  render to the same folder; it does not claim their files are duplicates. When a
+  render to the same folder; it does not claim their files are duplicates. Collision
+  rows show their actual source folders so entries with the same derived name remain
+  distinguishable without expanding their file lists. When a
   source folder has a strong distinguishing variant name such as `Alternative` or
   `v2`, the row offers that value as a reviewable suffix suggestion. Suggestions
   never apply automatically. The preview regenerates as you type. When the
   **AI-assisted field suggestions** toggle is on (**Settings → Library →
   Reorganize**, off by default), unclassifiable and collision rows also get a
   **Suggest with AI** action that infers creator/character/title from the
-  folder name and file names via the AI Organize endpoint (**Settings → AI &
+  actual source path, folder name, and file names via the AI Organize endpoint (**Settings → AI &
   Integrations**). A suggestion only prefills the form fields above — nothing
   changes until you review and confirm it, same as typing the values yourself.
 - **Apply.** Tick the eligible rows — or use **Select all eligible** to select

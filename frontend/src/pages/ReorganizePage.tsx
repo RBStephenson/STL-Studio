@@ -564,6 +564,14 @@ export default function ReorganizePage() {
                       </span>
                       <span className="flex-1 min-w-0">
                         <span className="block text-sm text-text-primary-alt truncate">{e.model_name}</span>
+                        {e.collision && (
+                          <span
+                            className="block text-xs text-text-muted truncate font-mono"
+                            title={`Source: ${e.source_path}`}
+                          >
+                            Source: {e.source_path}
+                          </span>
+                        )}
                         <span className="block text-xs text-text-secondary-alt truncate font-mono">→ {e.proposed_dir}</span>
                       </span>
                     </button>

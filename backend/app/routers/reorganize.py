@@ -41,6 +41,7 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
     return ReorganizeEntry(
         model_id=e.model_id,
         model_name=e.model_name,
+        source_path=e.source_dir,
         files=[
             ReorganizeFileMove(
                 stl_file_id=f.stl_file_id,
@@ -284,6 +285,7 @@ def ai_suggest(body: ReorganizeAiSuggestRequest, db: Session = Depends(get_db)) 
         candidates.append({
             "id": mid,
             "folder_name": entry.get("model_name") or "",
+            "source_path": entry.get("source_path") or "",
             "filenames": filenames,
         })
 

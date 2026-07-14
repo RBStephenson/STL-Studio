@@ -42,6 +42,7 @@ const reorg = api.reorganize as unknown as {
 function entry(over: Record<string, unknown>) {
   return {
     model_id: 1, model_name: "Joker Bust", files: [], kind: "move",
+    source_path: "/lib/Abe3D/Joker/Bust",
     proposed_dir: "/lib/Abe3D/Joker/Bust", eligible: true,
     pack_override_paths: [],
     collision: false, collision_kind: "none", collision_with: [], suggested_suffix: null,
@@ -466,6 +467,31 @@ describe("ReorganizePage resolvable vs unresolvable coloring (STUDIO-161)", () =
     expect(unresolvableRow.className).toContain("border-rose-900/60");
     expect(resolvableRow.className).not.toContain("border-rose-900/60");
     expect(unresolvableRow.className).not.toContain("border-amber-700/60");
+  });
+});
+
+describe("ReorganizePage collision source context (#1026)", () => {
+  it("shows source paths on collapsed collision rows without cluttering other rows", async () => {
+    reorg.preview.mockResolvedValue({
+      manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
+      generated_at: "now",
+      entries: [
+        entry({
+          model_id: 1, model_name: "2B", source_path: "/library/Abe3D/2B/Alternative",
+          eligible: false, collision: true, collision_kind: "same_destination", collision_with: [2],
+        }),
+        entry({
+          model_id: 2, model_name: "Joker Bust", source_path: "/library/Abe3D/Joker/Bust",
+        }),
+      ],
+      stats: STATS,
+    });
+
+    render(<ReorganizePage />);
+    buildPlan();
+
+    expect(await screen.findByText("Source: /library/Abe3D/2B/Alternative")).toBeVisible();
+    expect(screen.queryByText("Source: /library/Abe3D/Joker/Bust")).not.toBeInTheDocument();
   });
 });
 
