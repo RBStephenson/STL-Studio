@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Model
 from app.services import scrapers, secrets
-from app.services.metadata_apply import apply_scraped_to_model
+from app.services.metadata_apply import apply_scraped_to_model, fill_gallery_images
 from app.services.scrapers.base import ScrapedModel
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
@@ -60,6 +60,15 @@ class ApplyRequest(BaseModel):
     license: Optional[str] = None
     like_count: Optional[int] = None
     download_count: Optional[int] = None
+
+
+class ApplyImagesRequest(BaseModel):
+    """Just the gallery-image half of a ScrapePreview (#1028) — for callers
+    that already write the rest of a model's fields themselves (the Edit
+    Metadata panel's own inline Fetch/Apply, which merges scraped fields into
+    its local form and saves via PATCH /models/{id}) and only need the
+    image-download side effect this router already knows how to do."""
+    image_urls: list[str] = []
 
 
 class GroupScrapeApply(BaseModel):
@@ -161,6 +170,25 @@ async def apply_metadata(
     await _apply_request_to_model(db, model, body)
     db.commit()
     return {"ok": True, "model_id": model_id}
+
+
+@router.post("/apply-images/{model_id}", response_model=dict)
+async def apply_images(
+    model_id: int,
+    body: ApplyImagesRequest,
+    db: Session = Depends(get_db),
+):
+    """Fill a model's gallery from scraped image_urls, independent of the
+    rest of a scrape apply (#1028). For the Edit Metadata panel's own inline
+    Fetch/Apply, which already writes every other field itself via a plain
+    PATCH /models/{id} and never goes through apply_scraped_to_model."""
+    model = db.query(Model).filter(Model.id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    await fill_gallery_images(model, body.image_urls)
+    db.commit()
+    return {"ok": True, "model_id": model_id, "image_paths": model.image_paths or []}
 
 
 @router.post("/apply-group", response_model=GroupScrapeResult)

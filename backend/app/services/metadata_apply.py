@@ -18,26 +18,53 @@ The two call sites differ in policy, exposed as flags:
     bulk apply leaves it since no human looked at the deep data (#699 1.3).
 
 Gallery images (``scraped.image_urls``, #1028) are downloaded the same way
-for both call sites, unlike the flags above: only when the model's
-``image_paths`` is currently empty, capped at 30. Unlike the thumbnail
-(single slot, always refreshed by the single-model path), a gallery has no
-single "current" image to compare against and no reliable way to tell which
-already-downloaded files came from which source URL — so both paths use the
-same conservative fill-only-when-empty policy to avoid ballooning a gallery
-on repeated fetches.
+for every call site, unlike the flags above: unconditionally, every time,
+capped at 30 — matching Import's own gallery-image cap. Unlike the thumbnail
+(single slot, ``thumbnail_fill_only`` decides whether to touch it), a
+gallery download always runs; there's no per-caller flag to skip it. What's
+preserved across repeated fetches is *which files*, not *whether* to fetch:
+only the subset of ``image_paths`` previously written by a fetch (files
+under ``gallery_images_dir()``) is replaced with the fresh set — anything
+else already in the gallery (e.g. scan-discovered images sitting in the
+model's own library folder) is left alone, so a rescan's images and a
+fetch's images can coexist without either being able to stomp the other.
 """
 import logging
+import os
 
 from sqlalchemy.orm import Session
 
 from app.models import Model
+from app.services import thumbnails
 from app.services.scanner import resolve_creator
 from app.services.scrapers.base import ScrapedModel
-from app.services.thumbnails import ThumbnailDownloadError, download_gallery_images, download_thumbnail
+from app.services.thumbnails import ThumbnailDownloadError
 from app.services.variant_sync import propagate_source_url
 from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
+
+
+async def fill_gallery_images(model: Model, image_urls: list[str]) -> None:
+    """Download ``image_urls`` into ``model.image_paths`` (no commit),
+    unconditionally — every Fetch/Enrich run replaces the previously-fetched
+    subset of the gallery with a fresh one, capped at 30 (#1028). Standalone
+    (not folded silently into apply_scraped_to_model's body) so the Edit
+    Metadata panel's own inline Fetch/Apply flow — which merges scraped
+    fields into its local form and saves via a plain PATCH /models/{id},
+    never going through apply_scraped_to_model at all — can call it too."""
+    if not image_urls:
+        return
+    saved = await thumbnails.download_gallery_images(model.id, image_urls)
+    if not saved:
+        return
+    # Only replace files this mechanism itself previously wrote — anything
+    # else in image_paths (scan-discovered images from the model's own
+    # library folder) is untouched, not stomped by a fetch that happens to
+    # return fewer/different images this time.
+    fetched_prefix = os.path.realpath(str(thumbnails.gallery_images_dir())) + os.sep
+    kept = [p for p in (model.image_paths or []) if not p.startswith(fetched_prefix)]
+    model.image_paths = kept + saved
 
 
 async def apply_scraped_to_model(
@@ -67,7 +94,7 @@ async def apply_scraped_to_model(
         # the UI gives thumbnail_path precedence over thumbnail_url.
         try:
             model.thumbnail_path = str(
-                await download_thumbnail(model.id, scraped.thumbnail_url)
+                await thumbnails.download_thumbnail(model.id, scraped.thumbnail_url)
             )
             model.thumbnail_url = None
         except ThumbnailDownloadError as e:
@@ -77,10 +104,7 @@ async def apply_scraped_to_model(
             model.thumbnail_url = scraped.thumbnail_url
             model.thumbnail_path = None
 
-    if scraped.image_urls and not model.image_paths:
-        saved = await download_gallery_images(model.id, scraped.image_urls)
-        if saved:
-            model.image_paths = saved
+    await fill_gallery_images(model, scraped.image_urls)
 
     if scraped.tags:
         model.tags = list(set(model.tags or []) | set(scraped.tags))

@@ -99,7 +99,7 @@ def test_apply_downloads_gallery_images_when_empty(client, db, monkeypatch):
         calls.append((model_id, urls))
         return [f"/data/gallery_images/{model_id}_{i}.png" for i in range(len(urls))]
 
-    monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+    monkeypatch.setattr(metadata_apply.thumbnails, "download_gallery_images", fake_download)
 
     resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
     assert resp.status_code == 200
@@ -112,7 +112,9 @@ def test_apply_downloads_gallery_images_when_empty(client, db, monkeypatch):
     ]
 
 
-def test_apply_skips_gallery_download_when_model_already_has_images(client, db, monkeypatch):
+def test_apply_downloads_even_when_model_already_has_non_fetched_images(client, db, monkeypatch):
+    """#1028: no fill-only-when-empty gate — a model with a scan-discovered
+    promo image must still get the rest of the product page's gallery."""
     creator = make_creator(db)
     model = make_model(db, creator, name="dragon")
     model.image_paths = ["/library/existing.jpg"]
@@ -127,16 +129,16 @@ def test_apply_skips_gallery_download_when_model_already_has_images(client, db, 
 
     async def fake_download(model_id, urls, **kwargs):
         calls.append((model_id, urls))
-        return []
+        return [f"/data/gallery_images/{model_id}_0.png"]
 
-    monkeypatch.setattr(metadata_apply, "download_gallery_images", fake_download)
+    monkeypatch.setattr(metadata_apply.thumbnails, "download_gallery_images", fake_download)
 
     resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
     assert resp.status_code == 200
 
     db.refresh(model)
-    assert calls == []
-    assert model.image_paths == ["/library/existing.jpg"]
+    assert calls == [(model.id, ["https://cdn/a.png"])]
+    assert model.image_paths == ["/library/existing.jpg", f"/data/gallery_images/{model.id}_0.png"]
 
 
 def test_one_fetch_per_unique_url_fans_to_all_models(client, db, monkeypatch):

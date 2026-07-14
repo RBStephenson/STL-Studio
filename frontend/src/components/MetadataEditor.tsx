@@ -50,6 +50,12 @@ export default function MetadataEditor({ model, currentTags, onSaved, onCancel }
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [scraped, setScraped] = useState<ScrapePreview | null>(null);
+  // Applied scraped image_urls, held separately from `form` (which only ever
+  // carries plain metadata fields) and sent via a dedicated endpoint on save
+  // (#1028) — applyScraped() merges every other scraped field into the form
+  // for review/further editing, but there's no form field for a gallery to
+  // merge into.
+  const [pendingImageUrls, setPendingImageUrls] = useState<string[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -64,7 +70,18 @@ export default function MetadataEditor({ model, currentTags, onSaved, onCancel }
     setError(null);
     try {
       await api.models.update(model.id, form);
-      toast("Saved", "success");
+      let imagesFailed = false;
+      if (pendingImageUrls.length > 0) {
+        // Best-effort: a gallery-fetch failure shouldn't block the metadata
+        // save that already succeeded, or leave the user stuck on this
+        // screen — just note it and move on.
+        try {
+          await api.scrape.applyImages(model.id, pendingImageUrls);
+        } catch {
+          imagesFailed = true;
+        }
+      }
+      toast(imagesFailed ? "Saved, but the gallery images couldn't be fetched." : "Saved", imagesFailed ? "error" : "success");
       onSaved();
     } catch (e) {
       setError(errMsg(e) ?? null);
@@ -103,6 +120,9 @@ export default function MetadataEditor({ model, currentTags, onSaved, onCancel }
       thumbnail_url: scraped.thumbnail_url || prev.thumbnail_url,
       tags:          [...new Set([...prev.tags, ...scraped.tags])],
     }));
+    // Gallery images have no form field to merge into (they're not
+    // user-editable text) — queued here and sent on Save (#1028).
+    if (scraped.image_urls.length > 0) setPendingImageUrls(scraped.image_urls);
     setScraped(null);
   };
 
@@ -196,6 +216,11 @@ export default function MetadataEditor({ model, currentTags, onSaved, onCancel }
               {scraped.creator_name && <p className="text-xs text-gray-400">by {scraped.creator_name}</p>}
               {scraped.tags.length > 0 && (
                 <p className="text-xs text-gray-500 mt-0.5">Tags: {scraped.tags.join(", ")}</p>
+              )}
+              {scraped.image_urls.length > 1 && (
+                <p className="text-xs text-gray-600 mt-0.5">
+                  {scraped.image_urls.length} images found — added to this model's gallery on Save
+                </p>
               )}
             </div>
             <button

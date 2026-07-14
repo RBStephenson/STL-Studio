@@ -291,7 +291,7 @@ export default function FindOnWeb({ modelId, modelName, onApplied, onClose }: Pr
                   )}
                   {preview.image_urls.length > 1 && (
                     <p className="text-xs text-gray-600">
-                      {preview.image_urls.length} images found — added to this model's gallery on Apply if it doesn't already have images
+                      {preview.image_urls.length} images found — added to this model's gallery on Apply
                     </p>
                   )}
                 </div>
