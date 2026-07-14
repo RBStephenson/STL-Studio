@@ -952,6 +952,7 @@ export interface ReorganizeFileMove {
 export interface ReorganizeEntry {
   model_id: number;
   model_name: string;
+  source_path: string;
   files: ReorganizeFileMove[];
   kind: ReorganizeMoveKind;
   proposed_dir: string;

@@ -235,6 +235,7 @@ class TestSpansMultipleDirs:
         entry = client.get("/reorganize/preview").json()["entries"][0]
 
         assert entry["spans_multiple_dirs"] is False
+        assert entry["source_path"] == str(source_dir.parent).replace("\\", "/")
         assert entry["source_directories"] == [str(source_dir).replace("\\", "/")]
 
     def test_model_with_files_in_two_dirs_flagged(self, client, db, tmp_path):

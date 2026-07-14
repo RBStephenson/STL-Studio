@@ -553,13 +553,14 @@ _UNIT_JSON_SCHEMA: dict[str, Any] = {
 # affects anything on disk. No new apply/undo code path.
 _REORG_SYSTEM_PROMPT = ("""You are an assistant that infers organizing metadata for 3D-printing STL model folders in a miniature figure library.
 
-Given a JSON list of models (each {"id": <int>, "folder_name": <str>, "filenames": [<str>, ...]}), infer for each: the creator (the studio/artist who made it), the character (the specific subject/character name), and a clean display title.
+Given a JSON list of models (each {"id": <int>, "folder_name": <str>, "source_path": <str>, "filenames": [<str>, ...]}), infer for each: the creator (the studio/artist who made it), the character (the specific subject/character name), and a clean display title.
 
 Rules:
 1. creator: the creator/studio name if recognizable from the folder name or filenames (e.g. a Kickstarter/patreon studio tag). Null if truly unknowable — never guess a generic word like "Models" or a date as a creator.
 2. character: the specific character/subject name (e.g. "Goblin Warlord"), not a generic category. Null if truly unknowable.
 3. title: a clean, human-readable display name for the model, derived from the folder name and filenames with junk (version tags, dates, batch codes) stripped. Null only if nothing usable remains.
-4. Return ONLY the JSON object — no markdown, no explanation.
+4. source_path is the model's actual folder. Use its distinguishing path segments to tell otherwise-identical collision entries apart; do not copy unrelated library-root segments into the metadata.
+5. Return ONLY the JSON object — no markdown, no explanation.
 
 Format: {{"models": [{{"id": <int>, "creator": <str|null>, "character": <str|null>, "title": <str|null>}}, ...]}}"""
     + _NO_REASONING_SUFFIX)
@@ -624,7 +625,7 @@ def suggest_reorganize_fields(
     """Suggest creator/character/title for reorganize-preview entries the
     deterministic pass couldn't classify (unclassifiable or in collision).
 
-    ``entries``: ``[{"id": <model_id>, "folder_name": <str>, "filenames": [<str>, ...]}, ...]``.
+    ``entries``: ``[{"id": <model_id>, "folder_name": <str>, "source_path": <str>, "filenames": [<str>, ...]}, ...]``.
 
     No heuristic stage — this is pure LLM inference over free-text names, unlike
     the "parts"/"unit" strategies which have a keyword-driven fallback. Batched

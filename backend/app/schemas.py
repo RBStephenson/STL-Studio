@@ -869,6 +869,7 @@ class ReorganizeFileMove(BaseModel):
 class ReorganizeEntry(BaseModel):
     model_id: int
     model_name: str
+    source_path: str
     files: list[ReorganizeFileMove]   # the move unit is the file set
     kind: MoveKind
     proposed_dir: str
