@@ -37,6 +37,7 @@ DEFAULTS = {
     "reorganize_ai_suggestions_enabled": False,
     "hierarchy_variant_grouping_enabled": False,
     "system_info_enabled": False,
+    "storage_recovery_enabled": False,
     "collections_uniform_size": True,
 }
 
@@ -58,6 +59,32 @@ def test_system_info_is_server_gated_by_default(client):
     response = client.get("/settings/system-info")
     assert response.status_code == 404
     assert response.json()["detail"] == "System info is disabled"
+
+
+def test_storage_recovery_is_server_gated_and_path_free(client, db, tmp_path):
+    from app.models import ScanRoot
+
+    available = tmp_path / "private-drive" / "models"
+    available.mkdir(parents=True)
+    missing = tmp_path / "secret-drive" / "offline"
+    db.add_all([
+        ScanRoot(path=str(available), enabled=True),
+        ScanRoot(path=str(missing), enabled=True),
+    ])
+    db.commit()
+
+    assert client.get("/settings/storage-recovery").status_code == 404
+    client.patch("/settings", json={"storage_recovery_enabled": True})
+    response = client.get("/settings/storage-recovery")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "enabled_libraries": 2,
+        "available_libraries": 1,
+        "all_available": False,
+    }
+    assert "private-drive" not in response.text
+    assert "secret-drive" not in response.text
 
 
 def test_system_info_is_sanitized_and_reports_library_availability(

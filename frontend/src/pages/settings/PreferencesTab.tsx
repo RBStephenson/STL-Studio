@@ -265,6 +265,21 @@ export default function PreferencesTab() {
             </p>
           </div>
         </label>
+        <label className="flex items-start gap-3 cursor-pointer select-none mt-4">
+          <input
+            type="checkbox"
+            checked={settings.storage_recovery_enabled}
+            onChange={() => update({ storage_recovery_enabled: !settings.storage_recovery_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-text-primary-alt2">External storage recovery</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              Shows one quiet notification when library storage is warming up or returns,
+              then retries affected previews without interrupting catalog browsing.
+            </p>
+          </div>
+        </label>
       </section>
     </div>
   );

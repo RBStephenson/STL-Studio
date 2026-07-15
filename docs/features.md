@@ -1036,3 +1036,9 @@ a scan is in progress.)
 A global **NSFW On/Off** switch in the top-right of the nav. When off, models
 flagged NSFW are blurred in the grid and detail view. You can flag/unflag any
 model from its card or detail header, and filter by NSFW status in the Library.
+
+## External storage recovery
+
+The default-off **External storage recovery** option in **Settings → Preferences → About & Diagnostics** monitors enabled library storage without exposing paths to the recovery UI. It uses short-lived, aggregated notifications when external storage is warming up, becomes unavailable, or returns. Catalog metadata remains browsable throughout, and local previews receive one coordinated retry after storage recovers rather than repeated per-image retries.
+
+If the Electron backend cannot finish starting, the desktop recovery page offers **Try again**. Retrying cleans up the failed sidecar attempt and does not require restarting STL Studio.

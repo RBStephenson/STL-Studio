@@ -31,6 +31,7 @@ from app.schemas import (
     EnvReloadResult,
     FilterPreset,
     MmfSettingsRead,
+    StorageRecoveryRead,
     SystemInfoRead,
 )
 from app.services import secrets
@@ -117,6 +118,22 @@ def get_system_info(db: Session = Depends(get_db)):
         libraries_enabled=len(enabled_roots),
         libraries_available=available,
         last_scan=max(scans) if scans else None,
+    )
+
+
+@router.get("/storage-recovery", response_model=StorageRecoveryRead)
+def get_storage_recovery(db: Session = Depends(get_db)):
+    """Return path-free enabled-library availability for recovery UX."""
+    enabled = db.get(AppSetting, "storage_recovery_enabled")
+    if enabled is None or enabled.value is not True:
+        raise HTTPException(status_code=404, detail="Storage recovery is disabled")
+
+    roots = db.query(ScanRoot).filter(ScanRoot.enabled.is_(True)).all()
+    available = sum(1 for root in roots if Path(root.path).is_dir())
+    return StorageRecoveryRead(
+        enabled_libraries=len(roots),
+        available_libraries=available,
+        all_available=available == len(roots),
     )
 
 

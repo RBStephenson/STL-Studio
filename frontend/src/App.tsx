@@ -24,6 +24,7 @@ import ReorganizePage from "./pages/ReorganizePage";
 import ImportPage from "./pages/ImportPage";
 import ImportPreviewPage from "./pages/ImportPreviewPage";
 import BackToTop from "./components/BackToTop";
+import StorageRecoveryMonitor from "./components/StorageRecoveryMonitor";
 
 // The Reorganize feature is gated behind the `reorganize_enabled` flag: when
 // off, the page is unreachable even by direct URL (the nav link is hidden in
@@ -36,6 +37,7 @@ function ReorganizeRoute() {
 export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
+      <StorageRecoveryMonitor />
       <Navbar />
       <main className="flex-1">
         <Routes>

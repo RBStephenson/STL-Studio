@@ -299,6 +299,7 @@ export interface AppSettings {
   // Off by default; manual groups and explicit exclusions remain authoritative.
   hierarchy_variant_grouping_enabled: boolean;
   system_info_enabled: boolean;
+  storage_recovery_enabled: boolean;
   // Collections page: every card gets the same box size (the one cover art
   // already uses) instead of a compact box for collections with no cover.
   collections_uniform_size: boolean;
@@ -313,6 +314,12 @@ export interface SystemInfo {
   libraries_enabled: number;
   libraries_available: number;
   last_scan: string | null;
+}
+
+export interface StorageRecoveryStatus {
+  enabled_libraries: number;
+  available_libraries: number;
+  all_available: boolean;
 }
 
 export type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
