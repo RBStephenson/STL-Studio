@@ -19,17 +19,30 @@ from pathlib import Path
 TIMEOUT_S = 60
 
 
-def wait_for_lock(lock_path: Path, timeout_s: float = TIMEOUT_S) -> dict:
+def wait_for_lock(
+    appdata: Path,
+    proc: subprocess.Popen | None = None,
+    timeout_s: float = TIMEOUT_S,
+) -> dict:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        try:
-            record = json.loads(lock_path.read_text(encoding="utf-8"))
-            if isinstance(record.get("pid"), int) and isinstance(record.get("port"), int):
-                return record
-        except (OSError, ValueError, TypeError):
-            pass
+        if proc is not None and (exit_code := proc.poll()) is not None:
+            raise RuntimeError(f"installed app exited before startup with code {exit_code}")
+
+        valid_records = []
+        for lock_path in appdata.rglob("sidecar.lock.json"):
+            try:
+                record = json.loads(lock_path.read_text(encoding="utf-8"))
+                if isinstance(record.get("pid"), int) and isinstance(record.get("port"), int):
+                    valid_records.append(record)
+            except (OSError, ValueError, TypeError):
+                continue
+        if len(valid_records) == 1:
+            return valid_records[0]
+        if len(valid_records) > 1:
+            raise RuntimeError(f"multiple sidecar locks appeared under {appdata}")
         time.sleep(0.25)
-    raise TimeoutError(f"sidecar lock did not appear: {lock_path}")
+    raise TimeoutError(f"sidecar lock did not appear under {appdata}")
 
 
 def wait_for_health(port: int, timeout_s: float = TIMEOUT_S) -> None:
@@ -57,11 +70,12 @@ def kill_tree(pid: int) -> None:
     subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], check=False, capture_output=True)
 
 
-def launch_and_probe(exe: Path, env: dict[str, str], lock_path: Path) -> tuple[subprocess.Popen, dict]:
-    lock_path.unlink(missing_ok=True)
+def launch_and_probe(exe: Path, env: dict[str, str], appdata: Path) -> tuple[subprocess.Popen, dict]:
+    for lock_path in appdata.rglob("sidecar.lock.json"):
+        lock_path.unlink(missing_ok=True)
     proc = subprocess.Popen([str(exe)], env=env)
     try:
-        lock = wait_for_lock(lock_path)
+        lock = wait_for_lock(appdata, proc=proc)
         wait_for_health(lock["port"])
         return proc, lock
     except Exception:
@@ -86,13 +100,12 @@ def main(argv: list[str] | None = None) -> int:
     localappdata = root / "localappdata"
     env = os.environ.copy()
     env.update({"APPDATA": str(appdata), "LOCALAPPDATA": str(localappdata)})
-    lock_path = appdata / "STL Studio" / "sidecar.lock.json"
     db_path = localappdata / "STL-Inventory" / "stl_inventory.db"
     proc: subprocess.Popen | None = None
     try:
         subprocess.run([str(installer), "/S", f"/D={install_dir}"], check=True, env=env, timeout=120)
         app_exe = find_one(install_dir, "STL Studio.exe")
-        proc, _ = launch_and_probe(app_exe, env, lock_path)
+        proc, _ = launch_and_probe(app_exe, env, appdata)
         if not db_path.is_file():
             raise RuntimeError(f"installed app did not create database: {db_path}")
         kill_tree(proc.pid)
@@ -106,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             db.commit()
 
-        proc, _ = launch_and_probe(app_exe, env, lock_path)
+        proc, _ = launch_and_probe(app_exe, env, appdata)
         with sqlite3.connect(db_path) as db:
             marker = db.execute(
                 "SELECT value FROM app_settings WHERE key = ?", ("ci_installer_smoke",)
