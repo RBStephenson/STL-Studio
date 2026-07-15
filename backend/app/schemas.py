@@ -877,6 +877,11 @@ class ReorganizeEntry(BaseModel):
     package_mode: bool = False
     package_name: Optional[str] = None
     ambiguous_package: bool = False
+    character_source_dir: Optional[str] = None
+    character_proposed_dir: Optional[str] = None
+    character_package_ids: list[int] = Field(default_factory=list)
+    character_model_ids: list[int] = Field(default_factory=list)
+    shared_files: list[ReorganizeFileMove] = Field(default_factory=list)
     source_path: str
     files: list[ReorganizeFileMove]   # the move unit is the file set
     kind: MoveKind

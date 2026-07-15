@@ -107,6 +107,13 @@ as its package boundary. If the stored character cannot be matched to an ancesto
 folder, Reorganize blocks the package for review rather than flattening it. See
 [Reorganize Library](features.md#reorganize-library).
 
+Folders and files beside those package roots form the **character envelope**. This
+commonly includes shared `img/`, `Images/`, or `Renders/` folders, but unrecognized
+loose companion files are protected the same way. Reorganize moves the envelope
+only when every package under the character is selected. With a partial selection
+it remains at the original character path, and the preview explicitly reports that
+it will be retained.
+
 ## STL file part names
 
 Each STL file's **Name** (`part_name`, shown in the model detail file list) is

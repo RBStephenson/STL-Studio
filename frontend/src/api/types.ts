@@ -949,7 +949,7 @@ export interface ReorganizeFileMove {
   missing_file: boolean;
   // "stl" repaths an STLFile row; "image" repaths one of the model's own
   // image_paths/thumbnail_path/primary_image_path instead.
-  kind: "stl" | "image";
+  kind: "stl" | "image" | "companion" | "character_asset";
 }
 
 export interface ReorganizeEntry {
@@ -959,6 +959,11 @@ export interface ReorganizeEntry {
   package_mode: boolean;
   package_name?: string | null;
   ambiguous_package: boolean;
+  character_source_dir?: string | null;
+  character_proposed_dir?: string | null;
+  character_package_ids: number[];
+  character_model_ids: number[];
+  shared_files: ReorganizeFileMove[];
   source_path: string;
   files: ReorganizeFileMove[];
   kind: ReorganizeMoveKind;

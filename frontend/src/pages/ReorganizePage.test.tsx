@@ -47,6 +47,8 @@ function entry(over: Record<string, unknown>) {
   return {
     model_id: 1, model_name: "Joker Bust", files: [], kind: "move",
     model_ids: [1], package_mode: false, package_name: null, ambiguous_package: false,
+    character_source_dir: null, character_proposed_dir: null,
+    character_package_ids: [], character_model_ids: [], shared_files: [],
     source_path: "/lib/Abe3D/Joker/Bust",
     proposed_dir: "/lib/Abe3D/Joker/Bust", eligible: true,
     pack_override_paths: [],
@@ -97,6 +99,39 @@ describe("ReorganizePage", () => {
     packageModeEnabled = true;
     render(<ReorganizePage />);
     expect(screen.getByText(/Package preservation is on/)).toBeInTheDocument();
+  });
+
+  it("shows shared character assets moving only for a complete package selection", async () => {
+    const sharedFile = {
+      stl_file_id: null,
+      current_path: "/lib/Abe3D/Ada Wong/img/preview.jpg",
+      proposed_path: "/lib/abe3d/ada-wong/img/preview.jpg",
+      size_bytes: 3,
+      mtime_ns: 1,
+      content_hash: null,
+      fingerprint_method: "stat",
+      missing_file: false,
+      kind: "character_asset",
+    };
+    reorg.preview.mockResolvedValue({
+      ...previewFixture(),
+      entries: [
+        entry({
+          model_id: 1, model_name: "Release One", character_package_ids: [1, 2],
+          character_model_ids: [1, 2], shared_files: [sharedFile],
+        }),
+        entry({ model_id: 2, model_name: "Release Two", character_package_ids: [1, 2] }),
+      ],
+      stats: { ...STATS, total: 2, eligible: 2, blocked: 0, unclassifiable: 0, moves_needed: 2 },
+    });
+    render(<ReorganizePage />);
+    buildPlan();
+
+    expect(await screen.findByText(/will remain unless all 2 packages are selected/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Select Release One"));
+    expect(screen.getByText(/will remain unless all 2 packages are selected/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Select Release Two"));
+    expect(screen.getByText(/will move with the complete character/)).toBeInTheDocument();
   });
 
   it("selects an eligible entry and applies it", async () => {

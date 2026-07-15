@@ -150,7 +150,9 @@ A folder is only indexed as a model if it contains 3D files.
   default off) normalizes the creator/character prefix but moves a complete
   release package as one unit. Nested models such as `Alternate`, their relative
   folders, and companion files stay intact; uncertain package boundaries are
-  blocked rather than flattened.
+  blocked rather than flattened. Character-level folders such as `img/` and
+  `Renders/` move too when every package for that character is selected; partial
+  selections leave those shared assets in place and say so in preview.
 
 ### Storefront Enrichment
 - Paste a Gumroad, Cults3D, MyMiniFactory, or Loot Studios creator URL

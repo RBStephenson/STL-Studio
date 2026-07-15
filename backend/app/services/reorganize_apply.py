@@ -224,6 +224,23 @@ def _select_entries(payload: dict, entry_ids: list[int]) -> list[dict]:
     return selected
 
 
+def _include_complete_character_envelopes(payload: dict, selected: list[dict]) -> None:
+    """Add shared character files only when every package is selected."""
+    selected_ids = {entry["model_id"] for entry in selected}
+    selected_by_id = {entry["model_id"]: entry for entry in selected}
+    for source in payload.get("entries", []):
+        shared = source.get("shared_files") or []
+        package_ids = set(source.get("character_package_ids") or [])
+        if not shared or not package_ids or not package_ids.issubset(selected_ids):
+            continue
+        target = selected_by_id.get(source["model_id"])
+        if target is None:
+            continue
+        copied = [dict(file_move) for file_move in shared]
+        target["files"].extend(copied)
+        target["applied_shared_files"] = copied
+
+
 def _probe_writable(dirs: set[str], roots: list[str]) -> None:
     """Create+delete a temp file under each destination's nearest existing
     ancestor. Re-run at apply time because permissions vary per subtree and the
@@ -309,6 +326,7 @@ def apply_manifest(
 
     payload = _load_manifest(db, manifest_id)
     selected = _select_entries(payload, entry_ids)
+    _include_complete_character_envelopes(payload, selected)
     roots = _allowed_roots(db)
 
     # Inbox models live outside scan roots — their source dirs must be allowed as
@@ -421,6 +439,7 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
     for entry in selected:
         if entry.get("package_mode"):
             _repath_package_db(db, entry)
+            _repath_character_assets(db, entry)
             continue
         model = db.get(Model, entry["model_id"])
         if model is not None:
@@ -485,6 +504,23 @@ def _repath_package_db(db: Session, entry: dict) -> None:
     _repath_overrides(db, PackOverride, old, new)
 
 
+def _repath_character_assets(db: Session, entry: dict) -> None:
+    moves = entry.get("applied_shared_files") or []
+    if not moves:
+        return
+    for model_id in entry.get("character_model_ids") or []:
+        model = db.get(Model, model_id)
+        if model is None:
+            continue
+        for move in moves:
+            old, new = move["current_path"], move["proposed_path"]
+            _repath_model_image(model, old, new)
+            model.other_files = [new if _key(path) == _key(old) else path
+                                 for path in (model.other_files or [])]
+        model.image_manifest = None
+        model.image_manifest_sig = None
+
+
 def _repath_model_image(model: Model, old_path: str, new_path: str) -> None:
     """Point a moved gallery image's occurrences on the model row at its new
     location — image_paths, thumbnail_path, primary_image_path, and any
@@ -537,7 +573,10 @@ def _repath_overrides(db: Session, model_cls, old_dir: str, new_dir: str) -> Non
 def _prune_empty_sources(selected: list[dict]) -> None:
     """Remove now-empty source directories — only if truly empty. Never recursive:
     a non-empty source means a sibling model still lives there."""
+    character_sources: set[str] = set()
     for entry in selected:
+        if entry.get("applied_shared_files") and entry.get("character_source_dir"):
+            character_sources.add(entry["character_source_dir"])
         old_dir = _entry_source_dir(entry)
         if old_dir is None:
             continue
@@ -552,6 +591,22 @@ def _prune_empty_sources(selected: list[dict]) -> None:
                         child.rmdir()
             if native.is_dir() and not any(native.iterdir()):
                 native.rmdir()
+        except OSError:
+            pass
+
+    # Run character cleanup only after every package source has been pruned.
+    for source in character_sources:
+        character = Path(_os_native(source))
+        try:
+            if character.is_dir():
+                for child in sorted(
+                    (p for p in character.rglob("*") if p.is_dir()),
+                    key=lambda p: len(p.parts), reverse=True,
+                ):
+                    if not any(child.iterdir()):
+                        child.rmdir()
+                if not any(character.iterdir()):
+                    character.rmdir()
         except OSError:
             pass
 
@@ -702,6 +757,14 @@ def _repath_db_undo(
     move has no such row, so it's repathed via the record's own model_id."""
     override_dirs: set[tuple[str, str]] = set()   # (proposed_dir, source_dir)
     for to, frm, kind, model_id in reversed_moves:
+        if kind == "character_asset":
+            for model in db.query(Model).all():
+                _repath_model_image(model, to, frm)
+                model.other_files = [frm if _key(path) == _key(to) else path
+                                     for path in (model.other_files or [])]
+                model.image_manifest = None
+                model.image_manifest_sig = None
+            continue
         if kind == "image":
             model = db.get(Model, model_id) if model_id is not None else None
             if model is not None:
