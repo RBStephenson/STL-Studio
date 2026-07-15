@@ -41,6 +41,8 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
     return ReorganizeEntry(
         model_id=e.model_id,
         model_name=e.model_name,
+        creator_id=e.creator_id,
+        creator_name=e.creator_name,
         model_ids=e.model_ids or [e.model_id],
         package_mode=e.package_mode,
         package_name=e.package_name,

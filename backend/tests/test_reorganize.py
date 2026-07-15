@@ -68,9 +68,11 @@ class TestPreviewHappyPath:
 
     def test_proposed_dir_under_scan_root(self, client, db, tmp_path):
         _root(db, tmp_path)
-        _model_with_file(db, tmp_path, creator_name="Abe3D", character="Joker", title="Bust")
+        model = _model_with_file(db, tmp_path, creator_name="Abe3D", character="Joker", title="Bust")
 
         entry = client.get("/reorganize/preview").json()["entries"][0]
+        assert entry["creator_id"] == model.creator_id
+        assert entry["creator_name"] == "Abe3D"
         # Destination segments render lowercase/hyphenated by default (#reorganize).
         assert entry["proposed_dir"].endswith("abe3d/joker/bust")
         assert entry["eligible"] is True

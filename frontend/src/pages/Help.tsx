@@ -905,6 +905,10 @@ const SECTIONS: Section[] = [
         <p className="font-medium text-text-primary-alt">How it works</p>
         <ul>
           <li>
+            <strong>Filter by creator.</strong> Choose a creator above the status tabs
+            to narrow the preview, pagination, and page-level select-all to that creator.
+          </li>
+          <li>
             <strong>Preview first.</strong> The page shows a per-model plan, or one row
             per release package when package preservation is enabled: which
             files would move, where, and what kind of operation it is (move, rename,

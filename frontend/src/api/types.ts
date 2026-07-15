@@ -955,6 +955,8 @@ export interface ReorganizeFileMove {
 export interface ReorganizeEntry {
   model_id: number;
   model_name: string;
+  creator_id: number | null;
+  creator_name: string;
   model_ids: number[];
   package_mode: boolean;
   package_name?: string | null;
