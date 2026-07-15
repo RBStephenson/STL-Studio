@@ -45,6 +45,24 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
         package_mode=e.package_mode,
         package_name=e.package_name,
         ambiguous_package=e.ambiguous_package,
+        character_source_dir=e.character_source_dir,
+        character_proposed_dir=e.character_proposed_dir,
+        character_package_ids=e.character_package_ids,
+        character_model_ids=e.character_model_ids,
+        shared_files=[
+            ReorganizeFileMove(
+                stl_file_id=f.stl_file_id,
+                current_path=f.current_path,
+                proposed_path=f.proposed_path,
+                size_bytes=f.size_bytes,
+                mtime_ns=f.mtime_ns,
+                content_hash=f.content_hash,
+                fingerprint_method=f.fingerprint_method,
+                missing_file=f.missing_file,
+                kind=f.kind,
+            )
+            for f in e.shared_files
+        ],
         source_path=e.source_dir,
         files=[
             ReorganizeFileMove(

@@ -764,6 +764,15 @@ boundary; if that topology cannot be established confidently, the row is blocked
 with a **package boundary** explanation rather than guessed. The legacy per-model
 template behavior remains unchanged while this flag is off.
 
+Package mode also inventories a **character envelope**: files and folders directly
+under the character but outside every package, including conventional `img/`,
+`Images/`, and `Renders/` folders as well as unknown loose companion files. The
+envelope moves to the normalized character directory only when every package for
+that character is selected. A partial selection deliberately leaves it in place so
+unselected releases keep their shared assets. The preview reports both the shared
+file count and whether the current selection will move or retain them. Envelope
+files use the same drift checks and undo log as package files.
+
 - **Preview first.** The page shows exactly where every model *would* move, one row
   each—or one row per package in package-preserving mode—with a move-kind chip
   (move / rename / case rename / in place / merge) and

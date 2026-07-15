@@ -895,6 +895,13 @@ const SECTIONS: Section[] = [
           is not required. If the package boundary cannot be matched safely, the preview
           blocks it with a <strong>package boundary</strong> explanation.
         </p>
+        <p>
+          Files stored at the character level—such as <code>img/</code>,{" "}
+          <code>Images/</code>, <code>Renders/</code>, or loose assembly notes—move with
+          the character only when <em>every</em> package under that character is selected.
+          With a partial selection they remain in place so an unselected release cannot
+          lose shared assets; the preview states which outcome will occur before Apply.
+        </p>
         <p className="font-medium text-text-primary-alt">How it works</p>
         <ul>
           <li>

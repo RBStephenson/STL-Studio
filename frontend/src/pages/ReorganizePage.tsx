@@ -585,6 +585,18 @@ export default function ReorganizePage() {
                           </span>
                         )}
                         <span className="block text-xs text-text-secondary-alt truncate font-mono">→ {e.proposed_dir}</span>
+                        {e.shared_files.length > 0 && (
+                          <span className={`block text-xs ${
+                            e.character_package_ids.every((id) => selected.has(id))
+                              ? "text-emerald-400"
+                              : "text-amber-400"
+                          }`}>
+                            {e.shared_files.length} shared character file{e.shared_files.length === 1 ? "" : "s"}{" "}
+                            {e.character_package_ids.every((id) => selected.has(id))
+                              ? "will move with the complete character"
+                              : `will remain unless all ${e.character_package_ids.length} packages are selected`}
+                          </span>
+                        )}
                       </span>
                     </button>
                     {flags.map((f) => (
@@ -613,6 +625,18 @@ export default function ReorganizePage() {
                           <span className="text-text-secondary">{f.proposed_path}</span>
                         </div>
                       ))}
+                      {e.shared_files.length > 0 && (
+                        <div className="pt-2 border-t border-border-subtle/60 space-y-1">
+                          <div className="text-xs text-text-secondary">Shared character assets</div>
+                          {e.shared_files.map((f) => (
+                            <div key={f.current_path} className="text-xs font-mono text-text-secondary-alt">
+                              <span className="text-text-muted">{f.current_path}</span>
+                              <span className="text-text-muted-alt"> → </span>
+                              <span className="text-text-secondary">{f.proposed_path}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {!e.eligible && flags.length > 0 && (
                         <div className="pt-2 border-t border-border-subtle/60">
                           <div className="text-xs text-text-secondary mb-1">Why</div>

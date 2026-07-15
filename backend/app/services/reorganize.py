@@ -112,6 +112,11 @@ class Entry:
     package_mode: bool = False
     package_name: str | None = None
     ambiguous_package: bool = False
+    character_source_dir: str | None = None
+    character_proposed_dir: str | None = None
+    character_package_ids: list[int] = field(default_factory=list)
+    character_model_ids: list[int] = field(default_factory=list)
+    shared_files: list[FileMove] = field(default_factory=list)
 
 
 @dataclass
@@ -303,6 +308,7 @@ def build_manifest(
             models, root_keys, pack_paths, overrides,
             slugify_all=slugify_all,
         )
+        _attach_character_envelopes(entries)
     else:
         entries = []
         for m in models:
@@ -455,6 +461,8 @@ def _build_package_entries(
             model_ids=[model.id for model in member_models],
             package_mode=True,
             package_name=package_name,
+            character_source_dir=character_dir,
+            character_proposed_dir=_parent(proposed_dir) if package_name else proposed_dir,
         )
         entries.append(entry)
 
@@ -468,6 +476,64 @@ def _build_package_entries(
         legacy.eligible = False
         entries.append(legacy)
     return entries
+
+
+def _attach_character_envelopes(entries: list[Entry]) -> None:
+    """Inventory character-level files that sit outside every package root.
+
+    The files are attached to one representative entry for manifest compactness;
+    every entry receives the complete package/model id sets so apply can require
+    an all-packages selection before adding the envelope to the move batch.
+    """
+    groups: dict[str, list[Entry]] = {}
+    for entry in entries:
+        if entry.package_mode and not entry.ambiguous_package and entry.character_source_dir:
+            groups.setdefault(_key(entry.character_source_dir), []).append(entry)
+
+    for group in groups.values():
+        package_ids = sorted(entry.model_id for entry in group)
+        model_ids = sorted({model_id for entry in group for model_id in entry.model_ids})
+        package_roots = {_key(entry.source_dir) for entry in group}
+        for entry in group:
+            entry.character_package_ids = package_ids
+            entry.character_model_ids = model_ids
+
+        owner = min(group, key=lambda entry: entry.model_id)
+        source_dir = owner.character_source_dir or ""
+        proposed_dir = owner.character_proposed_dir or ""
+        if not source_dir or not proposed_dir or _key(source_dir) in package_roots:
+            continue
+
+        shared: list[FileMove] = []
+        for dirpath, dirnames, filenames in os.walk(source_dir, followlinks=False):
+            current_dir = _canon(dirpath)
+            # Never descend into a package; those files already belong to its
+            # package entry and must not be duplicated in the envelope.
+            dirnames[:] = [
+                name for name in dirnames
+                if _key(_canon(os.path.join(dirpath, name))) not in package_roots
+            ]
+            if any(_key(current_dir) == root or _key(current_dir).startswith(root + "/")
+                   for root in package_roots):
+                continue
+            for filename in filenames:
+                path = _canon(os.path.join(dirpath, filename))
+                size, mtime_ns, is_link, missing = _stat_file_cached(path)
+                if is_link or missing:
+                    continue
+                relative = path[len(source_dir):].lstrip("/")
+                shared.append(FileMove(
+                    stl_file_id=None,
+                    current_path=path,
+                    proposed_path=_canon(proposed_dir + "/" + relative),
+                    size_bytes=size,
+                    mtime_ns=mtime_ns,
+                    content_hash=None,
+                    fingerprint_method="stat",
+                    missing_file=False,
+                    kind="character_asset",
+                ))
+        owner.shared_files = shared
 
 
 def _build_entry(

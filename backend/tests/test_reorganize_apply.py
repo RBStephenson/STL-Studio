@@ -105,12 +105,16 @@ class TestPackageApply:
         base_file = package / "Base.stl"
         alt_file = alternate / "Head.stl"
         notes = package / "README.txt"
+        shared_image = package.parent / "img" / "preview.jpg"
+        shared_image.parent.mkdir()
         base_file.write_bytes(b"base")
         alt_file.write_bytes(b"alt")
         notes.write_text("keep me", encoding="utf-8")
+        shared_image.write_bytes(b"jpg")
         standard = make_model(db, creator, name="2B", character="2B")
         standard.folder_path = str(package).replace("\\", "/")
         standard.other_files = [str(notes).replace("\\", "/")]
+        standard.thumbnail_path = str(shared_image).replace("\\", "/")
         alt_model = make_model(db, creator, name="Alternative", character="2B")
         alt_model.folder_path = str(alternate).replace("\\", "/")
         db.commit()
@@ -131,10 +135,13 @@ class TestPackageApply:
         assert os.path.exists(destination + "/Base.stl")
         assert os.path.exists(destination + "/Alternate/Head.stl")
         assert os.path.exists(destination + "/README.txt")
+        character_destination = destination.rsplit("/", 1)[0]
+        assert os.path.exists(character_destination + "/img/preview.jpg")
         db.refresh(standard)
         db.refresh(alt_model)
         assert standard.folder_path == destination
         assert standard.other_files == [destination + "/README.txt"]
+        assert standard.thumbnail_path == character_destination + "/img/preview.jpg"
         assert alt_model.folder_path == destination + "/Alternate"
 
         undo = client.post("/reorganize/undo", json={"manifest_id": preview["manifest_id"]})
@@ -142,11 +149,65 @@ class TestPackageApply:
         assert os.path.exists(str(base_file))
         assert os.path.exists(str(alt_file))
         assert os.path.exists(str(notes))
+        assert os.path.exists(str(shared_image))
         db.refresh(standard)
         db.refresh(alt_model)
         assert standard.folder_path == str(package).replace("\\", "/")
         assert standard.other_files == [str(notes).replace("\\", "/")]
+        assert standard.thumbnail_path == str(shared_image).replace("\\", "/")
         assert alt_model.folder_path == str(alternate).replace("\\", "/")
+
+    def test_partial_character_selection_retains_shared_assets(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        creator = make_creator(db, name="Abe3d")
+        character = tmp_path / "MessyCreator" / "Ada Wong"
+        first_dir = character / "Release One"
+        second_dir = character / "Release Two"
+        image = character / "img" / "preview.jpg"
+        first_dir.mkdir(parents=True)
+        second_dir.mkdir()
+        image.parent.mkdir()
+        first_file = first_dir / "body.stl"
+        second_file = second_dir / "alt.stl"
+        first_file.write_bytes(b"one")
+        second_file.write_bytes(b"two")
+        image.write_bytes(b"jpg")
+        first = make_model(db, creator, name="Release One", character="Ada Wong")
+        second = make_model(db, creator, name="Release Two", character="Ada Wong")
+        first.folder_path = str(first_dir).replace("\\", "/")
+        second.folder_path = str(second_dir).replace("\\", "/")
+        first.thumbnail_path = str(image).replace("\\", "/")
+        db.commit()
+        make_stl_file(db, first, filename="body.stl", path=str(first_file).replace("\\", "/"))
+        make_stl_file(db, second, filename="alt.stl", path=str(second_file).replace("\\", "/"))
+        db.commit()
+        client.patch("/settings", json={"reorganize_package_mode_enabled": True})
+
+        preview = client.get("/reorganize/preview", params={"template": "{creator}/{character}"}).json()
+        owner = next(entry for entry in preview["entries"] if entry["shared_files"])
+        response = client.post("/reorganize/apply", json={
+            "manifest_id": preview["manifest_id"], "entry_ids": [owner["model_id"]],
+        })
+
+        assert response.status_code == 200, response.text
+        assert image.exists()
+        db.refresh(first)
+        assert first.thumbnail_path == str(image).replace("\\", "/")
+
+        undo = client.post("/reorganize/undo", json={"manifest_id": preview["manifest_id"]})
+        assert undo.status_code == 200, undo.text
+        complete = client.get("/reorganize/preview", params={"template": "{creator}/{character}"}).json()
+        complete_owner = next(entry for entry in complete["entries"] if entry["shared_files"])
+        complete_apply = client.post("/reorganize/apply", json={
+            "manifest_id": complete["manifest_id"],
+            "entry_ids": [entry["model_id"] for entry in complete["entries"]],
+        })
+
+        assert complete_apply.status_code == 200, complete_apply.text
+        assert os.path.exists(complete_owner["character_proposed_dir"] + "/img/preview.jpg")
+        assert not character.exists()
+        db.refresh(first)
+        assert first.thumbnail_path == complete_owner["character_proposed_dir"] + "/img/preview.jpg"
 
 
 class TestOnProgress:

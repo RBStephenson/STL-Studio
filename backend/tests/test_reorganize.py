@@ -122,6 +122,8 @@ class TestPackageMode:
         )
         assert moves["README.txt"]["kind"] == "companion"
         assert "preview.jpg" not in moves
+        assert [Path(f["current_path"]).name for f in entry["shared_files"]] == ["preview.jpg"]
+        assert entry["character_package_ids"] == [entry["model_id"]]
 
     def test_blocks_when_character_folder_cannot_be_found(self, client, db, tmp_path):
         _root(db, tmp_path)
