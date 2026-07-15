@@ -1,4 +1,4 @@
-import { FolderOpen, Images, RotateCw, Tag, LayoutPanelTop, ScrollText } from "lucide-react";
+import { FolderOpen, Images, RotateCw, Tag, LayoutPanelTop, ScrollText, Info } from "lucide-react";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import { LogLevel } from "../../api/client";
 import FlashBanner from "./FlashBanner";
@@ -243,6 +243,28 @@ export default function PreferencesTab() {
           full AI request/response detail; leave at <span className="text-text-secondary">INFO</span> for
           normal operation.
         </p>
+      </section>
+
+      {/* About & diagnostics */}
+      <section className="mt-8 pt-6 border-t border-border-subtle">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <Info size={14} /> About &amp; Diagnostics
+        </h2>
+        <label className="flex items-start gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={settings.system_info_enabled}
+            onChange={() => update({ system_info_enabled: !settings.system_info_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-text-primary-alt2">Show About &amp; System Info</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              Adds a sanitized health summary to Help → About &amp; support. It never
+              includes library paths, hostnames, database locations, or integration settings.
+            </p>
+          </div>
+        </label>
       </section>
     </div>
   );

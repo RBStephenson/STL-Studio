@@ -9,6 +9,7 @@ import type {
   EnvReloadResult,
   FilterPreset,
   MmfSettings,
+  SystemInfo,
 } from "./types";
 
 export const settingsApi = {
@@ -35,6 +36,7 @@ export const settingsApi = {
   // Re-read the .env / environment config without a full restart (#140).
   reloadEnv: () =>
     request<EnvReloadResult>("/settings/reload", { method: "POST" }),
+  systemInfo: () => request<SystemInfo>("/settings/system-info"),
   // AI settings (#517). The API key is write-only — get() returns only
   // whether one is set plus a masked hint, never the plaintext.
   ai: {

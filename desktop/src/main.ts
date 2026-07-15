@@ -232,7 +232,11 @@ async function bootBackendAndLoad(
     const result = await startSidecar(deps, {
       exePath,
       args: ["--port", String(port)],
-      env: { STL_SECRET_KEY: secretKey.key },
+      env: {
+        STL_SECRET_KEY: secretKey.key,
+        STL_STUDIO_VERSION: app.getVersion(),
+        DEPLOYMENT_MODE: "electron",
+      },
       port,
     });
     sidecar = result.proc;

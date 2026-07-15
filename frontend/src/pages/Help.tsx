@@ -5,6 +5,7 @@ import {
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
   Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, Lock, Cpu, type LucideIcon,
 } from "lucide-react";
+import SystemInfoPanel from "../components/SystemInfoPanel";
 
 /** A keyboard key, styled like the hints elsewhere in the app. */
 function Kbd({ children }: { children: ReactNode }) {
@@ -1085,6 +1086,7 @@ const SECTIONS: Section[] = [
         </p>
         <p>Thank you for being here, and happy printing!</p>
         <p className="text-text-secondary-alt">— Brent the Programmer</p>
+        <SystemInfoPanel />
       </>
     ),
   },

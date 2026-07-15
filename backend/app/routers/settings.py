@@ -6,14 +6,17 @@ stored rows on it, and the PATCH schema (AppSettingsUpdate) rejects anything
 outside it, so unknown keys can never be written.
 """
 import logging
+import re
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import RESTART_REQUIRED_KEYS, settings
 from app.database import get_db
-from app.models import AppSetting, AiApiConfig
+from app.models import AppSetting, AiApiConfig, ScanRoot
 from app.schemas import (
     AiApiConfigCreate,
     AiApiConfigRead,
@@ -28,6 +31,7 @@ from app.schemas import (
     EnvReloadResult,
     FilterPreset,
     MmfSettingsRead,
+    SystemInfoRead,
 )
 from app.services import secrets
 
@@ -38,6 +42,8 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 DEFAULTS: dict = AppSettingsRead().model_dump()
 
 FILTER_PRESETS_KEY = "filter_presets"
+_SAFE_VERSION = re.compile(r"^[A-Za-z0-9._+-]{1,40}$")
+_DEPLOYMENT_MODES = {"electron", "standalone", "web"}
 
 
 def _merged(db: Session) -> dict:
@@ -70,6 +76,48 @@ def update_settings(body: AppSettingsUpdate, db: Session = Depends(get_db)):
         from app.logging_config import apply_log_level
         apply_log_level(updates["log_level"])
     return _merged(db)
+
+
+@router.get("/system-info", response_model=SystemInfoRead)
+def get_system_info(db: Session = Depends(get_db)):
+    """Return a deliberately small, path-free support snapshot.
+
+    Do not expand this response with raw configuration. It is designed to be
+    copied into public issues without exposing NAS addresses, hostnames, paths,
+    database locations, integration settings, or secrets.
+    """
+    enabled = db.get(AppSetting, "system_info_enabled")
+    if enabled is None or enabled.value is not True:
+        raise HTTPException(status_code=404, detail="System info is disabled")
+
+    try:
+        quick_check = db.execute(text("PRAGMA quick_check(1)")).scalar_one()
+        database_status = "healthy" if quick_check == "ok" else "degraded"
+    except Exception:
+        _log.exception("System info database health probe failed")
+        database_status = "unavailable"
+
+    roots = db.query(ScanRoot).order_by(ScanRoot.id).all()
+    enabled_roots = [root for root in roots if root.enabled]
+    available = sum(1 for root in enabled_roots if Path(root.path).is_dir())
+    scans = [root.last_scanned for root in roots if root.last_scanned is not None]
+
+    raw_version = settings.stl_studio_version.strip()
+    version = raw_version if _SAFE_VERSION.fullmatch(raw_version) else "development"
+    mode = settings.deployment_mode.strip().lower()
+    if mode not in _DEPLOYMENT_MODES:
+        mode = "web"
+
+    return SystemInfoRead(
+        version=version,
+        deployment_mode=mode,
+        backend_status="healthy",
+        database_status=database_status,
+        libraries_configured=len(roots),
+        libraries_enabled=len(enabled_roots),
+        libraries_available=available,
+        last_scan=max(scans) if scans else None,
+    )
 
 
 @router.post("/reload", response_model=EnvReloadResult)

@@ -33,7 +33,7 @@ const EXPECTED_SLICE_METHODS: Record<string, string[]> = {
     "sourceContents", "scanFolder", "preview", "getMapping", "setMapping",
     "apply", "downloadImages",
   ],
-  settings: ["get", "update", "upsertPreset", "deletePreset", "reloadEnv"],
+  settings: ["get", "update", "upsertPreset", "deletePreset", "reloadEnv", "systemInfo"],
   painting: ["colorMatch", "colorMatchPoint"],
   database: ["backup", "restore", "health", "repair", "reset"],
   collections: [

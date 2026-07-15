@@ -582,6 +582,8 @@ class AppSettingsRead(BaseModel):
     # Improve scanner-owned auto groups using the hierarchy-derived character
     # envelope. Manual groups and no_group decisions remain authoritative.
     hierarchy_variant_grouping_enabled: bool = False
+    # Read-only About & System Info diagnostics. Default off and server-gated.
+    system_info_enabled: bool = False
     # Collections page: give every card the same box size (the one cover art
     # already uses) instead of a compact box for collections with no cover.
     collections_uniform_size: bool = True
@@ -627,6 +629,7 @@ class AppSettingsUpdate(BaseModel):
     reorganize_package_mode_enabled: Optional[bool] = None
     reorganize_ai_suggestions_enabled: Optional[bool] = None
     hierarchy_variant_grouping_enabled: Optional[bool] = None
+    system_info_enabled: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
@@ -668,6 +671,19 @@ class AppSettingsUpdate(BaseModel):
         return out
 
     model_config = {"extra": "forbid"}
+
+
+class SystemInfoRead(BaseModel):
+    """Allowlisted diagnostics safe to copy into a public support request."""
+
+    version: str
+    deployment_mode: str
+    backend_status: str
+    database_status: str
+    libraries_configured: int
+    libraries_enabled: int
+    libraries_available: int
+    last_scan: Optional[datetime] = None
 
 
 # --- Named AI API configs -------------------------------------------------

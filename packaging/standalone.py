@@ -63,6 +63,7 @@ def _configure_env(data_dir: Path) -> None:
     os.environ["DATABASE_URL"] = f"sqlite:///{data_dir / 'stl_inventory.db'}"
     # STL_ROOTS starts empty — users add drives through the Settings page.
     os.environ.setdefault("STL_ROOTS", "")
+    os.environ.setdefault("DEPLOYMENT_MODE", "standalone")
 
 
 # ---------------------------------------------------------------------------

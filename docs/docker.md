@@ -358,6 +358,20 @@ The new root is seeded automatically on next boot — no manual Settings step ne
 
 ## Optional environment variables
 
+**`STL_STUDIO_VERSION`** (backend) is an optional display-only version label for
+hosted web deployments. When **About & System Info** is enabled, this value is
+shown in its sanitized diagnostics panel. Leave it unset for development builds:
+
+```yaml
+services:
+  backend:
+    environment:
+      - STL_STUDIO_VERSION=1.0.0
+```
+
+It does not affect migrations, compatibility, image tags, or update behavior.
+Electron release builds supply their stamped application version automatically.
+
 **`LOG_LEVEL`** (backend) sets the initial log verbosity — one of `DEBUG`,
 `INFO` (default), `WARNING`, `ERROR`, `CRITICAL`:
 

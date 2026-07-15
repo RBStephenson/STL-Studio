@@ -298,9 +298,21 @@ export interface AppSettings {
   // Use scan hierarchy as a constrained signal for automatic variant groups.
   // Off by default; manual groups and explicit exclusions remain authoritative.
   hierarchy_variant_grouping_enabled: boolean;
+  system_info_enabled: boolean;
   // Collections page: every card gets the same box size (the one cover art
   // already uses) instead of a compact box for collections with no cover.
   collections_uniform_size: boolean;
+}
+
+export interface SystemInfo {
+  version: string;
+  deployment_mode: "electron" | "standalone" | "web";
+  backend_status: "healthy" | "unavailable";
+  database_status: "healthy" | "degraded" | "unavailable";
+  libraries_configured: number;
+  libraries_enabled: number;
+  libraries_available: number;
+  last_scan: string | null;
 }
 
 export type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
