@@ -44,6 +44,17 @@ a different port.
 > runs the headless binary you open in your browser; a packaged window there is
 > future work.
 
+### Upgrading an existing installation
+
+STL Studio supports direct upgrades from **v0.18.0 or newer**. The installer
+keeps the catalog database in your user-data folder and upgrades its schema on
+the first launch of the new version. Your STL files are never stored in that
+database or modified by the schema upgrade.
+
+Before a major upgrade, use **Settings → Data Management → Download Backup**.
+Downgrading after the database has been upgraded is not supported; restore the
+backup with the older version instead.
+
 ### 3. Tell it where your STLs are
 
 Open the **Settings** page and add the folder path(s) where your model library
