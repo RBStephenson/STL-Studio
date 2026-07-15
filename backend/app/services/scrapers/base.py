@@ -19,6 +19,7 @@ _SITE_DOMAINS = {
     "gumroad.com": "gumroad",
     "cults3d.com": "cults3d",
     "lootstudios.com": "loot-studios",
+    "anvilrage.com": "anvilrage",
 }
 
 

@@ -39,6 +39,7 @@ const SITES = [
   { id: "gumroad",        label: "Gumroad",        searchable: true },
   { id: "cults3d",        label: "Cults3D",        searchable: true },
   { id: "loot-studios",   label: "Loot Studios",   searchable: false },
+  { id: "anvilrage",      label: "Anvilrage",      searchable: false },
 ];
 
 type Tab = "url" | "search";

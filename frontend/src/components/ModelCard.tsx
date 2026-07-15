@@ -44,6 +44,8 @@ const SITE_LABELS: Record<string, string> = {
   makerworld: "MakerWorld",
   gumroad: "Gumroad",
   patreon: "Patreon",
+  "loot-studios": "Loot Studios",
+  anvilrage: "Anvilrage",
   other: "Other",
 };
 
