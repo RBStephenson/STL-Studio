@@ -7,10 +7,14 @@ asserts what got indexed (and how it grouped).
 """
 import os
 import re
+import threading
 from pathlib import Path
+
+from sqlalchemy.orm import sessionmaker
 
 from app.models import Creator, Model, STLFile, VariantGroup
 from app.services import scanner, name_parser
+from app.services.job_runner import JobHandle, JobState
 from app.services.scan_rules import IgnoreMatcher
 from tests.conftest import make_creator
 
@@ -1901,6 +1905,31 @@ class TestCaseInsensitiveIdentity:
 # ---------------------------------------------------------------------------
 # Busy-library launch gate (STUDIO-83)
 # ---------------------------------------------------------------------------
+
+def test_creator_rescan_refreshes_automatic_groups(db, tmp_path, monkeypatch):
+    """Creator-level rescans run the same post-walk grouping pass as full scans."""
+    creator = make_creator(db, "Creator")
+    creator_id = creator.id
+    db.commit()
+    Session = sessionmaker(bind=db.get_bind())
+    calls: list[int] = []
+
+    monkeypatch.setattr(scanner, "SessionLocal", Session)
+    monkeypatch.setattr(scanner, "_load_pack_overrides", lambda _db: None)
+    monkeypatch.setattr(scanner, "_load_scan_rules", lambda _db: None)
+    monkeypatch.setattr(scanner, "_creator_dirs_for", lambda _creator, _db: [(tmp_path, [], False)])
+    monkeypatch.setattr(scanner, "_walk_for_models", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scanner, "_prune_phantoms", lambda _db, creator_id=None: 0)
+    monkeypatch.setattr(scanner.grouping, "regroup_creator", lambda _db, cid: calls.append(cid))
+    monkeypatch.setattr(scanner.grouping, "prune_empty_groups", lambda _db: 0)
+    monkeypatch.setattr(scanner.write_lock, "release_scan", lambda: None)
+
+    job = JobHandle(key="creator-rescan-test", _lock=threading.Lock(), state=JobState.RUNNING)
+    scanner._creator_scan(job, creator_id)
+
+    assert calls == [creator_id]
+    assert job.payload()["state"] == "done"
+
 
 def test_start_scans_return_false_when_write_lock_held():
     """start_full_scan / start_creator_scan report False (not a silent no-op)

@@ -295,6 +295,9 @@ export interface AppSettings {
   // the ai_organize_api endpoint. Advisory only, prefills override fields the
   // user must confirm. Off by default; toggled on the Library tab.
   reorganize_ai_suggestions_enabled: boolean;
+  // Use scan hierarchy as a constrained signal for automatic variant groups.
+  // Off by default; manual groups and explicit exclusions remain authoritative.
+  hierarchy_variant_grouping_enabled: boolean;
   // Collections page: every card gets the same box size (the one cover art
   // already uses) instead of a compact box for collections with no cover.
   collections_uniform_size: boolean;

@@ -757,6 +757,13 @@ def _creator_scan(job: JobHandle, creator_id: int):
 
             if not _cancelled():
                 removed = _prune_phantoms(db, creator_id=creator_id)
+                # Match the full-scan path: creator rescans refresh only
+                # machine-owned groups after the filesystem walk. The grouping
+                # service keeps manual groups and explicit no_group decisions
+                # out of its candidate set.
+                grouping.regroup_creator(db, creator_id)
+                grouping.prune_empty_groups(db)
+                db.commit()
                 prog = job.payload()["progress"]
                 summary = (
                     f"done — {prog.get('models_found', 0)} models, "

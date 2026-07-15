@@ -1,21 +1,24 @@
 """Variant-grouping proposal engine (#615, epic #613).
 
 Given a creator's indexed models, propose durable variant groups by blending
-three signals, strongest first:
+four signals, strongest first:
 
-  1. file_hash overlap  — two folders sharing identical meshes are almost
+  1. hierarchy context  — when enabled, the scanner-derived character envelope
+     groups sibling packages and prevents weak signals crossing product boundaries.
+  2. file_hash overlap  — two folders sharing identical meshes are almost
      certainly variants of one product (near-free: hashes already indexed on
      STLFile).
-  2. STL filename overlap — folders whose STL file *names* substantially overlap
+  3. STL filename overlap — folders whose STL file *names* substantially overlap
      are the same part set prepared differently (supported/unsupported/hollow…).
-  3. name key            — name_parser.character_key, the existing heuristic
+  4. name key            — name_parser.character_key, the existing heuristic
      (weakest on its own; the baseline when no content signal exists).
 
-The engine derives groups from scratch from the content signals — it does NOT
-read the model's current `character` assignment, so it can correct the name
-heuristic rather than merely mirror it. It writes `variant_group_id` and
-recreates the creator's `auto` groups each run; `source="manual"` groups and
-their members are never touched. `Model.no_group` (#678 Phase 5 — explicit
+The engine derives auto groups from scratch. By default it does not read the
+model's current `character` assignment; the hierarchy feature flag deliberately
+adds that scanner-owned context as a constrained signal. It writes
+`variant_group_id` and recreates the creator's `auto` groups each run;
+`source="manual"` groups and their members are never touched. `Model.no_group`
+(#678 Phase 5 — explicit
 "keep me out of any group", sticky across rescans) is fully excluded from
 proposals.
 """
@@ -26,8 +29,9 @@ from collections import Counter, defaultdict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import Model, STLFile, VariantGroup, GroupingStrategy
+from app.models import AppSetting, Model, STLFile, VariantGroup, GroupingStrategy
 from app.services import name_parser
+from app.services.product_context import ProductContext, resolve_product_context
 
 
 def _norm(path: str) -> str:
@@ -70,12 +74,14 @@ _FILENAME_MIN_SHARED = 2
 # so a pathological creator can't stall a scan. Hash + name signals still apply.
 _FILENAME_PASS_MODEL_CAP = 400
 
-_CONFIDENCE = {"override": 0.95, "hash": 0.9, "filename": 0.7, "name": 0.6}
+_CONFIDENCE = {"override": 0.95, "hash": 0.9, "hierarchy": 0.85, "filename": 0.7, "name": 0.6}
+_HIERARCHY_SETTING = "hierarchy_variant_grouping_enabled"
 
 
 class _UnionFind:
-    def __init__(self, ids: list[int]):
+    def __init__(self, ids: list[int], boundaries: dict[int, str | None] | None = None):
         self.parent = {i: i for i in ids}
+        self.boundaries = {i: ({boundaries[i]} if boundaries and boundaries.get(i) else set()) for i in ids}
 
     def find(self, x: int) -> int:
         root = x
@@ -85,10 +91,21 @@ class _UnionFind:
             self.parent[x], x = root, self.parent[x]
         return root
 
-    def union(self, a: int, b: int) -> None:
+    def union(self, a: int, b: int) -> bool:
         ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self.parent[rb] = ra
+        if ra == rb:
+            return True
+        combined = self.boundaries[ra] | self.boundaries[rb]
+        if len(combined) > 1:
+            return False
+        self.parent[rb] = ra
+        self.boundaries[ra] = combined
+        return True
+
+
+def _hierarchy_enabled(db: Session) -> bool:
+    row = db.get(AppSetting, _HIERARCHY_SETTING)
+    return row is not None and row.value is True
 
 
 def regroup_creator(db: Session, creator_id: int) -> None:
@@ -146,8 +163,35 @@ def regroup_creator(db: Session, creator_id: int) -> None:
             hashes[model_id].add(file_hash)
 
     ids = [m.id for m in candidates]
-    uf = _UnionFind(ids)
+    hierarchy_enabled = _hierarchy_enabled(db)
+    creator_name = _creator_name(db, creator_id)
+    contexts: dict[int, ProductContext] = {
+        m.id: resolve_product_context(
+            folder_path=m.folder_path,
+            character=m.character,
+            creator_name=creator_name,
+        )
+        for m in candidates
+    } if hierarchy_enabled else {}
+    boundaries = {mid: contexts[mid].product_key for mid in ids} if hierarchy_enabled else None
+    uf = _UnionFind(ids, boundaries)
     signal: dict[int, str] = {}  # model_id -> strongest signal that merged it
+
+    # --- hierarchy signal: same scanner-derived character envelope ---
+    # It is both positive evidence and a hard boundary: later weak/content
+    # signals cannot transitively bridge two conflicting product envelopes.
+    if hierarchy_enabled:
+        hierarchy_index: dict[str, list[int]] = defaultdict(list)
+        for mid, context in contexts.items():
+            if context.product_key:
+                hierarchy_index[context.product_key].append(mid)
+        for bucket in hierarchy_index.values():
+            if len(bucket) >= 2:
+                first = bucket[0]
+                for other in bucket[1:]:
+                    if uf.union(first, other):
+                        signal.setdefault(first, "hierarchy")
+                        signal.setdefault(other, "hierarchy")
 
     # --- signal 1: file_hash overlap (strongest content signal) ---
     hash_index: dict[str, list[int]] = defaultdict(list)
@@ -158,9 +202,9 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         if 2 <= len(bucket) <= _HASH_BUCKET_CAP:
             first = bucket[0]
             for other in bucket[1:]:
-                uf.union(first, other)
-                signal[first] = "hash"
-                signal[other] = "hash"
+                if uf.union(first, other):
+                    signal[first] = "hash"
+                    signal[other] = "hash"
 
     # --- signal 2: STL filename overlap ---
     # Drop generic filenames (shared by many models) so common part names like
@@ -186,9 +230,9 @@ def regroup_creator(db: Session, creator_id: int) -> None:
                     continue
                 inter = len(fa & fb)
                 if inter >= _FILENAME_MIN_SHARED and inter / len(fa | fb) >= _FILENAME_JACCARD:
-                    uf.union(a, b)
-                    signal.setdefault(a, "filename")
-                    signal.setdefault(b, "filename")
+                    if uf.union(a, b):
+                        signal.setdefault(a, "filename")
+                        signal.setdefault(b, "filename")
 
     # --- signal 3: name key (baseline) ---
     key_index: dict[str, list[int]] = defaultdict(list)
@@ -203,9 +247,9 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         if len(bucket) >= 2:
             first = bucket[0]
             for other in bucket[1:]:
-                uf.union(first, other)
-                signal.setdefault(first, "name")
-                signal.setdefault(other, "name")
+                if uf.union(first, other):
+                    signal.setdefault(first, "name")
+                    signal.setdefault(other, "name")
 
     # --- materialise clusters ---
     clusters: dict[int, list[int]] = defaultdict(list)
@@ -227,7 +271,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
                 by_id[mid].variant_group_id = None
             continue
         strongest = _strongest_signal(members, signal)
-        label = _label_for(members, keys, by_id)
+        label = _label_for(members, keys, by_id, contexts)
         rep = next((m for m in members if by_id[m].is_group_rep), members[0])
         group = VariantGroup(
             creator_id=creator_id,
@@ -295,14 +339,22 @@ def _creator_name(db: Session, creator_id: int) -> str | None:
 
 def _strongest_signal(members: list[int], signal: dict[int, str]) -> str:
     present = {signal.get(m) for m in members} - {None}
-    for s in ("hash", "filename", "name"):
+    for s in ("hash", "hierarchy", "filename", "name"):
         if s in present:
             return s
     return "name"
 
 
-def _label_for(members: list[int], keys: dict[int, str], by_id: dict[int, Model]) -> str:
+def _label_for(
+    members: list[int],
+    keys: dict[int, str],
+    by_id: dict[int, Model],
+    contexts: dict[int, ProductContext],
+) -> str:
     """Most common name key wins; else the first member's name."""
+    hierarchy_labels = [contexts[m].display_label for m in members if m in contexts and contexts[m].display_label]
+    if hierarchy_labels:
+        return Counter(hierarchy_labels).most_common(1)[0][0]
     member_keys = [keys[m] for m in members if m in keys]
     if member_keys:
         return Counter(member_keys).most_common(1)[0][0]
@@ -314,4 +366,6 @@ def _reason_for(signal: str, members: list[int], keys: dict[int, str], label: st
         return "shared mesh files"
     if signal == "filename":
         return "shared STL file names"
+    if signal == "hierarchy":
+        return "same product hierarchy"
     return f"name: {label}"
