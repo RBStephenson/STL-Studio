@@ -5,6 +5,12 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     database_url: str = "sqlite:////data/stl_inventory.db"
 
+    # Build/runtime identity shown only through the sanitized system-info API.
+    # Electron injects its stamped app version; hosted web deployments may set
+    # STL_STUDIO_VERSION, otherwise the UI honestly reports "development".
+    stl_studio_version: str = "development"
+    deployment_mode: str = "web"
+
     # Comma-separated list of container paths to auto-seed as scan roots on
     # first boot.  Set via STL_ROOTS in .env / docker-compose environment.
     # Each entry must correspond to a volume mounted into the container.

@@ -33,6 +33,7 @@ export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
   reorganize_package_mode_enabled: false,
   reorganize_ai_suggestions_enabled: false,
   hierarchy_variant_grouping_enabled: false,
+  system_info_enabled: false,
   collections_uniform_size: true,
   ...over,
 });

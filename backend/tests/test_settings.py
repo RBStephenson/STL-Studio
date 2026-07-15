@@ -36,6 +36,7 @@ DEFAULTS = {
     "reorganize_package_mode_enabled": False,
     "reorganize_ai_suggestions_enabled": False,
     "hierarchy_variant_grouping_enabled": False,
+    "system_info_enabled": False,
     "collections_uniform_size": True,
 }
 
@@ -51,6 +52,63 @@ def test_hierarchy_variant_grouping_enabled_round_trips(client):
     response = client.patch("/settings", json={"hierarchy_variant_grouping_enabled": True})
     assert response.status_code == 200
     assert client.get("/settings").json()["hierarchy_variant_grouping_enabled"] is True
+
+
+def test_system_info_is_server_gated_by_default(client):
+    response = client.get("/settings/system-info")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "System info is disabled"
+
+
+def test_system_info_is_sanitized_and_reports_library_availability(
+    client, db, tmp_path, monkeypatch, restore_settings
+):
+    from app.models import ScanRoot
+    from app.utils import utcnow
+
+    available = tmp_path / "private-nas-address" / "models"
+    available.mkdir(parents=True)
+    missing = tmp_path / "secret-hostname" / "offline"
+    scanned_at = utcnow()
+    db.add_all([
+        ScanRoot(path=str(available), name="Personal collection", enabled=True, last_scanned=scanned_at),
+        ScanRoot(path=str(missing), name="Todd NAS", enabled=True),
+        ScanRoot(path=str(tmp_path / "disabled"), name="Archive", enabled=False),
+    ])
+    db.commit()
+    client.patch("/settings", json={"system_info_enabled": True})
+    monkeypatch.setattr(live_settings, "stl_studio_version", "1.0.0")
+    monkeypatch.setattr(live_settings, "deployment_mode", "web")
+
+    response = client.get("/settings/system-info")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "version": "1.0.0",
+        "deployment_mode": "web",
+        "backend_status": "healthy",
+        "database_status": "healthy",
+        "libraries_configured": 3,
+        "libraries_enabled": 2,
+        "libraries_available": 1,
+        "last_scan": scanned_at.isoformat().replace("+00:00", "Z"),
+    }
+    assert "private-nas-address" not in response.text
+    assert "secret-hostname" not in response.text
+    assert "Todd NAS" not in response.text
+
+
+def test_system_info_sanitizes_invalid_runtime_identity(
+    client, monkeypatch, restore_settings
+):
+    client.patch("/settings", json={"system_info_enabled": True})
+    monkeypatch.setattr(live_settings, "stl_studio_version", "../../private/path")
+    monkeypatch.setattr(live_settings, "deployment_mode", "internal-hostname")
+
+    body = client.get("/settings/system-info").json()
+
+    assert body["version"] == "development"
+    assert body["deployment_mode"] == "web"
 
 
 def test_ai_effort_round_trips_and_rejects_bad_value(client):

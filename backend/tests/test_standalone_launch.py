@@ -6,6 +6,7 @@ because packaging/ is not an importable package, and it must stay import-light
 (no app/DB build at module scope) for this to work.
 """
 import importlib.util
+import os
 import signal
 from pathlib import Path
 
@@ -62,6 +63,14 @@ def test_parser_defaults(standalone):
     args = standalone.build_parser().parse_args([])
     assert args.port is None
     assert args.open_browser is False
+
+
+def test_configure_env_marks_standalone_runtime(standalone, tmp_path, monkeypatch):
+    monkeypatch.delenv("DEPLOYMENT_MODE", raising=False)
+
+    standalone._configure_env(tmp_path)
+
+    assert os.environ["DEPLOYMENT_MODE"] == "standalone"
 
 
 # --- graceful shutdown -----------------------------------------------------

@@ -941,6 +941,24 @@ metadata, and thumbnails.
 When configured, these APIs are used automatically during
 [web enrichment](#metadata-editing--web-enrichment).
 
+## About & System Info
+
+The default-off **Settings → Preferences → Show About & System Info** flag adds
+a read-only diagnostics panel to **Help → About & support**. It shows the STL
+Studio version, deployment mode (Electron, standalone, or hosted web), backend
+and database health, enabled-library availability counts, and the last scan
+completion time.
+
+The **Copy diagnostics** action is deliberately safe for public support requests.
+Its backend contract never returns library paths or names, NAS addresses,
+hostnames, database locations, API configuration, credentials, or secrets. If a
+library is temporarily unavailable, the panel says so explicitly and confirms
+that the catalog remains retained.
+
+Hosted web builds report `development` unless the optional
+`STL_STUDIO_VERSION` environment variable is set. Release Electron builds use
+their stamped installer version automatically.
+
 ## Logging
 
 **Settings → Preferences → Logging** sets how much the backend writes to its
