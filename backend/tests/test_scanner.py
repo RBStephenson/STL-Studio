@@ -99,6 +99,39 @@ class TestLeafDetection:
         for m in _models(db, creator):
             assert db.query(STLFile).filter(STLFile.model_id == m.id).count() > 0
 
+    def test_creator_root_with_direct_stls_and_no_subfolders_is_indexed(self, db, tmp_path):
+        """Regression (#1048): a creator whose own folder IS the product —
+        STLs directly in the creator root, no character/product subfolder at
+        all — previously indexed 0 models. "The creator boundary is never
+        itself a model" (so real multi-character creators recurse past their
+        own root) only makes sense when there's something to recurse into;
+        with zero subdirectories, that rule silently dropped every file."""
+        creator_dir = tmp_path / "SoloCreator"
+        _stl(creator_dir, "part.stl")
+        creator = make_creator(db, "SoloCreator")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert len(models) == 1
+        assert db.query(STLFile).filter(STLFile.model_id == models[0].id).count() == 1
+
+    def test_creator_root_with_direct_stls_and_a_character_subfolder_still_recurses(self, db, tmp_path):
+        """Unaffected by the #1048 fix: when the creator root has direct STLs
+        *and* a character subfolder also has STLs, any_child_stls is True, so
+        the new fallback does not fire — existing behaviour (the loose direct
+        files are not indexed as their own model) is unchanged."""
+        creator_dir = tmp_path / "MixedCreator"
+        _stl(creator_dir, "loose.stl")
+        _stl(creator_dir / "Knight" / "STL")
+        creator = make_creator(db, "MixedCreator")
+
+        _walk(db, creator, creator_dir)
+
+        paths = {_rel(m, creator_dir) for m in _models(db, creator)}
+        assert "." not in paths
+        assert any("Knight" in p for p in paths)
+
 
 # ---------------------------------------------------------------------------
 # Gallery images

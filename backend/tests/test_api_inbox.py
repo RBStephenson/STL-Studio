@@ -181,6 +181,40 @@ class TestScanInboxFolder:
         r = client.get("/models?is_inbox=true")
         assert r.json()["total"] >= 1
 
+    def test_pseudo_creator_subdirs_with_no_further_nesting_are_indexed(self, client, db):
+        """Regression: a pack folder whose immediate subdirs hold STLs
+        directly (no further character/product level below them) previously
+        indexed 0 models. Each subdir becomes its own pseudo-creator
+        (Approach B) with creator_boundary == folder; since it has no child
+        directories to recurse into, the old "creator boundary is never a
+        model" rule silently dropped every file. Mirrors the real reported
+        case: a pack with sibling sub-collection folders, each holding STLs
+        directly and nothing more (#1048)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            _make_stl_tree(inbox, {
+                "E Stairs": {
+                    "a.stl": "solid a\nendsolid",
+                    "b.stl": "solid b\nendsolid",
+                },
+                "Platforms": {
+                    "c.stl": "solid c\nendsolid",
+                },
+            })
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(tmpdir, db=db)
+
+        r = client.get("/models?is_inbox=true")
+        names = {item["name"] for item in r.json()["items"]}
+        assert "E Stairs" in names
+        assert "Platforms" in names
+
+        for item in r.json()["items"]:
+            if item["name"] in ("E Stairs", "Platforms"):
+                detail = client.get(f"/models/{item['id']}").json()
+                assert len(detail["stl_files"]) > 0
+
     def test_flat_structure_uses_inbox_creator(self, client, db):
         """Flat: STLs directly in inbox root → _Inbox creator."""
         with tempfile.TemporaryDirectory() as tmpdir:

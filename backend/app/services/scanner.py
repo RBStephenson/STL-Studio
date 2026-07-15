@@ -1078,12 +1078,25 @@ def _walk_for_models(
                          layout_tags=layout_tags, is_inbox=is_inbox)
             return
 
-        # --- Step 3: deepest fallback — STLs here, nothing below ---
-        if has_direct_stls and not any_child_stls:
-            _index_model(folder, creator, db, creator_boundary, character,
-                         stl_cache, auto_signals=signals, last_scanned=last_scanned,
-                         layout_tags=layout_tags, is_inbox=is_inbox)
-            return
+    # --- Step 3: deepest fallback — STLs here, nothing below ---
+    # Unlike Step 1/2, this one isn't gated on `not is_creator_root`: those
+    # steps assume there's a real choice to make (recurse past this folder
+    # into character folders, or split off a nested product), which only
+    # makes sense when there's something to recurse into. When a "creator"
+    # boundary folder has no subdirectories at all, there's nothing to
+    # recurse into — the earlier rule "the creator boundary is never itself
+    # a model" would silently drop every file in it. This is exactly the
+    # shape of a creator whose own folder IS the product (no character
+    # subfolder at all), and of the inbox importer's per-subfolder pseudo-
+    # creators when an imported pack's sub-collections have no further
+    # nesting of their own (e.g. a pack folder with STLs one level down in
+    # several sibling sub-collection folders, none of which have their own
+    # child folders — previously indexed 0 models, #1048).
+    if not product_boundary_split and has_direct_stls and not any_child_stls:
+        _index_model(folder, creator, db, creator_boundary, character,
+                     stl_cache, auto_signals=signals, last_scanned=last_scanned,
+                     layout_tags=layout_tags, is_inbox=is_inbox)
+        return
 
     # Not a leaf — recurse. Decide the variant-grouping "character" for each child by
     # analysing the sibling folder names together, so support/scale/format variants
