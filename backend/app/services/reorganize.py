@@ -108,6 +108,8 @@ class Entry:
     escapes_scan_root: bool
     missing_files_on_disk: bool
     locked: bool
+    creator_id: int | None = None
+    creator_name: str = ""
     model_ids: list[int] = field(default_factory=list)
     package_mode: bool = False
     package_name: str | None = None
@@ -458,6 +460,8 @@ def _build_package_entries(
             escapes_scan_root=escapes,
             missing_files_on_disk=missing_files,
             locked=locked,
+            creator_id=representative.creator_id,
+            creator_name=representative.creator.name if representative.creator else "",
             model_ids=[model.id for model in member_models],
             package_mode=True,
             package_name=package_name,
@@ -777,6 +781,8 @@ def _build_entry(
         escapes_scan_root=escapes,
         missing_files_on_disk=missing_files_on_disk,
         locked=m.locked,
+        creator_id=m.creator_id,
+        creator_name=m.creator.name if m.creator else "",
     )
 
 

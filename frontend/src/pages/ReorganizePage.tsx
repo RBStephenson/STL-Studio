@@ -180,6 +180,7 @@ export default function ReorganizePage() {
   const changePageSize = (size: number) => { setPageSize(size); setPage(1); };
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [creatorFilter, setCreatorFilter] = useState("all");
   const [busy, setBusy] = useState(false);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [applyErr, setApplyErr] = useState<string | null>(null);
@@ -230,9 +231,40 @@ export default function ReorganizePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, template, overrides, hasOverrides, runToken]);
 
+  const creatorOptions = useMemo(() => {
+    const creators = new Map<string, string>();
+    for (const entry of preview?.entries ?? []) {
+      const value = entry.creator_id === null ? `name:${entry.creator_name}` : `id:${entry.creator_id}`;
+      creators.set(value, entry.creator_name || "Unknown creator");
+    }
+    return [...creators.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [preview]);
+
+  const creatorFiltered = useMemo(() => {
+    const entries = preview?.entries ?? [];
+    if (creatorFilter === "all") return entries;
+    return entries.filter((entry) =>
+      creatorFilter === (entry.creator_id === null ? `name:${entry.creator_name}` : `id:${entry.creator_id}`),
+    );
+  }, [preview, creatorFilter]);
+
+  useEffect(() => {
+    if (creatorFilter !== "all" && !creatorOptions.some((option) => option.value === creatorFilter)) {
+      setCreatorFilter("all");
+      setPage(1);
+    }
+  }, [creatorFilter, creatorOptions]);
+
+  const creatorVisibleIds = useMemo(
+    () => new Set(creatorFiltered.map((entry) => entry.model_id)),
+    [creatorFiltered],
+  );
+
   const visible = useMemo(
-    () => preview?.entries.filter((e) => matchesFilter(e, tab, Boolean(overrides[e.model_id]))) ?? [],
-    [preview, tab, overrides],
+    () => creatorFiltered.filter((e) => matchesFilter(e, tab, Boolean(overrides[e.model_id]))),
+    [creatorFiltered, tab, overrides],
   );
 
   const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
@@ -275,10 +307,12 @@ export default function ReorganizePage() {
       return next;
     });
 
-  // Drop selections that are no longer eligible after a re-preview.
+  // Drop selections that are no longer eligible or are hidden by the creator filter.
   useEffect(() => {
-    setSelected((prev) => new Set([...prev].filter((id) => eligibleIds.has(id))));
-  }, [eligibleIds]);
+    setSelected((prev) => new Set(
+      [...prev].filter((id) => eligibleIds.has(id) && creatorVisibleIds.has(id)),
+    ));
+  }, [eligibleIds, creatorVisibleIds]);
 
   const toggle = (id: number) =>
     setExpanded((prev) => {
@@ -486,6 +520,22 @@ export default function ReorganizePage() {
           </div>
           <ReorganizeStatsBar stats={preview.stats} />
 
+          <div className="flex items-center gap-2">
+            <label htmlFor="creator-filter" className="text-sm text-text-primary-alt2">Creator</label>
+            <select
+              id="creator-filter"
+              aria-label="Filter by creator"
+              value={creatorFilter}
+              onChange={(event) => { setCreatorFilter(event.target.value); setPage(1); }}
+              className="min-w-56 bg-panel border border-border rounded px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent-start"
+            >
+              <option value="all">All creators</option>
+              {creatorOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Filter tabs */}
           <div className="flex gap-1 flex-wrap border-b border-border-subtle">
             {FILTERS.map((f) => (
@@ -540,7 +590,9 @@ export default function ReorganizePage() {
               </label>
             )}
             {visible.length === 0 && (
-              <div className="text-sm text-text-muted py-6 text-center">No models in this view.</div>
+              <div className="text-sm text-text-muted py-6 text-center">
+                {creatorFilter === "all" ? "No models in this view." : "No models for this creator in this view."}
+              </div>
             )}
             {paged.map((e) => {
               const flags = blockerFlags(e);

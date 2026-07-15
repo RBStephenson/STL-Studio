@@ -773,6 +773,10 @@ unselected releases keep their shared assets. The preview reports both the share
 file count and whether the current selection will move or retain them. Envelope
 files use the same drift checks and undo log as package files.
 
+The preview can be filtered by creator before applying its status tabs and
+pagination. Page-level select-all is scoped to the selected creator, and changing
+the creator clears selections that are no longer visible.
+
 - **Preview first.** The page shows exactly where every model *would* move, one row
   each—or one row per package in package-preserving mode—with a move-kind chip
   (move / rename / case rename / in place / merge) and

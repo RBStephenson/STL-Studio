@@ -46,6 +46,7 @@ const reorg = api.reorganize as unknown as {
 function entry(over: Record<string, unknown>) {
   return {
     model_id: 1, model_name: "Joker Bust", files: [], kind: "move",
+    creator_id: 1, creator_name: "Abe3D",
     model_ids: [1], package_mode: false, package_name: null, ambiguous_package: false,
     character_source_dir: null, character_proposed_dir: null,
     character_package_ids: [], character_model_ids: [], shared_files: [],
@@ -492,6 +493,54 @@ describe("ReorganizePage select all eligible (STUDIO-160)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Unclassifiable" }));
     expect(screen.queryByRole("checkbox", { name: /select all eligible/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("ReorganizePage creator filter (#1035)", () => {
+  function multiCreatorPreview() {
+    return {
+      ...previewFixture(),
+      entries: [
+        entry({ model_id: 1, model_name: "Joker Bust", creator_id: 1, creator_name: "Abe3D" }),
+        entry({ model_id: 3, model_name: "Ada Wong", creator_id: 2, creator_name: "CA3D" }),
+      ],
+      stats: { ...STATS, total: 2, eligible: 2, moves_needed: 2, blocked: 0, unclassifiable: 0 },
+    };
+  }
+
+  it("filters rows and page-level select-all by creator", async () => {
+    reorg.preview.mockResolvedValue(multiCreatorPreview());
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+
+    fireEvent.change(screen.getByLabelText("Filter by creator"), { target: { value: "id:2" } });
+
+    expect(screen.queryByText("Joker Bust")).not.toBeInTheDocument();
+    expect(screen.getByText("Ada Wong")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select all eligible/ }));
+    expect(screen.getByLabelText("Select Ada Wong")).toBeChecked();
+    expect(screen.getByRole("button", { name: /Apply 1/ })).toBeEnabled();
+  });
+
+  it("preserves a valid creator filter on rebuild and clears it when stale", async () => {
+    reorg.preview
+      .mockResolvedValueOnce(multiCreatorPreview())
+      .mockResolvedValueOnce(multiCreatorPreview())
+      .mockResolvedValueOnce(previewFixture());
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+
+    const filter = screen.getByLabelText("Filter by creator");
+    fireEvent.change(filter, { target: { value: "id:2" } });
+    fireEvent.click(screen.getByRole("button", { name: /Rebuild Plan/ }));
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledTimes(2));
+    expect(filter).toHaveValue("id:2");
+
+    fireEvent.click(screen.getByRole("button", { name: /Rebuild Plan/ }));
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(filter).toHaveValue("all"));
   });
 });
 

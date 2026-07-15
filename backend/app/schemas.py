@@ -873,6 +873,8 @@ class ReorganizeFileMove(BaseModel):
 class ReorganizeEntry(BaseModel):
     model_id: int
     model_name: str
+    creator_id: Optional[int] = None
+    creator_name: str = ""
     model_ids: list[int] = Field(default_factory=list)
     package_mode: bool = False
     package_name: Optional[str] = None
