@@ -25,8 +25,12 @@ vi.mock("../api/client", () => {
 });
 
 let aiSuggestionsEnabled = false;
+let packageModeEnabled = false;
 vi.mock("../context/AppSettingsContext", () => ({
-  useAppSettings: () => ({ settings: { reorganize_ai_suggestions_enabled: aiSuggestionsEnabled } }),
+  useAppSettings: () => ({ settings: {
+    reorganize_ai_suggestions_enabled: aiSuggestionsEnabled,
+    reorganize_package_mode_enabled: packageModeEnabled,
+  } }),
 }));
 
 import { api } from "../api/client";
@@ -42,6 +46,7 @@ const reorg = api.reorganize as unknown as {
 function entry(over: Record<string, unknown>) {
   return {
     model_id: 1, model_name: "Joker Bust", files: [], kind: "move",
+    model_ids: [1], package_mode: false, package_name: null, ambiguous_package: false,
     source_path: "/lib/Abe3D/Joker/Bust",
     proposed_dir: "/lib/Abe3D/Joker/Bust", eligible: true,
     pack_override_paths: [],
@@ -77,6 +82,7 @@ function previewFixture() {
 beforeEach(() => {
   vi.clearAllMocks();
   aiSuggestionsEnabled = false;
+  packageModeEnabled = false;
   reorg.preview.mockResolvedValue(previewFixture());
 });
 
@@ -87,6 +93,12 @@ function buildPlan() {
 }
 
 describe("ReorganizePage", () => {
+  it("explains how package mode changes the destination", () => {
+    packageModeEnabled = true;
+    render(<ReorganizePage />);
+    expect(screen.getByText(/Package preservation is on/)).toBeInTheDocument();
+  });
+
   it("selects an eligible entry and applies it", async () => {
     reorg.apply.mockResolvedValue({
       manifest_id: "deadbeef", moved_files: 3, moved_models: 1, undo_log: "/x.log",
@@ -116,6 +128,16 @@ describe("ReorganizePage", () => {
     expect(await screen.findByLabelText("scale for Mystery")).toBeInTheDocument();
     // The eligible entry exposes a selection checkbox; the ineligible one doesn't.
     expect(screen.queryByLabelText("Select Mystery")).not.toBeInTheDocument();
+  });
+
+  it("explains an ambiguous package boundary", async () => {
+    reorg.preview.mockResolvedValue({
+      ...previewFixture(),
+      entries: [entry({ eligible: false, ambiguous_package: true })],
+    });
+    render(<ReorganizePage />);
+    buildPlan();
+    expect(await screen.findByText("package boundary")).toBeInTheDocument();
   });
 
   it("hides Suggest with AI when the flag is off", async () => {

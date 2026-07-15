@@ -315,11 +315,12 @@ def apply_manifest(
     # move sources (only). Destinations must still be within a scan root.
     inbox_src_dirs: list[str] = []
     for entry in selected:
-        m = db.get(Model, entry["model_id"])
-        if m and m.is_inbox and m.folder_path:
-            inbox_src_dirs.append(
-                os.path.normpath(os.path.abspath(_os_native(m.folder_path)))
-            )
+        for model_id in entry.get("model_ids") or [entry["model_id"]]:
+            m = db.get(Model, model_id)
+            if m and m.is_inbox and m.folder_path:
+                inbox_src_dirs.append(
+                    os.path.normpath(os.path.abspath(_os_native(m.folder_path)))
+                )
     src_roots = roots + inbox_src_dirs
 
     # Persist the approved inbox source dirs into the *trusted* manifest row
@@ -404,7 +405,7 @@ def apply_manifest(
         return ApplyResult(
             manifest_id=manifest_id,
             moved_files=moved,
-            moved_models=len(selected),
+            moved_models=sum(len(e.get("model_ids") or [e["model_id"]]) for e in selected),
             undo_log=str(log.path),
         )
 
@@ -418,6 +419,9 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
     GroupOverride no longer needs this (#678 Phase 5): the equivalent flag
     (Model.no_group) lives on the Model row itself, so it moves for free."""
     for entry in selected:
+        if entry.get("package_mode"):
+            _repath_package_db(db, entry)
+            continue
         model = db.get(Model, entry["model_id"])
         if model is not None:
             model.folder_path = entry["proposed_dir"]
@@ -443,6 +447,42 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
         if old_dir is not None:
             _repath_overrides(db, PackOverride, old_dir, new_dir)
     db.commit()
+
+
+def _replace_prefix(path: str | None, old: str, new: str) -> str | None:
+    if not path:
+        return path
+    canon = path.replace("\\", "/")
+    if _key(canon) == _key(old):
+        return new
+    if _key(canon).startswith(_key(old) + "/"):
+        return new + canon[len(old):]
+    return path
+
+
+def _repath_package_db(db: Session, entry: dict) -> None:
+    """Repath every indexed member while preserving its package-relative suffix."""
+    old, new = entry["source_path"], entry["proposed_dir"]
+    for model_id in entry.get("model_ids") or [entry["model_id"]]:
+        model = db.get(Model, model_id)
+        if model is None:
+            continue
+        model.folder_path = _replace_prefix(model.folder_path, old, new)
+        model.image_paths = [_replace_prefix(p, old, new) for p in (model.image_paths or [])]
+        model.removed_image_paths = [_replace_prefix(p, old, new) for p in (model.removed_image_paths or [])]
+        model.other_files = [_replace_prefix(p, old, new) for p in (model.other_files or [])]
+        model.thumbnail_path = _replace_prefix(model.thumbnail_path, old, new)
+        model.primary_image_path = _replace_prefix(model.primary_image_path, old, new)
+        model.image_manifest = None
+        model.image_manifest_sig = None
+        model.is_inbox = False
+        model.updated_at = utcnow()
+        for stl in model.stl_files:
+            replaced = _replace_prefix(stl.path, old, new)
+            if replaced:
+                stl.path = replaced
+                stl.filename = os.path.basename(replaced)
+    _repath_overrides(db, PackOverride, old, new)
 
 
 def _repath_model_image(model: Model, old_path: str, new_path: str) -> None:
@@ -472,6 +512,8 @@ def _entry_source_dir(entry: dict) -> str | None:
     """The model's source folder, derived from the first file's source parent.
     All eligible entries are single-dir (multi-dir is flagged ineligible in
     Phase 1), so the first file's parent is the model dir."""
+    if entry.get("package_mode"):
+        return entry.get("source_path")
     files = entry["files"]
     if not files:
         return None
@@ -501,6 +543,13 @@ def _prune_empty_sources(selected: list[dict]) -> None:
             continue
         native = Path(_os_native(old_dir))
         try:
+            if entry.get("package_mode") and native.is_dir():
+                for child in sorted(
+                    (p for p in native.rglob("*") if p.is_dir()),
+                    key=lambda p: len(p.parts), reverse=True,
+                ):
+                    if not any(child.iterdir()):
+                        child.rmdir()
             if native.is_dir() and not any(native.iterdir()):
                 native.rmdir()
         except OSError:
@@ -635,7 +684,7 @@ def undo_manifest(
                 continue
             reversed_moves.append((to, frm, rec_kind, rec_model_id))
 
-        _repath_db_undo(db, reversed_moves, roots)
+        _repath_db_undo(db, reversed_moves, roots, row.payload if row else None)
         return UndoResult(
             manifest_id=manifest_id,
             reversed_files=len(reversed_moves),
@@ -644,7 +693,8 @@ def undo_manifest(
 
 
 def _repath_db_undo(
-    db: Session, reversed_moves: list[tuple[str, str, str, int | None]], roots: list[str]
+    db: Session, reversed_moves: list[tuple[str, str, str, int | None]], roots: list[str],
+    manifest_payload: dict | None = None,
 ) -> None:
     """Point STLFile.path / Model.folder_path, the model's own image fields,
     and the path-keyed overrides back to the pre-apply locations, in one
@@ -678,4 +728,32 @@ def _repath_db_undo(
     for proposed_dir, source_dir in override_dirs:
         if proposed_dir and source_dir:
             _repath_overrides(db, PackOverride, proposed_dir, source_dir)
+    reversed_pairs = {(_key(to), _key(frm)) for to, frm, _kind, _mid in reversed_moves}
+
+    def restored_path(path: str | None, old: str, new: str) -> str | None:
+        candidate = _replace_prefix(path, old, new)
+        if not path or candidate == path:
+            return path
+        return candidate if (_key(path), _key(candidate or "")) in reversed_pairs else path
+
+    for entry in (manifest_payload or {}).get("entries", []):
+        if not entry.get("package_mode"):
+            continue
+        if not any((_key(f["proposed_path"]), _key(f["current_path"])) in reversed_pairs
+                   for f in entry.get("files", [])):
+            continue
+        old, new = entry["proposed_dir"], entry["source_path"]
+        for model_id in entry.get("model_ids") or [entry["model_id"]]:
+            model = db.get(Model, model_id)
+            if model is None:
+                continue
+            model.folder_path = _replace_prefix(model.folder_path, old, new)
+            model.image_paths = [restored_path(p, old, new) for p in (model.image_paths or [])]
+            model.removed_image_paths = [restored_path(p, old, new) for p in (model.removed_image_paths or [])]
+            model.other_files = [restored_path(p, old, new) for p in (model.other_files or [])]
+            model.thumbnail_path = restored_path(model.thumbnail_path, old, new)
+            model.primary_image_path = restored_path(model.primary_image_path, old, new)
+            model.image_manifest = None
+            model.image_manifest_sig = None
+        _repath_overrides(db, PackOverride, old, new)
     db.commit()

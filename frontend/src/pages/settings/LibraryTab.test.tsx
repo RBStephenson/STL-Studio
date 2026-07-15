@@ -71,6 +71,20 @@ describe("LibraryTab filename slugify setting", () => {
   });
 });
 
+describe("LibraryTab package-preserving setting", () => {
+  beforeEach(() => {
+    settings = mkSettings();
+    vi.clearAllMocks();
+  });
+
+  it("persists the default-off package mode when enabled", async () => {
+    settings = mkSettings({ reorganize_package_mode_enabled: false });
+    renderTab();
+    await userEvent.click(screen.getByRole("checkbox", { name: /preserve release package structure/i }));
+    expect(updateMock).toHaveBeenCalledWith({ reorganize_package_mode_enabled: true });
+  });
+});
+
 describe("LibraryTab AI suggestions setting", () => {
   beforeEach(() => {
     settings = mkSettings();

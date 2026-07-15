@@ -146,6 +146,11 @@ A folder is only indexed as a model if it contains 3D files.
 - Preview and apply a folder template (default `{creator}/{character}/{title}`, with optional `{scale}`) to tidy files on disk
 - Destination template and lowercase/hyphenated ("slug") formatting are saved settings, shared with manual creator-folder creation and the model detail page's "unorganized" indicator
 - A model's own gallery images move along with its STL files (shared/inherited images from a parent folder are left alone); the source folder is removed once it's empty
+- Optional **Preserve release package structure** mode (Settings → Library,
+  default off) normalizes the creator/character prefix but moves a complete
+  release package as one unit. Nested models such as `Alternate`, their relative
+  folders, and companion files stay intact; uncertain package boundaries are
+  blocked rather than flattened.
 
 ### Storefront Enrichment
 - Paste a Gumroad, Cults3D, MyMiniFactory, or Loot Studios creator URL

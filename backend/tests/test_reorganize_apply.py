@@ -95,6 +95,60 @@ class TestApplyHappyPath:
         assert len(lines) == 1 and lines[0]["status"] == "done"
 
 
+class TestPackageApply:
+    def test_moves_package_tree_and_repaths_nested_models(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        creator = make_creator(db, name="Abe3d")
+        package = tmp_path / "MessyCreatorFolder" / "2B" / "1_4 2B YoRHa - Abe3D"
+        alternate = package / "Alternate"
+        alternate.mkdir(parents=True)
+        base_file = package / "Base.stl"
+        alt_file = alternate / "Head.stl"
+        notes = package / "README.txt"
+        base_file.write_bytes(b"base")
+        alt_file.write_bytes(b"alt")
+        notes.write_text("keep me", encoding="utf-8")
+        standard = make_model(db, creator, name="2B", character="2B")
+        standard.folder_path = str(package).replace("\\", "/")
+        standard.other_files = [str(notes).replace("\\", "/")]
+        alt_model = make_model(db, creator, name="Alternative", character="2B")
+        alt_model.folder_path = str(alternate).replace("\\", "/")
+        db.commit()
+        make_stl_file(db, standard, filename="Base.stl", path=str(base_file).replace("\\", "/"))
+        make_stl_file(db, alt_model, filename="Head.stl", path=str(alt_file).replace("\\", "/"))
+        db.commit()
+        client.patch("/settings", json={"reorganize_package_mode_enabled": True})
+
+        preview = client.get("/reorganize/preview", params={"template": "{creator}/{character}"}).json()
+        entry = preview["entries"][0]
+        response = client.post("/reorganize/apply", json={
+            "manifest_id": preview["manifest_id"], "entry_ids": [entry["model_id"]],
+        })
+
+        assert response.status_code == 200, response.text
+        assert response.json()["moved_models"] == 2
+        destination = entry["proposed_dir"]
+        assert os.path.exists(destination + "/Base.stl")
+        assert os.path.exists(destination + "/Alternate/Head.stl")
+        assert os.path.exists(destination + "/README.txt")
+        db.refresh(standard)
+        db.refresh(alt_model)
+        assert standard.folder_path == destination
+        assert standard.other_files == [destination + "/README.txt"]
+        assert alt_model.folder_path == destination + "/Alternate"
+
+        undo = client.post("/reorganize/undo", json={"manifest_id": preview["manifest_id"]})
+        assert undo.status_code == 200, undo.text
+        assert os.path.exists(str(base_file))
+        assert os.path.exists(str(alt_file))
+        assert os.path.exists(str(notes))
+        db.refresh(standard)
+        db.refresh(alt_model)
+        assert standard.folder_path == str(package).replace("\\", "/")
+        assert standard.other_files == [str(notes).replace("\\", "/")]
+        assert alt_model.folder_path == str(alternate).replace("\\", "/")
+
+
 class TestOnProgress:
     """on_progress(moved, total) is purely additive — no callback means no
     behavior change (covered above); with one, it must fire once per moved

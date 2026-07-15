@@ -94,6 +94,19 @@ When the heuristic gets it wrong, you can fix it by
 the correction is a durable group membership, so future rescans leave it
 alone instead of re-deriving it from the heuristic.
 
+### Models versus release packages
+
+A scanned **model** is a catalog/viewer unit; a **release package** is a physical
+move boundary. One package may contain several models, such as printable files at
+its root plus a separately indexed `Alternate/` subtree. With **Preserve release
+package structure** enabled under **Settings → Library**, Reorganize finds the
+physical character ancestor and treats its next child as the package root. It then
+moves that complete subtree while keeping all relative folders and companion files
+unchanged. A model stored directly in the character directory uses that directory
+as its package boundary. If the stored character cannot be matched to an ancestor
+folder, Reorganize blocks the package for review rather than flattening it. See
+[Reorganize Library](features.md#reorganize-library).
+
 ## STL file part names
 
 Each STL file's **Name** (`part_name`, shown in the model detail file list) is

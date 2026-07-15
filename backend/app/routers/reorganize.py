@@ -41,6 +41,10 @@ def _entry_to_schema(e: reorganize.Entry) -> ReorganizeEntry:
     return ReorganizeEntry(
         model_id=e.model_id,
         model_name=e.model_name,
+        model_ids=e.model_ids or [e.model_id],
+        package_mode=e.package_mode,
+        package_name=e.package_name,
+        ambiguous_package=e.ambiguous_package,
         source_path=e.source_dir,
         files=[
             ReorganizeFileMove(
@@ -114,6 +118,11 @@ def _slugify_filenames(db: Session) -> bool:
     return bool(row.value) if row is not None else False
 
 
+def _package_mode(db: Session) -> bool:
+    row = db.get(AppSetting, "reorganize_package_mode_enabled")
+    return bool(row.value) if row is not None else False
+
+
 def _stored_template(db: Session, template: str | None) -> str | None:
     """An explicit template wins; otherwise fall back to the persisted setting
     (build_manifest itself falls back further to the built-in default)."""
@@ -149,6 +158,7 @@ def _build_and_persist(
             db, template, root_id, overrides, inbox_source,
             slugify_title=slugify_title, slugify_all=resolved_slugify_all,
             slugify_filenames=resolved_slugify_filenames,
+            preserve_packages=_package_mode(db),
         )
     except ReorganizeTemplateError as e:
         raise HTTPException(status_code=400, detail=str(e))

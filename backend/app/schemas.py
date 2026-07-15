@@ -569,6 +569,9 @@ class AppSettingsRead(BaseModel):
     # Default off; toggled from the Library settings tab. Retires the old
     # deployment-level REORGANIZE_WRITE_ENABLED env var.
     reorganize_enabled: bool = False
+    # Preserve each release/package subtree while normalizing only the
+    # creator/character prefix. Default off until explicitly enabled.
+    reorganize_package_mode_enabled: bool = False
     # AI-assisted suggestions (STUDIO-186) for reorganize preview entries the
     # deterministic pass can't classify (unclassifiable/collision): infers
     # creator/character/title from folder name + filenames via the same
@@ -618,6 +621,7 @@ class AppSettingsUpdate(BaseModel):
     reorganize_slugify: Optional[bool] = None
     reorganize_slugify_filenames: Optional[bool] = None
     reorganize_enabled: Optional[bool] = None
+    reorganize_package_mode_enabled: Optional[bool] = None
     reorganize_ai_suggestions_enabled: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
 
@@ -869,6 +873,10 @@ class ReorganizeFileMove(BaseModel):
 class ReorganizeEntry(BaseModel):
     model_id: int
     model_name: str
+    model_ids: list[int] = Field(default_factory=list)
+    package_mode: bool = False
+    package_name: Optional[str] = None
+    ambiguous_package: bool = False
     source_path: str
     files: list[ReorganizeFileMove]   # the move unit is the file set
     kind: MoveKind

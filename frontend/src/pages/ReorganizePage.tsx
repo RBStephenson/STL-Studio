@@ -95,6 +95,12 @@ interface BlockerFlag {
  *  "locked" or "over-length" with no way to know why or what to do. */
 function blockerFlags(e: ReorganizeEntry): BlockerFlag[] {
   const flags: BlockerFlag[] = [];
+  if (e.ambiguous_package) {
+    flags.push({
+      label: "package boundary",
+      explanation: "The model's character does not match a physical ancestor folder, so Reorganize cannot safely determine the release package boundary.",
+    });
+  }
   if (e.collision) {
     flags.push({
       label: `collision: ${e.collision_kind}`,
@@ -401,6 +407,12 @@ export default function ReorganizePage() {
           <code className="text-indigo-400">{"{scale}"}</code>{" "}
           <code className="text-indigo-400">{"{title}"}</code> — separate levels with <code>/</code>.
         </div>
+        {settings.reorganize_package_mode_enabled && (
+          <div className="text-xs text-indigo-300">
+            Package preservation is on: Reorganize uses the creator/character prefix
+            and keeps each release package's name and internal folders unchanged.
+          </div>
+        )}
         {error && preview && <div className="text-sm text-rose-400">{error}</div>}
       </div>
 

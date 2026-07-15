@@ -77,6 +77,66 @@ class TestPreviewHappyPath:
         assert entry["escapes_scan_root"] is False
 
 
+class TestPackageMode:
+    def test_groups_nested_models_and_preserves_relative_tree(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        creator = _get_creator(db, "Abe3d")
+        package = tmp_path / "Abe3d" / "2B" / "1_4 2B YoRHa - Abe3D"
+        alternate = package / "Alternate"
+        alternate.mkdir(parents=True)
+        standard_file = package / "Base.stl"
+        alternate_file = alternate / "Head.stl"
+        companion = package / "README.txt"
+        shared_render = package.parent / "Renders" / "preview.jpg"
+        shared_render.parent.mkdir()
+        standard_file.write_bytes(b"standard")
+        alternate_file.write_bytes(b"alternate")
+        companion.write_text("assembly notes", encoding="utf-8")
+        shared_render.write_bytes(b"jpg")
+
+        standard = make_model(db, creator, name="2B", character="2B")
+        standard.folder_path = str(package)
+        standard.thumbnail_path = str(shared_render)
+        alternate_model = make_model(db, creator, name="Alternative", character="2B")
+        alternate_model.folder_path = str(alternate)
+        db.commit()
+        make_stl_file(db, standard, filename="Base.stl", path=str(standard_file))
+        make_stl_file(db, alternate_model, filename="Head.stl", path=str(alternate_file))
+        db.commit()
+        client.patch("/settings", json={"reorganize_package_mode_enabled": True})
+
+        data = client.get("/reorganize/preview", params={"template": "{creator}/{character}"}).json()
+
+        assert len(data["entries"]) == 1
+        entry = data["entries"][0]
+        assert entry["package_mode"] is True
+        assert entry["eligible"] is True
+        assert entry["model_ids"] == [standard.id, alternate_model.id]
+        assert entry["source_path"].replace("\\", "/").endswith("Abe3d/2B/1_4 2B YoRHa - Abe3D")
+        assert entry["proposed_dir"].replace("\\", "/").endswith(
+            "abe3d/2b/1_4 2B YoRHa - Abe3D"
+        )
+        moves = {Path(f["current_path"]).name: f for f in entry["files"]}
+        assert moves["Head.stl"]["proposed_path"].replace("\\", "/").endswith(
+            "1_4 2B YoRHa - Abe3D/Alternate/Head.stl"
+        )
+        assert moves["README.txt"]["kind"] == "companion"
+        assert "preview.jpg" not in moves
+
+    def test_blocks_when_character_folder_cannot_be_found(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, character="Joker", title="Bust")
+        model = db.query(Creator).filter_by(name="Abe3D").one().models[0]
+        model.character = "Different Character"
+        db.commit()
+        client.patch("/settings", json={"reorganize_package_mode_enabled": True})
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+
+        assert entry["ambiguous_package"] is True
+        assert entry["eligible"] is False
+
+
 class TestSlugifyFilenames:
     """reorganize_slugify_filenames (#946) is off by default and independent
     of reorganize_slugify (directory segments only) — it renders each STL's
