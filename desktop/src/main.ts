@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { Menu, app, BrowserWindow, dialog, screen } from "electron";
 import type { WebContents } from "electron";
 
-import { LOCKFILE_NAME, baseUrl, resolveBackendExe } from "./config";
+import { LOCKFILE_NAME, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
 import {
   buildApplicationMenuTemplate,
   buildContextMenuTemplate,
@@ -44,6 +44,7 @@ let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarProcess | null = null;
 let deps: SidecarDeps | null = null;
 let windowStateSaveTimer: NodeJS.Timeout | null = null;
+let backendBooting = false;
 
 const IS_MAC = process.platform === "darwin";
 
@@ -156,6 +157,12 @@ function createWindow(): BrowserWindow {
   win.once("ready-to-show", () => win.show());
   void win.loadFile(SPLASH_HTML);
 
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!isBackendRetryUrl(url)) return;
+    event.preventDefault();
+    void win.loadFile(SPLASH_HTML).then(() => bootBackendAndLoad(win));
+  });
+
   // Right-click context menu: Back/Forward/Reload + clipboard when relevant.
   win.webContents.on("context-menu", (_event, params) => {
     const template = buildContextMenuTemplate(navFor(win.webContents), {
@@ -220,6 +227,8 @@ async function bootBackendAndLoad(
   win: BrowserWindow,
   opts: { forceReveal?: boolean } = {},
 ): Promise<void> {
+  if (backendBooting) return;
+  backendBooting = true;
   deps = runtimeDeps(app.getPath("userData"), LOCKFILE_NAME);
   const exePath = resolveBackendExe({
     packaged: app.isPackaged,
@@ -254,6 +263,8 @@ async function bootBackendAndLoad(
         : `Unexpected error starting the backend: ${String(err)}`;
     dialog.showErrorBox("STL Studio — backend failed to start", message);
     await win.loadFile(PLACEHOLDER_HTML);
+  } finally {
+    backendBooting = false;
   }
 }
 

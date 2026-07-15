@@ -18,6 +18,11 @@ export const BACKEND_HOST = "127.0.0.1";
 export const BACKEND_PORT = 8484;
 
 export const HEALTH_PATH = "/api/health";
+export const BACKEND_RETRY_URL = "stl-studio://retry-backend";
+
+export function isBackendRetryUrl(url: string): boolean {
+  return url === BACKEND_RETRY_URL;
+}
 
 /** Health-poll cadence and ceiling (ms). Python + uvicorn cold start is the
  *  slow part; 30s is generous headroom before we surface a startup error. */

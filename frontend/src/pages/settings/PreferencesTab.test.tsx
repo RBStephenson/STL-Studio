@@ -6,10 +6,11 @@ import { mkSettings } from "../../test/settings";
 
 const updateMock = vi.fn().mockResolvedValue(undefined);
 let enabled = false;
+let recoveryEnabled = false;
 
 vi.mock("../../context/AppSettingsContext", () => ({
   useAppSettings: () => ({
-    settings: mkSettings({ system_info_enabled: enabled }),
+    settings: mkSettings({ system_info_enabled: enabled, storage_recovery_enabled: recoveryEnabled }),
     update: updateMock,
   }),
 }));
@@ -17,7 +18,14 @@ vi.mock("../../context/AppSettingsContext", () => ({
 describe("PreferencesTab system info setting", () => {
   beforeEach(() => {
     enabled = false;
+    recoveryEnabled = false;
     vi.clearAllMocks();
+  });
+
+  it("persists the default-off storage recovery flag when enabled", async () => {
+    render(<PreferencesTab />);
+    await userEvent.click(screen.getByRole("checkbox", { name: /external storage recovery/i }));
+    expect(updateMock).toHaveBeenCalledWith({ storage_recovery_enabled: true });
   });
 
   it("persists the default-off flag when enabled", async () => {

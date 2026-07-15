@@ -11,6 +11,7 @@ import { modelLinkTo } from "../utils/modelLink";
 import QuickAssignPopover from "./QuickAssignPopover";
 import StarRating from "./StarRating";
 import { invalidateModelViews } from "../hooks/queries/invalidation";
+import { useStorageRecoverySignal, withStorageRecoverySignal } from "../hooks/useStorageRecoverySignal";
 
 interface Props {
   model: Model;
@@ -74,6 +75,8 @@ const SUPPORT_STATUS_LABEL: Record<string, string> = {
 // state — so the default shallow compare re-renders only the card whose
 // `selected`/`focused` actually changed (#382).
 function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false, allTagSuggestions = [], focused = false }: Props) {
+  const storageRecoverySignal = useStorageRecoverySignal();
+  const [cardImageFailed, setCardImageFailed] = useState(false);
   const location = useLocation();
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -280,7 +283,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
 
   // Static card image: explicit Library image, else selected thumbnail, else first gallery image.
   // Gallery images remain a fallback, but shouldn't hide thumbnail changes.
-  const cardImageUrl = (() => {
+  const baseCardImageUrl = (() => {
     if (imageCleared) return null;
     const gallery = model.image_paths ?? [];
     // Between bulk-enrich and import-apply, image_paths can hold remote CDN URLs
@@ -292,6 +295,9 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     if (gallery.length > 0) return resolve(gallery[0]);
     return null;
   })();
+  const cardImageUrl = baseCardImageUrl && cardImageFailed
+    ? withStorageRecoverySignal(baseCardImageUrl, storageRecoverySignal)
+    : baseCardImageUrl;
 
   const displayName = isGroup && localGroupLabel
     ? (localTitle || localGroupLabel)
@@ -337,6 +343,8 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             alt={displayName}
             className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${nsfw && !showNSFW ? "blur-xl" : ""}`}
             loading="lazy"
+            onError={() => setCardImageFailed(true)}
+            onLoad={() => setCardImageFailed(false)}
           />
         ) : thumbnail ? (
           <img
@@ -630,6 +638,7 @@ export const GalleryRotator = forwardRef<
   rotationMs = 10000,
   onIndexChange,
 }, ref) {
+  const storageRecoverySignal = useStorageRecoverySignal();
   const [broken, setBroken] = useState<Set<number>>(new Set());
   const [idx, setIdx] = useState(0);
   const [fade, setFade] = useState(true);
@@ -638,7 +647,10 @@ export const GalleryRotator = forwardRef<
   const labelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const urls = paths.map((p) => api.fileUrl(p));
+  const urls = paths.map((p, imageIndex) => withStorageRecoverySignal(
+    api.fileUrl(p),
+    broken.has(imageIndex) ? storageRecoverySignal : 0,
+  ));
   const validCount = paths.length - broken.size;
   const filename = paths[idx]?.replace(/\\/g, "/").split("/").pop() ?? "";
 
@@ -735,6 +747,12 @@ export const GalleryRotator = forwardRef<
         src={urls[idx]}
         alt={alt}
         onError={() => setBroken((prev) => new Set([...prev, idx]))}
+        onLoad={() => setBroken((prev) => {
+          if (!prev.has(idx)) return prev;
+          const next = new Set(prev);
+          next.delete(idx);
+          return next;
+        })}
         className={`w-full h-full object-cover transition-opacity duration-150 ${fade ? "opacity-100" : "opacity-0"} ${blur ? "blur-xl" : ""}`}
         loading="lazy"
       />

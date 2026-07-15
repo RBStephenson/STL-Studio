@@ -10,6 +10,7 @@ import type {
   FilterPreset,
   MmfSettings,
   SystemInfo,
+  StorageRecoveryStatus,
 } from "./types";
 
 export const settingsApi = {
@@ -37,6 +38,7 @@ export const settingsApi = {
   reloadEnv: () =>
     request<EnvReloadResult>("/settings/reload", { method: "POST" }),
   systemInfo: () => request<SystemInfo>("/settings/system-info"),
+  storageRecovery: () => request<StorageRecoveryStatus>("/settings/storage-recovery"),
   // AI settings (#517). The API key is write-only — get() returns only
   // whether one is set plus a masked hint, never the plaintext.
   ai: {

@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { resolveBackendExe } from "./config";
+import { isBackendRetryUrl, resolveBackendExe } from "./config";
 
 const exeName = process.platform === "win32" ? "stl-studio.exe" : "stl-studio";
+
+describe("backend retry URL", () => {
+  it("accepts only the internal retry navigation", () => {
+    expect(isBackendRetryUrl("stl-studio://retry-backend")).toBe(true);
+    expect(isBackendRetryUrl("https://example.com/retry-backend")).toBe(false);
+  });
+});
 
 describe("resolveBackendExe", () => {
   afterEach(() => {
