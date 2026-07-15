@@ -137,6 +137,19 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx --no-install electron-builder --win --publish never
 
+      # Exercise the artifact users actually run, not only the loose PyInstaller
+      # sidecar: silent install, Electron launch, restart/data persistence, and
+      # silent uninstall in isolated runner data directories (#1046).
+      - name: Smoke-test installed Windows app
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop/release/*.exe |
+            Where-Object { $_.Name -notlike 'Uninstall*' } |
+            Select-Object -First 1
+          if (-not $installer) { throw 'NSIS installer not found' }
+          python scripts/smoke_installer.py $installer.FullName
+
       # ---- Linux: label the loose binary (Windows retires its raw exe in favour
       #      of the installer above) ----
       - name: Rename artifact (Linux)
