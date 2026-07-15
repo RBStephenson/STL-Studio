@@ -136,6 +136,13 @@ const SECTIONS: Section[] = [
           — everything beneath it is one variant group, no name-guessing. Off by default;
           rescan to apply. Manual groupings still win.
         </p>
+        <p>
+          For mixed creator layouts, you can instead enable <strong>Improve automatic
+          variant grouping with folder hierarchy</strong> in Settings â†’ Library. Full
+          scans and creator rescans then use the detected product hierarchy as an
+          additional grouping signal. Conflicting or ambiguous products stay separate;
+          manual groups and models you explicitly ungrouped are never changed.
+        </p>
         <ul>
           <li>
             <strong>Drag-to-group (Library):</strong> hover a card, grab the grip in its

@@ -35,6 +35,7 @@ DEFAULTS = {
     "reorganize_enabled": False,
     "reorganize_package_mode_enabled": False,
     "reorganize_ai_suggestions_enabled": False,
+    "hierarchy_variant_grouping_enabled": False,
     "collections_uniform_size": True,
 }
 
@@ -43,6 +44,13 @@ def test_reorganize_enabled_round_trips(client):
     assert client.get("/settings").json()["reorganize_enabled"] is False
     assert client.patch("/settings", json={"reorganize_enabled": True}).status_code == 200
     assert client.get("/settings").json()["reorganize_enabled"] is True
+
+
+def test_hierarchy_variant_grouping_enabled_round_trips(client):
+    assert client.get("/settings").json()["hierarchy_variant_grouping_enabled"] is False
+    response = client.patch("/settings", json={"hierarchy_variant_grouping_enabled": True})
+    assert response.status_code == 200
+    assert client.get("/settings").json()["hierarchy_variant_grouping_enabled"] is True
 
 
 def test_ai_effort_round_trips_and_rejects_bad_value(client):

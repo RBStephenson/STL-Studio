@@ -1,6 +1,6 @@
 """Variant-grouping proposal engine (#615). Exercises the blended signals
 (file_hash / filename / name) and the manual-group lock."""
-from app.models import VariantGroup
+from app.models import AppSetting, VariantGroup
 from app.services import grouping
 from tests.conftest import make_creator, make_model, make_stl_file
 
@@ -20,6 +20,99 @@ def _run(db, creator):
     grouping.regroup_creator(db, creator.id)
     db.flush()
     db.expire_all()
+
+
+def _enable_hierarchy(db):
+    db.merge(AppSetting(key="hierarchy_variant_grouping_enabled", value=True))
+    db.flush()
+
+
+class TestHierarchySignal:
+    def test_same_character_envelope_groups_different_names(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Supported Files")
+        b = make_model(db, creator, name="Alternate Cut")
+        a.character = b.character = "Ada Wong"
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+        assert groups[0].label == "Ada Wong"
+        assert groups[0].reason == "same product hierarchy"
+
+    def test_conflicting_envelopes_block_shared_hash_merge(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Supported")
+        b = make_model(db, creator, name="Supported Copy")
+        a.character = "Ada Wong"
+        b.character = "Leon Kennedy"
+        db.flush()
+        _stl(db, a, "body.stl", file_hash="shared-base")
+        _stl(db, b, "body.stl", file_hash="shared-base")
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+
+    def test_disabled_flag_keeps_existing_hash_behavior(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        b = make_model(db, creator, name="Beta")
+        a.character = "Ada Wong"
+        b.character = "Leon Kennedy"
+        db.flush()
+        _stl(db, a, "a.stl", file_hash="same-mesh")
+        _stl(db, b, "b.stl", file_hash="same-mesh")
+
+        _run(db, creator)
+
+        assert len(_groups(db, creator)) == 1
+
+    def test_ambiguous_middle_cannot_bridge_conflicting_envelopes(self, db):
+        creator = make_creator(db)
+        ada = make_model(db, creator, name="Ada")
+        bridge = make_model(db, creator, name="Bridge")
+        leon = make_model(db, creator, name="Leon")
+        ada.character = "Ada Wong"
+        bridge.character = None
+        leon.character = "Leon Kennedy"
+        db.flush()
+        _stl(db, ada, "ada.stl", file_hash="left")
+        _stl(db, bridge, "bridge-left.stl", file_hash="left")
+        _stl(db, bridge, "bridge-right.stl", file_hash="right")
+        _stl(db, leon, "leon.stl", file_hash="right")
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        db.refresh(ada)
+        db.refresh(leon)
+        assert not (
+            ada.variant_group_id is not None
+            and ada.variant_group_id == leon.variant_group_id
+        )
+
+    def test_manual_group_remains_authoritative_when_enabled(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Ada Supported")
+        b = make_model(db, creator, name="Ada Unsupported")
+        a.character = b.character = "Ada Wong"
+        manual = VariantGroup(creator_id=creator.id, label="My Ada", source="manual")
+        db.add(manual)
+        db.flush()
+        a.variant_group_id = manual.id
+        b.variant_group_id = manual.id
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        db.refresh(manual)
+        assert manual.label == "My Ada"
+        assert {m.id for m in manual.models} == {a.id, b.id}
 
 
 class TestNameSignal:

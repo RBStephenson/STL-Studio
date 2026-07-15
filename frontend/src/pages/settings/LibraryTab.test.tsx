@@ -51,6 +51,25 @@ describe("LibraryTab reorganize feature flag", () => {
   });
 });
 
+describe("LibraryTab hierarchy variant grouping setting", () => {
+  beforeEach(() => {
+    settings = mkSettings();
+    vi.clearAllMocks();
+  });
+
+  it("persists the default-off setting when enabled", async () => {
+    settings = mkSettings({ hierarchy_variant_grouping_enabled: false });
+    renderTab();
+    await userEvent.click(screen.getByRole("checkbox", { name: /improve automatic variant grouping/i }));
+    expect(updateMock).toHaveBeenCalledWith({ hierarchy_variant_grouping_enabled: true });
+  });
+
+  it("explains that manual decisions survive rescans", () => {
+    renderTab();
+    expect(screen.getByText(/manual groups and models you kept separate are never overridden/i)).toBeVisible();
+  });
+});
+
 describe("LibraryTab filename slugify setting", () => {
   beforeEach(() => {
     settings = mkSettings();

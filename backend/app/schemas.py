@@ -579,6 +579,9 @@ class AppSettingsRead(BaseModel):
     # the existing per-model override fields; the user must confirm before
     # they affect the manifest. Default off; toggled from the Library tab.
     reorganize_ai_suggestions_enabled: bool = False
+    # Improve scanner-owned auto groups using the hierarchy-derived character
+    # envelope. Manual groups and no_group decisions remain authoritative.
+    hierarchy_variant_grouping_enabled: bool = False
     # Collections page: give every card the same box size (the one cover art
     # already uses) instead of a compact box for collections with no cover.
     collections_uniform_size: bool = True
@@ -623,6 +626,7 @@ class AppSettingsUpdate(BaseModel):
     reorganize_enabled: Optional[bool] = None
     reorganize_package_mode_enabled: Optional[bool] = None
     reorganize_ai_suggestions_enabled: Optional[bool] = None
+    hierarchy_variant_grouping_enabled: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")

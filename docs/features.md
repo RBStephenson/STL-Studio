@@ -95,6 +95,13 @@ apply**. Manual group overrides still win.
 
 ### Fixing mis-grouped models
 
+For mixed creator layouts, the default-off **Improve automatic variant grouping
+with folder hierarchy** setting (Settings â†’ Library) adds the scanner's detected
+character/package context to full scans and creator rescans. Conflicting hierarchy
+acts as an anti-merge boundary, while ambiguous models remain ungrouped. The pass
+only rebuilds automatic groups: manual groups and explicit keep-separate decisions
+remain authoritative.
+
 The scanner infers the character group from folder names — it's accurate for
 most layouts but occasionally gets it wrong (typo'd folder, unusual nesting,
 inconsistent studio naming). You can fix any mis-grouping durably, so your
