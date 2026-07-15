@@ -287,6 +287,9 @@ export interface AppSettings {
   // Feature flag: gates the Reorganize Library feature end-to-end (UI + the
   // destructive apply/undo writes). Off by default; toggled on the Library tab.
   reorganize_enabled: boolean;
+  // Preserve complete release/package subtrees beneath the normalized
+  // creator/character prefix. Off by default.
+  reorganize_package_mode_enabled: boolean;
   // AI-assisted suggestions (STUDIO-186) for reorganize entries the
   // deterministic preview can't classify — infers creator/character/title via
   // the ai_organize_api endpoint. Advisory only, prefills override fields the
@@ -952,6 +955,10 @@ export interface ReorganizeFileMove {
 export interface ReorganizeEntry {
   model_id: number;
   model_name: string;
+  model_ids: number[];
+  package_mode: boolean;
+  package_name?: string | null;
+  ambiguous_package: boolean;
   source_path: string;
   files: ReorganizeFileMove[];
   kind: ReorganizeMoveKind;

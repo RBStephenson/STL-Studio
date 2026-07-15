@@ -886,10 +886,20 @@ const SECTIONS: Section[] = [
           Templates can also include <code>{"{scale}"}</code>, using scanner-detected
           scale tags like <code>1:6</code> or <code>75mm</code>.
         </p>
+        <p>
+          For creator packages that contain nested releases such as an{" "}
+          <code>Alternate</code> folder, enable <strong>Preserve release package
+          structure</strong> under <strong>Settings → Library</strong>. This default-off
+          mode normalizes the creator/character prefix, then moves the complete package
+          as one unit without flattening its internal folders or companion files. Scale
+          is not required. If the package boundary cannot be matched safely, the preview
+          blocks it with a <strong>package boundary</strong> explanation.
+        </p>
         <p className="font-medium text-text-primary-alt">How it works</p>
         <ul>
           <li>
-            <strong>Preview first.</strong> The page shows a per-model plan: which
+            <strong>Preview first.</strong> The page shows a per-model plan, or one row
+            per release package when package preservation is enabled: which
             files would move, where, and what kind of operation it is (move, rename,
             case rename, or already in place). No files are touched yet.
           </li>

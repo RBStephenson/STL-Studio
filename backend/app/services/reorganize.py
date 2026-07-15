@@ -108,6 +108,10 @@ class Entry:
     escapes_scan_root: bool
     missing_files_on_disk: bool
     locked: bool
+    model_ids: list[int] = field(default_factory=list)
+    package_mode: bool = False
+    package_name: str | None = None
+    ambiguous_package: bool = False
 
 
 @dataclass
@@ -198,6 +202,7 @@ def build_manifest(
     slugify_all: bool = False,
     model_ids: list[int] | None = None,
     slugify_filenames: bool = False,
+    preserve_packages: bool = False,
 ) -> Manifest:
     """Build the reorganize preview manifest. Raises ReorganizeTemplateError on
     a malformed template (caller maps to 4xx).
@@ -293,17 +298,176 @@ def build_manifest(
         wanted = set(model_ids)
         models = [m for m in models if m.id in wanted]
 
-    entries: list[Entry] = []
-    for m in models:
-        entries.append(_build_entry(m, segments, root_keys, pack_paths,
-                                    overrides.get(m.id), _dest_for(m),
-                                    slugify_title=slugify_title,
-                                    slugify_all=slugify_all,
-                                    slugify_filenames=slugify_filenames))
+    if preserve_packages and inbox_source is None:
+        entries = _build_package_entries(
+            models, root_keys, pack_paths, overrides,
+            slugify_all=slugify_all,
+        )
+    else:
+        entries = []
+        for m in models:
+            entries.append(_build_entry(m, segments, root_keys, pack_paths,
+                                        overrides.get(m.id), _dest_for(m),
+                                        slugify_title=slugify_title,
+                                        slugify_all=slugify_all,
+                                        slugify_filenames=slugify_filenames))
 
     _detect_collisions(entries)
     _detect_overlaps(entries)
     return Manifest(template=canonical_template, entries=entries, _root_keys=[k for _, k in root_keys])
+
+
+def _boundary_key(value: str) -> str:
+    """Conservative folder/character comparison used for package boundaries."""
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def _package_boundary(model: Model, root_keys: list[tuple[str, str]]) -> tuple[str, str] | None:
+    """Return ``(character_dir, package_root)`` when topology is unambiguous.
+
+    The scanner's character label must correspond to a real ancestor folder.
+    The package is that character folder itself when it owns the model files,
+    otherwise its first child on the path to the model. Nested model boundaries
+    such as ``Alternate`` therefore resolve to the same release package.
+    """
+    current = _canon(model.folder_path or "")
+    root = _scan_root_for(_key(current), root_keys)
+    wanted = _boundary_key(model.character or "")
+    if not current or not root or not wanted:
+        return None
+
+    parts = current.split("/")
+    root_parts = root.split("/")
+    for idx in range(len(parts) - 1, len(root_parts) - 1, -1):
+        if _boundary_key(parts[idx]) != wanted:
+            continue
+        character_dir = "/".join(parts[:idx + 1])
+        package_root = character_dir if idx == len(parts) - 1 else "/".join(parts[:idx + 2])
+        return character_dir, package_root
+    return None
+
+
+def _build_package_entries(
+    models: list[Model],
+    root_keys: list[tuple[str, str]],
+    pack_paths: list[str],
+    overrides: dict[int, dict],
+    *,
+    slugify_all: bool,
+) -> list[Entry]:
+    """Build one atomic move entry per physical release package."""
+    grouped: dict[str, list[tuple[Model, str, str]]] = {}
+    ambiguous: list[Model] = []
+    for model in models:
+        boundary = _package_boundary(model, root_keys)
+        if boundary is None:
+            ambiguous.append(model)
+            continue
+        character_dir, package_root = boundary
+        grouped.setdefault(_key(package_root), []).append((model, character_dir, package_root))
+
+    entries: list[Entry] = []
+    for members in grouped.values():
+        members.sort(key=lambda item: (_canon(item[0].folder_path).count("/"), item[0].id))
+        representative, character_dir, package_root = members[0]
+        member_models = [item[0] for item in members]
+        override = overrides.get(representative.id) or {}
+        creator = (override.get("creator") or "").strip() or (
+            representative.creator.name if representative.creator else ""
+        )
+        character = (override.get("character") or "").strip() or (representative.character or "")
+        missing = [name for name, value in (("creator", creator), ("character", character)) if not value]
+
+        scan_root = _scan_root_for(_key(package_root), root_keys)
+        sanitized_prefix = [
+            sanitize_segment(value or (UNKNOWN_CREATOR if name == "creator" else UNKNOWN_CHARACTER),
+                             slugify=slugify_all)
+            for name, value in (("creator", creator), ("character", character))
+        ]
+        safe_prefix = [part.value for part in sanitized_prefix]
+        reserved = any(part.reserved_name for part in sanitized_prefix)
+        proposed_dir = _canon((scan_root + "/" if scan_root else "") + "/".join(safe_prefix))
+        package_name = None
+        if _key(package_root) != _key(character_dir):
+            package_name = package_root.rsplit("/", 1)[-1]
+            sanitized_package = sanitize_segment(package_name, slugify=False)
+            reserved = reserved or sanitized_package.reserved_name
+            proposed_dir = _canon(proposed_dir + "/" + sanitized_package.value)
+
+        tracked: dict[str, tuple[int, str]] = {}
+        for model in member_models:
+            for stl in model.stl_files:
+                tracked[_key(stl.path)] = (stl.id, "stl")
+
+        files: list[FileMove] = []
+        seen: set[str] = set()
+        is_symlink = False
+        if os.path.isdir(package_root):
+            for dirpath, dirnames, filenames in os.walk(package_root, followlinks=False):
+                is_symlink = is_symlink or any(os.path.islink(os.path.join(dirpath, d)) for d in dirnames)
+                for filename in filenames:
+                    path = _canon(os.path.join(dirpath, filename))
+                    seen.add(_key(path))
+                    size, mtime_ns, link, missing_file = _stat_file_cached(path)
+                    is_symlink = is_symlink or link
+                    relative = path[len(package_root):].lstrip("/")
+                    stl_id, kind = tracked.get(_key(path), (0, "companion"))
+                    files.append(FileMove(
+                        stl_file_id=stl_id or None,
+                        current_path=path,
+                        proposed_path=_canon(proposed_dir + "/" + relative),
+                        size_bytes=size,
+                        mtime_ns=mtime_ns,
+                        content_hash=None,
+                        fingerprint_method="stat",
+                        missing_file=missing_file,
+                        kind=kind,
+                    ))
+
+        missing_files = any(key not in seen for key in tracked)
+        over_length = path_over_length(proposed_dir) or any(path_over_length(f.proposed_path) for f in files)
+        escapes = scan_root is None
+        locked = any(model.locked for model in member_models)
+        entry = Entry(
+            model_id=representative.id,
+            model_name=package_name or character or representative.name,
+            files=files,
+            kind=_classify_kind(package_root, proposed_dir),
+            source_dir=package_root,
+            proposed_dir=proposed_dir,
+            eligible=not (missing or over_length or reserved or is_symlink or escapes or missing_files or locked),
+            pack_override_paths=[p for p in pack_paths if _key(p) == _key(package_root) or _key(p).startswith(_key(package_root) + "/")],
+            collision=False,
+            collision_kind="none",
+            collision_with=[],
+            suggested_suffix=None,
+            unclassifiable=bool(missing),
+            missing_fields=missing,
+            over_length=over_length,
+            reserved_name=reserved,
+            overlaps_other=False,
+            spans_multiple_dirs=False,
+            source_directories=[package_root],
+            is_symlink=is_symlink,
+            escapes_scan_root=escapes,
+            missing_files_on_disk=missing_files,
+            locked=locked,
+            model_ids=[model.id for model in member_models],
+            package_mode=True,
+            package_name=package_name,
+        )
+        entries.append(entry)
+
+    for model in ambiguous:
+        legacy = _build_entry(model, parse_template("{creator}/{character}"), root_keys,
+                              pack_paths, overrides.get(model.id), None,
+                              slugify_all=slugify_all)
+        legacy.model_ids = [model.id]
+        legacy.package_mode = True
+        legacy.ambiguous_package = True
+        legacy.eligible = False
+        entries.append(legacy)
+    return entries
 
 
 def _build_entry(

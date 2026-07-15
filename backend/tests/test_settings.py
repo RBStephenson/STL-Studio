@@ -33,6 +33,7 @@ DEFAULTS = {
     "reorganize_slugify": True,
     "reorganize_slugify_filenames": False,
     "reorganize_enabled": False,
+    "reorganize_package_mode_enabled": False,
     "reorganize_ai_suggestions_enabled": False,
     "collections_uniform_size": True,
 }

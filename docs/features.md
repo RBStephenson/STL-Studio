@@ -751,8 +751,22 @@ this page. The toggle is on by default: every segment renders slug-style (e.g.
 `abe-3d` instead of `Abe 3D`), matching how imported folders are named. Turn it
 off to keep each segment's original casing and spacing.
 
+The default-off **Preserve release package structure** toggle on the same Settings
+panel changes the move unit from one indexed model to one physical release package.
+Reorganize normalizes the `{creator}/{character}` prefix and preserves the package
+folder name plus every relative path beneath it. A package can contain multiple
+independently indexed models—for example, root-level standard STLs and an
+`Alternate/` model—and they move together without flattening. Non-indexed companion
+files such as assembly notes are included in the same drift-checked apply and undo.
+Scale is not used to find or place the package. Package mode matches the model's
+character to a real ancestor directory and uses the next directory as the release
+boundary; if that topology cannot be established confidently, the row is blocked
+with a **package boundary** explanation rather than guessed. The legacy per-model
+template behavior remains unchanged while this flag is off.
+
 - **Preview first.** The page shows exactly where every model *would* move, one row
-  each, with a move-kind chip (move / rename / case rename / in place / merge) and
+  each—or one row per package in package-preserving mode—with a move-kind chip
+  (move / rename / case rename / in place / merge) and
   blocker chips for anything unsafe (collision, over-length or reserved name,
   unclassifiable, symlink, multi-directory, escapes-scan-root, missing files,
   locked). Nothing is touched until you apply. A **missing files** chip means the

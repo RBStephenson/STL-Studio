@@ -407,6 +407,23 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           </div>
         </label>
 
+        <label className="flex items-start gap-3 cursor-pointer select-none mb-4 ml-6">
+          <input
+            type="checkbox"
+            checked={settings.reorganize_package_mode_enabled}
+            onChange={() => update({ reorganize_package_mode_enabled: !settings.reorganize_package_mode_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-text-primary-alt2">Preserve release package structure</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              Groups nested models such as Alternate into one package move. Reorganize
+              normalizes the creator/character prefix while preserving every folder and
+              companion file inside the release package. Ambiguous boundaries are blocked.
+            </p>
+          </div>
+        </label>
+
         <div className="bg-panel/60 border border-border-subtle rounded-lg px-4 py-3 mt-4 flex flex-col gap-3">
           <div>
             <label className="block text-xs text-text-secondary-alt mb-1">Destination template</label>
