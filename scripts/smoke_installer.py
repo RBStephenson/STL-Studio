@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import shutil
@@ -10,6 +13,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -97,6 +101,50 @@ def wait_for_health(port: int, timeout_s: float = TIMEOUT_S) -> None:
     raise TimeoutError(f"installed app did not serve {url}")
 
 
+def read_system_info(port: int) -> dict:
+    url = f"http://127.0.0.1:{port}/api/settings/system-info"
+    with urllib.request.urlopen(url, timeout=2) as response:
+        return json.load(response)
+
+
+def wait_for_updated_version(
+    appdata: Path,
+    previous_sidecar_pid: int,
+    expected_version: str,
+    timeout_s: float,
+) -> dict:
+    deadline = time.monotonic() + timeout_s
+    last_error = "updated sidecar did not appear"
+    while time.monotonic() < deadline:
+        for lock_path in appdata.rglob("sidecar.lock.json"):
+            try:
+                record = json.loads(lock_path.read_text(encoding="utf-8"))
+                if record.get("pid") == previous_sidecar_pid:
+                    continue
+                info = read_system_info(record["port"])
+                if info.get("version") == expected_version:
+                    return record
+                last_error = f"relaunch reported version {info.get('version')!r}"
+            except (KeyError, OSError, ValueError, TypeError, urllib.error.URLError) as error:
+                last_error = str(error)
+        time.sleep(0.5)
+    raise TimeoutError(f"update did not reach {expected_version}: {last_error}")
+
+
+@contextmanager
+def serve_update_feed(directory: Path):
+    handler = partial(SimpleHTTPRequestHandler, directory=str(directory))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def wait_for_absent(path: Path, timeout_s: float = TIMEOUT_S) -> None:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -114,8 +162,38 @@ def find_one(root: Path, pattern: str) -> Path:
     return matches[0]
 
 
+def validate_candidate_feed(directory: Path, expected_version: str) -> None:
+    metadata = directory / "latest.yml"
+    if not metadata.is_file():
+        raise RuntimeError("candidate update feed is missing latest.yml")
+    version = next(
+        (
+            line.split(":", 1)[1].strip().strip("'\"")
+            for line in metadata.read_text(encoding="utf-8").splitlines()
+            if line.startswith("version:")
+        ),
+        None,
+    )
+    if version != expected_version:
+        raise RuntimeError(
+            f"candidate metadata version {version!r} does not match {expected_version!r}"
+        )
+    installer = find_one(directory, "STL-Studio-Setup-*.exe")
+    blockmap = Path(f"{installer}.blockmap")
+    if not blockmap.is_file():
+        raise RuntimeError(f"candidate update feed is missing {blockmap.name}")
+
+
 def kill_tree(pid: int) -> None:
     subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], check=False, capture_output=True)
+
+
+def kill_installed_app() -> None:
+    subprocess.run(
+        ["taskkill", "/T", "/F", "/IM", "STL Studio.exe"],
+        check=False,
+        capture_output=True,
+    )
 
 
 def launch_and_probe(
@@ -145,6 +223,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("installer", type=Path)
     parser.add_argument("--diagnostics-dir", type=Path)
+    parser.add_argument("--candidate-dir", type=Path)
+    parser.add_argument("--expected-version")
+    parser.add_argument("--update-timeout", type=float, default=300)
     args = parser.parse_args(argv)
     if sys.platform != "win32":
         parser.error("the installed-app smoke test requires Windows")
@@ -152,6 +233,14 @@ def main(argv: list[str] | None = None) -> int:
     installer = args.installer.resolve()
     if not installer.is_file():
         parser.error(f"installer not found: {installer}")
+    if bool(args.candidate_dir) != bool(args.expected_version):
+        parser.error("--candidate-dir and --expected-version must be provided together")
+    candidate_dir = args.candidate_dir.resolve() if args.candidate_dir else None
+    if candidate_dir is not None:
+        try:
+            validate_candidate_feed(candidate_dir, args.expected_version)
+        except RuntimeError as error:
+            parser.error(str(error))
 
     root = Path(tempfile.mkdtemp(prefix="stl-studio-installed-smoke-"))
     install_dir = root / "install"
@@ -172,7 +261,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     db_path = localappdata / "STL-Inventory" / "stl_inventory.db"
     proc: subprocess.Popen | None = None
+    feed_context = serve_update_feed(candidate_dir) if candidate_dir else None
+    feed_url: str | None = None
     try:
+        if feed_context:
+            feed_url = feed_context.__enter__()
         subprocess.run([str(installer), "/S", f"/D={install_dir}"], check=True, env=env, timeout=120)
         app_exe = find_one(install_dir, "STL Studio.exe")
         with app_log.open("ab") as log:
@@ -188,7 +281,43 @@ def main(argv: list[str] | None = None) -> int:
                 "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
                 ("ci_installer_smoke", json.dumps("preserved")),
             )
+            if candidate_dir:
+                db.execute(
+                    "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+                    ("system_info_enabled", json.dumps(True)),
+                )
             db.commit()
+
+        if candidate_dir:
+            assert feed_url is not None
+            env.update({
+                "STL_STUDIO_UPDATE_SMOKE": "1",
+                "STL_STUDIO_UPDATE_FEED_URL": feed_url,
+            })
+            with app_log.open("ab") as log:
+                proc, first_lock = launch_and_probe(app_exe, env, appdata, log)
+            wait_for_updated_version(
+                appdata,
+                first_lock["pid"],
+                args.expected_version,
+                args.update_timeout,
+            )
+            proc.wait(timeout=30)
+            proc = None
+            with sqlite3.connect(db_path) as db:
+                marker = db.execute(
+                    "SELECT value FROM app_settings WHERE key = ?", ("ci_installer_smoke",)
+                ).fetchone()
+            if marker != (json.dumps("preserved"),):
+                raise RuntimeError(f"database marker did not survive update: {marker}")
+            kill_installed_app()
+            uninstaller = find_one(install_dir, "Uninstall*.exe")
+            subprocess.run([str(uninstaller), "/S"], check=True, env=env, timeout=120)
+            wait_for_absent(app_exe)
+            print(
+                "smoke_installer: OK - install, update, relaunch, version, persistence, and uninstall"
+            )
+            return 0
 
         with app_log.open("ab") as log:
             proc, _ = launch_and_probe(app_exe, env, appdata, log)
@@ -220,6 +349,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if proc is not None and proc.poll() is None:
             kill_tree(proc.pid)
+        if feed_context:
+            feed_context.__exit__(None, None, None)
         shutil.rmtree(root, ignore_errors=True)
 
 

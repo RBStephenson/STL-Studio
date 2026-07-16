@@ -29,6 +29,7 @@ import type { SidecarDeps, SidecarProcess } from "./sidecar";
 import { applyUserDataOverride } from "./userDataOverride";
 import { createUpdateController, readAutoUpdateEnabled } from "./updater";
 import type { UpdateController } from "./updater";
+import { readUpdateSmokeConfig } from "./updateSmoke";
 import { readWindowState, saveWindowState } from "./windowState";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
@@ -115,6 +116,11 @@ async function stopOwnedSidecar(): Promise<void> {
 
 async function initializeUpdater(win: BrowserWindow, backendUrl: string): Promise<void> {
   if (updateController) return;
+  const smoke = readUpdateSmokeConfig(process.env);
+  if (smoke) {
+    autoUpdater.setFeedURL({ provider: "generic", url: smoke.feedUrl });
+    console.log(`[updater-smoke] feed=${smoke.feedUrl}`);
+  }
   let enabled = false;
   try {
     enabled = await readAutoUpdateEnabled(backendUrl, async (url) => {
@@ -129,12 +135,16 @@ async function initializeUpdater(win: BrowserWindow, backendUrl: string): Promis
   updateController = createUpdateController({
     updater: autoUpdater,
     currentVersion: app.getVersion(),
-    enabled,
+    enabled: smoke ? true : enabled,
     supported: app.isPackaged && process.platform === "win32",
     stopApplication: stopOwnedSidecar,
     log: (message) => console.log(`[updater] ${message}`),
     ui: {
       async confirmDownload(version) {
+        if (smoke) {
+          console.log(`[updater-smoke] accepting download ${version}`);
+          return true;
+        }
         const { response } = await dialog.showMessageBox(win, {
           type: "info",
           buttons: ["Download", "Later"],
@@ -162,6 +172,10 @@ async function initializeUpdater(win: BrowserWindow, backendUrl: string): Promis
         win.setProgressBar(percent === null ? -1 : percent / 100);
       },
       async confirmRestart(version) {
+        if (smoke) {
+          console.log(`[updater-smoke] accepting restart ${version}`);
+          return true;
+        }
         const { response } = await dialog.showMessageBox(win, {
           type: "info",
           buttons: ["Restart and Install", "Later"],

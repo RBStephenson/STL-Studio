@@ -1,0 +1,79 @@
+name: Installed Update Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      bootstrap_tag:
+        description: "Published release to install before updating"
+        required: true
+        default: "v0.20.3"
+        type: string
+      candidate_version:
+        description: "Semver for the candidate; must be newer than bootstrap"
+        required: true
+        default: "0.20.4"
+        type: string
+      candidate_ref:
+        description: "Git ref to build as the update candidate"
+        required: true
+        default: "main"
+        type: string
+
+jobs:
+  candidate:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build.yml
+    with:
+      release: false
+      ref: ${{ inputs.candidate_ref }}
+      desktop_version: ${{ inputs.candidate_version }}
+      artifact_retention_days: 7
+
+  update-smoke:
+    needs: candidate
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout smoke harness
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate_ref }}
+
+      - name: Download candidate installer and update metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: stl-studio-setup-windows
+          path: candidate
+
+      - name: Download bootstrap installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          New-Item -ItemType Directory -Force bootstrap | Out-Null
+          gh release download '${{ inputs.bootstrap_tag }}' `
+            --pattern 'STL-Studio-Setup-*.exe' `
+            --dir bootstrap
+
+      - name: Run installed update and relaunch smoke
+        shell: pwsh
+        run: |
+          $bootstrap = Get-ChildItem bootstrap/STL-Studio-Setup-*.exe |
+            Select-Object -First 1
+          if (-not $bootstrap) { throw 'Bootstrap NSIS installer not found' }
+          python scripts/smoke_installer.py $bootstrap.FullName `
+            --candidate-dir candidate `
+            --expected-version '${{ inputs.candidate_version }}' `
+            --diagnostics-dir installed-update-smoke-diagnostics
+
+      - name: Upload update smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installed-update-smoke-diagnostics
+          path: installed-update-smoke-diagnostics
+          retention-days: 14
+          if-no-files-found: warn

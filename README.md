@@ -212,6 +212,11 @@ Electron app, verifies backend/database health and persistence, then uninstalls
 while confirming user data is retained. This is a packaging smoke gate, not a
 replacement for manual UI acceptance testing on a clean Windows machine.
 
+Release candidates also require the manually dispatched **Installed Update
+Smoke** workflow, which verifies the published-bootstrap → candidate updater
+path, installer replacement, relaunch version, and retained database state. See
+[`docs/release-checklist.md`](docs/release-checklist.md).
+
 Both frontend and backend are baked into their images — rebuild after any code change:
 ```
 docker compose build backend && docker compose up -d backend
