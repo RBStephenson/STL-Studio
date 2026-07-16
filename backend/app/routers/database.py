@@ -121,12 +121,16 @@ def _snapshot_db(reason: str) -> Path | None:
 
     src = sqlite3.connect(str(db_path))
     dst = sqlite3.connect(str(dest))
+    snapshot_succeeded = False
     try:
         with dst:
             src.backup(dst)
+        snapshot_succeeded = True
     finally:
         dst.close()
         src.close()
+        if not snapshot_succeeded:
+            _safe_unlink(dest)
 
     # Prune older snapshots for this reason, keeping the newest SNAPSHOT_KEEP.
     # Timestamped names sort chronologically, so lexical order is age order.
@@ -160,12 +164,16 @@ def backup_database(background_tasks: BackgroundTasks):
     # any data still sitting in the WAL — a plain file copy would not.
     src = sqlite3.connect(str(db_path))
     dst = sqlite3.connect(str(tmp))
+    backup_succeeded = False
     try:
         with dst:
             src.backup(dst)
+        backup_succeeded = True
     finally:
         dst.close()
         src.close()
+        if not backup_succeeded:
+            _safe_unlink(tmp)
 
     background_tasks.add_task(_safe_unlink, tmp)
     return FileResponse(

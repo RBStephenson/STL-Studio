@@ -20,6 +20,7 @@ model library — search, filter, tag, preview in 3D, and plan your prints.
 | [Feature Guide](features.md) | Every screen and what it does — Library, Triage, favorites, print queue, collections, image picker, Kit Builder, enrichment, bulk enrich, import folder, reorganize, Paint Shelf & PaintRack CSV, AI & Integrations, backup & restore |
 | [Scanning & Folder Structure](scanning-and-folders.md) | How the scanner finds your models, the folder layout it expects, and automatic tagging |
 | [Troubleshooting & FAQ](troubleshooting.md) | Models not showing up, wrong thumbnails, rescan vs. full scan, and other common questions |
+| [Adverse Failure Qualification](release/adverse-failure-qualification.md) | Repeatable release checks for interrupted updates, storage failures, locked databases, missing drives, and invalid settings |
 
 ## What it does, in one paragraph
 
