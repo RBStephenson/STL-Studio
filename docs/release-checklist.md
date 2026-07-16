@@ -24,3 +24,9 @@ published executable and updater implementation remain unchanged. Because
 v0.20.3 uses an assisted NSIS installer, the harness also drives only the
 candidate installer's allowlisted navigation buttons and records every matched
 window and button set in failure diagnostics.
+
+Update rehearsals use the disposable GitHub-hosted runner account's normal
+per-user data directories because the assisted installer relaunch does not
+preserve process-level AppData overrides. A clean-profile preflight prevents
+the rehearsal from using pre-existing STL Studio data; the runner is destroyed
+after the job.
