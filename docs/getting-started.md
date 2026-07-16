@@ -55,6 +55,11 @@ Before a major upgrade, use **Settings → Data Management → Download Backup**
 Downgrading after the database has been upgraded is not supported; restore the
 backup with the older version instead.
 
+A backup made by a newer STL Studio version is not guaranteed to work in an older
+version. For rollback, retain a backup or automatic `pre_upgrade_*.db` snapshot
+created by the older version, reinstall that older application version, and
+restore the matching backup. The application does not reverse schema migrations.
+
 When an existing database needs a schema upgrade, STL Studio first writes a
 consistent `pre_upgrade_<timestamp>.db` snapshot in the `backups` folder beside
 the catalog database. If migration fails, startup stops and the original database
