@@ -1,9 +1,9 @@
 # STL Studio
 
-[![Release](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/release.yml)
-[![Build Check](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/build-check.yml)
-[![Tests](https://github.com/RBStephenson/STL-Inventory/actions/workflows/tests.yml/badge.svg)](https://github.com/RBStephenson/STL-Inventory/actions/workflows/tests.yml)
-[![Wiki](https://img.shields.io/badge/docs-Wiki-2496ED?logo=github&logoColor=white)](https://github.com/RBStephenson/STL-Inventory/wiki)
+[![Release](https://github.com/RBStephenson/STL-Studio/actions/workflows/release.yml/badge.svg)](https://github.com/RBStephenson/STL-Studio/actions/workflows/release.yml)
+[![Build Check](https://github.com/RBStephenson/STL-Studio/actions/workflows/build-check.yml/badge.svg)](https://github.com/RBStephenson/STL-Studio/actions/workflows/build-check.yml)
+[![Tests](https://github.com/RBStephenson/STL-Studio/actions/workflows/tests.yml/badge.svg)](https://github.com/RBStephenson/STL-Studio/actions/workflows/tests.yml)
+[![Wiki](https://img.shields.io/badge/docs-Wiki-2496ED?logo=github&logoColor=white)](https://github.com/RBStephenson/STL-Studio/wiki)
 &nbsp;
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -14,14 +14,14 @@
 
 Local web app for cataloguing, browsing, and managing an STL file library.
 
-📖 **User documentation:** the **[STL Studio Wiki](https://github.com/RBStephenson/STL-Inventory/wiki)** is the canonical user guide.
+📖 **User documentation:** the **[STL Studio Wiki](https://github.com/RBStephenson/STL-Studio/wiki)** is the canonical user guide.
 🗺️ **What's coming next:** [ROADMAP.md](ROADMAP.md)
 
 
-[Getting Started](https://github.com/RBStephenson/STL-Inventory/wiki/Getting-Started) ·
-[Feature Guide](https://github.com/RBStephenson/STL-Inventory/wiki/Feature-Guide) ·
-[Scanning & Folder Structure](https://github.com/RBStephenson/STL-Inventory/wiki/Scanning-and-Folder-Structure) ·
-[Troubleshooting](https://github.com/RBStephenson/STL-Inventory/wiki/Troubleshooting-and-FAQ)
+[Getting Started](https://github.com/RBStephenson/STL-Studio/wiki/Getting-Started) ·
+[Feature Guide](https://github.com/RBStephenson/STL-Studio/wiki/Feature-Guide) ·
+[Scanning & Folder Structure](https://github.com/RBStephenson/STL-Studio/wiki/Scanning-and-Folder-Structure) ·
+[Troubleshooting](https://github.com/RBStephenson/STL-Studio/wiki/Troubleshooting-and-FAQ)
 
 > The wiki is generated from the in-repo [`docs/`](docs/README.md) folder (the single source of truth, which also backs the in-app **Help** page).
 
@@ -29,7 +29,7 @@ Local web app for cataloguing, browsing, and managing an STL file library.
 
 ### Standalone (recommended for most users — no Docker needed)
 
-1. Go to the [Releases page](https://github.com/RBStephenson/STL-Inventory/releases) and download the file for your OS:
+1. Go to the [Releases page](https://github.com/RBStephenson/STL-Studio/releases) and download the file for your OS:
    - **Windows**: `stl-studio-windows.exe`
    - **Linux**: `stl-studio-linux`
 
