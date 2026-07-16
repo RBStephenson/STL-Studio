@@ -270,6 +270,22 @@ describe("ModelCard inline rename (#191)", () => {
     expect(screen.getByText("Akuma")).toBeInTheDocument();
   });
 
+  it("an explicit group label always wins over the rep model's own title (#1062)", () => {
+    // Reproduces the reported bug: 4 models merged into a manual group
+    // labeled "Wooden Stairs" — the representative model happens to be
+    // titled "Platforms" (its own, unrelated field). The group's real name
+    // must display, not the rep's title.
+    renderCard({
+      variant_count: 4,
+      character: "Platforms",
+      title: "Platforms",
+      variant_group_id: 42,
+      variant_group: { id: 42, creator_id: 1, label: "Wooden Stairs", rep_model_id: 7, source: "manual", reason: "manual", confidence: 1 },
+    });
+    expect(screen.getByText("Wooden Stairs")).toBeInTheDocument();
+    expect(screen.queryByText("Platforms")).not.toBeInTheDocument();
+  });
+
   it("opens the rename editor from the quick-assign popover", () => {
     renderCard();
     fireEvent.click(screen.getByLabelText("Quick assign tags and collections"));

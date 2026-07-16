@@ -299,8 +299,17 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
     ? withStorageRecoverySignal(baseCardImageUrl, storageRecoverySignal)
     : baseCardImageUrl;
 
-  const displayName = isGroup && localGroupLabel
-    ? (localTitle || localGroupLabel)
+  // An explicit VariantGroup.label (set via rename or a manual merge) is the
+  // group's real identity and must always win — falling back to the rep
+  // model's own `title` field made a rename via renameGroup() appear to
+  // silently fail, since that field belongs to whichever model happens to be
+  // the rep, not the group (#1062). But when there's no explicit label yet
+  // (localGroupLabel is only the raw scanner-derived `character` slug, e.g.
+  // "1.Firestar-Regular-stls"), the rep's enriched title is still a better
+  // display name than the slug — so that preference only applies there.
+  const hasExplicitGroupLabel = Boolean(model.variant_group?.label);
+  const displayName = isGroup
+    ? (hasExplicitGroupLabel ? localGroupLabel : (localTitle || localGroupLabel))
     : (localTitle || model.name);
   const removedAuto = new Set(model.removed_auto_tags ?? []);
   const visibleAutoTags = (model.auto_tags ?? []).filter((t) => !removedAuto.has(t));
