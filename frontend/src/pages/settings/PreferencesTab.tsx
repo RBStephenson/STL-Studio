@@ -1,4 +1,4 @@
-import { FolderOpen, Images, RotateCw, Tag, LayoutPanelTop, ScrollText, Info } from "lucide-react";
+import { Download, FolderOpen, Images, RotateCw, Tag, LayoutPanelTop, ScrollText, Info } from "lucide-react";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import { LogLevel } from "../../api/client";
 import FlashBanner from "./FlashBanner";
@@ -243,6 +243,28 @@ export default function PreferencesTab() {
           full AI request/response detail; leave at <span className="text-text-secondary">INFO</span> for
           normal operation.
         </p>
+      </section>
+
+      {/* Desktop updates */}
+      <section className="mt-8 pt-6 border-t border-border-subtle">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <Download size={14} /> Desktop Updates
+        </h2>
+        <label className="flex items-start gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={settings.auto_update_enabled}
+            onChange={() => update({ auto_update_enabled: !settings.auto_update_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-text-primary-alt2">Check for desktop updates automatically</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              The installed Windows app checks GitHub Releases after startup. Downloads and restarts
+              always require your confirmation. This setting takes effect the next time STL Studio starts.
+            </p>
+          </div>
+        </label>
       </section>
 
       {/* About & diagnostics */}

@@ -135,6 +135,9 @@ jobs:
         # signing identity doesn't fail the pack.
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        # `publish never` still generates latest.yml + blockmap from the GitHub
+        # provider config; the workflow uploads all three assets to the same
+        # draft release so users never see mismatched update metadata.
         run: npx --no-install electron-builder --win --publish never
 
       # Exercise the artifact users actually run, not only the loose PyInstaller
@@ -174,7 +177,10 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
-          files: desktop/release/*.exe
+          files: |
+            desktop/release/*.exe
+            desktop/release/*.blockmap
+            desktop/release/latest.yml
           draft: ${{ inputs.release_draft }}
           prerelease: ${{ inputs.release_prerelease }}
           overwrite_files: true
@@ -194,7 +200,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: stl-studio-setup-${{ matrix.label }}
-          path: desktop/release/*.exe
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.blockmap
+            desktop/release/latest.yml
           retention-days: ${{ inputs.artifact_retention_days }}
 
       - name: Upload build artifact (Linux binary)

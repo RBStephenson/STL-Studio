@@ -1,7 +1,7 @@
 # Plan — #528: replace pywebview desktop shell with Electron
 
 **Type:** packaging / desktop-shell refactor. **Multi-PR — do not land in one shot.**
-**v1 scope (decided 2026-07-02):** Windows only · auto-update deferred · unsigned · PyInstaller sidecar.
+**v1 scope:** Windows only · automatic updates required before 1.0 · SignPath signing pending · PyInstaller sidecar.
 
 ---
 
@@ -18,7 +18,7 @@ with `console=True`. Problems #528 calls out:
   no update path.
 - pywebview's WebView2 backend still depends on pythonnet / clr-loader and the OS WebView2 runtime.
 
-Electron gives a proper Chromium shell, a native installer (NSIS), a real update channel (later),
+Electron gives a proper Chromium shell, a native installer (NSIS), a real update channel,
 and no stray console — while the Python backend stays untouched behind `create_app()`.
 
 ## Architecture
@@ -117,10 +117,11 @@ instructions, close #528. Also fixed the stale **macOS** download row in getting
 `stl-library-macos`, but the build matrix only ships windows + linux, so no such artifact exists;
 macOS now points at Docker / source-run.
 
-## Deferred (explicit non-goals for v1)
+## Follow-up work
 
-- **Auto-update** (electron-updater / GitHub Releases feed) — follow-up ticket.
-- **Code signing** — ships unsigned; users will see a SmartScreen warning. Follow-up.
+- **Auto-update** (electron-updater / GitHub Releases feed) — required pre-1.0
+  work tracked in #1058.
+- **Code signing** — SignPath application and integration tracked in #1056.
 - **Linux/macOS Electron packaging** — Linux keeps the current loose-binary + browser fallback;
   macOS notarization stays in backlog (#17).
 

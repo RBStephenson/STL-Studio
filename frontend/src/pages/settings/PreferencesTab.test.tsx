@@ -7,10 +7,15 @@ import { mkSettings } from "../../test/settings";
 const updateMock = vi.fn().mockResolvedValue(undefined);
 let enabled = false;
 let recoveryEnabled = false;
+let autoUpdateEnabled = true;
 
 vi.mock("../../context/AppSettingsContext", () => ({
   useAppSettings: () => ({
-    settings: mkSettings({ system_info_enabled: enabled, storage_recovery_enabled: recoveryEnabled }),
+    settings: mkSettings({
+      system_info_enabled: enabled,
+      storage_recovery_enabled: recoveryEnabled,
+      auto_update_enabled: autoUpdateEnabled,
+    }),
     update: updateMock,
   }),
 }));
@@ -19,7 +24,14 @@ describe("PreferencesTab system info setting", () => {
   beforeEach(() => {
     enabled = false;
     recoveryEnabled = false;
+    autoUpdateEnabled = true;
     vi.clearAllMocks();
+  });
+
+  it("persists the default-on automatic update flag when disabled", async () => {
+    render(<PreferencesTab />);
+    await userEvent.click(screen.getByRole("checkbox", { name: /check for desktop updates automatically/i }));
+    expect(updateMock).toHaveBeenCalledWith({ auto_update_enabled: false });
   });
 
   it("persists the default-off storage recovery flag when enabled", async () => {

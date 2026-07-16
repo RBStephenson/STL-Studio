@@ -1,8 +1,9 @@
 # electron-builder configuration — Phase 3 (STUDIO-73).
 #
 # Produces a Windows NSIS installer that bundles the Electron shell plus the
-# PyInstaller backend as an extraResources sidecar. v1 scope: Windows only,
-# unsigned, auto-update deferred (see docs/plans/528-pywebview-to-electron.md).
+# PyInstaller backend as an extraResources sidecar. v1 scope is Windows only;
+# GitHub Releases supplies the electron-updater feed and SignPath will provide
+# the production signing identity before 1.0.
 #
 # The backend exe must be built first (pyinstaller packaging/stl-studio.spec
 # --distpath dist-standalone) — CI chains this in Phase 4 (STUDIO-74).
@@ -13,6 +14,11 @@ copyright: Copyright © STL Studio
 directories:
   output: release
   buildResources: resources
+
+publish:
+  provider: github
+  owner: RBStephenson
+  repo: STL-Studio
 
 # App code shipped inside the asar archive.
 files:

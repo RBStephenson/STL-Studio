@@ -38,8 +38,15 @@ DEFAULTS = {
     "hierarchy_variant_grouping_enabled": False,
     "system_info_enabled": False,
     "storage_recovery_enabled": False,
+    "auto_update_enabled": True,
     "collections_uniform_size": True,
 }
+
+
+def test_auto_update_enabled_defaults_on_and_round_trips(client):
+    assert client.get("/settings").json()["auto_update_enabled"] is True
+    assert client.patch("/settings", json={"auto_update_enabled": False}).status_code == 200
+    assert client.get("/settings").json()["auto_update_enabled"] is False
 
 
 def test_reorganize_enabled_round_trips(client):
