@@ -50,11 +50,15 @@ def create_upgrade_snapshot(engine: Engine, head_revision: str) -> Path | None:
             sequence += 1
 
         destination = sqlite3.connect(str(snapshot))
+        backup_succeeded = False
         try:
             with destination:
                 source.backup(destination)
+            backup_succeeded = True
         finally:
             destination.close()
+            if not backup_succeeded:
+                snapshot.unlink(missing_ok=True)
 
         snapshots = sorted(backups.glob("pre_upgrade_*.db"))
         for old_snapshot in snapshots[:-UPGRADE_SNAPSHOT_KEEP]:
