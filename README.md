@@ -261,6 +261,22 @@ docker run --rm --workdir /app \
 Every PR to `main` (and every push to `main`) also runs the suite via the **Tests**
 workflow, so regressions are caught alongside the binary **Build Check**.
 
+## Coverage gates
+
+CI enforces regression floors against the current tested baseline: 88% backend
+statement coverage; 62% statements, 58% branches, 54% functions, and 65% lines
+for the frontend; and 48% statements, 83% branches, 86% functions, and 48% lines
+for the desktop process. Coverage reports are uploaded as workflow artifacts for
+14 days so changes can be investigated without weakening the gates.
+
+Run the same coverage checks locally with:
+
+```bash
+cd backend && pytest --cov=app
+npm --prefix frontend run test:coverage
+npm --prefix desktop run test:coverage
+```
+
 ## Releasing
 
 Standalone executables (Windows/macOS/Linux) are built by GitHub Actions.
