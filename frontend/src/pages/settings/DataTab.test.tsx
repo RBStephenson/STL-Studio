@@ -84,4 +84,20 @@ describe("DataTab database health", () => {
     expect(api.database.repair).toHaveBeenCalled();
     expect(await screen.findByText(/database repaired/i)).toBeInTheDocument();
   });
+
+  it("shows progress while all data is being deleted", async () => {
+    const { api } = await import("../../api/client");
+    const reset = deferred<{ ok: boolean }>();
+    vi.mocked(api.database.reset).mockReturnValue(reset.promise);
+
+    render(<DataTab />);
+
+    await userEvent.click(screen.getByRole("button", { name: /delete all data/i }));
+    await userEvent.type(screen.getByPlaceholderText("ACKNOWLEDGED"), "ACKNOWLEDGED");
+    await userEvent.click(screen.getByRole("button", { name: /delete everything/i }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(/creating a recovery snapshot/i);
+    expect(screen.getByRole("button", { name: /deleting/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeDisabled();
+  });
 });

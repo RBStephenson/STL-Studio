@@ -7,6 +7,7 @@ recreates an empty schema. Restore and reset run under the library write lock an
 are refused (409) while a scan, reorganize apply, or undo is in progress, to avoid
 corrupting an in-flight write or leaving on-disk files and DB rows diverged.
 """
+
 import os
 import logging
 import shutil
@@ -52,7 +53,9 @@ def _db_path() -> Path:
 
 def _require_idle():
     if scanner.get_status()["running"]:
-        raise HTTPException(409, "A scan is currently running — wait for it to finish or cancel it first")
+        raise HTTPException(
+            409, "A scan is currently running — wait for it to finish or cancel it first"
+        )
 
 
 def _integrity_check(path: Path) -> str:
@@ -256,9 +259,7 @@ async def restore_database(file: UploadFile = File(...)):
             if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("integrity check failed")
             tables = {
-                r[0] for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
         finally:
             conn.close()
@@ -289,6 +290,7 @@ async def restore_database(file: UploadFile = File(...)):
             # Bring a possibly-older backup's schema up to date.
             Base.metadata.create_all(bind=engine)
             from app.main import _migrate_schema
+
             _migrate_schema()
     except LibraryBusy:
         _safe_unlink(tmp)
@@ -306,13 +308,42 @@ def reset_database():
         with library_write("database_reset"):
             # Snapshot before wiping so a mis-clicked reset is recoverable (#222).
             snapshot = _snapshot_db("reset")
-            Base.metadata.drop_all(bind=engine)
-            Base.metadata.create_all(bind=engine)
-            from app.main import _migrate_schema
-            _migrate_schema()
+            _replace_with_empty_database(snapshot)
     except LibraryBusy:
         raise HTTPException(409, "Library is busy — a scan, apply, or undo is in progress")
     return {"ok": True, "snapshot": str(snapshot) if snapshot else None}
+
+
+def _replace_with_empty_database(snapshot: Path | None) -> None:
+    """Replace the live SQLite file instead of deleting every row in one WAL.
+
+    ``drop_all`` scales with the amount of indexed data and can generate a WAL
+    as large as the database. Replacing the file makes the destructive phase
+    constant-time after the safety snapshot has completed.
+    """
+    db_path = _db_path()
+    engine.dispose()
+    _unlink_live_database(db_path)
+
+    try:
+        Base.metadata.create_all(bind=engine)
+        from app.main import _migrate_schema
+
+        _migrate_schema()
+    except Exception:
+        # Do not strand the app without a usable DB if initialization fails.
+        engine.dispose()
+        _unlink_live_database(db_path)
+        if snapshot is not None:
+            shutil.copy2(snapshot, db_path)
+        raise
+
+
+def _unlink_live_database(db_path: Path) -> None:
+    """Remove a SQLite database and its sidecars, failing on filesystem errors."""
+    for suffix in ("-wal", "-shm"):
+        Path(str(db_path) + suffix).unlink(missing_ok=True)
+    db_path.unlink(missing_ok=True)
 
 
 def _safe_unlink(path: Path):

@@ -1024,8 +1024,10 @@ never modified.**
   your current library with it. The file is validated first (it must be a real
   STL Studio backup), and an older backup's schema is brought up to date
   automatically.
-- **Delete All Data** — wipes the entire index back to empty. You'd then run a
-  full scan to rebuild it.
+- **Delete All Data** — creates a recovery snapshot, then replaces the index
+  with a fresh empty database without modifying your STL files. The dialog stays
+  open with a progress message while the snapshot is prepared. You'd then run a
+  full scan to rebuild the index.
 
 Repair, Restore, and Delete require a confirmation phrase because they can modify
 or replace the index. Download a backup before using them. (They cannot run while
