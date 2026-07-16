@@ -150,10 +150,13 @@ def test_automate_update_dialogs_clicks_expected_buttons_in_order():
             2: "Download",
             3: "STL Studio update ready",
             4: "Restart and Install",
+            5: "STL Studio Setup",
+            6: "&Install",
         }
 
         def __init__(self):
             self.messages = []
+            self.stop_event = None
 
         def GetWindowTextLengthW(self, hwnd):
             return len(self.labels[hwnd])
@@ -163,16 +166,18 @@ def test_automate_update_dialogs_clicks_expected_buttons_in_order():
 
         @staticmethod
         def EnumWindows(callback, _lparam):
-            for hwnd in (1, 3):
+            for hwnd in (1, 3, 5):
                 if not callback(hwnd, 0):
                     break
 
         @staticmethod
         def EnumChildWindows(hwnd, callback, _lparam):
-            callback({1: 2, 3: 4}[hwnd], 0)
+            callback({1: 2, 3: 4, 5: 6}[hwnd], 0)
 
         def PostMessageW(self, hwnd, message, _wparam, _lparam):
             self.messages.append((hwnd, message))
+            if hwnd == 6 and self.stop_event is not None:
+                self.stop_event.set()
 
     user32 = FakeUser32()
     clicked = []
@@ -186,6 +191,27 @@ def test_automate_update_dialogs_clicks_expected_buttons_in_order():
 
     assert clicked == list(smoke_installer.UPDATE_DIALOG_BUTTONS)
     assert user32.messages == [(2, 0x00F5), (4, 0x00F5)]
+
+    stop_event = threading.Event()
+    user32 = FakeUser32()
+    user32.stop_event = stop_event
+    clicked = []
+    observed = []
+    smoke_installer.automate_update_dialogs(
+        stop_event,
+        clicked,
+        timeout_s=1,
+        installer_image_name="STL-Studio-Setup-1.2.3.exe",
+        observed=observed,
+        user32=user32,
+        ctypes_module=FakeCtypes,
+        installer_pids=lambda: {99},
+        window_pid=lambda hwnd: 99 if hwnd == 5 else 0,
+    )
+
+    assert clicked == list(smoke_installer.UPDATE_DIALOG_BUTTONS)
+    assert user32.messages == [(2, 0x00F5), (4, 0x00F5), (6, 0x00F5)]
+    assert "STL Studio Setup: ['Install']" in observed
 
 
 def test_wait_for_updated_version_accepts_new_sidecar_version(tmp_path, monkeypatch):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from contextlib import contextmanager
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +26,23 @@ UPDATE_DIALOG_BUTTONS = {
     "STL Studio update available": "Download",
     "STL Studio update ready": "Restart and Install",
 }
+NSIS_BUTTON_PRIORITY = ("Install", "Next >", "Finish", "Close")
+
+
+def find_process_ids(image_name: str) -> set[int]:
+    result = subprocess.run(
+        ["tasklist", "/FI", f"IMAGENAME eq {image_name}", "/FO", "CSV", "/NH"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return set()
+    return {
+        int(row[1])
+        for row in csv.reader(result.stdout.splitlines())
+        if len(row) >= 2 and row[0].casefold() == image_name.casefold()
+    }
 
 
 def write_update_feed_config(app_exe: Path, feed_url: str) -> Path:
@@ -40,10 +58,14 @@ def automate_update_dialogs(
     stop_event: threading.Event,
     clicked: list[str],
     timeout_s: float,
+    installer_image_name: str | None = None,
+    observed: list[str] | None = None,
     user32=None,
     ctypes_module=None,
+    installer_pids=None,
+    window_pid=None,
 ) -> None:
-    """Click the two native v0.20.3 updater confirmations by exact text."""
+    """Drive v0.20.3 confirmations and its owned assisted NSIS update UI."""
     if ctypes_module is None:
         import ctypes as ctypes_module
     if user32 is None:
@@ -53,6 +75,17 @@ def automate_update_dialogs(
         ctypes_module.c_void_p,
         ctypes_module.c_void_p,
     )
+    if installer_pids is None:
+        def installer_pids():
+            return find_process_ids(installer_image_name or "")
+    if window_pid is None:
+        def window_pid(hwnd):
+            pid = ctypes_module.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes_module.byref(pid))
+            return pid.value
+    if observed is None:
+        observed = []
+    clicked_controls: set[tuple[int, str]] = set()
     deadline = time.monotonic() + timeout_s
 
     while not stop_event.is_set() and time.monotonic() < deadline:
@@ -60,8 +93,9 @@ def automate_update_dialogs(
             (title for title in UPDATE_DIALOG_BUTTONS if title not in clicked),
             None,
         )
-        if expected_title is None:
+        if expected_title is None and installer_image_name is None:
             return
+        owned_installer_pids = installer_pids() if expected_title is None else set()
 
         def inspect_window(hwnd, _lparam):
             title_length = user32.GetWindowTextLengthW(hwnd)
@@ -69,23 +103,45 @@ def automate_update_dialogs(
                 return True
             title_buffer = ctypes_module.create_unicode_buffer(title_length + 1)
             user32.GetWindowTextW(hwnd, title_buffer, len(title_buffer))
-            if title_buffer.value != expected_title:
+            title = title_buffer.value
+            if expected_title is not None and title != expected_title:
+                return True
+            if expected_title is None and (
+                not title.startswith("STL Studio") or window_pid(hwnd) not in owned_installer_pids
+            ):
                 return True
 
-            expected_button = UPDATE_DIALOG_BUTTONS[expected_title]
+            expected_button = (
+                UPDATE_DIALOG_BUTTONS[expected_title]
+                if expected_title is not None
+                else None
+            )
+            available_buttons: dict[str, int] = {}
 
             def inspect_child(child_hwnd, _child_lparam):
                 text_length = user32.GetWindowTextLengthW(child_hwnd)
                 text_buffer = ctypes_module.create_unicode_buffer(text_length + 1)
                 user32.GetWindowTextW(child_hwnd, text_buffer, len(text_buffer))
-                if text_buffer.value == expected_button:
+                button_text = text_buffer.value.replace("&", "").strip()
+                available_buttons[button_text] = child_hwnd
+                if expected_button is not None and button_text == expected_button:
                     user32.PostMessageW(child_hwnd, 0x00F5, 0, 0)  # BM_CLICK
                     clicked.append(expected_title)
                     return False
                 return True
 
             user32.EnumChildWindows(hwnd, enum_windows_proc(inspect_child), 0)
-            return expected_title not in clicked
+            snapshot = f"{title}: {sorted(available_buttons)}"
+            if snapshot not in observed:
+                observed.append(snapshot)
+            if expected_button is None:
+                for button in NSIS_BUTTON_PRIORITY:
+                    control = (int(hwnd), button)
+                    if button in available_buttons and control not in clicked_controls:
+                        user32.PostMessageW(available_buttons[button], 0x00F5, 0, 0)
+                        clicked_controls.add(control)
+                        break
+            return expected_title is None or expected_title not in clicked
 
         user32.EnumWindows(enum_windows_proc(inspect_window), 0)
         stop_event.wait(0.25)
@@ -99,6 +155,7 @@ def write_diagnostics(
     destination: Path,
     app_log: Path,
     search_roots: list[Path],
+    observed_windows: list[str] | None = None,
 ) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     if app_log.is_file():
@@ -127,6 +184,7 @@ def write_diagnostics(
     report = {
         "sidecar_locks": lock_paths,
         "relevant_processes": relevant_processes,
+        "observed_windows": observed_windows or [],
     }
     (destination / "report.json").write_text(
         json.dumps(report, indent=2), encoding="utf-8"
@@ -335,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
     proc: subprocess.Popen | None = None
     feed_context = serve_update_feed(candidate_dir) if candidate_dir else None
     feed_url: str | None = None
+    observed_windows: list[str] = []
     try:
         if feed_context:
             feed_url = feed_context.__enter__()
@@ -362,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if candidate_dir:
             assert feed_url is not None
+            candidate_installer = find_one(candidate_dir, "STL-Studio-Setup-*.exe")
             write_update_feed_config(app_exe, feed_url)
             env.update({
                 "STL_STUDIO_UPDATE_SMOKE": "1",
@@ -371,7 +431,13 @@ def main(argv: list[str] | None = None) -> int:
             clicked_dialogs: list[str] = []
             dialog_thread = threading.Thread(
                 target=automate_update_dialogs,
-                args=(dialog_stop, clicked_dialogs, args.update_timeout),
+                args=(
+                    dialog_stop,
+                    clicked_dialogs,
+                    args.update_timeout,
+                    candidate_installer.name,
+                    observed_windows,
+                ),
                 daemon=True,
             )
             dialog_thread.start()
@@ -433,6 +499,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.diagnostics_dir.resolve(),
                 app_log,
                 [appdata, localappdata, host_appdata, host_localappdata],
+                observed_windows,
             )
         raise
     finally:
