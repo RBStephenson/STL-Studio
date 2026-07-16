@@ -15,5 +15,13 @@ ignore = [
     "E741",  # ambiguous variable names (l, I, O)
 ]
 
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+fail_under = 88
+show_missing = true
+skip_covered = true
+
 # `ruff format` is intentionally NOT enforced in CI yet: adopting it means a
 # ~138-file reformat commit, deferred until the open refactor branches land.

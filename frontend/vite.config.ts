@@ -14,6 +14,19 @@ export default defineConfig({
     // findBy waits time out (#596) — a load artifact, not a real failure. Retry
     // re-runs a failed test (a genuinely broken one still fails all attempts).
     retry: 2,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary", "html"],
+      reportsDirectory: "coverage",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/*.test.{ts,tsx}", "src/test-setup.ts"],
+      thresholds: {
+        statements: 62,
+        branches: 58,
+        functions: 54,
+        lines: 65,
+      },
+    },
   },
   server: {
     host: "0.0.0.0",

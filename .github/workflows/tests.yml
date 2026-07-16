@@ -92,7 +92,21 @@ jobs:
 
       - name: Run pytest
         working-directory: backend
-        run: pytest -v
+        run: |
+          mkdir -p coverage
+          pytest -v --cov=app \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=json:coverage/coverage.json \
+            --cov-report=html:coverage/html
+
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: backend/coverage
+          retention-days: 14
+          if-no-files-found: warn
 
       # scripts/smoke_boot.py's poll/timeout/crash logic (STUDIO-102) — repo-root
       # tooling, not part of the backend package, run separately from the above.
@@ -121,7 +135,16 @@ jobs:
 
       - name: Run Vitest
         working-directory: frontend
-        run: npm test
+        run: npm run test:coverage
+
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+          retention-days: 14
+          if-no-files-found: warn
 
   desktop-vitest:
     # Logic-only tests (sidecar lifecycle, window state, secret key, menu
@@ -154,4 +177,13 @@ jobs:
 
       - name: Run Vitest
         working-directory: desktop
-        run: npm test
+        run: npm run test:coverage
+
+      - name: Upload desktop coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-coverage
+          path: desktop/coverage
+          retention-days: 14
+          if-no-files-found: warn
