@@ -584,6 +584,8 @@ class AppSettingsRead(BaseModel):
     hierarchy_variant_grouping_enabled: bool = False
     # Read-only About & System Info diagnostics. Default off and server-gated.
     system_info_enabled: bool = False
+    # Bounded sanitized log files and self-service support downloads.
+    persistent_diagnostics_enabled: bool = False
     # Aggregated external-storage recovery notifications and bounded image retry.
     storage_recovery_enabled: bool = False
     # Electron desktop startup checks GitHub Releases when enabled. Manual
@@ -635,6 +637,7 @@ class AppSettingsUpdate(BaseModel):
     reorganize_ai_suggestions_enabled: Optional[bool] = None
     hierarchy_variant_grouping_enabled: Optional[bool] = None
     system_info_enabled: Optional[bool] = None
+    persistent_diagnostics_enabled: Optional[bool] = None
     storage_recovery_enabled: Optional[bool] = None
     auto_update_enabled: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None

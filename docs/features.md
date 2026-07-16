@@ -955,6 +955,11 @@ hostnames, database locations, API configuration, credentials, or secrets. If a
 library is temporarily unavailable, the panel says so explicitly and confirms
 that the catalog remains retained.
 
+When **Persistent support logs** is enabled under **Settings → Preferences**, this
+panel also provides **Download logs** in every deployment. The download is a bounded
+ZIP of sanitized backend logs; Electron additionally includes desktop logs and shows
+**Open logs folder**. Logs rotate at 2 MiB with three retained backups per process.
+
 Hosted web builds report `development` unless the optional
 `STL_STUDIO_VERSION` environment variable is set. Release Electron builds use
 their stamped installer version automatically.

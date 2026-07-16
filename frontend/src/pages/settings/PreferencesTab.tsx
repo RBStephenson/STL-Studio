@@ -35,6 +35,16 @@ export default function PreferencesTab() {
     }
   };
 
+  const togglePersistentDiagnostics = async () => {
+    const enabled = !settings.persistent_diagnostics_enabled;
+    try {
+      await update({ persistent_diagnostics_enabled: enabled });
+      await window.stlStudio?.setPersistentDiagnosticsEnabled(enabled);
+    } catch (e) {
+      flash(errMsg(e) || "Could not update persistent diagnostics", "err");
+    }
+  };
+
   return (
     <div>
       <FlashBanner success={success} error={error} />
@@ -284,6 +294,21 @@ export default function PreferencesTab() {
             <p className="text-xs text-text-secondary-alt mt-0.5">
               Adds a sanitized health summary to Help → About &amp; support. It never
               includes library paths, hostnames, database locations, or integration settings.
+            </p>
+          </div>
+        </label>
+        <label className="flex items-start gap-3 cursor-pointer select-none mt-4">
+          <input
+            type="checkbox"
+            checked={settings.persistent_diagnostics_enabled}
+            onChange={() => void togglePersistentDiagnostics()}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-text-primary-alt2">Persistent support logs</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              Keeps a small rotating set of sanitized logs and adds a download action under
+              Help → About &amp; support. Electron can also open the logs folder directly.
             </p>
           </div>
         </label>

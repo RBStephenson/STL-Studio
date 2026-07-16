@@ -13,6 +13,9 @@ Kept in its own module so both ``app.main`` (startup) and ``app.routers.settings
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+import re
 import sys
 
 # Standard levels, ordered least→most severe. This is the whitelist the API
@@ -20,6 +23,64 @@ import sys
 LOG_LEVELS: tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 _APP_LOGGER = "app"
+_FILE_HANDLER_MARKER = "_stl_studio_file"
+LOG_FILE_NAME = "backend.log"
+LOG_MAX_BYTES = 2 * 1024 * 1024
+LOG_BACKUP_COUNT = 3
+
+_BEARER = re.compile(r"(?i)(bearer\s+)([^\s,;&\"']+)")
+_NAMED_SECRET = re.compile(
+    r"(?i)([\"']?(?:authorization|api[_-]?key|token|password|secret)[\"']?\s*[:=]\s*[\"']?)([^\"'\s,;&}]+)"
+)
+_WINDOWS_PATH = re.compile(r"[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s]*")
+_PRIVATE_UNIX_PATH = re.compile(r"/(?:data|mnt|media|home|Users)/[^\s,;]+")
+
+
+def sanitize_log_text(value: object) -> str:
+    """Remove common credentials and private filesystem locations."""
+    text = str(value)
+    text = _BEARER.sub(lambda match: f"{match.group(1)}<redacted>", text)
+    text = _NAMED_SECRET.sub(lambda match: f"{match.group(1)}<redacted>", text)
+    text = _WINDOWS_PATH.sub("<local-path>", text)
+    return _PRIVATE_UNIX_PATH.sub("<local-path>", text)
+
+
+class SanitizingFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return sanitize_log_text(super().format(record))
+
+
+def _file_handlers(logger: logging.Logger) -> list[logging.Handler]:
+    return [handler for handler in logger.handlers if getattr(handler, _FILE_HANDLER_MARKER, False)]
+
+
+def configure_persistent_logging(enabled: bool, log_dir: str) -> bool:
+    """Enable or disable the bounded sanitized backend logfile live."""
+    logger = logging.getLogger(_APP_LOGGER)
+    existing = _file_handlers(logger)
+    if not enabled:
+        for handler in existing:
+            logger.removeHandler(handler)
+            handler.close()
+        return False
+    if existing:
+        return True
+    try:
+        directory = Path(log_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            directory / LOG_FILE_NAME,
+            maxBytes=LOG_MAX_BYTES,
+            backupCount=LOG_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        setattr(handler, _FILE_HANDLER_MARKER, True)
+        handler.setFormatter(SanitizingFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logger.addHandler(handler)
+        return True
+    except OSError:
+        logger.exception("Could not initialize persistent diagnostics")
+        return False
 
 
 def _has_handler(logger: logging.Logger) -> bool:

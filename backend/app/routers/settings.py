@@ -6,11 +6,14 @@ stored rows on it, and the PATCH schema (AppSettingsUpdate) rejects anything
 outside it, so unknown keys can never be written.
 """
 import logging
+import io
 import re
+import zipfile
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -76,6 +79,12 @@ def update_settings(body: AppSettingsUpdate, db: Session = Depends(get_db)):
     if "log_level" in updates:
         from app.logging_config import apply_log_level
         apply_log_level(updates["log_level"])
+    if "persistent_diagnostics_enabled" in updates:
+        from app.logging_config import configure_persistent_logging
+        configure_persistent_logging(
+            updates["persistent_diagnostics_enabled"],
+            settings.stl_studio_log_dir,
+        )
     return _merged(db)
 
 
@@ -118,6 +127,38 @@ def get_system_info(db: Session = Depends(get_db)):
         libraries_enabled=len(enabled_roots),
         libraries_available=available,
         last_scan=max(scans) if scans else None,
+    )
+
+
+@router.get("/logs")
+def download_logs(db: Session = Depends(get_db)):
+    """Download the bounded sanitized diagnostic files from this deployment."""
+    enabled = db.get(AppSetting, "persistent_diagnostics_enabled")
+    if enabled is None or enabled.value is not True:
+        raise HTTPException(status_code=404, detail="Persistent diagnostics are disabled")
+
+    from app.logging_config import LOG_MAX_BYTES, sanitize_log_text
+
+    log_dir = Path(settings.stl_studio_log_dir)
+    candidates = sorted(
+        path for path in log_dir.glob("*.log*")
+        if path.is_file() and not path.is_symlink() and path.parent == log_dir
+    )[:10]
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for path in candidates:
+            try:
+                with path.open("rb") as source:
+                    raw = source.read(LOG_MAX_BYTES + 1)
+                safe_text = sanitize_log_text(raw[:LOG_MAX_BYTES].decode("utf-8", errors="replace"))
+                bundle.writestr(path.name, safe_text)
+            except OSError:
+                _log.warning("Could not add diagnostic log %s", path.name)
+    archive.seek(0)
+    return StreamingResponse(
+        archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="stl-studio-logs.zip"'},
     )
 
 

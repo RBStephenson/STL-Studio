@@ -12,8 +12,8 @@
  */
 import { join } from "node:path";
 
-import { Menu, app, BrowserWindow, dialog, screen } from "electron";
-import type { WebContents } from "electron";
+import { Menu, app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
+import type { IpcMainInvokeEvent, WebContents } from "electron";
 import { autoUpdater } from "electron-updater";
 
 import { LOCKFILE_NAME, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
@@ -31,6 +31,11 @@ import { createUpdateController, readAutoUpdateEnabled } from "./updater";
 import type { UpdateController } from "./updater";
 import { readUpdateSmokeConfig } from "./updateSmoke";
 import { readWindowState, saveWindowState } from "./windowState";
+import {
+  PersistentLogger,
+  diagnosticsWereEnabled,
+  persistDiagnosticsChoice,
+} from "./persistentLogger";
 import {
   registerProcessFailureHandlers,
   registerRendererFailureHandler,
@@ -56,10 +61,56 @@ let deps: SidecarDeps | null = null;
 let windowStateSaveTimer: NodeJS.Timeout | null = null;
 let backendBooting = false;
 let updateController: UpdateController | null = null;
+let persistentLogger: PersistentLogger | null = null;
 
 const IS_MAC = process.platform === "darwin";
 
 applyUserDataOverride(app, process.env.STL_STUDIO_USER_DATA_DIR);
+
+const userDataDir = app.getPath("userData");
+const logDir = join(userDataDir, "logs");
+if (diagnosticsWereEnabled(userDataDir)) {
+  try {
+    persistentLogger = new PersistentLogger(logDir);
+  } catch (error) {
+    console.error("Could not initialize persistent desktop diagnostics", error);
+  }
+}
+
+const originalConsole = {
+  log: console.log.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+};
+console.log = (...values: unknown[]) => {
+  originalConsole.log(...values);
+  persistentLogger?.write("INFO", values);
+};
+console.warn = (...values: unknown[]) => {
+  originalConsole.warn(...values);
+  persistentLogger?.write("WARNING", values);
+};
+console.error = (...values: unknown[]) => {
+  originalConsole.error(...values);
+  persistentLogger?.write("ERROR", values);
+};
+
+function assertTrustedDiagnosticsSender(event: IpcMainInvokeEvent): void {
+  const source = new URL(event.sender.getURL());
+  if (source.protocol !== "http:" || !["localhost", "127.0.0.1"].includes(source.hostname)) {
+    throw new Error("Diagnostics request rejected from an untrusted page");
+  }
+}
+
+ipcMain.handle("diagnostics:open-logs", async (event) => {
+  assertTrustedDiagnosticsSender(event);
+  return shell.openPath(logDir);
+});
+ipcMain.handle("diagnostics:set-enabled", (event, enabled: boolean) => {
+  assertTrustedDiagnosticsSender(event);
+  persistDiagnosticsChoice(userDataDir, enabled);
+  persistentLogger = enabled ? new PersistentLogger(logDir) : null;
+});
 
 function startupLog(checkpoint: string): void {
   console.log(`[startup] ${checkpoint}`);
@@ -285,7 +336,6 @@ async function regenerateEncryptionKey(): Promise<void> {
 }
 
 function createWindow(): BrowserWindow {
-  const userDataDir = app.getPath("userData");
   const savedState = readWindowState(userDataDir, screen.getAllDisplays());
   const win = new BrowserWindow({
     ...savedState.bounds,
@@ -296,6 +346,7 @@ function createWindow(): BrowserWindow {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: join(__dirname, "preload.js"),
     },
   });
   if (savedState.isMaximized) {
@@ -380,7 +431,7 @@ async function bootBackendAndLoad(
   if (backendBooting) return;
   startupLog("backend-boot-begin");
   backendBooting = true;
-  deps = runtimeDeps(app.getPath("userData"), LOCKFILE_NAME);
+  deps = runtimeDeps(userDataDir, LOCKFILE_NAME, (level, values) => persistentLogger?.write(level, values));
   const exePath = resolveBackendExe({
     packaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
@@ -396,6 +447,7 @@ async function bootBackendAndLoad(
         STL_SECRET_KEY: secretKey.key,
         STL_STUDIO_VERSION: app.getVersion(),
         DEPLOYMENT_MODE: "electron",
+        STL_STUDIO_LOG_DIR: logDir,
       },
       port,
     });

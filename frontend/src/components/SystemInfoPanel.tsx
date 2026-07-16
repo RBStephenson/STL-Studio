@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clipboard, Server, TriangleAlert } from "lucide-react";
+import { CheckCircle2, Clipboard, Download, FolderOpen, Server, TriangleAlert } from "lucide-react";
 import { api, type SystemInfo } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { errMsg } from "../utils/err";
@@ -38,20 +38,21 @@ export default function SystemInfoPanel() {
     return () => { alive = false; };
   }, [settings.system_info_enabled]);
 
-  if (!settings.system_info_enabled) return null;
-  if (loadError) {
+  if (!settings.system_info_enabled && !settings.persistent_diagnostics_enabled) return null;
+  if (settings.system_info_enabled && loadError) {
     return <div role="alert" className="mt-5 rounded-lg border border-rose-800/70 bg-rose-950/30 px-4 py-3 text-sm text-rose-300">{loadError}</div>;
   }
-  if (!info) {
+  if (settings.system_info_enabled && !info) {
     return <div role="status" className="mt-5 text-sm text-text-muted">Loading system info…</div>;
   }
 
-  const degraded = info.backend_status !== "healthy"
+  const degraded = info ? info.backend_status !== "healthy"
     || info.database_status !== "healthy"
-    || info.libraries_available < info.libraries_enabled;
+    || info.libraries_available < info.libraries_enabled : false;
 
   const copy = async () => {
     try {
+      if (!info) return;
       await navigator.clipboard.writeText(diagnosticText(info));
       setCopyError(null);
       setCopied(true);
@@ -65,16 +66,30 @@ export default function SystemInfoPanel() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 id="system-info-title" className="flex items-center gap-2 font-semibold text-text-primary-alt">
-            <Server size={16} /> System Info
+            <Server size={16} /> Support diagnostics
           </h3>
           <p className="mt-1 text-xs text-text-muted">Sanitized and safe to include in a public support request.</p>
         </div>
-        <button onClick={copy} className="flex items-center gap-1.5 rounded border border-border bg-panel-secondary px-2.5 py-1.5 text-xs text-text-secondary hover:text-text-primary-alt">
-          <Clipboard size={13} /> {copied ? "Copied" : "Copy diagnostics"}
-        </button>
+        <div className="flex flex-wrap justify-end gap-2">
+          {settings.system_info_enabled && (
+            <button onClick={copy} className="flex items-center gap-1.5 rounded border border-border bg-panel-secondary px-2.5 py-1.5 text-xs text-text-secondary hover:text-text-primary-alt">
+              <Clipboard size={13} /> {copied ? "Copied" : "Copy diagnostics"}
+            </button>
+          )}
+          {settings.persistent_diagnostics_enabled && (
+            <a href="/api/settings/logs" download className="flex items-center gap-1.5 rounded border border-border bg-panel-secondary px-2.5 py-1.5 text-xs text-text-secondary hover:text-text-primary-alt">
+              <Download size={13} /> Download logs
+            </a>
+          )}
+          {settings.persistent_diagnostics_enabled && window.stlStudio && (
+            <button onClick={() => void window.stlStudio?.openLogsFolder()} className="flex items-center gap-1.5 rounded border border-border bg-panel-secondary px-2.5 py-1.5 text-xs text-text-secondary hover:text-text-primary-alt">
+              <FolderOpen size={13} /> Open logs folder
+            </button>
+          )}
+        </div>
       </div>
 
-      <dl className="mt-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
+      {info && <><dl className="mt-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
         <dt className="text-text-muted">Version</dt><dd className="text-text-primary-alt2">{info.version}</dd>
         <dt className="text-text-muted">Deployment</dt><dd className="text-text-primary-alt2">{modeLabel(info.deployment_mode)}</dd>
         <dt className="text-text-muted">Backend</dt><dd className="text-text-primary-alt2">{info.backend_status}</dd>
@@ -91,6 +106,7 @@ export default function SystemInfoPanel() {
           ? "Some services or libraries are temporarily unavailable. Your catalog data is retained."
           : "STL Studio and all enabled libraries are available."}
       </div>
+      </>}
       {copyError && <p role="alert" className="mt-2 text-xs text-rose-300">{copyError}</p>}
     </section>
   );
