@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+import urllib.request
 
 import pytest
 
@@ -80,3 +82,44 @@ def test_wait_for_absent_times_out_when_path_remains(tmp_path):
     path.touch()
     with pytest.raises(TimeoutError, match="path was not removed"):
         smoke_installer.wait_for_absent(path, timeout_s=0)
+
+
+def test_update_feed_serves_candidate_metadata(tmp_path):
+    (tmp_path / "latest.yml").write_text("version: 1.2.3\n", encoding="utf-8")
+    with smoke_installer.serve_update_feed(tmp_path) as feed_url:
+        with urllib.request.urlopen(f"{feed_url}latest.yml") as response:
+            assert response.read() == b"version: 1.2.3\n"
+
+
+def test_validate_candidate_feed_checks_version_and_assets(tmp_path):
+    installer = tmp_path / "STL-Studio-Setup-1.2.3.exe"
+    installer.touch()
+    Path(f"{installer}.blockmap").touch()
+    (tmp_path / "latest.yml").write_text("version: 1.2.3\n", encoding="utf-8")
+    smoke_installer.validate_candidate_feed(tmp_path, "1.2.3")
+
+    with pytest.raises(RuntimeError, match="does not match"):
+        smoke_installer.validate_candidate_feed(tmp_path, "1.2.4")
+
+
+def test_wait_for_updated_version_accepts_new_sidecar_version(tmp_path, monkeypatch):
+    lock = tmp_path / "sidecar.lock.json"
+    lock.write_text(json.dumps({"pid": 20, "port": 2000}), encoding="utf-8")
+    monkeypatch.setattr(
+        smoke_installer, "read_system_info", lambda _port: {"version": "1.2.3"}
+    )
+    assert smoke_installer.wait_for_updated_version(tmp_path, 10, "1.2.3", 1) == {
+        "pid": 20,
+        "port": 2000,
+    }
+
+
+def test_wait_for_updated_version_reports_wrong_version(tmp_path, monkeypatch):
+    (tmp_path / "sidecar.lock.json").write_text(
+        json.dumps({"pid": 20, "port": 2000}), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        smoke_installer, "read_system_info", lambda _port: {"version": "1.2.2"}
+    )
+    with pytest.raises(TimeoutError, match="reported version '1.2.2'"):
+        smoke_installer.wait_for_updated_version(tmp_path, 10, "1.2.3", 0.01)

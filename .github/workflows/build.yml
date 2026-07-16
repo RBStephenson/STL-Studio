@@ -29,6 +29,10 @@ on:
         description: "Retention period for non-release CI artifacts"
         type: number
         default: 7
+      desktop_version:
+        description: "Optional semver for a non-release Windows candidate build"
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -111,12 +115,15 @@ jobs:
       # the rolling main build's tag ("rolling") isn't semver, so it falls back to
       # a 0.0.0-<sha> prerelease version instead.
       - name: Set desktop app version
-        if: ${{ inputs.release && matrix.os == 'windows-latest' }}
+        if: ${{ matrix.os == 'windows-latest' && (inputs.release || inputs.desktop_version != '') }}
         working-directory: desktop
         shell: bash
         run: |
+          requested="${{ inputs.desktop_version }}"
           tag="${{ inputs.tag }}"
-          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [ -n "$requested" ]; then
+            version="$requested"
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             version="${tag#v}"
           else
             version="0.0.0-$(git rev-parse --short HEAD)"
