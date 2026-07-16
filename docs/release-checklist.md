@@ -20,4 +20,7 @@ HTTP loopback feed URL.
 For bootstrap releases that predate the smoke hook, the harness replaces the
 installed copy's generated updater feed configuration with the loopback feed
 and clicks the existing Download and Restart confirmation dialogs. The
-published executable and updater implementation remain unchanged.
+published executable and updater implementation remain unchanged. Because
+v0.20.3 uses an assisted NSIS installer, the harness also drives only the
+candidate installer's allowlisted navigation buttons and records every matched
+window and button set in failure diagnostics.
