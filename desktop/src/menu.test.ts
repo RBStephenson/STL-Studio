@@ -108,4 +108,14 @@ describe("buildApplicationMenuTemplate", () => {
     expect(buildApplicationMenuTemplate(nav, { isMac: false })[0].role).not.toBe("appMenu");
     expect(buildApplicationMenuTemplate(nav, { isMac: true })[0].role).toBe("appMenu");
   });
+
+  it("wires the manual update check from the Help menu", () => {
+    const { nav } = makeNav();
+    const onCheckForUpdates = vi.fn();
+    const t = buildApplicationMenuTemplate(nav, { isMac: false, onCheckForUpdates });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const help = (t.find((i) => i.label === "Help") as any).submenu as any[];
+    help[0].click();
+    expect(onCheckForUpdates).toHaveBeenCalledOnce();
+  });
 });

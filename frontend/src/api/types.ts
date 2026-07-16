@@ -300,6 +300,8 @@ export interface AppSettings {
   hierarchy_variant_grouping_enabled: boolean;
   system_info_enabled: boolean;
   storage_recovery_enabled: boolean;
+  // Installed Electron app checks GitHub Releases automatically on startup.
+  auto_update_enabled: boolean;
   // Collections page: every card gets the same box size (the one cover art
   // already uses) instead of a compact box for collections with no cover.
   collections_uniform_size: boolean;

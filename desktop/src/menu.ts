@@ -67,7 +67,7 @@ export function buildContextMenuTemplate(
  */
 export function buildApplicationMenuTemplate(
   nav: NavTarget,
-  opts: { isMac: boolean; onRegenerateKey?: () => void },
+  opts: { isMac: boolean; onRegenerateKey?: () => void; onCheckForUpdates?: () => void },
 ): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
 
@@ -120,6 +120,17 @@ export function buildApplicationMenuTemplate(
   });
 
   template.push({ role: "windowMenu" });
+
+  template.push({
+    label: "Help",
+    submenu: [
+      {
+        label: "Check for Updatesâ€¦",
+        enabled: Boolean(opts.onCheckForUpdates),
+        click: () => opts.onCheckForUpdates?.(),
+      },
+    ],
+  });
 
   return template;
 }

@@ -586,6 +586,9 @@ class AppSettingsRead(BaseModel):
     system_info_enabled: bool = False
     # Aggregated external-storage recovery notifications and bounded image retry.
     storage_recovery_enabled: bool = False
+    # Electron desktop startup checks GitHub Releases when enabled. Manual
+    # checks remain available from the desktop Help menu when this is off.
+    auto_update_enabled: bool = True
     # Collections page: give every card the same box size (the one cover art
     # already uses) instead of a compact box for collections with no cover.
     collections_uniform_size: bool = True
@@ -633,6 +636,7 @@ class AppSettingsUpdate(BaseModel):
     hierarchy_variant_grouping_enabled: Optional[bool] = None
     system_info_enabled: Optional[bool] = None
     storage_recovery_enabled: Optional[bool] = None
+    auto_update_enabled: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")

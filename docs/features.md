@@ -1042,3 +1042,17 @@ model from its card or detail header, and filter by NSFW status in the Library.
 The default-off **External storage recovery** option in **Settings → Preferences → About & Diagnostics** monitors enabled library storage without exposing paths to the recovery UI. It uses short-lived, aggregated notifications when external storage is warming up, becomes unavailable, or returns. Catalog metadata remains browsable throughout, and local previews receive one coordinated retry after storage recovers rather than repeated per-image retries.
 
 If the Electron backend cannot finish starting, the desktop recovery page offers **Try again**. Retrying cleans up the failed sidecar attempt and does not require restarting STL Studio.
+
+## Desktop updates
+
+The installed Windows app checks published GitHub Releases after startup by
+default. When an update is available, STL Studio asks before downloading it and
+again before restarting to install it, so an update never interrupts active
+work. Download progress appears in the Windows taskbar. The Electron shell stops
+its Python sidecar before handing control to the installer, while the database,
+settings, and library configuration remain in the per-user data directory.
+
+Automatic checks can be disabled under **Settings â†’ Preferences â†’ Desktop
+Updates**. **Help â†’ Check for Updatesâ€¦** remains available for a manual check.
+The setting takes effect the next time the desktop app starts. Docker, source,
+Linux, and unpackaged development builds do not use the Electron update channel.

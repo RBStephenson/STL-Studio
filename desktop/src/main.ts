@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 import { Menu, app, BrowserWindow, dialog, screen } from "electron";
 import type { WebContents } from "electron";
+import { autoUpdater } from "electron-updater";
 
 import { LOCKFILE_NAME, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
 import {
@@ -26,6 +27,8 @@ import { getOrCreateSecretKey, regenerateSecretKey } from "./secretKey";
 import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
 import { applyUserDataOverride } from "./userDataOverride";
+import { createUpdateController, readAutoUpdateEnabled } from "./updater";
+import type { UpdateController } from "./updater";
 import { readWindowState, saveWindowState } from "./windowState";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
@@ -46,6 +49,7 @@ let sidecar: SidecarProcess | null = null;
 let deps: SidecarDeps | null = null;
 let windowStateSaveTimer: NodeJS.Timeout | null = null;
 let backendBooting = false;
+let updateController: UpdateController | null = null;
 
 const IS_MAC = process.platform === "darwin";
 
@@ -81,9 +85,97 @@ function installApplicationMenu(): void {
   };
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
-      buildApplicationMenuTemplate(nav, { isMac: IS_MAC, onRegenerateKey: regenerateEncryptionKey }),
+      buildApplicationMenuTemplate(nav, {
+        isMac: IS_MAC,
+        onRegenerateKey: regenerateEncryptionKey,
+        onCheckForUpdates: checkForUpdatesManually,
+      }),
     ),
   );
+}
+
+function checkForUpdatesManually(): void {
+  if (!updateController) {
+    dialog.showErrorBox(
+      "STL Studio updates",
+      "The backend is still starting. Try checking again in a moment.",
+    );
+    return;
+  }
+  void updateController.check(true);
+}
+
+async function stopOwnedSidecar(): Promise<void> {
+  if (!sidecar || !deps) return;
+  const proc = sidecar;
+  const d = deps;
+  sidecar = null;
+  await stopSidecar(d, proc);
+}
+
+async function initializeUpdater(win: BrowserWindow, backendUrl: string): Promise<void> {
+  if (updateController) return;
+  let enabled = false;
+  try {
+    enabled = await readAutoUpdateEnabled(backendUrl, async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`settings request returned ${response.status}`);
+      return response.json();
+    });
+  } catch (error) {
+    console.warn("Could not read automatic-update setting; skipping startup check", error);
+  }
+
+  updateController = createUpdateController({
+    updater: autoUpdater,
+    currentVersion: app.getVersion(),
+    enabled,
+    supported: app.isPackaged && process.platform === "win32",
+    stopApplication: stopOwnedSidecar,
+    log: (message) => console.log(`[updater] ${message}`),
+    ui: {
+      async confirmDownload(version) {
+        const { response } = await dialog.showMessageBox(win, {
+          type: "info",
+          buttons: ["Download", "Later"],
+          defaultId: 0,
+          cancelId: 1,
+          title: "STL Studio update available",
+          message: `STL Studio ${version} is available`,
+          detail: "Download it in the background? You can keep using STL Studio while it downloads.",
+        });
+        return response === 0;
+      },
+      async showCurrent(version) {
+        await dialog.showMessageBox(win, {
+          type: "info",
+          buttons: ["OK"],
+          title: "STL Studio updates",
+          message: "You're up to date",
+          detail: `STL Studio ${version} is the newest available version.`,
+        });
+      },
+      showError(message) {
+        dialog.showErrorBox("STL Studio update failed", message);
+      },
+      showProgress(percent) {
+        win.setProgressBar(percent === null ? -1 : percent / 100);
+      },
+      async confirmRestart(version) {
+        const { response } = await dialog.showMessageBox(win, {
+          type: "info",
+          buttons: ["Restart and Install", "Later"],
+          defaultId: 0,
+          cancelId: 1,
+          title: "STL Studio update ready",
+          message: `STL Studio ${version} is ready to install`,
+          detail: "Restart now to finish the update, or keep working and install it later.",
+        });
+        return response === 0;
+      },
+    },
+  });
+  void updateController.check();
 }
 
 /** A small non-modal window showing the encryption key once, with a Copy
@@ -263,6 +355,7 @@ async function bootBackendAndLoad(
     // never returns to it.
     await win.loadURL(baseUrl(result.port));
     win.webContents.navigationHistory.clear();
+    await initializeUpdater(win, baseUrl(result.port));
     if (secretKey.isNew || opts.forceReveal) {
       showKeyRevealWindow(secretKey.key);
     }
@@ -320,10 +413,7 @@ if (!gotLock) {
   app.on("before-quit", async (event) => {
     if (sidecar && deps) {
       event.preventDefault();
-      const proc = sidecar;
-      const d = deps;
-      sidecar = null;
-      await stopSidecar(d, proc);
+      await stopOwnedSidecar();
       app.quit();
     }
   });
