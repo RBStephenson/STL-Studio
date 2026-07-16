@@ -14,6 +14,7 @@
 - [Where is my data stored? Is it safe?](#where-is-my-data-stored-is-it-safe)
 - [How do I back up or move my library?](#how-do-i-back-up-or-move-my-library)
 - [A collection shows 0 models after I added some](#a-collection-shows-0-models-after-i-added-some)
+- [Application crashes and recovery](#application-crashes-and-recovery)
 
 ---
 
@@ -153,3 +154,15 @@ The model count on the Collections page is refreshed when the page loads. If you
 added models from a detail page and then navigated back, click away and return to
 the Collections page to see the updated counts. The counts are always accurate
 when you open a collection's detail view.
+
+# Application crashes and recovery
+
+If a page fails while STL Studio is running, the application shows a recovery screen. Use
+**Try again** first; if the same error returns, choose **Reload STL Studio**. Saved catalog data is
+stored by the backend and is not removed by either action, but edits that had not yet been saved may
+need to be entered again.
+
+The installed desktop app also detects an unexpected renderer-process exit and offers to reload the
+window or quit. An internal Electron main-process error is shown in an error dialog instead of being
+silently ignored. After reopening the app, use **Help → About & support → Copy diagnostics** when
+reporting a repeatable failure.
