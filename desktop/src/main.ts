@@ -25,6 +25,7 @@ import { findFreePort, runtimeDeps } from "./runtime";
 import { getOrCreateSecretKey, regenerateSecretKey } from "./secretKey";
 import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
+import { applyUserDataOverride } from "./userDataOverride";
 import { readWindowState, saveWindowState } from "./windowState";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
@@ -47,6 +48,8 @@ let windowStateSaveTimer: NodeJS.Timeout | null = null;
 let backendBooting = false;
 
 const IS_MAC = process.platform === "darwin";
+
+applyUserDataOverride(app, process.env.STL_STUDIO_USER_DATA_DIR);
 
 function startupLog(checkpoint: string): void {
   console.log(`[startup] ${checkpoint}`);

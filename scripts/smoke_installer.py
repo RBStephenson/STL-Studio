@@ -147,11 +147,19 @@ def main(argv: list[str] | None = None) -> int:
     install_dir = root / "install"
     appdata = root / "appdata"
     localappdata = root / "localappdata"
+    appdata.mkdir(parents=True)
+    localappdata.mkdir(parents=True)
     host_appdata = Path(os.environ.get("APPDATA", ""))
     host_localappdata = Path(os.environ.get("LOCALAPPDATA", ""))
     app_log = root / "electron.log"
     env = os.environ.copy()
-    env.update({"APPDATA": str(appdata), "LOCALAPPDATA": str(localappdata)})
+    env.update(
+        {
+            "APPDATA": str(appdata),
+            "LOCALAPPDATA": str(localappdata),
+            "STL_STUDIO_USER_DATA_DIR": str(appdata),
+        }
+    )
     db_path = localappdata / "STL-Inventory" / "stl_inventory.db"
     proc: subprocess.Popen | None = None
     try:
