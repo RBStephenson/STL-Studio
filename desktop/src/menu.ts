@@ -125,7 +125,7 @@ export function buildApplicationMenuTemplate(
     label: "Help",
     submenu: [
       {
-        label: "Check for Updatesâ€¦",
+        label: "Check for Updates...",
         enabled: Boolean(opts.onCheckForUpdates),
         click: () => opts.onCheckForUpdates?.(),
       },

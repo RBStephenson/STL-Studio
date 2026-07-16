@@ -115,6 +115,7 @@ describe("buildApplicationMenuTemplate", () => {
     const t = buildApplicationMenuTemplate(nav, { isMac: false, onCheckForUpdates });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const help = (t.find((i) => i.label === "Help") as any).submenu as any[];
+    expect(help[0].label).toBe("Check for Updates...");
     help[0].click();
     expect(onCheckForUpdates).toHaveBeenCalledOnce();
   });
