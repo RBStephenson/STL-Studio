@@ -140,6 +140,33 @@ jobs:
         # draft release so users never see mismatched update metadata.
         run: npx --no-install electron-builder --win --publish never
 
+      # Fail before upload if latest.yml points at a filename that the package
+      # step did not actually produce. This prevents another published 404 like
+      # v0.20.2's dots-vs-hyphens installer mismatch.
+      - name: Validate Electron update artifact names
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $metadataPath = 'desktop/release/latest.yml'
+          if (-not (Test-Path -LiteralPath $metadataPath)) {
+            throw "Updater metadata not found: $metadataPath"
+          }
+          $metadata = Get-Content -Raw -LiteralPath $metadataPath
+          $match = [regex]::Match($metadata, '(?m)^path:\s*(.+?)\s*$')
+          if (-not $match.Success) {
+            throw 'latest.yml does not contain a top-level path entry'
+          }
+          $installerName = $match.Groups[1].Value.Trim().Trim("'`"")
+          $installerPath = Join-Path 'desktop/release' $installerName
+          $blockmapPath = "$installerPath.blockmap"
+          if (-not (Test-Path -LiteralPath $installerPath)) {
+            throw "latest.yml references missing installer: $installerName"
+          }
+          if (-not (Test-Path -LiteralPath $blockmapPath)) {
+            throw "Updater blockmap missing for: $installerName"
+          }
+          Write-Host "Validated updater metadata: $installerName"
+
       # Exercise the artifact users actually run, not only the loose PyInstaller
       # sidecar: silent install, Electron launch, restart/data persistence, and
       # silent uninstall in isolated runner data directories (#1046).
