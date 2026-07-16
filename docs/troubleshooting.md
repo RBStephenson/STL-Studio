@@ -15,6 +15,7 @@
 - [How do I back up or move my library?](#how-do-i-back-up-or-move-my-library)
 - [A collection shows 0 models after I added some](#a-collection-shows-0-models-after-i-added-some)
 - [Application crashes and recovery](#application-crashes-and-recovery)
+- [Accessing support logs](#accessing-support-logs)
 
 ---
 
@@ -166,3 +167,15 @@ The installed desktop app also detects an unexpected renderer-process exit and o
 window or quit. An internal Electron main-process error is shown in an error dialog instead of being
 silently ignored. After reopening the app, use **Help → About & support → Copy diagnostics** when
 reporting a repeatable failure.
+
+## Accessing support logs
+
+Enable **Persistent support logs** under **Settings → Preferences**, then open
+**Help → About & support**. **Download logs** works in both Electron and Docker and
+produces a sanitized ZIP. Electron also provides **Open logs folder**.
+
+Docker stores the same backend files under `/data/logs`; with the standard Compose
+file that is the host's `./data/logs` directory. For a live terminal stream, use
+`docker compose logs backend`. Each process keeps a 2 MiB active log and three
+rotated backups. Disabling the feature stops new persistent writes but does not
+delete existing diagnostic files.

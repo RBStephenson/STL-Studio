@@ -91,7 +91,11 @@ function killTree(pid: number): Promise<void> {
  * userData dir (passed in so this module never imports `electron`, keeping it
  * loadable in plain-Node contexts).
  */
-export function runtimeDeps(userDataDir: string, lockfileName: string): SidecarDeps {
+export function runtimeDeps(
+  userDataDir: string,
+  lockfileName: string,
+  persistentLog?: (level: string, values: unknown[]) => void,
+): SidecarDeps {
   const lockPath = join(userDataDir, lockfileName);
 
   return {
@@ -104,8 +108,14 @@ export function runtimeDeps(userDataDir: string, lockfileName: string): SidecarD
         stdio: ["ignore", "pipe", "pipe"],
         env: env ? { ...process.env, ...env } : process.env,
       });
-      child.stdout?.on("data", (d) => process.stdout.write(`[backend] ${d}`));
-      child.stderr?.on("data", (d) => process.stderr.write(`[backend] ${d}`));
+      child.stdout?.on("data", (d) => {
+        process.stdout.write(`[backend] ${d}`);
+        persistentLog?.("BACKEND", [d.toString()]);
+      });
+      child.stderr?.on("data", (d) => {
+        process.stderr.write(`[backend] ${d}`);
+        persistentLog?.("BACKEND-ERROR", [d.toString()]);
+      });
       return child as unknown as SidecarProcess;
     },
     probe,

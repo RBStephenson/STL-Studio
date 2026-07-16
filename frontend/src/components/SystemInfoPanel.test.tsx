@@ -7,12 +7,16 @@ import type { SystemInfo } from "../api/client";
 
 const systemInfoMock = vi.fn();
 let enabled = true;
+let persistentEnabled = false;
 
 vi.mock("../api/client", () => ({
   api: { settings: { systemInfo: (...args: unknown[]) => systemInfoMock(...args) } },
 }));
 vi.mock("../context/AppSettingsContext", () => ({
-  useAppSettings: () => ({ settings: mkSettings({ system_info_enabled: enabled }) }),
+  useAppSettings: () => ({ settings: mkSettings({
+    system_info_enabled: enabled,
+    persistent_diagnostics_enabled: persistentEnabled,
+  }) }),
 }));
 
 const healthy: SystemInfo = {
@@ -29,6 +33,7 @@ const healthy: SystemInfo = {
 describe("SystemInfoPanel", () => {
   beforeEach(() => {
     enabled = true;
+    persistentEnabled = false;
     systemInfoMock.mockReset();
     systemInfoMock.mockResolvedValue(healthy);
     Object.defineProperty(navigator, "clipboard", {
@@ -40,8 +45,30 @@ describe("SystemInfoPanel", () => {
   it("is absent while the feature flag is off", () => {
     enabled = false;
     render(<SystemInfoPanel />);
-    expect(screen.queryByText("System Info")).toBeNull();
+    expect(screen.queryByText("Support diagnostics")).toBeNull();
     expect(systemInfoMock).not.toHaveBeenCalled();
+  });
+
+  it("offers a log download in browser deployments", () => {
+    enabled = false;
+    persistentEnabled = true;
+    render(<SystemInfoPanel />);
+    expect(screen.getByRole("link", { name: /download logs/i })).toHaveAttribute(
+      "href", "/api/settings/logs",
+    );
+    expect(screen.queryByRole("button", { name: /open logs folder/i })).toBeNull();
+  });
+
+  it("offers direct folder access in Electron", () => {
+    enabled = false;
+    persistentEnabled = true;
+    window.stlStudio = {
+      openLogsFolder: vi.fn().mockResolvedValue(""),
+      setPersistentDiagnosticsEnabled: vi.fn(),
+    };
+    render(<SystemInfoPanel />);
+    expect(screen.getByRole("button", { name: /open logs folder/i })).toBeVisible();
+    delete window.stlStudio;
   });
 
   it("shows healthy, sanitized runtime details", async () => {

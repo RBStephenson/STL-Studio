@@ -37,6 +37,7 @@ DEFAULTS = {
     "reorganize_ai_suggestions_enabled": False,
     "hierarchy_variant_grouping_enabled": False,
     "system_info_enabled": False,
+    "persistent_diagnostics_enabled": False,
     "storage_recovery_enabled": False,
     "auto_update_enabled": True,
     "collections_uniform_size": True,
@@ -66,6 +67,35 @@ def test_system_info_is_server_gated_by_default(client):
     response = client.get("/settings/system-info")
     assert response.status_code == 404
     assert response.json()["detail"] == "System info is disabled"
+
+
+def test_persistent_diagnostics_default_off_and_download_is_gated(client):
+    assert client.get("/settings").json()["persistent_diagnostics_enabled"] is False
+    assert client.get("/settings/logs").status_code == 404
+
+
+def test_log_download_is_sanitized(client, tmp_path, monkeypatch, restore_settings):
+    import zipfile
+    from io import BytesIO
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "backend.log").write_text(
+        "Authorization: Bearer private-token path=C:\\Users\\Brent\\Models\\secret.stl",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(live_settings, "stl_studio_log_dir", str(log_dir))
+    client.patch("/settings", json={"persistent_diagnostics_enabled": True})
+
+    response = client.get("/settings/logs")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(BytesIO(response.content)) as archive:
+        text = archive.read("backend.log").decode()
+    assert "private-token" not in text
+    assert "Brent" not in text
+    assert "<redacted>" in text
 
 
 def test_storage_recovery_is_server_gated_and_path_free(client, db, tmp_path):

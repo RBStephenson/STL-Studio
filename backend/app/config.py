@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # WARNING with no handler — so INFO-level diagnostics (e.g. the AI organizer
     # request/response trace) were silently dropped. Set via LOG_LEVEL.
     log_level: str = "INFO"
+    # Persistent diagnostics live on the existing /data volume in Docker.
+    # Electron overrides this with its per-user application data directory.
+    stl_studio_log_dir: str = "/data/logs"
 
     @property
     def stl_root_list(self) -> list[str]:

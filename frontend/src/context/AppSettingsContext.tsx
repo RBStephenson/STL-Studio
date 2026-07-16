@@ -38,6 +38,7 @@ const DEFAULTS: AppSettings = {
   reorganize_ai_suggestions_enabled: false,
   hierarchy_variant_grouping_enabled: false,
   system_info_enabled: false,
+  persistent_diagnostics_enabled: false,
   storage_recovery_enabled: false,
   auto_update_enabled: true,
   collections_uniform_size: true,
@@ -87,9 +88,15 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           const updated = await api.settings.update(patch);
           clearLegacyPreferences();
           setSettings(updated);
+          void window.stlStudio?.setPersistentDiagnosticsEnabled(
+            updated.persistent_diagnostics_enabled,
+          ).catch(() => undefined);
         } else {
           clearLegacyPreferences();
           setSettings(server);
+          void window.stlStudio?.setPersistentDiagnosticsEnabled(
+            server.persistent_diagnostics_enabled,
+          ).catch(() => undefined);
         }
         setLoaded(true);
       })

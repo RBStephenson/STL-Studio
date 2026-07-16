@@ -369,6 +369,29 @@ def _apply_persisted_log_level():
         db.close()
 
 
+def _apply_persistent_diagnostics():
+    """Enable the file handler after migrations make app_settings available."""
+    from app.logging_config import configure_persistent_logging
+    from app.models import AppSetting
+
+    db = SessionLocal()
+    try:
+        row = db.get(AppSetting, "persistent_diagnostics_enabled")
+        configure_persistent_logging(
+            bool(row and row.value is True),
+            app_settings.stl_studio_log_dir,
+        )
+    except Exception:
+        # Diagnostics are best-effort and must never turn a damaged or
+        # temporarily unavailable settings database into a startup failure.
+        import logging
+        logging.getLogger("app").debug(
+            "Could not read persistent diagnostics setting", exc_info=True
+        )
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # One-time startup migrations / seeding, run before the app serves requests.
@@ -376,6 +399,7 @@ async def lifespan(app: FastAPI):
     _backfill_missing_variant_groups()
     _seed_tag_index()
     _apply_persisted_log_level()
+    _apply_persistent_diagnostics()
     yield
 
 
