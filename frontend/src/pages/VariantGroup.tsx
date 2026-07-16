@@ -809,7 +809,14 @@ export default function VariantGroup() {
             <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               {variants.map((model, i) => (
                 <SortableCard key={model.id} id={model.id}>
-                  <div className="relative">
+                  <div className="relative flex-1 flex flex-col">
+                    {/* flex-1 so this wrapper actually claims the row's
+                        stretched height (a CSS grid item stretches by
+                        default, but its own children don't inherit that
+                        automatically) — ModelCard's own h-full then fills
+                        it and pushes its tag row / footer to line up with
+                        every sibling, instead of each card sizing to only
+                        its own tag count (#1064). */}
                     {/* Checkbox sits right of the drag grip (top-left). */}
                     <label className="absolute top-2 left-9 z-10 flex items-center justify-center p-1 rounded bg-panel/80 border border-border cursor-pointer">
                       <input

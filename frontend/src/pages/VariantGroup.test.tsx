@@ -55,6 +55,24 @@ describe("VariantGroup empty state", () => {
   });
 });
 
+describe("VariantGroup card grid alignment (#1064)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("stretches each member card's wrapper to fill the grid row (jsdom can't verify actual pixel heights — this guards the structural fix)", async () => {
+    const { container } = renderPage();
+    await screen.findByText("Widget");
+
+    // A grid item's own children don't inherit CSS grid's default row
+    // stretch automatically — this wrapper needs flex-1 (within the
+    // SortableCard flex-col) so ModelCard's own h-full has real extra
+    // space to fill, keeping every card's "Move to group" row pinned to
+    // the same Y position regardless of how much content (tags, a
+    // support-status badge, etc.) precedes it on a given card.
+    const wrapper = container.querySelector(".relative.flex-1.flex.flex-col");
+    expect(wrapper).not.toBeNull();
+  });
+});
+
 describe("VariantGroup error state", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
