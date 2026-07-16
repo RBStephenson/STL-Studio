@@ -8,6 +8,35 @@ import pytest
 import smoke_installer
 
 
+def test_installer_shortcuts_resolves_current_user_locations(tmp_path):
+    appdata = tmp_path / "roaming"
+    profile = tmp_path / "profile"
+    assert smoke_installer.installer_shortcuts(
+        {"APPDATA": str(appdata), "USERPROFILE": str(profile)}
+    ) == (
+        appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "STL Studio.lnk",
+        profile / "Desktop" / "STL Studio.lnk",
+    )
+
+
+def test_installer_shortcuts_requires_environment_paths():
+    with pytest.raises(RuntimeError, match="environment paths"):
+        smoke_installer.installer_shortcuts({})
+
+
+def test_require_paths_reports_missing_and_stale_paths(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.touch()
+
+    smoke_installer.require_paths((first,), present=True, phase="install")
+    smoke_installer.require_paths((second,), present=False, phase="uninstall")
+    with pytest.raises(RuntimeError, match="install expected paths to be created"):
+        smoke_installer.require_paths((first, second), present=True, phase="install")
+    with pytest.raises(RuntimeError, match="uninstall expected paths to be removed"):
+        smoke_installer.require_paths((first, second), present=False, phase="uninstall")
+
+
 def test_find_one_requires_exactly_one_match(tmp_path):
     expected = tmp_path / "STL Studio.exe"
     expected.touch()

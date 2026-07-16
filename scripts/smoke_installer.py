@@ -33,6 +33,30 @@ UPDATE_PROFILE_PATHS = (
     ("LOCALAPPDATA", "STL-Inventory"),
     ("LOCALAPPDATA", "stl-studio-desktop"),
 )
+SHORTCUT_NAME = "STL Studio.lnk"
+
+
+def installer_shortcuts(environ: dict[str, str]) -> tuple[Path, Path]:
+    """Return the current-user shortcuts created by the NSIS package."""
+    missing = [name for name in ("APPDATA", "USERPROFILE") if not environ.get(name)]
+    if missing:
+        raise RuntimeError(f"installer shortcut checks require environment paths: {missing}")
+    return (
+        Path(environ["APPDATA"])
+        / "Microsoft"
+        / "Windows"
+        / "Start Menu"
+        / "Programs"
+        / SHORTCUT_NAME,
+        Path(environ["USERPROFILE"]) / "Desktop" / SHORTCUT_NAME,
+    )
+
+
+def require_paths(paths: tuple[Path, ...], *, present: bool, phase: str) -> None:
+    mismatches = [path for path in paths if path.exists() is not present]
+    if mismatches:
+        expectation = "created" if present else "removed"
+        raise RuntimeError(f"{phase} expected paths to be {expectation}: {mismatches}")
 
 
 def prepare_data_paths(
@@ -415,6 +439,7 @@ def main(argv: list[str] | None = None) -> int:
     install_dir = root / "install"
     host_appdata = Path(os.environ.get("APPDATA", ""))
     host_localappdata = Path(os.environ.get("LOCALAPPDATA", ""))
+    shortcuts = installer_shortcuts(dict(os.environ))
     app_log = root / "electron.log"
     appdata, localappdata, env = prepare_data_paths(
         root,
@@ -431,6 +456,7 @@ def main(argv: list[str] | None = None) -> int:
             feed_url = feed_context.__enter__()
         subprocess.run([str(installer), "/S", f"/D={install_dir}"], check=True, env=env, timeout=120)
         app_exe = find_one(install_dir, "STL Studio.exe")
+        require_paths(shortcuts, present=True, phase="custom install")
         with app_log.open("ab") as log:
             proc, _ = launch_and_probe(app_exe, env, appdata, log)
         if not db_path.is_file():
@@ -450,6 +476,24 @@ def main(argv: list[str] | None = None) -> int:
                     ("system_info_enabled", json.dumps(True)),
                 )
             db.commit()
+
+        # Installing the same package again exercises NSIS repair/reinstall
+        # semantics. The application payload and user-owned database must both
+        # remain usable before an update or ordinary relaunch is attempted.
+        subprocess.run(
+            [str(installer), "/S", f"/D={install_dir}"],
+            check=True,
+            env=env,
+            timeout=120,
+        )
+        app_exe = find_one(install_dir, "STL Studio.exe")
+        require_paths(shortcuts, present=True, phase="reinstall")
+        with sqlite3.connect(db_path) as db:
+            marker = db.execute(
+                "SELECT value FROM app_settings WHERE key = ?", ("ci_installer_smoke",)
+            ).fetchone()
+        if marker != (json.dumps("preserved"),):
+            raise RuntimeError(f"database marker did not survive reinstall: {marker}")
 
         if candidate_dir:
             assert feed_url is not None
@@ -501,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:
             uninstaller = find_one(install_dir, "Uninstall*.exe")
             subprocess.run([str(uninstaller), "/S"], check=True, env=env, timeout=120)
             wait_for_absent(app_exe)
+            require_paths(shortcuts, present=False, phase="uninstall")
             print(
                 "smoke_installer: OK - install, update, relaunch, version, persistence, and uninstall"
             )
@@ -521,9 +566,30 @@ def main(argv: list[str] | None = None) -> int:
         uninstaller = find_one(install_dir, "Uninstall*.exe")
         subprocess.run([str(uninstaller), "/S"], check=True, env=env, timeout=120)
         wait_for_absent(app_exe)
+        require_paths(shortcuts, present=False, phase="custom uninstall")
         if not db_path.is_file():
             raise RuntimeError("uninstall removed user database")
-        print("smoke_installer: OK - install, launch, restart, persistence, and uninstall")
+
+        # A second pass without /D proves the installer's default-directory
+        # behavior independently of the custom-directory lifecycle above.
+        subprocess.run([str(installer), "/S"], check=True, env=env, timeout=120)
+        default_app_exe = find_one(host_localappdata / "Programs", "STL Studio.exe")
+        require_paths(shortcuts, present=True, phase="default install")
+        with app_log.open("ab") as log:
+            proc, _ = launch_and_probe(default_app_exe, env, appdata, log)
+        kill_tree(proc.pid)
+        proc.wait(timeout=15)
+        proc = None
+        default_uninstaller = find_one(default_app_exe.parent, "Uninstall*.exe")
+        subprocess.run([str(default_uninstaller), "/S"], check=True, env=env, timeout=120)
+        wait_for_absent(default_app_exe)
+        require_paths(shortcuts, present=False, phase="default uninstall")
+        if not db_path.is_file():
+            raise RuntimeError("default uninstall removed user database")
+        print(
+            "smoke_installer: OK - custom/default install, reinstall, shortcuts, "
+            "relaunch, persistence, and uninstall"
+        )
         return 0
     except Exception:
         if args.diagnostics_dir:

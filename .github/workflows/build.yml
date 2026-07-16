@@ -175,8 +175,8 @@ jobs:
           Write-Host "Validated updater metadata: $installerName"
 
       # Exercise the artifact users actually run, not only the loose PyInstaller
-      # sidecar: silent install, Electron launch, restart/data persistence, and
-      # silent uninstall in isolated runner data directories (#1046).
+      # sidecar: custom/default install, shortcuts, reinstall, Electron launch,
+      # restart/data persistence, and uninstall cleanup (STUDIO-205).
       - name: Smoke-test installed Windows app
         if: matrix.os == 'windows-latest'
         shell: pwsh
