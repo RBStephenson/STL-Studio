@@ -289,15 +289,17 @@ def _run_migrations() -> None:
     from sqlalchemy import text
     from alembic.config import Config
     from alembic import command
+    from alembic.script import ScriptDirectory
 
     import sys
 
+    from app.services.database_upgrade import (
+        create_upgrade_snapshot,
+        restore_upgrade_snapshot,
+    )
+
     logger = logging.getLogger(__name__)
 
-    # Table creation, moved off import time (STUDIO-57). alembic_version is not
-    # part of the metadata, so this never affects the legacy-vs-managed branch
-    # below.
-    Base.metadata.create_all(bind=engine)
     if getattr(sys, "frozen", False):
         # PyInstaller bundle: alembic.ini and alembic/ are extracted to sys._MEIPASS
         base = Path(sys._MEIPASS)  # type: ignore[attr-defined]
@@ -305,21 +307,37 @@ def _run_migrations() -> None:
         base = Path(__file__).parent.parent
     alembic_cfg = Config(base / "alembic.ini")
     alembic_cfg.set_main_option("script_location", str(base / "alembic"))
+    head_revision = ScriptDirectory.from_config(alembic_cfg).get_current_head()
+    if head_revision is None:
+        raise RuntimeError("Alembic migration history has no head revision")
 
-    with engine.connect() as conn:
-        tables = {
-            r[0] for r in conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table'")
+    snapshot = create_upgrade_snapshot(engine, head_revision)
+    try:
+        # Table creation, moved off import time (STUDIO-57). alembic_version is not
+        # part of the metadata, so this never affects the legacy-vs-managed branch.
+        Base.metadata.create_all(bind=engine)
+        with engine.connect() as conn:
+            tables = {
+                r[0] for r in conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table'")
+                )
+            }
+
+        if "alembic_version" not in tables:
+            _migrate_schema()
+            command.stamp(alembic_cfg, "head")
+            logger.info("Alembic: stamped legacy/new DB at head (0001 baseline)")
+        else:
+            command.upgrade(alembic_cfg, "head")
+            logger.info("Alembic: schema up to date")
+    except Exception:
+        if snapshot is not None:
+            restore_upgrade_snapshot(engine, snapshot)
+            logger.exception(
+                "Database migration failed; restored pre-upgrade snapshot %s",
+                snapshot,
             )
-        }
-
-    if "alembic_version" not in tables:
-        _migrate_schema()
-        command.stamp(alembic_cfg, "head")
-        logger.info("Alembic: stamped legacy/new DB at head (0001 baseline)")
-    else:
-        command.upgrade(alembic_cfg, "head")
-        logger.info("Alembic: schema up to date")
+        raise
 
 
 def _apply_persisted_log_level():

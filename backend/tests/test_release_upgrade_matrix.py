@@ -10,11 +10,13 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+from alembic import command as alembic_command
 import pytest
 from sqlalchemy import create_engine, inspect, text
 
 import app.database as database_module
 import app.main as main_module
+from app.services import database_upgrade
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "upgrade"
@@ -40,6 +42,20 @@ def _seed_representative_data(path: Path, revision: str) -> None:
     try:
         conn.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
         conn.execute("INSERT INTO alembic_version VALUES (?)", (revision,))
+        _insert(conn, "scan_roots", {
+            "id": 1,
+            "path": "/library",
+            "enabled": 1,
+            "name": "Fixture Library",
+            "is_writable": 1,
+            "layout": "{creator}/{character}",
+            "group_by_character": 1,
+        })
+        _insert(conn, "import_source_mappings", {
+            "id": 1,
+            "source_path": "/imports",
+            "library_id": 1,
+        })
         _insert(conn, "creators", {"id": 1, "name": "Fixture Creator"})
         _insert(conn, "variant_groups", {
             "id": 1, "creator_id": 1, "label": "Fixture Group", "source": "manual",
@@ -82,6 +98,10 @@ def _seed_representative_data(path: Path, revision: str) -> None:
         _insert(conn, "app_settings", {
             "key": "reorganize_template",
             "value": json.dumps("{creator}/{character}/{title}"),
+        })
+        _insert(conn, "app_settings", {
+            "key": "ai_api_key_enc",
+            "value": json.dumps("fixture-ciphertext-not-plaintext"),
         })
 
         ai_config = {
@@ -186,6 +206,24 @@ def test_released_database_upgrades_to_head_without_data_loss(
         assert conn.execute(text(
             "SELECT filename FROM stl_files WHERE model_id = 1"
         )).scalar_one() == "body.stl"
+        library = conn.execute(text(
+            "SELECT path, name, is_writable, layout, group_by_character "
+            "FROM scan_roots WHERE id = 1"
+        )).one()
+        assert library == (
+            "/library",
+            "Fixture Library",
+            1,
+            "{creator}/{character}",
+            1,
+        )
+        assert conn.execute(text(
+            "SELECT source_path FROM import_source_mappings WHERE library_id = 1"
+        )).scalar_one() == "/imports"
+        encrypted_setting = conn.execute(text(
+            "SELECT value FROM app_settings WHERE key = 'ai_api_key_enc'"
+        )).scalar_one()
+        assert json.loads(encrypted_setting) == "fixture-ciphertext-not-plaintext"
         assert conn.execute(text("SELECT name FROM paints WHERE id = 1")).scalar_one() == "Fixture Red"
         assert conn.execute(text("SELECT title FROM guides WHERE model_id = 1")).scalar_one() == "Fixture Guide"
         ai = conn.execute(text(
@@ -198,4 +236,61 @@ def test_released_database_upgrades_to_head_without_data_loss(
             1 if release == "v0.20.0" else 0,
         )
 
+    engine.dispose()
+
+
+def test_failed_upgrade_restores_exact_pre_upgrade_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "failed-upgrade.db"
+    shutil.copy2(FIXTURES / "v0.18.0.db", db_path)
+    _seed_representative_data(db_path, "0027")
+    engine = create_engine(f"sqlite:///{db_path}")
+    monkeypatch.setattr(database_module, "engine", engine)
+    monkeypatch.setattr(main_module, "engine", engine)
+
+    def fail_upgrade(*_args, **_kwargs) -> None:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("UPDATE models SET title = 'partially migrated' WHERE id = 1")
+        raise RuntimeError("simulated migration failure")
+
+    monkeypatch.setattr(alembic_command, "upgrade", fail_upgrade)
+
+    with pytest.raises(RuntimeError, match="simulated migration failure"):
+        main_module._run_migrations()
+
+    snapshots = list((tmp_path / "backups").glob("pre_upgrade_*.db"))
+    assert len(snapshots) == 1
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0027"
+        assert conn.execute("SELECT title FROM models WHERE id = 1").fetchone()[0] == "Curated title"
+    engine.dispose()
+
+
+def test_current_schema_does_not_create_redundant_upgrade_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "current.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    monkeypatch.setattr(database_module, "engine", engine)
+    monkeypatch.setattr(main_module, "engine", engine)
+
+    main_module._run_migrations()
+    main_module._run_migrations()
+
+    assert not (tmp_path / "backups").exists()
+    engine.dispose()
+
+
+def test_upgrade_snapshot_retention_is_bounded(tmp_path: Path) -> None:
+    db_path = tmp_path / "catalog.db"
+    shutil.copy2(FIXTURES / "v0.18.0.db", db_path)
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    for _ in range(database_upgrade.UPGRADE_SNAPSHOT_KEEP + 1):
+        database_upgrade.create_upgrade_snapshot(engine, "0032")
+
+    snapshots = list((tmp_path / "backups").glob("pre_upgrade_*.db"))
+    assert len(snapshots) == database_upgrade.UPGRADE_SNAPSHOT_KEEP
     engine.dispose()

@@ -17,6 +17,11 @@ current application's real startup migration path twice. Keeping seed data in
 the test makes the binary fixtures free of personal paths, credentials, and
 other user data.
 
+The suite also injects a failure after migration begins and verifies that startup
+restores the exact pre-upgrade database from its automatic safety snapshot. This
+keeps the release qualification matrix responsible for both forward upgrades and
+the failed-upgrade recovery path.
+
 | Fixture | Source tag | Starting revision |
 |---|---|---|
 | `v0.18.0.db` | `v0.18.0` | `0027` |
