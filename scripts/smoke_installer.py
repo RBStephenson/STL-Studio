@@ -21,6 +21,78 @@ from pathlib import Path
 
 
 TIMEOUT_S = 60
+UPDATE_DIALOG_BUTTONS = {
+    "STL Studio update available": "Download",
+    "STL Studio update ready": "Restart and Install",
+}
+
+
+def write_update_feed_config(app_exe: Path, feed_url: str) -> Path:
+    """Point an installed electron-updater client at the disposable CI feed."""
+    config = app_exe.parent / "resources" / "app-update.yml"
+    if not config.is_file():
+        raise RuntimeError(f"installed updater configuration not found: {config}")
+    config.write_text(f"provider: generic\nurl: {feed_url}\n", encoding="utf-8")
+    return config
+
+
+def automate_update_dialogs(
+    stop_event: threading.Event,
+    clicked: list[str],
+    timeout_s: float,
+    user32=None,
+    ctypes_module=None,
+) -> None:
+    """Click the two native v0.20.3 updater confirmations by exact text."""
+    if ctypes_module is None:
+        import ctypes as ctypes_module
+    if user32 is None:
+        user32 = ctypes_module.windll.user32
+    enum_windows_proc = ctypes_module.WINFUNCTYPE(
+        ctypes_module.c_bool,
+        ctypes_module.c_void_p,
+        ctypes_module.c_void_p,
+    )
+    deadline = time.monotonic() + timeout_s
+
+    while not stop_event.is_set() and time.monotonic() < deadline:
+        expected_title = next(
+            (title for title in UPDATE_DIALOG_BUTTONS if title not in clicked),
+            None,
+        )
+        if expected_title is None:
+            return
+
+        def inspect_window(hwnd, _lparam):
+            title_length = user32.GetWindowTextLengthW(hwnd)
+            if title_length <= 0:
+                return True
+            title_buffer = ctypes_module.create_unicode_buffer(title_length + 1)
+            user32.GetWindowTextW(hwnd, title_buffer, len(title_buffer))
+            if title_buffer.value != expected_title:
+                return True
+
+            expected_button = UPDATE_DIALOG_BUTTONS[expected_title]
+
+            def inspect_child(child_hwnd, _child_lparam):
+                text_length = user32.GetWindowTextLengthW(child_hwnd)
+                text_buffer = ctypes_module.create_unicode_buffer(text_length + 1)
+                user32.GetWindowTextW(child_hwnd, text_buffer, len(text_buffer))
+                if text_buffer.value == expected_button:
+                    user32.PostMessageW(child_hwnd, 0x00F5, 0, 0)  # BM_CLICK
+                    clicked.append(expected_title)
+                    return False
+                return True
+
+            user32.EnumChildWindows(hwnd, enum_windows_proc(inspect_child), 0)
+            return expected_title not in clicked
+
+        user32.EnumWindows(enum_windows_proc(inspect_window), 0)
+        stop_event.wait(0.25)
+
+    if not stop_event.is_set() and len(clicked) != len(UPDATE_DIALOG_BUTTONS):
+        missing = [title for title in UPDATE_DIALOG_BUTTONS if title not in clicked]
+        raise TimeoutError(f"updater confirmation dialogs did not appear: {missing}")
 
 
 def write_diagnostics(
@@ -290,18 +362,35 @@ def main(argv: list[str] | None = None) -> int:
 
         if candidate_dir:
             assert feed_url is not None
+            write_update_feed_config(app_exe, feed_url)
             env.update({
                 "STL_STUDIO_UPDATE_SMOKE": "1",
                 "STL_STUDIO_UPDATE_FEED_URL": feed_url,
             })
+            dialog_stop = threading.Event()
+            clicked_dialogs: list[str] = []
+            dialog_thread = threading.Thread(
+                target=automate_update_dialogs,
+                args=(dialog_stop, clicked_dialogs, args.update_timeout),
+                daemon=True,
+            )
+            dialog_thread.start()
             with app_log.open("ab") as log:
                 proc, first_lock = launch_and_probe(app_exe, env, appdata, log)
-            wait_for_updated_version(
-                appdata,
-                first_lock["pid"],
-                args.expected_version,
-                args.update_timeout,
-            )
+            try:
+                wait_for_updated_version(
+                    appdata,
+                    first_lock["pid"],
+                    args.expected_version,
+                    args.update_timeout,
+                )
+            finally:
+                dialog_stop.set()
+                dialog_thread.join(timeout=5)
+            if clicked_dialogs != list(UPDATE_DIALOG_BUTTONS):
+                raise RuntimeError(
+                    f"updater confirmations were incomplete: {clicked_dialogs}"
+                )
             proc.wait(timeout=30)
             proc = None
             with sqlite3.connect(db_path) as db:

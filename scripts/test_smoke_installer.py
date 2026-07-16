@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import threading
 import urllib.request
 
 import pytest
@@ -100,6 +101,91 @@ def test_validate_candidate_feed_checks_version_and_assets(tmp_path):
 
     with pytest.raises(RuntimeError, match="does not match"):
         smoke_installer.validate_candidate_feed(tmp_path, "1.2.4")
+
+
+def test_write_update_feed_config_replaces_published_provider(tmp_path):
+    app_exe = tmp_path / "install" / "STL Studio.exe"
+    config = app_exe.parent / "resources" / "app-update.yml"
+    config.parent.mkdir(parents=True)
+    config.write_text("provider: github\nowner: example\n", encoding="utf-8")
+
+    assert smoke_installer.write_update_feed_config(
+        app_exe, "http://127.0.0.1:4321/"
+    ) == config
+    assert config.read_text(encoding="utf-8") == (
+        "provider: generic\nurl: http://127.0.0.1:4321/\n"
+    )
+
+
+def test_write_update_feed_config_requires_packaged_config(tmp_path):
+    with pytest.raises(RuntimeError, match="configuration not found"):
+        smoke_installer.write_update_feed_config(
+            tmp_path / "STL Studio.exe", "http://127.0.0.1:4321/"
+        )
+
+
+def test_automate_update_dialogs_clicks_expected_buttons_in_order():
+    class Buffer:
+        value = ""
+
+        @staticmethod
+        def __len__():
+            return 256
+
+    class FakeCtypes:
+        c_bool = object
+        c_void_p = object
+
+        @staticmethod
+        def WINFUNCTYPE(*_args):
+            return lambda callback: callback
+
+        @staticmethod
+        def create_unicode_buffer(_length):
+            return Buffer()
+
+    class FakeUser32:
+        labels = {
+            1: "STL Studio update available",
+            2: "Download",
+            3: "STL Studio update ready",
+            4: "Restart and Install",
+        }
+
+        def __init__(self):
+            self.messages = []
+
+        def GetWindowTextLengthW(self, hwnd):
+            return len(self.labels[hwnd])
+
+        def GetWindowTextW(self, hwnd, buffer, _length):
+            buffer.value = self.labels[hwnd]
+
+        @staticmethod
+        def EnumWindows(callback, _lparam):
+            for hwnd in (1, 3):
+                if not callback(hwnd, 0):
+                    break
+
+        @staticmethod
+        def EnumChildWindows(hwnd, callback, _lparam):
+            callback({1: 2, 3: 4}[hwnd], 0)
+
+        def PostMessageW(self, hwnd, message, _wparam, _lparam):
+            self.messages.append((hwnd, message))
+
+    user32 = FakeUser32()
+    clicked = []
+    smoke_installer.automate_update_dialogs(
+        threading.Event(),
+        clicked,
+        timeout_s=1,
+        user32=user32,
+        ctypes_module=FakeCtypes,
+    )
+
+    assert clicked == list(smoke_installer.UPDATE_DIALOG_BUTTONS)
+    assert user32.messages == [(2, 0x00F5), (4, 0x00F5)]
 
 
 def test_wait_for_updated_version_accepts_new_sidecar_version(tmp_path, monkeypatch):
