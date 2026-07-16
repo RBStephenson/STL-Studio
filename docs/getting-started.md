@@ -55,6 +55,14 @@ Before a major upgrade, use **Settings → Data Management → Download Backup**
 Downgrading after the database has been upgraded is not supported; restore the
 backup with the older version instead.
 
+When an existing database needs a schema upgrade, STL Studio first writes a
+consistent `pre_upgrade_<timestamp>.db` snapshot in the `backups` folder beside
+the catalog database. If migration fails, startup stops and the original database
+is restored automatically from that snapshot. The three newest upgrade snapshots
+are retained. Keep the snapshot when reporting an upgrade failure; after returning
+to the older app version, it can also be restored through **Settings → Data
+Management → Restore Backup**.
+
 ### 3. Tell it where your STLs are
 
 Open the **Settings** page and add the folder path(s) where your model library
