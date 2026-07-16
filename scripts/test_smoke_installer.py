@@ -69,3 +69,14 @@ def test_write_diagnostics_captures_logs_locks_and_relevant_processes(tmp_path, 
     assert report["sidecar_locks"] == [str(profile / "sidecar.lock.json")]
     assert report["relevant_processes"] == ['"STL Studio.exe","42"']
     assert (destination / "electron.log").read_text(encoding="utf-8") == "[startup] main-loaded\n"
+
+
+def test_wait_for_absent_returns_when_path_is_missing(tmp_path):
+    smoke_installer.wait_for_absent(tmp_path / "removed.exe", timeout_s=0)
+
+
+def test_wait_for_absent_times_out_when_path_remains(tmp_path):
+    path = tmp_path / "remaining.exe"
+    path.touch()
+    with pytest.raises(TimeoutError, match="path was not removed"):
+        smoke_installer.wait_for_absent(path, timeout_s=0)

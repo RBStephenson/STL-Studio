@@ -97,6 +97,16 @@ def wait_for_health(port: int, timeout_s: float = TIMEOUT_S) -> None:
     raise TimeoutError(f"installed app did not serve {url}")
 
 
+def wait_for_absent(path: Path, timeout_s: float = TIMEOUT_S) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if not path.exists():
+            return
+        time.sleep(0.25)
+    if path.exists():
+        raise TimeoutError(f"path was not removed after {timeout_s}s: {path}")
+
+
 def find_one(root: Path, pattern: str) -> Path:
     matches = sorted(root.rglob(pattern))
     if len(matches) != 1:
@@ -194,8 +204,7 @@ def main(argv: list[str] | None = None) -> int:
 
         uninstaller = find_one(install_dir, "Uninstall*.exe")
         subprocess.run([str(uninstaller), "/S"], check=True, env=env, timeout=120)
-        if app_exe.exists():
-            raise RuntimeError(f"uninstall left application executable behind: {app_exe}")
+        wait_for_absent(app_exe)
         if not db_path.is_file():
             raise RuntimeError("uninstall removed user database")
         print("smoke_installer: OK - install, launch, restart, persistence, and uninstall")
