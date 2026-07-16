@@ -9,6 +9,8 @@
 # --distpath dist-standalone) — CI chains this in Phase 4 (STUDIO-74).
 appId: com.stlstudio.desktop
 productName: STL Studio
+# Keep the packaged filename identical to the updater feed's safe URL.
+artifactName: STL-Studio-Setup-${version}.${ext}
 copyright: Copyright © STL Studio
 
 directories:
