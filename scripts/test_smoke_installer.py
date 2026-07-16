@@ -49,3 +49,23 @@ def test_wait_for_lock_reports_early_process_exit(tmp_path):
 
     with pytest.raises(RuntimeError, match="exited before startup with code 7"):
         smoke_installer.wait_for_lock(tmp_path, proc=ExitedProcess(), timeout_s=0.1)
+
+
+def test_write_diagnostics_captures_logs_locks_and_relevant_processes(tmp_path, monkeypatch):
+    app_log = tmp_path / "electron.log"
+    app_log.write_text("[startup] main-loaded\n", encoding="utf-8")
+    profile = tmp_path / "appdata" / "stl-studio-desktop"
+    profile.mkdir(parents=True)
+    (profile / "sidecar.lock.json").write_text("{}", encoding="utf-8")
+
+    class Result:
+        stdout = '"STL Studio.exe","42"\n"unrelated.exe","43"\n'
+
+    monkeypatch.setattr(smoke_installer.subprocess, "run", lambda *args, **kwargs: Result())
+    destination = tmp_path / "diagnostics"
+    smoke_installer.write_diagnostics(destination, app_log, [tmp_path / "appdata"])
+
+    report = json.loads((destination / "report.json").read_text(encoding="utf-8"))
+    assert report["sidecar_locks"] == [str(profile / "sidecar.lock.json")]
+    assert report["relevant_processes"] == ['"STL Studio.exe","42"']
+    assert (destination / "electron.log").read_text(encoding="utf-8") == "[startup] main-loaded\n"

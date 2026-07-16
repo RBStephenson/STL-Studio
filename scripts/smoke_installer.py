@@ -19,6 +19,44 @@ from pathlib import Path
 TIMEOUT_S = 60
 
 
+def write_diagnostics(
+    destination: Path,
+    app_log: Path,
+    search_roots: list[Path],
+) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    if app_log.is_file():
+        shutil.copy2(app_log, destination / "electron.log")
+
+    lock_paths: list[str] = []
+    for root in search_roots:
+        if not root.is_dir():
+            continue
+        for profile_name in ("STL Studio", "stl-studio-desktop"):
+            lock = root / profile_name / "sidecar.lock.json"
+            if lock.is_file():
+                lock_paths.append(str(lock))
+
+    processes = subprocess.run(
+        ["tasklist", "/FO", "CSV"],
+        check=False,
+        capture_output=True,
+        text=True,
+    ).stdout
+    relevant_processes = [
+        line
+        for line in processes.splitlines()
+        if "STL Studio.exe" in line or "stl-studio.exe" in line
+    ]
+    report = {
+        "sidecar_locks": lock_paths,
+        "relevant_processes": relevant_processes,
+    }
+    (destination / "report.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8"
+    )
+
+
 def wait_for_lock(
     appdata: Path,
     proc: subprocess.Popen | None = None,
@@ -70,10 +108,20 @@ def kill_tree(pid: int) -> None:
     subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], check=False, capture_output=True)
 
 
-def launch_and_probe(exe: Path, env: dict[str, str], appdata: Path) -> tuple[subprocess.Popen, dict]:
+def launch_and_probe(
+    exe: Path,
+    env: dict[str, str],
+    appdata: Path,
+    app_log,
+) -> tuple[subprocess.Popen, dict]:
     for lock_path in appdata.rglob("sidecar.lock.json"):
         lock_path.unlink(missing_ok=True)
-    proc = subprocess.Popen([str(exe)], env=env)
+    proc = subprocess.Popen(
+        [str(exe)],
+        env=env,
+        stdout=app_log,
+        stderr=subprocess.STDOUT,
+    )
     try:
         lock = wait_for_lock(appdata, proc=proc)
         wait_for_health(lock["port"])
@@ -86,6 +134,7 @@ def launch_and_probe(exe: Path, env: dict[str, str], appdata: Path) -> tuple[sub
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("installer", type=Path)
+    parser.add_argument("--diagnostics-dir", type=Path)
     args = parser.parse_args(argv)
     if sys.platform != "win32":
         parser.error("the installed-app smoke test requires Windows")
@@ -98,6 +147,9 @@ def main(argv: list[str] | None = None) -> int:
     install_dir = root / "install"
     appdata = root / "appdata"
     localappdata = root / "localappdata"
+    host_appdata = Path(os.environ.get("APPDATA", ""))
+    host_localappdata = Path(os.environ.get("LOCALAPPDATA", ""))
+    app_log = root / "electron.log"
     env = os.environ.copy()
     env.update({"APPDATA": str(appdata), "LOCALAPPDATA": str(localappdata)})
     db_path = localappdata / "STL-Inventory" / "stl_inventory.db"
@@ -105,7 +157,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         subprocess.run([str(installer), "/S", f"/D={install_dir}"], check=True, env=env, timeout=120)
         app_exe = find_one(install_dir, "STL Studio.exe")
-        proc, _ = launch_and_probe(app_exe, env, appdata)
+        with app_log.open("ab") as log:
+            proc, _ = launch_and_probe(app_exe, env, appdata, log)
         if not db_path.is_file():
             raise RuntimeError(f"installed app did not create database: {db_path}")
         kill_tree(proc.pid)
@@ -119,7 +172,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             db.commit()
 
-        proc, _ = launch_and_probe(app_exe, env, appdata)
+        with app_log.open("ab") as log:
+            proc, _ = launch_and_probe(app_exe, env, appdata, log)
         with sqlite3.connect(db_path) as db:
             marker = db.execute(
                 "SELECT value FROM app_settings WHERE key = ?", ("ci_installer_smoke",)
@@ -138,6 +192,14 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError("uninstall removed user database")
         print("smoke_installer: OK - install, launch, restart, persistence, and uninstall")
         return 0
+    except Exception:
+        if args.diagnostics_dir:
+            write_diagnostics(
+                args.diagnostics_dir.resolve(),
+                app_log,
+                [appdata, localappdata, host_appdata, host_localappdata],
+            )
+        raise
     finally:
         if proc is not None and proc.poll() is None:
             kill_tree(proc.pid)

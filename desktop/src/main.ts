@@ -48,6 +48,12 @@ let backendBooting = false;
 
 const IS_MAC = process.platform === "darwin";
 
+function startupLog(checkpoint: string): void {
+  console.log(`[startup] ${checkpoint}`);
+}
+
+startupLog("main-loaded");
+
 /** A NavTarget over a webContents' navigation history — drives both menus. */
 function navFor(wc: WebContents): NavTarget {
   const history = wc.navigationHistory;
@@ -228,6 +234,7 @@ async function bootBackendAndLoad(
   opts: { forceReveal?: boolean } = {},
 ): Promise<void> {
   if (backendBooting) return;
+  startupLog("backend-boot-begin");
   backendBooting = true;
   deps = runtimeDeps(app.getPath("userData"), LOCKFILE_NAME);
   const exePath = resolveBackendExe({
@@ -271,6 +278,7 @@ async function bootBackendAndLoad(
 // Single-instance lock: a second launch hands focus to the running window
 // instead of spawning a rival backend and a duplicate window.
 const gotLock = app.requestSingleInstanceLock();
+startupLog(`single-instance-lock=${gotLock ? "acquired" : "denied"}`);
 if (!gotLock) {
   app.quit();
 } else {
@@ -284,8 +292,10 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    startupLog(`ready userData=${app.getPath("userData")}`);
     installApplicationMenu();
     mainWindow = createWindow();
+    startupLog("window-created");
     await bootBackendAndLoad(mainWindow);
 
     app.on("activate", async () => {

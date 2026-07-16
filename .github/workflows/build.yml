@@ -148,7 +148,16 @@ jobs:
             Where-Object { $_.Name -notlike 'Uninstall*' } |
             Select-Object -First 1
           if (-not $installer) { throw 'NSIS installer not found' }
-          python scripts/smoke_installer.py $installer.FullName
+          python scripts/smoke_installer.py $installer.FullName --diagnostics-dir installer-smoke-diagnostics
+
+      - name: Upload installed-app smoke diagnostics
+        if: ${{ failure() && matrix.os == 'windows-latest' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: installed-app-smoke-diagnostics
+          path: installer-smoke-diagnostics
+          retention-days: 7
+          if-no-files-found: warn
 
       # ---- Linux: label the loose binary (Windows retires its raw exe in favour
       #      of the installer above) ----
