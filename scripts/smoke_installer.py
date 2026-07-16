@@ -27,6 +27,45 @@ UPDATE_DIALOG_BUTTONS = {
     "STL Studio update ready": "Restart and Install",
 }
 NSIS_BUTTON_PRIORITY = ("Install", "Next >", "Finish", "Close")
+UPDATE_PROFILE_PATHS = (
+    ("APPDATA", "stl-studio-desktop"),
+    ("APPDATA", "STL Studio"),
+    ("LOCALAPPDATA", "STL-Inventory"),
+    ("LOCALAPPDATA", "stl-studio-desktop"),
+)
+
+
+def prepare_data_paths(
+    root: Path,
+    update_rehearsal: bool,
+    environ: dict[str, str],
+) -> tuple[Path, Path, dict[str, str]]:
+    env = environ.copy()
+    if update_rehearsal:
+        missing = [name for name in ("APPDATA", "LOCALAPPDATA") if not env.get(name)]
+        if missing:
+            raise RuntimeError(f"update rehearsal requires environment paths: {missing}")
+        dirty = [
+            Path(env[variable]) / relative
+            for variable, relative in UPDATE_PROFILE_PATHS
+            if (Path(env[variable]) / relative).exists()
+        ]
+        if dirty:
+            raise RuntimeError(f"update rehearsal runner profile is not clean: {dirty}")
+        return Path(env["APPDATA"]), Path(env["LOCALAPPDATA"]), env
+
+    appdata = root / "appdata"
+    localappdata = root / "localappdata"
+    appdata.mkdir(parents=True)
+    localappdata.mkdir(parents=True)
+    env.update(
+        {
+            "APPDATA": str(appdata),
+            "LOCALAPPDATA": str(localappdata),
+            "STL_STUDIO_USER_DATA_DIR": str(appdata),
+        }
+    )
+    return appdata, localappdata, env
 
 
 def find_process_ids(image_name: str) -> set[int]:
@@ -374,20 +413,13 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(tempfile.mkdtemp(prefix="stl-studio-installed-smoke-"))
     install_dir = root / "install"
-    appdata = root / "appdata"
-    localappdata = root / "localappdata"
-    appdata.mkdir(parents=True)
-    localappdata.mkdir(parents=True)
     host_appdata = Path(os.environ.get("APPDATA", ""))
     host_localappdata = Path(os.environ.get("LOCALAPPDATA", ""))
     app_log = root / "electron.log"
-    env = os.environ.copy()
-    env.update(
-        {
-            "APPDATA": str(appdata),
-            "LOCALAPPDATA": str(localappdata),
-            "STL_STUDIO_USER_DATA_DIR": str(appdata),
-        }
+    appdata, localappdata, env = prepare_data_paths(
+        root,
+        candidate_dir is not None,
+        dict(os.environ),
     )
     db_path = localappdata / "STL-Inventory" / "stl_inventory.db"
     proc: subprocess.Popen | None = None

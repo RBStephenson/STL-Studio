@@ -124,6 +124,51 @@ def test_write_update_feed_config_requires_packaged_config(tmp_path):
         )
 
 
+def test_prepare_data_paths_isolates_ordinary_smoke(tmp_path):
+    appdata, localappdata, env = smoke_installer.prepare_data_paths(
+        tmp_path,
+        update_rehearsal=False,
+        environ={"KEEP": "value"},
+    )
+
+    assert appdata == tmp_path / "appdata"
+    assert localappdata == tmp_path / "localappdata"
+    assert env["APPDATA"] == str(appdata)
+    assert env["LOCALAPPDATA"] == str(localappdata)
+    assert env["STL_STUDIO_USER_DATA_DIR"] == str(appdata)
+    assert env["KEEP"] == "value"
+
+
+def test_prepare_data_paths_uses_clean_runner_profile_for_update(tmp_path):
+    roaming = tmp_path / "roaming"
+    local = tmp_path / "local"
+    roaming.mkdir()
+    local.mkdir()
+
+    assert smoke_installer.prepare_data_paths(
+        tmp_path / "working",
+        update_rehearsal=True,
+        environ={"APPDATA": str(roaming), "LOCALAPPDATA": str(local)},
+    )[:2] == (roaming, local)
+
+    (local / "STL-Inventory").mkdir()
+    with pytest.raises(RuntimeError, match="profile is not clean"):
+        smoke_installer.prepare_data_paths(
+            tmp_path / "working",
+            update_rehearsal=True,
+            environ={"APPDATA": str(roaming), "LOCALAPPDATA": str(local)},
+        )
+
+
+def test_prepare_data_paths_requires_windows_profile_environment(tmp_path):
+    with pytest.raises(RuntimeError, match="environment paths"):
+        smoke_installer.prepare_data_paths(
+            tmp_path,
+            update_rehearsal=True,
+            environ={},
+        )
+
+
 def test_automate_update_dialogs_clicks_expected_buttons_in_order():
     class Buffer:
         value = ""
