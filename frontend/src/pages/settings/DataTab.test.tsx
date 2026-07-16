@@ -100,4 +100,19 @@ describe("DataTab database health", () => {
     expect(screen.getByRole("button", { name: /deleting/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /cancel/i })).toBeDisabled();
   });
+
+  it("keeps the reset dialog open and reports a reset failure", async () => {
+    const { api } = await import("../../api/client");
+    vi.mocked(api.database.reset).mockRejectedValue(new Error("Recovery snapshot failed"));
+
+    render(<DataTab />);
+
+    await userEvent.click(screen.getByRole("button", { name: /delete all data/i }));
+    await userEvent.type(screen.getByPlaceholderText("ACKNOWLEDGED"), "ACKNOWLEDGED");
+    await userEvent.click(screen.getByRole("button", { name: /delete everything/i }));
+
+    expect(await screen.findByText("Recovery snapshot failed")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /delete all data/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete everything/i })).toBeEnabled();
+  });
 });

@@ -1034,6 +1034,13 @@ never modified.**
   open with a progress message while the snapshot is prepared. You'd then run a
   full scan to rebuild the index.
 
+Backup and restore are qualified as a full-database round trip, including saved
+settings, collections, variant-group membership, painting guides, reorganization
+history, and encrypted integration configuration. Reset recreates the complete
+empty schema and retains its populated pre-reset snapshot in the `backups` folder.
+If reset fails while creating the replacement database, STL Studio restores that
+snapshot instead of leaving the catalog unavailable.
+
 Repair, Restore, and Delete require a confirmation phrase because they can modify
 or replace the index. Download a backup before using them. (They cannot run while
 a scan is in progress.)
