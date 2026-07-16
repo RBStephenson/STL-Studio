@@ -114,6 +114,20 @@ def test_wait_for_absent_times_out_when_path_remains(tmp_path):
         smoke_installer.wait_for_absent(path, timeout_s=0)
 
 
+def test_wait_for_paths_absent_waits_for_each_path(tmp_path, monkeypatch):
+    paths = (tmp_path / "start-menu.lnk", tmp_path / "desktop.lnk")
+    calls = []
+    monkeypatch.setattr(
+        smoke_installer,
+        "wait_for_absent",
+        lambda path, timeout_s: calls.append((path, timeout_s)),
+    )
+
+    smoke_installer.wait_for_paths_absent(paths, timeout_s=12)
+
+    assert calls == [(paths[0], 12), (paths[1], 12)]
+
+
 def test_update_feed_serves_candidate_metadata(tmp_path):
     (tmp_path / "latest.yml").write_text("version: 1.2.3\n", encoding="utf-8")
     with smoke_installer.serve_update_feed(tmp_path) as feed_url:

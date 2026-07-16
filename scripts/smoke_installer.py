@@ -348,6 +348,12 @@ def wait_for_absent(path: Path, timeout_s: float = TIMEOUT_S) -> None:
         raise TimeoutError(f"path was not removed after {timeout_s}s: {path}")
 
 
+def wait_for_paths_absent(paths: tuple[Path, ...], timeout_s: float = TIMEOUT_S) -> None:
+    """Wait for NSIS to finish asynchronous shell-link cleanup."""
+    for path in paths:
+        wait_for_absent(path, timeout_s=timeout_s)
+
+
 def find_one(root: Path, pattern: str) -> Path:
     matches = sorted(root.rglob(pattern))
     if len(matches) != 1:
@@ -545,7 +551,7 @@ def main(argv: list[str] | None = None) -> int:
             uninstaller = find_one(install_dir, "Uninstall*.exe")
             subprocess.run([str(uninstaller), "/S"], check=True, env=env, timeout=120)
             wait_for_absent(app_exe)
-            require_paths(shortcuts, present=False, phase="uninstall")
+            wait_for_paths_absent(shortcuts)
             print(
                 "smoke_installer: OK - install, update, relaunch, version, persistence, and uninstall"
             )
@@ -566,7 +572,7 @@ def main(argv: list[str] | None = None) -> int:
         uninstaller = find_one(install_dir, "Uninstall*.exe")
         subprocess.run([str(uninstaller), "/S"], check=True, env=env, timeout=120)
         wait_for_absent(app_exe)
-        require_paths(shortcuts, present=False, phase="custom uninstall")
+        wait_for_paths_absent(shortcuts)
         if not db_path.is_file():
             raise RuntimeError("uninstall removed user database")
 
@@ -583,7 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         default_uninstaller = find_one(default_app_exe.parent, "Uninstall*.exe")
         subprocess.run([str(default_uninstaller), "/S"], check=True, env=env, timeout=120)
         wait_for_absent(default_app_exe)
-        require_paths(shortcuts, present=False, phase="default uninstall")
+        wait_for_paths_absent(shortcuts)
         if not db_path.is_file():
             raise RuntimeError("default uninstall removed user database")
         print(
