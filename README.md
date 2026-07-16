@@ -206,11 +206,12 @@ The **Paint Shelf** is always available in the nav. Enabling **Settings → Pain
 
 ## Development
 
-Windows packaging CI smoke-tests the generated NSIS installer end to end: it
-installs into an isolated runner directory, launches and restarts the packaged
-Electron app, verifies backend/database health and persistence, then uninstalls
-while confirming user data is retained. This is a packaging smoke gate, not a
-replacement for manual UI acceptance testing on a clean Windows machine.
+Windows packaging CI smoke-tests the generated NSIS installer end to end. It
+qualifies custom and default install directories, Start-menu and desktop
+shortcuts, repair/reinstall, packaged-app launch and restart, database
+persistence, and uninstall cleanup while confirming user data is retained.
+This is a packaging smoke gate, not a replacement for manual UI acceptance
+testing on a clean Windows machine.
 
 Release candidates also require the manually dispatched **Installed Update
 Smoke** workflow, which verifies the published-bootstrap → candidate updater

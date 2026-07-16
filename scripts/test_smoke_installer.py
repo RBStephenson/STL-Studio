@@ -8,6 +8,35 @@ import pytest
 import smoke_installer
 
 
+def test_installer_shortcuts_resolves_current_user_locations(tmp_path):
+    appdata = tmp_path / "roaming"
+    profile = tmp_path / "profile"
+    assert smoke_installer.installer_shortcuts(
+        {"APPDATA": str(appdata), "USERPROFILE": str(profile)}
+    ) == (
+        appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "STL Studio.lnk",
+        profile / "Desktop" / "STL Studio.lnk",
+    )
+
+
+def test_installer_shortcuts_requires_environment_paths():
+    with pytest.raises(RuntimeError, match="environment paths"):
+        smoke_installer.installer_shortcuts({})
+
+
+def test_require_paths_reports_missing_and_stale_paths(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.touch()
+
+    smoke_installer.require_paths((first,), present=True, phase="install")
+    smoke_installer.require_paths((second,), present=False, phase="uninstall")
+    with pytest.raises(RuntimeError, match="install expected paths to be created"):
+        smoke_installer.require_paths((first, second), present=True, phase="install")
+    with pytest.raises(RuntimeError, match="uninstall expected paths to be removed"):
+        smoke_installer.require_paths((first, second), present=False, phase="uninstall")
+
+
 def test_find_one_requires_exactly_one_match(tmp_path):
     expected = tmp_path / "STL Studio.exe"
     expected.touch()
@@ -83,6 +112,20 @@ def test_wait_for_absent_times_out_when_path_remains(tmp_path):
     path.touch()
     with pytest.raises(TimeoutError, match="path was not removed"):
         smoke_installer.wait_for_absent(path, timeout_s=0)
+
+
+def test_wait_for_paths_absent_waits_for_each_path(tmp_path, monkeypatch):
+    paths = (tmp_path / "start-menu.lnk", tmp_path / "desktop.lnk")
+    calls = []
+    monkeypatch.setattr(
+        smoke_installer,
+        "wait_for_absent",
+        lambda path, timeout_s: calls.append((path, timeout_s)),
+    )
+
+    smoke_installer.wait_for_paths_absent(paths, timeout_s=12)
+
+    assert calls == [(paths[0], 12), (paths[1], 12)]
 
 
 def test_update_feed_serves_candidate_metadata(tmp_path):

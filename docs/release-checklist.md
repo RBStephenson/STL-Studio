@@ -3,6 +3,10 @@
 Before approving a v1.0.0 release candidate:
 
 - Confirm the normal Tests, Build Check, CodeQL, and packaging jobs are green.
+- Require the Windows packaging smoke to pass its custom/default-directory,
+  shortcut creation/removal, repair/reinstall, relaunch, user-data retention,
+  and uninstall checks. Production certificate acquisition and signed-installer
+  verification remain separate release decisions and are not covered by this gate.
 - Run **Actions → Installed Update Smoke → Run workflow** with the latest
   supported published release as `bootstrap_tag`, the candidate ref, and a
   candidate semantic version newer than the bootstrap.
