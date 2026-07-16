@@ -16,3 +16,8 @@ Before approving a v1.0.0 release candidate:
 The workflow never uses the developer workstation or production user data. Its
 test-only updater override accepts only an explicit smoke-mode switch and an
 HTTP loopback feed URL.
+
+For bootstrap releases that predate the smoke hook, the harness replaces the
+installed copy's generated updater feed configuration with the loopback feed
+and clicks the existing Download and Restart confirmation dialogs. The
+published executable and updater implementation remain unchanged.
