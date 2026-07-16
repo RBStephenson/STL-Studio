@@ -31,6 +31,11 @@ import { createUpdateController, readAutoUpdateEnabled } from "./updater";
 import type { UpdateController } from "./updater";
 import { readUpdateSmokeConfig } from "./updateSmoke";
 import { readWindowState, saveWindowState } from "./windowState";
+import {
+  registerProcessFailureHandlers,
+  registerRendererFailureHandler,
+  type FailureUi,
+} from "./failureHandling";
 
 const PLACEHOLDER_HTML = join(__dirname, "..", "index.html");
 const SPLASH_HTML = join(__dirname, "..", "splash.html");
@@ -59,6 +64,35 @@ applyUserDataOverride(app, process.env.STL_STUDIO_USER_DATA_DIR);
 function startupLog(checkpoint: string): void {
   console.log(`[startup] ${checkpoint}`);
 }
+
+const failureUi: FailureUi = {
+  log(message, error) {
+    console.error(`[failure] ${message}`, error ?? "");
+  },
+  async showRendererFailure(detail) {
+    const { response } = await dialog.showMessageBox({
+      type: "error",
+      buttons: ["Reload STL Studio", "Quit"],
+      defaultId: 0,
+      cancelId: 1,
+      title: "STL Studio stopped responding",
+      message: "The application window closed unexpectedly",
+      detail: `${detail}\n\nReload the window to recover. Saved catalog data is unchanged.`,
+    });
+    return response === 0 ? "reload" : "quit";
+  },
+  showMainFailure(detail) {
+    dialog.showErrorBox(
+      "STL Studio encountered an internal error",
+      `${detail}\n\nClose and reopen STL Studio if the application no longer responds.`,
+    );
+  },
+  quit() {
+    app.quit();
+  },
+};
+
+registerProcessFailureHandlers(process, failureUi);
 
 startupLog("main-loaded");
 
@@ -271,6 +305,7 @@ function createWindow(): BrowserWindow {
   // looks hung while the backend boots; bootBackendAndLoad swaps to the app.
   win.once("ready-to-show", () => win.show());
   void win.loadFile(SPLASH_HTML);
+  registerRendererFailureHandler(win, failureUi);
 
   win.webContents.on("will-navigate", (event, url) => {
     if (!isBackendRetryUrl(url)) return;
