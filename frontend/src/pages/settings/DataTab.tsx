@@ -268,6 +268,19 @@ export default function DataTab() {
                 <AlertCircle size={14} className="shrink-0" /> {dangerError}
               </div>
             )}
+            {busy === "reset" && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex items-center gap-2 rounded-lg border border-sky-900/70 bg-sky-950/20 px-3 py-2 text-xs text-sky-300 mb-4"
+              >
+                <LoaderCircle size={14} className="animate-spin shrink-0" />
+                <span>
+                  <span className="font-semibold">Deleting library data...</span>{" "}
+                  Creating a recovery snapshot first; large libraries may take a few minutes.
+                </span>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <button
                 onClick={closeDanger}

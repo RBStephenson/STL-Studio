@@ -5,8 +5,10 @@ Like test_database_painting, these run against a real file-backed SQLite DB unde
 tmp_path (the snapshot logic resolves the data dir from the live DB file and uses
 the on-disk sqlite3 backup API), not the shared in-memory fixture.
 """
+
 import io
 import sqlite3
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,6 +56,7 @@ def _make_backup_upload(client):
 # Snapshot is taken before the destructive op
 # ---------------------------------------------------------------------------
 
+
 def test_reset_snapshots_before_wiping(file_db_client):
     client, db_path = file_db_client
     resp = client.post("/database/reset")
@@ -67,11 +70,65 @@ def test_reset_snapshots_before_wiping(file_db_client):
     assert len(snaps) == 1
     # The snapshot is a readable SQLite DB that looks like ours.
     tables = {
-        r[0] for r in sqlite3.connect(snaps[0]).execute(
+        r[0]
+        for r in sqlite3.connect(snaps[0]).execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         )
     }
     assert "models" in tables
+
+
+def test_reset_replaces_database_without_transactional_schema_drop(file_db_client, monkeypatch):
+    client, db_path = file_db_client
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("reset must replace the database instead of dropping tables")
+
+    monkeypatch.setattr(Base.metadata, "drop_all", fail_if_called)
+
+    resp = client.post("/database/reset")
+
+    assert resp.status_code == 200
+    with sqlite3.connect(db_path) as conn:
+        tables = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    assert "models" in tables
+
+
+def test_reset_restores_snapshot_when_empty_database_creation_fails(file_db_client, monkeypatch):
+    client, db_path = file_db_client
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO creators (name) VALUES ('Recovery Test')")
+        conn.commit()
+
+    def fail_create(*_args, **_kwargs):
+        raise RuntimeError("schema creation failed")
+
+    monkeypatch.setattr(Base.metadata, "create_all", fail_create)
+
+    with pytest.raises(RuntimeError, match="schema creation failed"):
+        client.post("/database/reset")
+
+    with sqlite3.connect(db_path) as conn:
+        creator = conn.execute("SELECT name FROM creators WHERE name = 'Recovery Test'").fetchone()
+    assert creator == ("Recovery Test",)
+
+
+def test_reset_file_removal_fails_loudly(tmp_path, monkeypatch):
+    db_path = tmp_path / "stl_inventory.db"
+    db_path.write_bytes(b"database")
+    original_unlink = Path.unlink
+
+    def deny_database_unlink(path, *args, **kwargs):
+        if path == db_path:
+            raise PermissionError("database is still open")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_database_unlink)
+
+    with pytest.raises(PermissionError, match="database is still open"):
+        database_router._unlink_live_database(db_path)
 
 
 def test_restore_snapshots_before_swapping(file_db_client):
@@ -133,6 +190,7 @@ def test_invalid_restore_takes_no_snapshot(file_db_client):
 # Health check and conservative repair
 # ---------------------------------------------------------------------------
 
+
 def test_database_health_reports_clean_database(file_db_client):
     client, _db_path = file_db_client
 
@@ -192,6 +250,7 @@ def test_repair_returns_current_health_when_already_clean(file_db_client):
 # Pruning keeps only the newest N per reason
 # ---------------------------------------------------------------------------
 
+
 def test_reset_prunes_to_keep_limit(file_db_client):
     client, db_path = file_db_client
     backups = _backups_dir(db_path)
@@ -234,6 +293,7 @@ def test_reset_and_restore_snapshots_are_pruned_independently(file_db_client):
 # ---------------------------------------------------------------------------
 # Restore/reset honor the library write lock (STUDIO-82)
 # ---------------------------------------------------------------------------
+
 
 def test_reset_returns_409_when_library_busy(file_db_client):
     """A reset must not wipe the DB while a reorganize apply/undo holds the write
