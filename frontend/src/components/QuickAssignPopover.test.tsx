@@ -153,8 +153,4 @@ describe("QuickAssignPopover (#172)", () => {
     );
   });
 
-  it("shows the quick-assign button on the ModelCard", async () => {
-    // Tested indirectly via ModelCard.test.tsx — button has aria-label
-    expect(true).toBe(true);
-  });
 });

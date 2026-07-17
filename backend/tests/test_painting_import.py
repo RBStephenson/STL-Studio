@@ -807,7 +807,6 @@ class TestRawBlocks:
 # real corpus parse + import report (schema-coverage / inventory gap lists)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not PRESTO.exists(), reason="corpus fixture not present")
 class TestRealCorpus:
     def _parse(self):
         html = PRESTO.read_text(encoding="utf-8")
@@ -991,7 +990,6 @@ class TestJsObjectToJson:
         assert json.loads(_js_object_to_json("{a: 'x', b: 'y'}")) == {"a": "x", "b": "y"}
 
 
-@pytest.mark.skipif(not CORPUS.exists(), reason="corpus fixture not present")
 def test_tab_level_callouts_gone_from_corpus_unmapped():
     """#271 step 1: across all 40 corpus guides, tab-level tip/warning/warn and
     stray intro <p> are now captured, so they no longer appear in any guide's

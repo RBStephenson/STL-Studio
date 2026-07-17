@@ -547,9 +547,9 @@ class TestOverrideRepath:
         preview = _preview(client)
         entry = preview["entries"][0]
         mid = preview["manifest_id"]
-        # Only meaningful if it actually moves; skip if in-place.
-        if entry["kind"] == "in_place":
-            pytest.skip("destination equals source — no repath to verify")
+        assert entry["kind"] != "in_place", (
+            "the deliberately messy source fixture must produce a move so override repathing is tested"
+        )
         resp = client.post("/reorganize/apply",
                            json={"manifest_id": mid, "entry_ids": [m.id]})
         assert resp.status_code == 200
@@ -567,8 +567,9 @@ class TestOverrideRepath:
         preview = _preview(client)
         entry = preview["entries"][0]
         mid = preview["manifest_id"]
-        if entry["kind"] == "in_place":
-            pytest.skip("destination equals source — no move to verify")
+        assert entry["kind"] != "in_place", (
+            "the deliberately messy source fixture must produce a move so no_group persistence is tested"
+        )
         resp = client.post("/reorganize/apply",
                            json={"manifest_id": mid, "entry_ids": [m.id]})
         assert resp.status_code == 200

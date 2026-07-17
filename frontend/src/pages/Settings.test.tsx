@@ -495,7 +495,7 @@ describe("Settings – Library name + import destination (#452)", () => {
     const input = await screen.findByDisplayValue("minis");
     await userEvent.clear(input);
     await userEvent.type(input, "terrain");
-    input.blur();
-    expect(api.scan.updateRoot).toHaveBeenCalledWith(7, { name: "terrain" });
+    await userEvent.tab();
+    await waitFor(() => expect(api.scan.updateRoot).toHaveBeenCalledWith(7, { name: "terrain" }));
   });
 });

@@ -1991,6 +1991,4 @@ These fixtures live in the painting test suite (pytest, in-memory SQLite) and ru
 
   
 
-*End of document. v1.0 = a painting-guide module inside STL-Inventory: authors guides (AI-drafted, human-edited), grounds every recipe in the Paint Shelf, links guides to the STL models they're printed from, and exports Patreon-ready PDFs. Reuses STL-Inventory's stack, SQLite DB, backup, packaging, and CI. Public reader designed-for but deferred. First open item: Q0 — keep this module out of STL-Inventory's public builds (feature flag or private branch). Ready to hand Sections 3, 6 & 7 (+ Appendices A/B) to Code, which already knows the STL-Inventory codebase. The 38-guide HTML importer (9.6) doubles as the schema's acceptance test, and the corpus itself (9.7) is the ground truth for the renderer, the AI's house style, and validator calibration.*
-
-  
+*End of document. v1.0 = a painting-guide module inside STL Studio: authors guides (AI-drafted, human-edited), grounds every recipe in the Paint Shelf, links guides to the STL models they're printed from, and exports Patreon-ready PDFs. Reuses STL Studio's stack, SQLite DB, backup, packaging, and CI. Public reader designed-for but deferred. Public-release inclusion is resolved through the default-off Painting Guides feature flag (Q0 above). The 38-guide HTML importer (9.6) doubles as the schema's acceptance test, and the corpus itself (9.7) is the ground truth for the renderer, the AI's house style, and validator calibration.*

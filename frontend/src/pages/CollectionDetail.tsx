@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, FolderOpen, Package, X } from "lucide-react";
 import { api, Model, Collection } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import { useToast } from "../context/ToastContext";
+import ErrorState from "../components/ErrorState";
+import { SkeletonPanel } from "../components/SkeletonBlock";
 
 export default function CollectionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -13,20 +15,27 @@ export default function CollectionDetail() {
   const [collection, setCollection] = useState<Collection | null>(null);
   const [models, setModels] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadCollection = useCallback(async () => {
     if (!id) return;
-    Promise.all([
-      api.collections.list(),
-      api.collections.getModels(collectionId),
-    ])
-      .then(([cols, mdls]) => {
-        setCollection(cols.find((c) => c.id === collectionId) ?? null);
-        setModels(mdls);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [cols, mdls] = await Promise.all([
+        api.collections.list(),
+        api.collections.getModels(collectionId),
+      ]);
+      setCollection(cols.find((c) => c.id === collectionId) ?? null);
+      setModels(mdls);
+    } catch (e) {
+      setLoadError((e as Error)?.message || "Could not load this collection.");
+    } finally {
+      setLoading(false);
+    }
   }, [id, collectionId]);
+
+  useEffect(() => { void loadCollection(); }, [loadCollection]);
 
   const removeModel = async (e: React.MouseEvent, modelId: number) => {
     e.preventDefault();
@@ -42,7 +51,20 @@ export default function CollectionDetail() {
     }
   };
 
-  if (loading) return <div className="p-8 text-text-secondary-alt animate-pulse">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="p-6">
+        <SkeletonPanel className="h-72 rounded-lg border border-border-subtle" data-testid="collection-loading-skeleton" />
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="p-6">
+        <ErrorState title="Couldn't load this collection" message={loadError} onRetry={() => void loadCollection()} />
+      </div>
+    );
+  }
   if (!collection) return <div className="p-8 text-text-secondary-alt">Collection not found.</div>;
 
   return (

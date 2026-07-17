@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, Lock, Cpu, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, Lock, Cpu, HardDrive, Download, type LucideIcon,
 } from "lucide-react";
 import SystemInfoPanel from "../components/SystemInfoPanel";
 
@@ -31,9 +31,10 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          STL Studio catalogues the 3D-model files already on your drives. It never
-          downloads or moves anything — it reads your folders, builds a searchable index,
-          and lets you browse, tag, preview, and plan prints.
+          STL Studio catalogues the 3D-model files already on your drives. Scanning is
+          read-only: it builds a searchable index so you can browse, tag, preview, and
+          plan prints. File-moving tools such as Import and Reorganize are separate,
+          opt-in actions that show a preview before they change anything.
         </p>
         <ol>
           <li>Open <strong>Settings</strong> and add the folder path(s) where your models live.</li>
@@ -41,7 +42,8 @@ const SECTIONS: Section[] = [
           <li>Browse the <strong>Library</strong>, filter to what you want, and start tagging and queueing prints.</li>
         </ol>
         <p className="text-text-secondary-alt">
-          Everything runs locally. Your library never leaves your machine.
+          Your catalog and model files stay on your machine. Optional AI and storefront
+          integrations make network requests only when you configure and use them.
         </p>
       </>
     ),
@@ -876,6 +878,11 @@ const SECTIONS: Section[] = [
           integrations (Cults3D, MyMiniFactory) that enrich your library with
           creator details and thumbnails.
         </p>
+        <p className="text-text-secondary-alt">
+          Configured AI providers receive the metadata needed for the action you start,
+          and storefront integrations contact their external sites. Your catalog database
+          and model files are not uploaded as a whole.
+        </p>
       </>
     ),
   },
@@ -998,6 +1005,48 @@ const SECTIONS: Section[] = [
     ),
   },
   {
+    id: "storage-recovery",
+    title: "External storage recovery",
+    icon: HardDrive,
+    body: (
+      <>
+        <p>
+          The default-off <strong>External storage recovery</strong> option under{" "}
+          <strong>Settings → Preferences → About &amp; Diagnostics</strong> monitors
+          enabled library storage. It shows brief, aggregated notices when external
+          storage is warming up, becomes unavailable, or returns.
+        </p>
+        <p>
+          Catalog metadata remains available while a drive is offline. After storage
+          returns, local previews receive one coordinated retry instead of repeatedly
+          retrying every missing image. If the Electron backend cannot finish starting,
+          the desktop recovery page also offers <strong>Try again</strong>.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: "desktop-updates",
+    title: "Desktop updates",
+    icon: Download,
+    body: (
+      <>
+        <p>
+          The installed Windows app checks published GitHub Releases after startup by
+          default. It asks before downloading an available update and again before
+          restarting to install it, so an update does not interrupt active work.
+        </p>
+        <p>
+          Disable automatic checks under{" "}
+          <strong>Settings → Preferences → Desktop Updates</strong>. You can still use{" "}
+          <strong>Help → Check for Updates…</strong> for a manual check. The setting
+          takes effect the next time the desktop app starts. Docker, source, Linux, and
+          unpackaged development builds do not use the Electron update channel.
+        </p>
+      </>
+    ),
+  },
+  {
     id: "troubleshooting",
     title: "Troubleshooting",
     icon: LifeBuoy,
@@ -1086,6 +1135,18 @@ const SECTIONS: Section[] = [
         </p>
         <p>Thank you for being here, and happy printing!</p>
         <p className="text-text-secondary-alt">— Brent the Programmer</p>
+        <p>
+          Need help? Review the{" "}
+          <a
+            href="https://github.com/RBStephenson/STL-Studio/wiki/Support-and-compatibility-policy"
+            target="_blank"
+            rel="noreferrer"
+          >
+            support and compatibility policy
+          </a>{" "}
+          for supported platforms, upgrade and backup expectations, and what to
+          share in a support request.
+        </p>
         <SystemInfoPanel />
       </>
     ),
