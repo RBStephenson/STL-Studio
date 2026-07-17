@@ -262,3 +262,129 @@ class TestScanInboxFolder:
         # Pre-existing inbox model unchanged
         r2 = client.get(f"/models/{item['id']}")
         assert r2.json()["is_inbox"] is True
+
+
+# ---------------------------------------------------------------------------
+# scan_inbox_folder(single_pack=True) — #1087
+# ---------------------------------------------------------------------------
+
+class TestSinglePackImport:
+    """Import Preview's per-pack Import button (POST /import/scan-folder)
+    always scopes to exactly one pack — by construction, a pack is one
+    product's content, never several creators' worth. single_pack=True skips
+    Approach B (every immediate subfolder -> its own creator) and instead
+    treats the whole pack as one creator, delegating to _walk_for_models —
+    the same product/variant detection a real scan root's creator folder
+    already gets."""
+
+    def test_format_variant_subfolders_become_one_creator_with_grouped_models(self, client, db):
+        """Regression for the reported case: a pack shaped like
+        "Product (supported)" / "Product (unsupported)" / "Product (chitubox)"
+        — previously split into bogus per-subfolder creators (#1048-style),
+        orphaning any pack-level metadata. Now: one creator (the pack's own
+        name), both STL-bearing variants indexed and auto-grouped into a
+        single "2 variants" card, the STL-less chitubox folder produces no
+        model at all."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            _make_stl_tree(inbox, {
+                "Widget Team (supported)": {
+                    "a_sup.stl": "solid a\nendsolid",
+                    "b_sup.stl": "solid b\nendsolid",
+                },
+                "Widget Team (unsupported)": {
+                    "a.stl": "solid a\nendsolid",
+                    "b.stl": "solid b\nendsolid",
+                },
+                "Widget Team (chitubox)": {
+                    "a.chitubox": "not an stl",
+                },
+            })
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(tmpdir, db=db, single_pack=True)
+
+        from app.models import Model
+        models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+        assert len(models) == 2
+        assert {m.creator.name for m in models} == {Path(tmpdir).name}
+        # Auto-grouped into one variant group, not left as two loose models.
+        group_ids = {m.variant_group_id for m in models}
+        assert len(group_ids) == 1
+        assert None not in group_ids
+
+        # The Library listing collapses the group to one representative row.
+        # ModelRead (the list-item schema) only carries creator_id — creator
+        # identity was already asserted above via the DB query.
+        r = client.get("/models?is_inbox=true")
+        items = r.json()["items"]
+        assert len(items) == 1
+        assert items[0]["variant_count"] == 2
+
+    def test_router_scan_folder_uses_single_pack_mode(self, client, db):
+        """POST /import/scan-folder (the real endpoint Import Preview calls)
+        must pass single_pack=True through to the scanner — the actual scan
+        run (threaded, its own DB session) is covered by the unit-level
+        tests above; this just pins the router's wiring."""
+        from app.models import ScanRoot
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db.add(ScanRoot(path=tmpdir, enabled=True, layout="{creator}"))
+            db.commit()
+
+            with patch("app.services.scanner.start_inbox_scan", return_value=True) as mock_start:
+                r = client.post("/import/scan-folder", json={"path": tmpdir})
+            assert r.status_code == 200
+            mock_start.assert_called_once()
+            args, kwargs = mock_start.call_args
+            assert kwargs.get("single_pack") is True
+
+    def test_single_pack_with_no_subfolders_still_indexes_the_pack(self, client, db):
+        """A pack with STLs directly in its own root (no variant subfolders
+        at all) — the plain, common case — must still work under
+        single_pack=True."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            (inbox / "part.stl").write_text("solid p\nendsolid")
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(tmpdir, db=db, single_pack=True)
+
+            from app.models import Model
+            models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+            assert len(models) == 1
+            assert models[0].creator.name == Path(tmpdir).name
+
+        r = client.get("/models?is_inbox=true")
+        assert len(r.json()["items"]) == 1
+
+    def test_flat_layout_auto_links_sup_files_by_filename_instead_of_splitting(self, client, db):
+        """A pack with NO variant subfolders, distinguishing supported vs
+        unsupported purely by a "-sup" filename suffix, has no folder signal
+        for _walk_for_models to split on — everything lands on one model.
+        Rather than leaving the -sup files as unrelated duplicate entries,
+        auto-link each to its base part by name (#1087 follow-up), the same
+        pairing "AI Organize > Link sups" already offers manually — the
+        user's explicit choice over splitting into two models."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            _make_stl_tree(inbox, {
+                "warrior-1.stl": "solid a\nendsolid",
+                "warrior-1-sup.stl": "solid a\nendsolid",
+                "warrior-2.stl": "solid b\nendsolid",
+                "warrior-2-sup.stl": "solid b\nendsolid",
+                "sergeant.stl": "solid c\nendsolid",  # no sup counterpart
+            })
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(tmpdir, db=db, single_pack=True)
+
+        from app.models import Model, STLFile
+        models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+        assert len(models) == 1
+        files = {f.filename: f for f in db.query(STLFile).filter_by(model_id=models[0].id).all()}
+        assert len(files) == 5
+        assert files["warrior-1-sup.stl"].sup_of_id == files["warrior-1.stl"].id
+        assert files["warrior-2-sup.stl"].sup_of_id == files["warrior-2.stl"].id
+        assert files["warrior-1.stl"].sup_of_id is None
+        assert files["sergeant.stl"].sup_of_id is None
