@@ -9,6 +9,7 @@ literal paths like `/grouping-strategy` on the sibling routers.
 import logging
 import os
 import shutil
+import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -404,32 +405,134 @@ def create_creator(body: CreatorCreate, db: Session = Depends(get_db)):
     return result
 
 
+def _repath_str(value: str | None, old_prefix: str, new_prefix: str) -> str | None:
+    """Rewrite `value` onto its new location if it lived inside the folder
+    that just moved; anything else (e.g. a gallery image shared from a parent
+    folder) is left alone — mirrors reorganize.py's _owned_local_image
+    caution about only ever touching paths actually owned by the moved
+    folder."""
+    if isinstance(value, str) and value.startswith(old_prefix):
+        return new_prefix + value[len(old_prefix):]
+    return value
+
+
+def _prune_empty_parents(path: str, stop_at: set[str]) -> None:
+    """Walk upward from `path`'s parent removing now-empty directories, one
+    level at a time, stopping the instant one isn't empty — os.rmdir refuses
+    a non-empty directory outright, so this can never sweep up unrelated
+    content — or we reach a configured scan root boundary. This is how a
+    creator's (now-vacated) directory tree actually disappears: not a single
+    rmtree of the whole thing, but the natural result of every model folder
+    under it having moved out."""
+    current = os.path.dirname(os.path.realpath(path))
+    while current and os.path.realpath(current) not in stop_at:
+        try:
+            os.rmdir(current)
+        except OSError:
+            break
+        current = os.path.dirname(current)
+
+
+def _free_inbox_destination(inbox_dir: str, leaf_name: str, db: Session) -> str:
+    """A destination under inbox_dir that collides with neither an existing
+    directory on disk nor another model's folder_path — suffixed like the
+    import-apply collision retry (a short random suffix) if the plain name
+    is already taken."""
+    candidate = os.path.join(inbox_dir, leaf_name)
+    for _ in range(50):
+        if not os.path.exists(candidate) and not db.query(Model).filter(Model.folder_path == candidate).first():
+            return candidate
+        candidate = os.path.join(inbox_dir, f"{leaf_name}-{uuid.uuid4().hex[:4]}")
+    raise HTTPException(status_code=409, detail="Could not find a free destination folder in the inbox")
+
+
 @router.delete("/creators/{creator_id}", status_code=204)
 def delete_creator(creator_id: int, db: Session = Depends(get_db)):
     """Delete a creator row. Any model still pointing at it (including
     excluded/hidden ones — this checks the raw FK relationship, not just what
-    the library grid shows) is sent back to the inbox instead of blocking the
-    delete: its creator_id is cleared and is_inbox set, exactly the state a
-    freshly-scanned, not-yet-organized model is in. The user then assigns a
-    new creator the same way they would for any inbox item — editing the
-    model's metadata — rather than needing to clean up models before they're
-    allowed to remove the creator.
+    the library grid shows) has its whole folder moved into the "_Inbox"
+    creator's directory first — the same sentinel creator a flat, no-
+    structure inbox scan already uses (scanner._inbox_scan) — with creator_id
+    cleared and is_inbox set, exactly the state a freshly-scanned,
+    not-yet-organized model is in. The user then assigns a new creator the
+    same way as any other inbox item: editing that model's metadata.
 
-    Files are never moved on disk here; is_inbox is the same triage flag
-    Import already uses to filter the library view (`?is_inbox=1`), not a
-    statement about where the files physically live. A model in this state
-    that reaches Reorganize before getting a new creator assigned falls back
-    to the existing "creator missing" (_Unknown Creator) sentinel — the same
-    path any other unclassifiable model already takes.
+    The move is a plain directory move (not a template-driven reorganize), so
+    everything physically in the model's folder — STLs, gallery images,
+    other_files, anything untracked — comes along as one unit; only the path
+    fields that pointed inside the old folder are rewritten onto the new one.
+    The old creator's directory is never force-deleted: once every model
+    under it has moved out, its now-empty directory tree disappears on its
+    own via _prune_empty_parents, which refuses to touch anything non-empty.
+
+    Raises 409 (leaving the creator and its models completely untouched) if
+    there's no scan root configured to anchor the inbox folder under —
+    nowhere safe to put the files.
     """
     creator = db.get(Creator, creator_id)
     if not creator:
         raise HTTPException(status_code=404, detail="Creator not found")
+    if creator.name.strip().lower() == "_inbox":
+        raise HTTPException(status_code=400, detail="Can't delete the built-in _Inbox creator.")
+
     orphaned = db.query(Model).filter(Model.creator_id == creator_id).all()
+
+    inbox_dir: str | None = None
+    if orphaned:
+        template = _stored_template(db, None)
+        try:
+            inbox_dir = reorganize.creator_scan_dir(db, template, "_Inbox", slugify=_slugify_all(db))
+        except ReorganizeTemplateError as e:
+            raise HTTPException(status_code=409, detail=f"Could not resolve the inbox destination: {e}")
+        if not inbox_dir:
+            raise HTTPException(
+                status_code=409,
+                detail="No library is configured to receive the inbox folder — add a scan root first.",
+            )
+        os.makedirs(inbox_dir, exist_ok=True)
+
+    scan_root_bounds = {os.path.realpath(r.path) for r in db.query(ScanRoot).all() if r.path}
+    inbox_creator = resolve_creator("_Inbox", db)
+    db.flush()
+
     for m in orphaned:
-        m.creator_id = None
+        old_folder = m.folder_path
+        if old_folder and os.path.isdir(old_folder):
+            leaf = os.path.basename(old_folder.rstrip("/\\")) or "model"
+            new_folder = _free_inbox_destination(inbox_dir, leaf, db)
+            try:
+                shutil.move(old_folder, new_folder)
+            except OSError as e:
+                _log.warning("Could not move %r to inbox for creator delete: %s", old_folder, e)
+            else:
+                m.folder_path = new_folder
+                for f in m.stl_files:
+                    f.path = _repath_str(f.path, old_folder, new_folder)
+                m.thumbnail_path = _repath_str(m.thumbnail_path, old_folder, new_folder)
+                m.primary_image_path = _repath_str(m.primary_image_path, old_folder, new_folder)
+                if isinstance(m.image_paths, list):
+                    m.image_paths = [_repath_str(p, old_folder, new_folder) for p in m.image_paths]
+                if isinstance(m.removed_image_paths, list):
+                    m.removed_image_paths = [_repath_str(p, old_folder, new_folder) for p in m.removed_image_paths]
+                if isinstance(m.other_files, list):
+                    m.other_files = [_repath_str(p, old_folder, new_folder) for p in m.other_files]
+                # Cached Set-Thumbnail walk of the old folder — stale now, and
+                # harmless to drop: it's rebuilt on next open.
+                m.image_manifest = None
+                m.image_manifest_sig = None
+                _prune_empty_parents(old_folder, scan_root_bounds)
+
+        m.creator_id = inbox_creator.id
         m.is_inbox = True
         m.updated_at = utcnow()
+
+    # Committed separately, before the delete: every model must actually be
+    # re-pointed at "_Inbox" in the database first. Deleting `creator` in the
+    # same flush risks the ORM's default nullify-on-parent-delete cascade
+    # processing these same rows and clobbering the reassignment back to
+    # NULL instead of leaving it at the new creator's id.
+    db.commit()
+
     db.delete(creator)
     db.commit()
 
