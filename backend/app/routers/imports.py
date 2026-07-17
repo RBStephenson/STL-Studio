@@ -216,9 +216,12 @@ def scan_folder(body: InboxScanRequest, db: Session = Depends(get_db)):
     # Launch off the request path via scanner.start_inbox_scan (shared job runner,
     # STUDIO-59): it takes the write lock synchronously so the 200 is authoritative,
     # returns False when the library is busy, and releases the lock on launch
-    # failure. Same launcher /scan/inbox uses.
+    # failure. Same launcher /scan/inbox uses. single_pack=True (#1087): this
+    # endpoint is always scoped to exactly one pack (Import Preview's per-pack
+    # Import button, or the browse-a-folder-directly flow) — never a multi-creator
+    # dump, unlike /scan/inbox.
     try:
-        started = scanner.start_inbox_scan(str(p))
+        started = scanner.start_inbox_scan(str(p), single_pack=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start import: {e}")
     if not started:
@@ -540,6 +543,75 @@ def _move_non_stl_files(
             m.thumbnail_path = remapped if os.path.exists(remapped) else None
 
 
+def _copy_shared_pack_images(
+    db: Session, src: str, eligible_ids: list[int],
+    all_folder_map: dict[int, str], all_old_to_new: dict[str, str],
+) -> None:
+    """A single-pack scan (#1087) attaches gallery images sitting at the pack
+    ROOT to every nested format-variant model (boundary=inbox at scan time),
+    so two sibling variants' image_paths can point at the exact same source
+    file outside either model's own folder_path. _move_non_stl_files above
+    only walks each model's own folder, so those pack-root images are never
+    relocated — image_paths keeps pointing at the old /import location, which
+    stops resolving once the model leaves inbox (the file-serving allowlist
+    only trusts an is_inbox model's own folder_path), so the gallery goes
+    blank despite everything else importing fine.
+
+    Copies (not moves — siblings may share the same source image) any
+    still-existing pack-root image referenced in a model's image_paths OR
+    thumbnail_path into that model's own new folder, and remaps the entry to
+    the copy. thumbnail_path drives the Library grid card image — leaving it
+    stale is what made the grid stay blank even after image_paths (used by
+    the model detail page's filmstrip) was already fixed."""
+    try:
+        src_resolved = Path(src).resolve()
+    except OSError:
+        return
+    models = db.query(Model).filter(Model.id.in_(eligible_ids)).all()
+    for m in models:
+        old_folder = all_folder_map.get(m.id)
+        new_folder = old_folder and all_old_to_new.get(old_folder)
+        if not new_folder or not os.path.isdir(new_folder):
+            continue
+        new_resolved = Path(new_folder).resolve()
+
+        def _relocate(path_str: str) -> tuple[str, bool]:
+            """Return (possibly-remapped path, changed?)."""
+            ip = Path(path_str)
+            try:
+                ip_resolved = ip.resolve()
+            except OSError:
+                return path_str, False
+            if ip_resolved.is_relative_to(new_resolved) or not ip_resolved.is_relative_to(src_resolved):
+                return path_str, False  # already relocated, or not part of this pack
+            if not ip_resolved.exists():
+                return path_str, False  # dead reference — not this fix's job
+            dst = new_resolved / ip_resolved.name
+            try:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dst.exists():
+                    shutil.copy2(str(ip_resolved), str(dst))
+                return str(dst), True
+            except OSError as e:
+                logger.warning("Could not copy shared pack image %r -> %r: %s", ip_resolved, dst, e)
+                return path_str, False
+
+        changed = False
+        remapped: list[str] = []
+        for img in (m.image_paths or []):
+            new_path, did_change = _relocate(img)
+            remapped.append(new_path)
+            changed = changed or did_change
+        if changed:
+            m.image_paths = remapped
+
+        if m.thumbnail_path:
+            new_thumb, thumb_changed = _relocate(m.thumbnail_path)
+            if thumb_changed:
+                m.thumbnail_path = new_thumb
+    db.commit()
+
+
 def _cleanup_non_stl_folders(old_to_new: dict[str, str], db: Session) -> None:
     """Move non-STL files from import folders to their library destinations and
     remove the source folder. Only runs when the destination already exists on
@@ -559,7 +631,18 @@ def _cleanup_non_stl_folders(old_to_new: dict[str, str], db: Session) -> None:
         try:
             _move_non_stl_files(old_folder, new_folder, dest_models, db)
             db.commit()
+            # "new_folder exists" doesn't prove old_folder's own files ever
+            # landed there — it can just as easily be a stray/partial
+            # destination from an interrupted earlier run. Only remove
+            # old_folder once nothing real is left in it (#1087 data-loss
+            # incident — see the matching guard in _run_import_apply_job).
             old_resolved = os.path.realpath(old_folder)
+            if any(True for _ in Path(old_resolved).rglob("*") if _.is_file()):
+                logger.warning(
+                    "Leaving %r in place — still has unaccounted-for files "
+                    "after cleanup (not confirmed fully moved)", old_resolved,
+                )
+                continue
             try:
                 shutil.rmtree(old_resolved)
             except OSError as e:
@@ -594,10 +677,23 @@ def _retry_with_suffix(
     return resp, retry_ids
 
 
-def _cleanup_stale_source_dirs(db: Session, src: str) -> None:
+def _cleanup_stale_source_dirs(db: Session, src: str, force_remove_root: bool = False) -> None:
     """Remove now-empty directories left behind in the source root after a
     move. Best-effort: a containment/validation miss skips cleanup rather than
-    failing the caller, and any unexpected error is logged, not raised."""
+    failing the caller, and any unexpected error is logged, not raised.
+
+    ``force_remove_root`` (#1087): when the caller knows every inbox model
+    under ``src`` was successfully moved (nothing left ineligible), whatever
+    remains directly in the pack root is import scaffolding no model
+    references any more — untracked slicer project files (e.g.
+    ``*.chitubox``), a ``config.orynt3d``, or a pack-root gallery image
+    that's already been copied into each variant's own destination by
+    ``_copy_shared_pack_images``. The default (conservative, empty-dirs-only)
+    prune below would leave all of that behind forever, since it never had a
+    tracked file of its own to be removed alongside. Only reachable from the
+    single-pack Import Preview apply flow, where ``inbox_source`` scoping in
+    build_manifest guarantees ``src`` is exactly the one pack folder just
+    fully processed — not a shared ancestor of other, untouched packs."""
     matched_root = None
     for _base in _allowed_bases(db):
         _b = os.path.realpath(os.path.expanduser(_base))
@@ -620,6 +716,9 @@ def _cleanup_stale_source_dirs(db: Session, src: str) -> None:
             raise ValueError("source must be within a configured scan root")
         if not os.path.isdir(safe_src):
             raise ValueError("source is not an existing directory")
+        if force_remove_root:
+            shutil.rmtree(safe_src)
+            return
         for dirpath, _, filenames in os.walk(safe_src, topdown=False):
             if not filenames:
                 dirpath_resolved = os.path.realpath(dirpath)
@@ -649,6 +748,7 @@ def _run_import_apply_job(
     all_folder_map: dict[int, str],
     slugify_all: bool,
     slugify_filenames: bool,
+    is_single_pack: bool = False,
 ) -> None:
     """Background body for POST /import/apply once there's real work to do.
     Moving files (and the best-effort cleanup after) can take a while for a
@@ -718,8 +818,26 @@ def _run_import_apply_job(
                     if old == old_folder and mid in model_by_id
                 ]
                 _move_non_stl_files(old_folder, new_folder, models_here, db)
-                # Resolve before rmtree so symlink traversal is collapsed first.
+                # Resolve before checking/removing so symlink traversal is
+                # collapsed first. "new_folder already exists" is not proof
+                # this old_folder's own STLs were actually moved there — it
+                # can just as easily be a stray/partial destination left by
+                # an earlier interrupted run (e.g. the apply job's process
+                # dying mid-move). Blindly rmtree-ing here deleted 9 STL
+                # files from a still-ineligible model that never got a
+                # chance to move (#1087 data-loss incident) — only remove
+                # old_folder once _move_non_stl_files has emptied it out;
+                # any file still sitting in it (most commonly STLs an
+                # ineligible/partial model never got to move) means it's
+                # not actually done, so leave it for a future retry instead
+                # of discarding it.
                 old_resolved = os.path.realpath(old_folder)
+                if any(True for _ in Path(old_resolved).rglob("*") if _.is_file()):
+                    logger.warning(
+                        "Leaving %r in place — still has unaccounted-for files "
+                        "after cleanup (not confirmed fully moved)", old_resolved,
+                    )
+                    continue
                 try:
                     shutil.rmtree(old_resolved)
                 except OSError as rmtree_err:
@@ -728,7 +846,18 @@ def _run_import_apply_job(
         except Exception:
             logger.exception("Non-STL file move/cleanup failed; STL files were already moved successfully")
 
-        _cleanup_stale_source_dirs(db, src)
+        try:
+            _copy_shared_pack_images(db, src, eligible_ids, all_folder_map, all_old_to_new)
+        except Exception:
+            logger.exception("Shared pack-root image copy failed (non-fatal)")
+
+        # Every inbox model build_manifest found under src is now accounted
+        # for (moved) — nothing left ineligible means it's safe to remove the
+        # whole pack folder outright, not just prune what's now empty. Only
+        # for a single-pack apply — src is the whole mapped root in the
+        # "Import All" case, and force-removing that could delete files no
+        # model here ever touched (see is_single_pack above).
+        _cleanup_stale_source_dirs(db, src, force_remove_root=is_single_pack and not ineligible)
 
         final = ImportApplyResponse(
             manifest_id=result.manifest_id,
@@ -764,6 +893,14 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
     mapping = _mapped_source_for(db, src)
     if not mapping:
         raise HTTPException(status_code=400, detail="No destination library mapped for this source.")
+    # A mapping is set once on the whole source root the user picked (e.g.
+    # `/import`) via the "Import All" flow, which applies that exact root —
+    # `src == mapping.source_path` there. The Import Preview per-pack button
+    # instead applies one specific pack subfolder underneath it. Only the
+    # latter is safe to remove wholesale on a fully-successful apply (#1087):
+    # sweeping the whole mapped root could delete not-yet-scanned files that
+    # were never part of any model this apply touched.
+    is_single_pack = os.path.normcase(src) != os.path.normcase(os.path.realpath(mapping.source_path))
 
     # Use {creator}/{title} template so imports land in creator/slug-of-title.
     # slugify_title=True converts the {title} segment to a lowercase-dashes slug.
@@ -819,6 +956,7 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
         manifest_id=resp.manifest_id, eligible_ids=eligible_ids, ineligible=ineligible,
         src=src, all_old_to_new=all_old_to_new, all_folder_map=all_folder_map,
         slugify_all=slugify_all, slugify_filenames=slugify_filenames,
+        is_single_pack=is_single_pack,
     )
     if handle is None:
         raise HTTPException(status_code=409, detail="An import is already in progress.")

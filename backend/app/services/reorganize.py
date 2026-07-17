@@ -25,6 +25,7 @@ from app.models import (
     PackOverride,
     ScanRoot,
 )
+from app.services import name_parser
 from app.services.path_sanitize import path_over_length, sanitize_segment, slug_filename
 from app.services.reorganize_template import VALID_FIELDS, parse_template, render_segments
 
@@ -321,8 +322,56 @@ def build_manifest(
                                         slugify_filenames=slugify_filenames))
 
     _detect_collisions(entries)
+    if inbox_source is not None:
+        # Import-apply has no interactive collision-resolution step (#1087):
+        # unlike the Reorganize page, a blocked entry here is a dead end for
+        # the user rather than just a hint. Silently fold an available
+        # suggested_suffix into the title so the import can proceed.
+        entries = _auto_apply_import_suffixes(
+            entries, models, segments, root_keys, pack_paths, overrides, _dest_for,
+            slugify_title=slugify_title, slugify_all=slugify_all,
+            slugify_filenames=slugify_filenames,
+        )
     _detect_overlaps(entries)
     return Manifest(template=canonical_template, entries=entries, _root_keys=[k for _, k in root_keys])
+
+
+def _auto_apply_import_suffixes(
+    entries: list[Entry],
+    models: list[Model],
+    segments: list[str],
+    root_keys: list[tuple[str, str]],
+    pack_paths: list[str],
+    overrides: dict[int, dict],
+    dest_for,
+    *,
+    slugify_title: bool,
+    slugify_all: bool,
+    slugify_filenames: bool,
+) -> list[Entry]:
+    """Resolve import-apply collisions that have an unambiguous
+    ``suggested_suffix`` by appending it to the title and rebuilding the
+    entry, then re-checking for collisions. Entries without a suggestion
+    (or whose suggestion doesn't resolve the collision) are left as-is and
+    stay blocked, same as before."""
+    if not any(e.collision and e.suggested_suffix for e in entries):
+        return entries
+    by_id = {m.id: m for m in models}
+    rebuilt = []
+    changed = False
+    for e in entries:
+        if e.collision and e.suggested_suffix:
+            m = by_id[e.model_id]
+            ov = dict(overrides.get(m.id) or {})
+            ov.setdefault("suffix", e.suggested_suffix)
+            e = _build_entry(m, segments, root_keys, pack_paths, ov, dest_for(m),
+                              slugify_title=slugify_title, slugify_all=slugify_all,
+                              slugify_filenames=slugify_filenames)
+            changed = True
+        rebuilt.append(e)
+    if changed:
+        _detect_collisions(rebuilt)
+    return rebuilt
 
 
 def _boundary_key(value: str) -> str:
@@ -636,6 +685,15 @@ def _build_entry(
     src_dirs: dict[str, str] = {}
     is_symlink = False
     missing_files_on_disk = False
+    # Two distinct source filenames can collapse to the identical destination
+    # name — slugify_filenames strips enough (e.g. "arm_2_R_sup.stl" and
+    # "arm_2_R__sup.stl" both slug to "arm-2-r-sup.stl"), or a source folder
+    # can just have two files differing only by case. Left unchecked, the
+    # second file's move silently overwrites the first on some filesystems
+    # or hard-fails apply outright on others (#1087 — a real build-kit pack
+    # hit this and lost the second file). Track destination names already
+    # claimed within this model and disambiguate with a numeric suffix.
+    dest_name_counts: dict[str, int] = {}
     for f in m.stl_files:
         size, mtime_ns, link, is_missing = _stat_file_cached(f.path)
         is_symlink = is_symlink or link
@@ -648,6 +706,12 @@ def _build_entry(
         dest_filename = f.filename or os.path.basename(f.path or "")
         if slugify_filenames and dest_filename:
             dest_filename = slug_filename(dest_filename)
+        dest_key = dest_filename.casefold()
+        count = dest_name_counts.get(dest_key, 0) + 1
+        dest_name_counts[dest_key] = count
+        if count > 1:
+            stem, ext = os.path.splitext(dest_filename)
+            dest_filename = f"{stem}-{count}{ext}"
         files.append(FileMove(
             stl_file_id=f.id,
             current_path=_canon(f.path),
@@ -874,12 +938,23 @@ def _detect_collisions(entries: list[Entry]) -> None:
 
 
 def _source_suffix(source_dir: str) -> str | None:
-    """Return a safe suffix for a strong variant-like source-folder name."""
+    """Return a safe suffix for a strong variant-like source-folder name.
+
+    Falls back to :func:`name_parser.support_status` for print-format-variant
+    folders ("... (supported)" / "... (unsupported)") that don't match the
+    Alt/V2/Version pattern above but are just as reliable a distinguishing
+    signal (#1087) — common when a single pack's Approach-B/single-pack scan
+    lands two variants of the same product in one collision group."""
     leaf = _canon(source_dir).rsplit("/", 1)[-1].strip()
-    if not leaf or not _SOURCE_SUFFIX_RE.fullmatch(leaf):
+    if not leaf:
         return None
-    suffix = sanitize_segment(leaf, slugify=True).value
-    return suffix or None
+    if _SOURCE_SUFFIX_RE.fullmatch(leaf):
+        suffix = sanitize_segment(leaf, slugify=True).value
+        return suffix or None
+    status = name_parser.support_status(leaf)
+    if status:
+        return sanitize_segment(status, slugify=True).value or None
+    return None
 
 
 def _detect_overlaps(entries: list[Entry]) -> None:
