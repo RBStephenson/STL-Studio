@@ -1,6 +1,6 @@
 """Tests for manually adding a creator and the model-detail "unorganized"
 indicator (reorganize destination vs. current folder_path)."""
-from app.models import AppSetting, Creator, ScanRoot
+from app.models import AppSetting, Creator, Model, ScanRoot
 from tests.conftest import make_creator, make_model, make_stl_file
 
 
@@ -62,28 +62,61 @@ class TestDeleteCreator:
         assert resp.status_code == 204
         assert db.query(Creator).filter_by(id=creator.id).first() is None
 
-    def test_blocked_while_the_creator_still_has_models(self, client, db):
+    def test_models_sent_to_inbox_instead_of_blocking_the_delete(self, client, db):
+        """Deleting a creator with models attached no longer blocks — those
+        models are cleared to no creator and flagged is_inbox, exactly like a
+        freshly-scanned, not-yet-organized model, so the user assigns a new
+        creator by editing that model's metadata."""
         creator = make_creator(db, name="Abe3D")
-        make_model(db, creator, name="Bust", character="Joker")
+        m = make_model(db, creator, name="Bust", character="Joker")
         db.commit()
+        model_id = m.id
 
         resp = client.delete(f"/models/creators/{creator.id}")
-        assert resp.status_code == 409
-        assert "1 model" in resp.json()["detail"]
-        # Not deleted — still there for a follow-up request.
-        assert db.query(Creator).filter_by(id=creator.id).first() is not None
+        assert resp.status_code == 204
+        assert db.query(Creator).filter_by(id=creator.id).first() is None
 
-    def test_blocked_even_for_an_excluded_model(self, client, db):
-        """The safety check counts every model row referencing this creator,
-        not just the ones the library grid shows — an excluded model is still
-        a real FK reference that a delete would orphan."""
+        db.expire_all()
+        moved = db.get(Model, model_id)
+        assert moved is not None
+        assert moved.creator_id is None
+        assert moved.is_inbox is True
+        # The model itself (and its files) are untouched otherwise.
+        assert moved.character == "Joker"
+
+    def test_excluded_model_also_sent_to_inbox(self, client, db):
+        """Same treatment regardless of the excluded/hidden flag — this
+        checks the raw FK relationship, not just what the library grid shows,
+        so nothing is left silently pointing at a deleted creator."""
         creator = make_creator(db, name="Abe3D")
         m = make_model(db, creator, name="Bust", character="Joker")
         m.excluded = True
         db.commit()
+        model_id = m.id
 
         resp = client.delete(f"/models/creators/{creator.id}")
-        assert resp.status_code == 409
+        assert resp.status_code == 204
+
+        db.expire_all()
+        moved = db.get(Model, model_id)
+        assert moved.creator_id is None
+        assert moved.is_inbox is True
+
+    def test_multiple_models_all_sent_to_inbox(self, client, db):
+        creator = make_creator(db, name="Abe3D")
+        m1 = make_model(db, creator, name="Bust", character="Joker")
+        m2 = make_model(db, creator, name="Statue", character="Riddler")
+        db.commit()
+        ids = [m1.id, m2.id]
+
+        resp = client.delete(f"/models/creators/{creator.id}")
+        assert resp.status_code == 204
+
+        db.expire_all()
+        for mid in ids:
+            m = db.get(Model, mid)
+            assert m.creator_id is None
+            assert m.is_inbox is True
 
     def test_unknown_creator_is_404(self, client, db):
         resp = client.delete("/models/creators/999999")

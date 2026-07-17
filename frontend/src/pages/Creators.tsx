@@ -65,7 +65,9 @@ export default function Creators() {
     if (deletingId !== null) return;
     const ok = await confirm({
       title: "Delete this creator?",
-      message: `"${c.name}" will be permanently deleted. This cannot be undone.`,
+      message: c.model_count > 0
+        ? `"${c.name}" will be permanently deleted. Its ${c.model_count} model${c.model_count !== 1 ? "s" : ""} will be sent back to the inbox so you can assign a new creator — they are not deleted.`
+        : `"${c.name}" will be permanently deleted. This cannot be undone.`,
       confirmLabel: "Delete",
       destructive: true,
     });

@@ -25,7 +25,8 @@ vi.mock("../api/client", async (importOriginal) => {
 const toastMock = vi.fn();
 vi.mock("../context/ToastContext", () => ({ useToast: () => ({ toast: toastMock }) }));
 vi.mock("../components/RefreshEnrich", () => ({ default: () => null }));
-vi.mock("../context/ConfirmContext", () => ({ useConfirm: () => vi.fn(async () => true) }));
+const confirmMock = vi.fn(async () => true);
+vi.mock("../context/ConfirmContext", () => ({ useConfirm: () => confirmMock }));
 
 function renderPage() {
   return render(<MemoryRouter><Creators /></MemoryRouter>);
@@ -76,21 +77,59 @@ describe("Creators delete", () => {
     expect(toastMock).toHaveBeenCalledWith(expect.stringContaining("deleted"), "success");
   });
 
-  it("surfaces the server's blocked-deletion message instead of deleting", async () => {
-    const { api, ApiError } = await import("../api/client");
+  it("warns that the creator's models go back to the inbox, not that they're deleted", async () => {
+    const { api } = await import("../api/client");
     vi.mocked(api.models.creators).mockResolvedValueOnce(CREATORS);
-    vi.mocked(api.models.deleteCreator).mockRejectedValueOnce(
-      new ApiError(409, 'Can\'t delete "Toon Studios" — it still has 12 models. Move or delete those first.'),
+    renderPage();
+    await screen.findByText("Toon Studios");
+
+    await userEvent.click(screen.getByRole("button", { name: /Delete Toon Studios/i }));
+
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("sent back to the inbox") }),
     );
+  });
+
+  it("warns plainly when the creator has no models to relocate", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.models.creators).mockResolvedValueOnce([
+      { id: 2, name: "Empty Studio", source_url: null, model_count: 0 },
+    ]);
+    renderPage();
+    await screen.findByText("Empty Studio");
+
+    await userEvent.click(screen.getByRole("button", { name: /Delete Empty Studio/i }));
+
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.not.stringContaining("inbox") }),
+    );
+  });
+
+  it("does nothing when the confirm dialog is declined", async () => {
+    confirmMock.mockResolvedValueOnce(false);
+    const { api } = await import("../api/client");
+    vi.mocked(api.models.creators).mockResolvedValueOnce(CREATORS);
+    renderPage();
+    await screen.findByText("Toon Studios");
+
+    await userEvent.click(screen.getByRole("button", { name: /Delete Toon Studios/i }));
+
+    expect(api.models.deleteCreator).not.toHaveBeenCalled();
+    expect(screen.getByText("Toon Studios")).toBeInTheDocument();
+  });
+
+  it("surfaces a delete failure as a toast without removing the card", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.models.creators).mockResolvedValueOnce(CREATORS);
+    vi.mocked(api.models.deleteCreator).mockRejectedValueOnce(new Error("Network error"));
     renderPage();
     await screen.findByText("Toon Studios");
 
     await userEvent.click(screen.getByRole("button", { name: /Delete Toon Studios/i }));
 
     await vi.waitFor(() => {
-      expect(toastMock).toHaveBeenCalledWith(expect.stringContaining("still has 12 models"), "error");
+      expect(toastMock).toHaveBeenCalledWith("Network error", "error");
     });
-    // Not removed — the card is still there since deletion was blocked.
     expect(screen.getByText("Toon Studios")).toBeInTheDocument();
   });
 });

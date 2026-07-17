@@ -406,23 +406,30 @@ def create_creator(body: CreatorCreate, db: Session = Depends(get_db)):
 
 @router.delete("/creators/{creator_id}", status_code=204)
 def delete_creator(creator_id: int, db: Session = Depends(get_db)):
-    """Delete a creator row. Blocked while any model still references it
-    (including excluded/hidden ones — this checks the raw FK relationship,
-    not just what the library grid shows) so deleting never orphans a model
-    or silently strands its files. The caller (Creators page) surfaces the
-    409 as a toast telling the user to move or delete those models first."""
+    """Delete a creator row. Any model still pointing at it (including
+    excluded/hidden ones — this checks the raw FK relationship, not just what
+    the library grid shows) is sent back to the inbox instead of blocking the
+    delete: its creator_id is cleared and is_inbox set, exactly the state a
+    freshly-scanned, not-yet-organized model is in. The user then assigns a
+    new creator the same way they would for any inbox item — editing the
+    model's metadata — rather than needing to clean up models before they're
+    allowed to remove the creator.
+
+    Files are never moved on disk here; is_inbox is the same triage flag
+    Import already uses to filter the library view (`?is_inbox=1`), not a
+    statement about where the files physically live. A model in this state
+    that reaches Reorganize before getting a new creator assigned falls back
+    to the existing "creator missing" (_Unknown Creator) sentinel — the same
+    path any other unclassifiable model already takes.
+    """
     creator = db.get(Creator, creator_id)
     if not creator:
         raise HTTPException(status_code=404, detail="Creator not found")
-    model_count = db.query(Model).filter(Model.creator_id == creator_id).count()
-    if model_count > 0:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Can't delete \"{creator.name}\" — it still has {model_count} "
-                f"model{'s' if model_count != 1 else ''}. Move or delete those first."
-            ),
-        )
+    orphaned = db.query(Model).filter(Model.creator_id == creator_id).all()
+    for m in orphaned:
+        m.creator_id = None
+        m.is_inbox = True
+        m.updated_at = utcnow()
     db.delete(creator)
     db.commit()
 
