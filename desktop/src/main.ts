@@ -13,10 +13,11 @@
 import { join } from "node:path";
 
 import { Menu, app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
-import type { IpcMainInvokeEvent, WebContents } from "electron";
+import type { WebContents } from "electron";
 import { autoUpdater } from "electron-updater";
 
 import { LOCKFILE_NAME, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
+import { patchConsoleForDiagnostics, registerDiagnosticsIpcHandlers } from "./diagnostics";
 import {
   buildApplicationMenuTemplate,
   buildContextMenuTemplate,
@@ -31,11 +32,7 @@ import { createUpdateController, readAutoUpdateEnabled } from "./updater";
 import type { UpdateController } from "./updater";
 import { readUpdateSmokeConfig } from "./updateSmoke";
 import { readWindowState, saveWindowState } from "./windowState";
-import {
-  PersistentLogger,
-  diagnosticsWereEnabled,
-  persistDiagnosticsChoice,
-} from "./persistentLogger";
+import { PersistentLogger, diagnosticsWereEnabled } from "./persistentLogger";
 import {
   registerProcessFailureHandlers,
   registerRendererFailureHandler,
@@ -77,39 +74,17 @@ if (diagnosticsWereEnabled(userDataDir)) {
   }
 }
 
-const originalConsole = {
-  log: console.log.bind(console),
-  warn: console.warn.bind(console),
-  error: console.error.bind(console),
-};
-console.log = (...values: unknown[]) => {
-  originalConsole.log(...values);
-  persistentLogger?.write("INFO", values);
-};
-console.warn = (...values: unknown[]) => {
-  originalConsole.warn(...values);
-  persistentLogger?.write("WARNING", values);
-};
-console.error = (...values: unknown[]) => {
-  originalConsole.error(...values);
-  persistentLogger?.write("ERROR", values);
-};
+patchConsoleForDiagnostics(console, (level, values) => persistentLogger?.write(level, values));
 
-function assertTrustedDiagnosticsSender(event: IpcMainInvokeEvent): void {
-  const source = new URL(event.sender.getURL());
-  if (source.protocol !== "http:" || !["localhost", "127.0.0.1"].includes(source.hostname)) {
-    throw new Error("Diagnostics request rejected from an untrusted page");
-  }
-}
-
-ipcMain.handle("diagnostics:open-logs", async (event) => {
-  assertTrustedDiagnosticsSender(event);
-  return shell.openPath(logDir);
-});
-ipcMain.handle("diagnostics:set-enabled", (event, enabled: boolean) => {
-  assertTrustedDiagnosticsSender(event);
-  persistDiagnosticsChoice(userDataDir, enabled);
-  persistentLogger = enabled ? new PersistentLogger(logDir) : null;
+registerDiagnosticsIpcHandlers({
+  ipcMain,
+  logDir,
+  userDataDir,
+  openPath: (path) => shell.openPath(path),
+  createLogger: (directory) => new PersistentLogger(directory),
+  setLogger: (logger) => {
+    persistentLogger = logger;
+  },
 });
 
 function startupLog(checkpoint: string): void {
