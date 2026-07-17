@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { createRef } from "react";
 import ModelCard, { GalleryRotator, GalleryRotatorHandle } from "./ModelCard";
@@ -335,7 +335,7 @@ describe("GalleryRotator index reset on paths change", () => {
     const { ref, rerender, container } = renderRotator(["a.png", "b.png", "c.png"]);
 
     // goTo() fades out before committing the new idx — wait for it to land.
-    ref.current?.goTo(2);
+    act(() => { ref.current?.goTo(2); });
     await waitFor(() =>
       expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("c.png"))
     );
@@ -361,7 +361,7 @@ describe("GalleryRotator index reset on paths change", () => {
   it("does not reset when the same paths list re-renders (no unnecessary flicker)", async () => {
     const { ref, rerender, container } = renderRotator(["a.png", "b.png"]);
 
-    ref.current?.goTo(1);
+    act(() => { ref.current?.goTo(1); });
     await waitFor(() =>
       expect(container.querySelector("img")).toHaveAttribute("src", expect.stringContaining("b.png"))
     );
