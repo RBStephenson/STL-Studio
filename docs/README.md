@@ -2,10 +2,11 @@
 
 <!-- wiki-only:strip -->
 > ✏️ **This folder is the single source of truth for the user docs.** The
-> [STL Studio Wiki](https://github.com/RBStephenson/STL-Inventory/wiki) is
+> [STL Studio Wiki](https://github.com/RBStephenson/STL-Studio/wiki) is
 > **generated** from these files by `scripts/wiki/build_wiki.py` on every merge
 > to `main` — so edit Markdown here (via a PR), never on the wiki directly.
-> These same files also back the in-app **Help** page.
+> The in-app **Help** page is maintained separately as a shorter, contextual
+> guide and should be reconciled whenever user-facing behavior changes.
 <!-- /wiki-only -->
 
 A locally-hosted web app for cataloguing, browsing, and managing a large STL
@@ -32,4 +33,6 @@ From there you can filter by creator, scale, type, or tag; mark favorites;
 queue models to print; track what you've already printed; preview STLs in 3D;
 assemble multi-part builds; and group models into named **collections**.
 
-Everything runs **locally** — your library never leaves your machine.
+The catalog and model files stay on your machine. Optional AI and storefront
+integrations make network requests only when you configure and use them; see
+[AI & Integrations](features.md#ai--integrations).

@@ -3,14 +3,10 @@
 [![Release](https://github.com/RBStephenson/STL-Studio/actions/workflows/release.yml/badge.svg)](https://github.com/RBStephenson/STL-Studio/actions/workflows/release.yml)
 [![Build Check](https://github.com/RBStephenson/STL-Studio/actions/workflows/build-check.yml/badge.svg)](https://github.com/RBStephenson/STL-Studio/actions/workflows/build-check.yml)
 [![Tests](https://github.com/RBStephenson/STL-Studio/actions/workflows/tests.yml/badge.svg)](https://github.com/RBStephenson/STL-Studio/actions/workflows/tests.yml)
+[![Docker](https://github.com/RBStephenson/STL-Studio/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/RBStephenson/STL-Studio/actions/workflows/docker-publish.yml)
 [![Wiki](https://img.shields.io/badge/docs-Wiki-2496ED?logo=github&logoColor=white)](https://github.com/RBStephenson/STL-Studio/wiki)
-&nbsp;
-![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
-![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
+[![Latest release](https://img.shields.io/github/v/release/RBStephenson/STL-Studio?display_name=tag&sort=semver)](https://github.com/RBStephenson/STL-Studio/releases/latest)
+[![License](https://img.shields.io/github/license/RBStephenson/STL-Studio)](LICENSE)
 
 Local web app for cataloguing, browsing, and managing an STL file library.
 
@@ -23,20 +19,23 @@ Local web app for cataloguing, browsing, and managing an STL file library.
 [Scanning & Folder Structure](https://github.com/RBStephenson/STL-Studio/wiki/Scanning-and-Folder-Structure) ·
 [Troubleshooting](https://github.com/RBStephenson/STL-Studio/wiki/Troubleshooting-and-FAQ)
 
-> The wiki is generated from the in-repo [`docs/`](docs/README.md) folder (the single source of truth, which also backs the in-app **Help** page).
+> The wiki is generated from the in-repo [`docs/`](docs/README.md) folder. The
+> in-app **Help** page is maintained separately for concise, contextual guidance.
 
 ## Installation
 
 ### Standalone (recommended for most users — no Docker needed)
 
 1. Go to the [Releases page](https://github.com/RBStephenson/STL-Studio/releases) and download the file for your OS:
-   - **Windows**: `stl-studio-windows.exe`
+   - **Windows**: `STL-Studio-Setup-<version>.exe`
    - **Linux**: `stl-studio-linux`
 
    For testing the newest successful `main` build before a versioned release,
    use the rolling `Main Build` prerelease on the same Releases page.
 
-2. Run the file. Your browser will open automatically to `http://localhost:8484`.
+2. On Windows, run the installer and launch **STL Studio** from the Start menu.
+   The Electron app opens in its own desktop window. On Linux, mark the binary
+   executable, run it, and open `http://localhost:8484` in your browser.
 
 3. Go to **Settings** and add the folder paths where your STL files live.
 
@@ -44,7 +43,6 @@ Local web app for cataloguing, browsing, and managing an STL file library.
 
 Your library database is stored in your user data folder and survives app updates:
 - **Windows**: `%LOCALAPPDATA%\STL-Inventory\`
-- **macOS**: `~/Library/Application Support/STL-Inventory/`
 - **Linux**: `~/.local/share/stl-inventory/`
 
 > **Linux note**: You may need to mark the binary as executable before running it: `chmod +x stl-studio-linux`
@@ -279,17 +277,18 @@ npm --prefix desktop run test:coverage
 
 ## Releasing
 
-Standalone executables (Windows/macOS/Linux) are built by GitHub Actions.
+GitHub Actions builds the Windows NSIS installer and Linux headless binary.
 
 **One-click release:** Go to the **Actions** tab → **Release** → **Run workflow**, pick
-`patch`/`minor`/`major`. It computes the next version, creates the tag, and builds +
-publishes a GitHub Release with auto-generated notes.
+`patch`/`minor`/`major`. It computes the next version, creates the tag, and builds
+a draft GitHub Release. The workflow validates the complete asset set, generates
+`SHA256SUMS`, and runs the installed-update qualification before publishing it.
 
 **Manual tag** (alternative): `git tag v1.2.3 && git push origin v1.2.3` triggers the
 same build.
 
-Every PR to `main` runs **Build Check**, which compiles all three platform binaries
-(without releasing) so packaging breaks are caught before merge.
+Every PR to `main` runs **Build Check**, which compiles both supported platform
+artifacts (without releasing) so packaging breaks are caught before merge.
 
 ## Ports
 
@@ -302,7 +301,7 @@ Every PR to `main` runs **Build Check**, which compiles all three platform binar
 ## Stack
 
 - **Backend**: Python 3.12 + FastAPI + SQLAlchemy + SQLite
-- **Frontend**: React 18 + Vite + TypeScript + TailwindCSS
+- **Frontend**: React 19 + Vite + TypeScript + TailwindCSS
 - **Proxy**: nginx
 
 ## About & Support

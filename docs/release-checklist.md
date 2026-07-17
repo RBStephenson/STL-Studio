@@ -1,6 +1,6 @@
 # Release qualification checklist
 
-Before approving a v1.0.0 release candidate:
+Before approving a release candidate:
 
 - Confirm the normal Tests, Build Check, CodeQL, and packaging jobs are green.
 - Require the Windows packaging smoke to pass its custom/default-directory,
