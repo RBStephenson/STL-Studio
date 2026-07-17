@@ -11,3 +11,13 @@ declare module "node:path" {
 declare module "node:url" {
   export function fileURLToPath(url: string): string;
 }
+
+// jsdom ships no types of its own, and @types/jsdom (DefinitelyTyped) is
+// capped at major 28 while the project depends on jsdom 29 — covers just
+// what test-setup.ts uses: constructing a Window and reading its Storage.
+declare module "jsdom" {
+  export class JSDOM {
+    constructor(html?: string, options?: { url?: string });
+    window: { localStorage: Storage; sessionStorage: Storage };
+  }
+}
