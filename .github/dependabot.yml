@@ -13,6 +13,19 @@ updates:
       prod-deps:
         dependency-type: "production"
 
+  # npm (Electron shell)
+  - package-ecosystem: "npm"
+    directory: "/desktop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      dev-deps:
+        dependency-type: "development"
+      prod-deps:
+        dependency-type: "production"
+
   # pip (backend)
   - package-ecosystem: "pip"
     directory: "/backend"

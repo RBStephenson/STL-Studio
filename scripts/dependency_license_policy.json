@@ -1,0 +1,38 @@
+{
+  "allowed_licenses": [
+    "(MPL-2.0 OR Apache-2.0)",
+    "(MIT OR CC0-1.0)",
+    "(WTFPL OR MIT)",
+    "0BSD",
+    "Apache Software License",
+    "Apache Software License; MIT License",
+    "Apache-2.0",
+    "Apache-2.0 OR BSD-2-Clause",
+    "Apache-2.0 OR BSD-3-Clause",
+    "BSD License",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+    "BlueOak-1.0.0",
+    "CC-BY-4.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT AND PSF-2.0",
+    "MIT License",
+    "MIT*",
+    "MIT-0",
+    "MIT-CMU",
+    "MPL-2.0",
+    "Mozilla Public License 2.0 (MPL 2.0)",
+    "PSF-2.0",
+    "Python Software Foundation License",
+    "Python-2.0",
+    "WTFPL",
+    "WTFPL OR ISC"
+  ],
+  "ignored_private_packages": [
+    "stl-studio",
+    "stl-studio-desktop"
+  ]
+}
