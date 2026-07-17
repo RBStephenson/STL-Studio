@@ -2,6 +2,10 @@
 
 Before approving a release candidate:
 
+- Complete the [clean-machine release acceptance](release/clean-machine-acceptance.md)
+  on a disposable Windows VM. Record its operator, candidate version, VM image,
+  PASS result, and evidence location in the release ticket; release promotion
+  must reference that completed ticket.
 - Confirm the normal Tests, Build Check, CodeQL, and packaging jobs are green.
 - Require the Windows packaging smoke to pass its custom/default-directory,
   shortcut creation/removal, repair/reinstall, relaunch, user-data retention,
