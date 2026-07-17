@@ -25,5 +25,9 @@ describe("Help", () => {
     expect(screen.getByRole("heading", { name: "Desktop updates" })).toBeVisible();
     expect(screen.getByText(/optional AI and storefront integrations make network requests/i)).toBeVisible();
     expect(screen.getByText(/file-moving tools such as Import and Reorganize/i)).toBeVisible();
+    expect(screen.getByRole("link", { name: /support and compatibility policy/i })).toHaveAttribute(
+      "href",
+      "https://github.com/RBStephenson/STL-Studio/wiki/Support-and-compatibility-policy",
+    );
   });
 });

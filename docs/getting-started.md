@@ -5,6 +5,10 @@ There are two ways to run STL Studio:
 - **[Standalone](#standalone-recommended)** — a single downloadable app. No Docker, no setup. Recommended for most people.
 - **[Docker](#docker-advanced)** — for people who already run Docker and want the containerized version.
 
+Before installing, review the [Support and compatibility policy](support-policy.md)
+for supported operating systems and architectures, upgrade paths, rollback limits,
+and diagnostic privacy.
+
 ---
 
 ## Standalone (recommended)

@@ -1135,6 +1135,18 @@ const SECTIONS: Section[] = [
         </p>
         <p>Thank you for being here, and happy printing!</p>
         <p className="text-text-secondary-alt">— Brent the Programmer</p>
+        <p>
+          Need help? Review the{" "}
+          <a
+            href="https://github.com/RBStephenson/STL-Studio/wiki/Support-and-compatibility-policy"
+            target="_blank"
+            rel="noreferrer"
+          >
+            support and compatibility policy
+          </a>{" "}
+          for supported platforms, upgrade and backup expectations, and what to
+          share in a support request.
+        </p>
         <SystemInfoPanel />
       </>
     ),

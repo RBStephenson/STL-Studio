@@ -7,6 +7,7 @@
 - [Scanning & Folder Structure](Scanning-and-Folder-Structure)
 - [Docker Drive Mounts](Docker-Drive-Mounts)
 - [Troubleshooting & FAQ](Troubleshooting-and-FAQ)
+- [Support & Compatibility](Support-and-compatibility-policy)
 - [Roadmap](Roadmap)
 
 ---
