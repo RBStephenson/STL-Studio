@@ -138,6 +138,58 @@ class TestImportApplyMove:
         assert m.folder_path.startswith(str(lib.path).replace("\\", "/"))
         assert not os.path.exists(str(f))
 
+    def test_single_pack_apply_removes_untracked_leftovers_from_pack_root(
+        self, client, db, tmp_path, write_mode,
+    ):
+        """A single-pack apply (src = one specific pack subfolder under the
+        mapped root, the Import Preview per-pack button's call shape) that
+        moves everything successfully should remove the WHOLE pack folder —
+        including untracked scaffolding no model ever referenced (a stray
+        slicer project file, a config file) — not just the STL/image content
+        the reorganize engine and _move_non_stl_files know about (#1087)."""
+        lib = _library(db, tmp_path / "library")
+        mapped_root = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=mapped_root, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
+        # Untracked leftovers no Model/STLFile/image_paths ever references.
+        (pack / "profile.chitubox").write_bytes(b"junk")
+        (pack / "config.orynt3d").write_bytes(b"junk")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+
+        status, body = _apply_and_wait(client, str(pack))
+        assert status == 200, body
+        assert body["moved_models"] == 1
+        db.refresh(m)
+        assert m.is_inbox is False
+        assert not os.path.exists(str(pack))
+
+    def test_import_all_apply_does_not_sweep_the_whole_mapped_root(
+        self, client, db, tmp_path, write_mode,
+    ):
+        """The "Import All" flow applies the whole mapped source root, not one
+        pack — even when nothing comes back ineligible, an unrelated/not-yet-
+        scanned file sitting directly in that root must survive (#1087
+        follow-up safety gate: force-removal only applies to a single-pack
+        apply, never the mapped root itself)."""
+        lib = _library(db, tmp_path / "library")
+        mapped_root = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=mapped_root, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
+        _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+        # Sitting directly in the mapped root, unrelated to the "Bust" pack —
+        # e.g. a file just dropped in and not yet scanned into any model.
+        stray = tmp_path / "inbox" / "not_yet_scanned.txt"
+        stray.write_bytes(b"do not delete me")
+
+        status, body = _apply_and_wait(client, mapped_root)
+        assert status == 200, body
+        assert body["moved_models"] == 1
+        assert os.path.exists(str(stray))
+
     def test_stale_source_dirs_cleaned_when_source_under_scan_root(self, client, db, tmp_path, write_mode):
         """Source inside a configured scan root: the post-apply stale-dir cleanup
         walk runs and removes the emptied pack folder. Regression guard for the
@@ -157,6 +209,49 @@ class TestImportApplyMove:
         assert body["moved_models"] == 1
         # The emptied source pack dir is removed by the stale-dir cleanup walk.
         assert not os.path.exists(str(pack))
+
+
+class TestImportApplyPreservesUnmovedFiles:
+    """Regression for a real data-loss incident (#1087): the old cleanup pass
+    rmtree'd a model's whole old_folder whenever its *proposed* destination
+    directory already existed on disk — which just meant SOME prior run
+    (interrupted mid-move, or otherwise) had already created it, not that
+    THIS model's own files had actually landed there. An ineligible model
+    with some files still genuinely sitting in its old_folder had them
+    deleted outright, with no way to recover them."""
+
+    def test_ineligible_models_stl_survives_when_destination_dir_preexists(
+        self, client, db, tmp_path, write_mode,
+    ):
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        present = pack / "still_here.stl"; present.write_bytes(b"solid\nendsolid\n")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=present)
+        # A second STLFile row whose source is already gone — this is what
+        # actually makes the model ineligible (missing_files_on_disk).
+        db.add(STLFile(model_id=m.id, path=str(pack / "already_gone.stl").replace("\\", "/"),
+                       filename="already_gone.stl", size_bytes=1024))
+        db.commit()
+
+        # Simulate a prior interrupted run: the proposed destination dir
+        # already exists (slugify is on by default: abe3d/bust).
+        dest_dir = tmp_path / "library" / "abe3d" / "bust"
+        dest_dir.mkdir(parents=True)
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 0
+        assert body["skipped"] == 1
+
+        db.refresh(m)
+        assert m.is_inbox is True
+        # The file that was still genuinely present must NOT be deleted —
+        # it stays available for a future retry once the real problem
+        # (the missing sibling file) is resolved.
+        assert present.exists()
 
 
 class TestImportApplyScoping:
@@ -346,6 +441,127 @@ class TestImportApplySlugifyFilenames:
         db.refresh(m)
         stl = db.query(STLFile).filter(STLFile.model_id == m.id).first()
         assert stl.filename == "Cold Giant last time hollowed.stl"
+
+
+class TestImportApplySupportStatusDisambiguation:
+    """A single pack with format-variant subfolders (e.g. "... (supported)" /
+    "... (unsupported)") produces two inbox models sharing the same creator
+    and title, so they compute to the same {creator}/{title} destination.
+    Import has no interactive collision-resolution UI (unlike Reorganize), so
+    this must resolve automatically rather than skip both models (#1087)."""
+
+    def test_supported_and_unsupported_variants_import_without_collision(
+        self, client, db, tmp_path, write_mode,
+    ):
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Ignisaurus Clan Ignitium"); db.add(creator); db.flush()
+
+        models = {}
+        for variant in ("supported", "unsupported"):
+            pack = tmp_path / "inbox" / f"Ignisaurus Clan Team Ignitium (x10) ({variant})"
+            pack.mkdir(parents=True)
+            f = pack / "part1.stl"; f.write_bytes(b"solid\nendsolid\n")
+            models[variant] = _inbox_model(
+                db, pack, creator=creator, character=None,
+                title="Ignisaurus Clan Team Ignitium (x10) Prime Armored Fire Squad",
+                with_file=f,
+            )
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 2
+        assert body["skipped"] == 0
+
+        for variant, m in models.items():
+            db.refresh(m)
+            assert m.is_inbox is False
+            assert m.folder_path.endswith(variant)
+        assert models["supported"].folder_path != models["unsupported"].folder_path
+
+    def test_generic_same_title_collision_with_no_variant_signal_still_blocked(
+        self, client, db, tmp_path, write_mode,
+    ):
+        """Sanity check the fix is scoped to real distinguishing signals —
+        two models that collide for no discoverable reason still skip rather
+        than silently merging."""
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+
+        for sub in ("files", "stl"):
+            pack = tmp_path / "inbox" / "Bust" / sub
+            pack.mkdir(parents=True)
+            f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
+            m = Model(name="Bust", folder_path=str(pack).replace("\\", "/"),
+                      creator_id=creator.id, character=None, title="Bust",
+                      tags=[], auto_tags=[], is_inbox=True, created_at=utcnow(), updated_at=utcnow())
+            db.add(m); db.flush()
+            db.add(STLFile(model_id=m.id, path=str(f).replace("\\", "/"), filename="head.stl", size_bytes=1024))
+        db.commit()
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 0
+        assert body["skipped"] == 2
+        assert all(r == "destination collision" for i in body["ineligible"] for r in i["reasons"])
+
+    def test_pack_root_gallery_image_shared_by_both_variants_survives_apply(
+        self, client, db, tmp_path, write_mode,
+    ):
+        """Gallery images downloaded to the pack ROOT (not either variant's own
+        subfolder) get attached to both nested models at scan time
+        (boundary=inbox). Apply must copy that shared image into each
+        model's own new folder and remap image_paths there — otherwise the
+        path still points at the old inbox location, which the file-serving
+        allowlist stops trusting the moment the model leaves inbox, and the
+        gallery goes blank despite import otherwise succeeding."""
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Ignisaurus"); db.add(creator); db.flush()
+
+        pack_root = tmp_path / "inbox"
+        pack_root.mkdir(parents=True, exist_ok=True)
+        shared_img = pack_root / "gallery_00.jpg"
+        shared_img.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        models = {}
+        for variant in ("supported", "unsupported"):
+            sub = pack_root / f"Ignisaurus (x10) ({variant})"
+            sub.mkdir(parents=True)
+            f = sub / "part1.stl"; f.write_bytes(b"solid\nendsolid\n")
+            m = _inbox_model(db, sub, creator=creator, character=None,
+                              title="Ignisaurus (x10)", with_file=f)
+            # Scan-time behavior being simulated: both variants' image_paths
+            # AND thumbnail_path already point at the one shared pack-root
+            # image (thumbnail_path drives the Library grid card).
+            m.image_paths = [str(shared_img).replace("\\", "/")]
+            m.thumbnail_path = str(shared_img).replace("\\", "/")
+            db.commit()
+            models[variant] = m
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 2
+
+        seen_paths = set()
+        for variant, m in models.items():
+            db.refresh(m)
+            assert len(m.image_paths) == 1
+            img_path = m.image_paths[0]
+            assert img_path.startswith(m.folder_path)
+            assert os.path.exists(img_path)
+            seen_paths.add(img_path)
+            # thumbnail_path must be relocated too, not just image_paths.
+            assert m.thumbnail_path.startswith(m.folder_path)
+            assert os.path.exists(m.thumbnail_path)
+        # Each variant got its own copy, not a shared/aliased path.
+        assert len(seen_paths) == 2
+        # The original shared source file is untouched (copy, not move).
+        assert shared_img.exists()
 
 
 class TestImportApplyCollisionRetry:
