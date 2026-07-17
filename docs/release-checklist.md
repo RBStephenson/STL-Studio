@@ -21,6 +21,26 @@ The workflow never uses the developer workstation or production user data. Its
 test-only updater override accepts only an explicit smoke-mode switch and an
 HTTP loopback feed URL.
 
+## Publication gate and recovery
+
+The Release workflow keeps every candidate as a draft until all platform
+artifacts have uploaded. It then downloads that exact draft asset set, creates
+`SHA256SUMS`, verifies `latest.yml` points to the real NSIS filename, and runs
+the installed-update rehearsal from the latest published version. Only the
+publish job can clear the draft flag, and it depends on the complete
+qualification job.
+
+If qualification fails, leave the release as a draft and download
+`release-qualification-diagnostics`. Repair the workflow or replace the bad
+draft assets, then rerun the release workflow with the same explicit version.
+The upload steps overwrite draft assets safely. If a clean restart is required,
+delete the draft release first, then delete its tag, fix the cause, and rerun;
+never publish a partial draft manually. Verify the public release contains the
+installer, matching blockmap, `latest.yml`, Linux binary, and `SHA256SUMS`.
+
+Production certificate acquisition and signed-installer verification remain
+separate release decisions and are excluded from this qualification gate.
+
 For bootstrap releases that predate the smoke hook, the harness replaces the
 installed copy's generated updater feed configuration with the loopback feed
 and clicks the existing Download and Restart confirmation dialogs. The
