@@ -55,8 +55,8 @@ describe("Library search debounce (#220)", () => {
     listMock.mockClear();
     vi.useFakeTimers();
   });
-  afterEach(() => {
-    vi.runOnlyPendingTimers();
+  afterEach(async () => {
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
     vi.useRealTimers();
   });
 
@@ -100,8 +100,8 @@ describe("Library search clear button (#355)", () => {
     sessionStorage.clear();
     vi.useFakeTimers();
   });
-  afterEach(() => {
-    vi.runOnlyPendingTimers();
+  afterEach(async () => {
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
     vi.useRealTimers();
   });
 

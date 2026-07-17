@@ -98,6 +98,7 @@ describe("Library Tools menu (moved from Creators — ADDENDUM §7)", () => {
     const CreatorsPage = (await import("./Creators")).default;
     render(<MemoryRouter><CreatorsPage /></MemoryRouter>);
 
+    await screen.findByText("(0)");
     expect(screen.queryByRole("button", { name: /Library Tools/i })).toBeNull();
     vi.doUnmock("../context/ToastContext");
     vi.doUnmock("../components/RefreshEnrich");

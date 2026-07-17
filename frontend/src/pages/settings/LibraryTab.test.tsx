@@ -27,6 +27,7 @@ describe("LibraryTab reorganize feature flag", () => {
   beforeEach(() => {
     settings = mkSettings();
     vi.clearAllMocks();
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
   });
 
   // The Reorganize Library launch point moved to the Creators toolbar's
@@ -55,6 +56,7 @@ describe("LibraryTab hierarchy variant grouping setting", () => {
   beforeEach(() => {
     settings = mkSettings();
     vi.clearAllMocks();
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
   });
 
   it("persists the default-off setting when enabled", async () => {
@@ -74,6 +76,7 @@ describe("LibraryTab filename slugify setting", () => {
   beforeEach(() => {
     settings = mkSettings();
     vi.clearAllMocks();
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
   });
 
   it("toggling it on persists reorganize_slugify_filenames=true", async () => {
@@ -94,6 +97,7 @@ describe("LibraryTab package-preserving setting", () => {
   beforeEach(() => {
     settings = mkSettings();
     vi.clearAllMocks();
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
   });
 
   it("persists the default-off package mode when enabled", async () => {
@@ -108,6 +112,7 @@ describe("LibraryTab AI suggestions setting", () => {
   beforeEach(() => {
     settings = mkSettings();
     vi.clearAllMocks();
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
   });
 
   it("toggling it on persists reorganize_ai_suggestions_enabled=true", async () => {
