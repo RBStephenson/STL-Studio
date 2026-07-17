@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { api, ApiError, Guide, GuideCreateInput } from "../api/client";
 import GuideMetaForm from "../components/guide/GuideMetaForm";
 import { useToast } from "../context/ToastContext";
+import ErrorState from "../components/ErrorState";
+import { SkeletonBlock, SkeletonPanel } from "../components/SkeletonBlock";
 
 export default function GuideEditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -17,18 +19,20 @@ export default function GuideEditorPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const loadGuide = useCallback(async () => {
     if (isNew) return;
-    let alive = true;
     setLoading(true);
     setLoadError(null);
-    api.painting.guides
-      .get(Number(id))
-      .then((g) => { if (alive) setGuide(g); })
-      .catch((e) => { if (alive) setLoadError(e?.message || "Could not load this guide."); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    try {
+      setGuide(await api.painting.guides.get(Number(id)));
+    } catch (e) {
+      setLoadError((e as Error)?.message || "Could not load this guide.");
+    } finally {
+      setLoading(false);
+    }
   }, [id, isNew]);
+
+  useEffect(() => { void loadGuide(); }, [loadGuide]);
 
   const save = async (value: GuideCreateInput) => {
     setBusy(true);
@@ -66,8 +70,17 @@ export default function GuideEditorPage() {
         {isNew ? "New guide" : "Edit guide"}
       </h1>
 
-      {loading && <p className="text-sm text-text-secondary-alt">Loading…</p>}
-      {loadError && <p role="alert" className="text-sm text-rose-400">{loadError}</p>}
+      {loading && (
+        <SkeletonPanel className="space-y-4 rounded-lg border border-border-subtle p-5" data-testid="guide-editor-loading-skeleton">
+          <SkeletonBlock className="h-4 w-24" />
+          <SkeletonBlock className="h-10 w-full" />
+          <SkeletonBlock className="h-4 w-20" />
+          <SkeletonBlock className="h-10 w-full" />
+        </SkeletonPanel>
+      )}
+      {loadError && (
+        <ErrorState title="Couldn't load this guide" message={loadError} onRetry={() => void loadGuide()} />
+      )}
 
       {!loading && !loadError && (
         <GuideMetaForm

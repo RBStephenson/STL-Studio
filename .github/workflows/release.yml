@@ -27,6 +27,7 @@ jobs:
       contents: write   # to create and push the new tag
     outputs:
       tag: ${{ steps.compute.outputs.tag }}
+      bootstrap_tag: ${{ steps.bootstrap.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -85,18 +86,104 @@ jobs:
             echo "Release $tag already exists — leaving as-is."
           fi
 
+      - name: Resolve published bootstrap release
+        id: bootstrap
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --limit 100 \
+            --json tagName,isDraft,isPrerelease,publishedAt \
+            --jq '[.[] | select(.isDraft == false and .isPrerelease == false)][0].tagName')
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+            echo "No published bootstrap release is available" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Using bootstrap release $tag"
+
   release:
     needs: version
     uses: ./.github/workflows/build.yml
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     with:
       release: true
       tag: ${{ needs.version.outputs.tag }}
       ref: ${{ needs.version.outputs.tag }}
 
-  publish:
+  qualify:
     needs: [version, release]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout candidate harness
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download draft candidate assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          New-Item -ItemType Directory -Force candidate | Out-Null
+          gh release download '${{ needs.version.outputs.tag }}' --dir candidate
+
+      - name: Generate and validate checksums and update metadata
+        shell: pwsh
+        run: |
+          $version = '${{ needs.version.outputs.tag }}'.TrimStart('v')
+          python scripts/validate_release_assets.py candidate `
+            --version $version --write-checksums
+
+      - name: Upload checksum manifest to draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload '${{ needs.version.outputs.tag }}' candidate/SHA256SUMS --clobber
+
+      - name: Download bootstrap installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          New-Item -ItemType Directory -Force bootstrap | Out-Null
+          gh release download '${{ needs.version.outputs.bootstrap_tag }}' `
+            --pattern 'STL-Studio-Setup-*.exe' --dir bootstrap
+
+      - name: Qualify installed update before publication
+        shell: pwsh
+        run: |
+          $bootstrap = Get-ChildItem bootstrap/STL-Studio-Setup-*.exe |
+            Select-Object -First 1
+          if (-not $bootstrap) { throw 'Bootstrap NSIS installer not found' }
+          $version = '${{ needs.version.outputs.tag }}'.TrimStart('v')
+          python scripts/smoke_installer.py $bootstrap.FullName `
+            --candidate-dir candidate --expected-version $version `
+            --diagnostics-dir release-qualification-diagnostics
+
+      - name: Upload qualification diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-qualification-diagnostics
+          path: release-qualification-diagnostics
+          retention-days: 14
+          if-no-files-found: warn
+
+  publish:
+    needs: [version, release, qualify]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -105,4 +192,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}   # this job has no checkout; tell gh the repo
-        run: gh release edit "${{ needs.version.outputs.tag }}" --draft=false
+        run: |
+          draft=$(gh release view "${{ needs.version.outputs.tag }}" --json isDraft --jq .isDraft)
+          if [ "$draft" != "true" ]; then
+            echo "Candidate release is not a draft; refusing promotion" >&2
+            exit 1
+          fi
+          gh release edit "${{ needs.version.outputs.tag }}" --draft=false

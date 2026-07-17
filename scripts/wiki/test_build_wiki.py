@@ -19,6 +19,7 @@ import build_wiki as bw  # noqa: E402
         # Relative link within docs/ -> wiki page.
         ("getting-started.md", "docs/README.md", "Getting-Started"),
         ("features.md", "docs/docker.md", "Feature-Guide"),
+        ("support-policy.md", "docs/README.md", "Support-and-compatibility-policy"),
         # Anchor is preserved when mapping to a wiki page.
         (
             "features.md#variant-grouping",

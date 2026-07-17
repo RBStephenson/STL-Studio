@@ -39,6 +39,7 @@ SOURCES: dict[str, str] = {
     "docs/scanning-and-folders.md": "Scanning-and-Folder-Structure",
     "docs/docker.md": "Docker-Drive-Mounts",
     "docs/troubleshooting.md": "Troubleshooting-and-FAQ",
+    "docs/support-policy.md": "Support-and-compatibility-policy",
     "ROADMAP.md": "Roadmap",
 }
 

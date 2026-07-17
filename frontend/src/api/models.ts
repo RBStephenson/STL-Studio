@@ -30,6 +30,8 @@ export const modelsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, source_url: source_url || null }),
     }),
+  deleteCreator: (id: number) =>
+    request<void>(`/models/creators/${id}`, { method: "DELETE" }),
   tags: () => request<{ tag: string; count: number }[]>("/models/tags/all"),
   renameTag: (oldTag: string, newTag: string) =>
     request<{ ok: boolean; updated: number }>("/models/tags/rename", {

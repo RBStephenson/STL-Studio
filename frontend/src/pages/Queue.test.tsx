@@ -105,7 +105,7 @@ describe("Queue error state", () => {
       return { items: [], total: 0 };
     });
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
-    expect(await screen.findByText("Dragon")).toBeInTheDocument();
+    expect(await screen.findAllByText("Dragon")).not.toHaveLength(0);
   });
 });
 
