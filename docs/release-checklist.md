@@ -36,7 +36,9 @@ draft assets, then rerun the release workflow with the same explicit version.
 The upload steps overwrite draft assets safely. If a clean restart is required,
 delete the draft release first, then delete its tag, fix the cause, and rerun;
 never publish a partial draft manually. Verify the public release contains the
-installer, matching blockmap, `latest.yml`, Linux binary, and `SHA256SUMS`.
+installer, matching blockmap, `latest.yml`, Linux binary, three CycloneDX SBOMs,
+and `SHA256SUMS`. Follow [Release supply-chain verification](release/supply-chain-verification.md)
+to validate the downloaded assets and GitHub attestations independently.
 
 Production certificate acquisition and signed-installer verification remain
 separate release decisions and are excluded from this qualification gate.

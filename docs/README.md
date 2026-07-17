@@ -24,6 +24,7 @@ model library — search, filter, tag, preview in 3D, and plan your prints.
 | [Support and Compatibility Policy](support-policy.md) | Supported platforms, upgrades, backups, rollback limits, support channels, and diagnostic privacy |
 | [Adverse Failure Qualification](release/adverse-failure-qualification.md) | Repeatable release checks for interrupted updates, storage failures, locked databases, missing drives, and invalid settings |
 | [Dependency and License Audit](release/dependency-license-audit-2026-07-16.md) | v1.0 dependency inventories, vulnerability results, license policy, unused-package decisions, and recurring audit gates |
+| [Release Supply-Chain Verification](release/supply-chain-verification.md) | Verify release checksums, CycloneDX SBOMs, and GitHub artifact attestations |
 
 ## What it does, in one paragraph
 
