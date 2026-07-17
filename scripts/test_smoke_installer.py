@@ -47,6 +47,20 @@ def test_find_one_requires_exactly_one_match(tmp_path):
         smoke_installer.find_one(tmp_path, "STL Studio.exe")
 
 
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    (("0.20.3", True), ("0.20.4", False), ("1.0.0", False)),
+)
+def test_bootstrap_update_dialog_compatibility(version, expected):
+    installer = Path(f"STL-Studio-Setup-{version}.exe")
+    assert smoke_installer.bootstrap_requires_update_dialogs(installer) is expected
+
+
+def test_bootstrap_update_dialog_compatibility_rejects_unknown_name():
+    with pytest.raises(RuntimeError, match="cannot determine bootstrap version"):
+        smoke_installer.bootstrap_requires_update_dialogs(Path("setup.exe"))
+
+
 def test_wait_for_lock_reads_complete_record(tmp_path):
     profile = tmp_path / "stl-studio-desktop"
     profile.mkdir()
@@ -300,6 +314,25 @@ def test_automate_update_dialogs_clicks_expected_buttons_in_order():
     assert clicked == list(smoke_installer.UPDATE_DIALOG_BUTTONS)
     assert user32.messages == [(2, 0x00F5), (4, 0x00F5), (6, 0x00F5)]
     assert "STL Studio Setup: ['Install']" in observed
+
+    stop_event = threading.Event()
+    user32 = FakeUser32()
+    user32.stop_event = stop_event
+    clicked = []
+    smoke_installer.automate_update_dialogs(
+        stop_event,
+        clicked,
+        timeout_s=1,
+        installer_image_name="STL-Studio-Setup-1.2.3.exe",
+        user32=user32,
+        ctypes_module=FakeCtypes,
+        installer_pids=lambda: {99},
+        window_pid=lambda hwnd: 99 if hwnd == 5 else 0,
+        require_update_dialogs=False,
+    )
+
+    assert clicked == []
+    assert user32.messages == [(6, 0x00F5)]
 
 
 def test_wait_for_updated_version_accepts_new_sidecar_version(tmp_path, monkeypatch):
