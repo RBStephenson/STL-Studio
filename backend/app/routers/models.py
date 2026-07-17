@@ -465,9 +465,13 @@ def delete_creator(creator_id: int, db: Session = Depends(get_db)):
     under it has moved out, its now-empty directory tree disappears on its
     own via _prune_empty_parents, which refuses to touch anything non-empty.
 
-    Raises 409 (leaving the creator and its models completely untouched) if
-    there's no scan root configured to anchor the inbox folder under —
-    nowhere safe to put the files.
+    Deleting the creator row (and reparenting its models to "_Inbox" in the
+    database) never fails because of the filesystem — no scan root
+    configured to anchor the inbox folder under, a scan root that's
+    temporarily unreachable (an unmounted drive, permissions, ...), or an
+    individual model's own folder already missing on disk all just skip the
+    physical move for the affected model(s) and fall back to the same
+    database-only reassignment, rather than blocking the delete outright.
     """
     creator = db.get(Creator, creator_id)
     if not creator:
@@ -482,14 +486,14 @@ def delete_creator(creator_id: int, db: Session = Depends(get_db)):
         template = _stored_template(db, None)
         try:
             inbox_dir = reorganize.creator_scan_dir(db, template, "_Inbox", slugify=_slugify_all(db))
-        except ReorganizeTemplateError as e:
-            raise HTTPException(status_code=409, detail=f"Could not resolve the inbox destination: {e}")
-        if not inbox_dir:
-            raise HTTPException(
-                status_code=409,
-                detail="No library is configured to receive the inbox folder — add a scan root first.",
+            if inbox_dir:
+                os.makedirs(inbox_dir, exist_ok=True)
+        except (ReorganizeTemplateError, OSError) as e:
+            _log.warning(
+                "Could not prepare the inbox destination for creator delete (%s) — "
+                "falling back to a database-only move: %s", creator.name, e,
             )
-        os.makedirs(inbox_dir, exist_ok=True)
+            inbox_dir = None
 
     scan_root_bounds = {os.path.realpath(r.path) for r in db.query(ScanRoot).all() if r.path}
     inbox_creator = resolve_creator("_Inbox", db)
@@ -497,7 +501,7 @@ def delete_creator(creator_id: int, db: Session = Depends(get_db)):
 
     for m in orphaned:
         old_folder = m.folder_path
-        if old_folder and os.path.isdir(old_folder):
+        if inbox_dir and old_folder and os.path.isdir(old_folder):
             leaf = os.path.basename(old_folder.rstrip("/\\")) or "model"
             new_folder = _free_inbox_destination(inbox_dir, leaf, db)
             try:

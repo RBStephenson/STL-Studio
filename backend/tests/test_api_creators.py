@@ -223,21 +223,51 @@ class TestDeleteCreator:
         inbox_creator = db.get(Creator, moved.creator_id)
         assert inbox_creator.name == "_Inbox"
 
-    def test_no_scan_root_is_rejected_and_nothing_changes(self, client, db, tmp_path):
+    def test_no_scan_root_still_deletes_with_a_database_only_move(self, client, db, tmp_path):
         """No scan root configured means no safe place to anchor the inbox
-        folder — the whole delete is rejected rather than guessing."""
+        folder — the delete still succeeds (the DB entry is the thing being
+        removed), it just can't physically relocate the model's folder."""
         creator = make_creator(db, name="Abe3D")
         m = _model_with_real_file(db, tmp_path, creator)
+        old_folder = m.folder_path
 
         resp = client.delete(f"/models/creators/{creator.id}")
-        assert resp.status_code == 409
+        assert resp.status_code == 204
 
         db.expire_all()
-        assert db.query(Creator).filter_by(id=creator.id).first() is not None
-        untouched = db.get(Model, m.id)
-        assert untouched.creator_id == creator.id
-        assert untouched.is_inbox is False
-        assert os.path.isdir(untouched.folder_path)
+        assert db.query(Creator).filter_by(id=creator.id).first() is None
+        moved = db.get(Model, m.id)
+        assert moved.is_inbox is True
+        assert db.get(Creator, moved.creator_id).name == "_Inbox"
+        # Nowhere safe to move it to — left exactly where it was.
+        assert moved.folder_path == old_folder
+        assert os.path.isdir(moved.folder_path)
+
+    def test_inbox_directory_unavailable_falls_back_to_database_only_move(self, client, db, tmp_path):
+        """A configured scan root whose target directory can't actually be
+        created (e.g. a mount point gone missing) must not block the delete
+        — it just skips the physical move for the affected model(s)."""
+        # The scan root's own path is a file, not a directory, so nothing can
+        # be created underneath it — os.makedirs raises NotADirectoryError.
+        root_file = tmp_path / "not_a_dir"
+        root_file.write_text("oops")
+        db.add(ScanRoot(path=str(root_file), enabled=True))
+        db.commit()
+
+        creator = make_creator(db, name="Abe3D")
+        m = make_model(db, creator, name="Bust", character="Joker")
+        m.folder_path = str(tmp_path / "somewhere" / "Bust")  # never touched either way
+        db.commit()
+        model_id = m.id
+
+        resp = client.delete(f"/models/creators/{creator.id}")
+        assert resp.status_code == 204
+
+        db.expire_all()
+        assert db.query(Creator).filter_by(id=creator.id).first() is None
+        moved = db.get(Model, model_id)
+        assert moved.is_inbox is True
+        assert db.get(Creator, moved.creator_id).name == "_Inbox"
 
     def test_cannot_delete_the_inbox_sentinel_creator(self, client, db):
         creator = make_creator(db, name="_Inbox")
