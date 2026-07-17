@@ -5,6 +5,8 @@ data/
 !backend/app/painting/data/
 frontend/node_modules/
 frontend/dist/
+frontend/coverage/
+desktop/coverage/
 node_modules/
 __pycache__/
 *.pyc
