@@ -9,6 +9,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -34,6 +35,18 @@ UPDATE_PROFILE_PATHS = (
     ("LOCALAPPDATA", "stl-studio-desktop"),
 )
 SHORTCUT_NAME = "STL Studio.lnk"
+SMOKE_MODE_AUTO_ACCEPT_VERSION = (0, 20, 4)
+
+
+def bootstrap_requires_update_dialogs(installer: Path) -> bool:
+    """Return whether the bootstrap predates smoke-mode updater auto-accept."""
+    match = re.fullmatch(r"STL-Studio-Setup-(\d+)\.(\d+)\.(\d+)\.exe", installer.name)
+    if not match:
+        raise RuntimeError(
+            f"cannot determine bootstrap version from {installer.name!r}"
+        )
+    version = tuple(int(part) for part in match.groups())
+    return version < SMOKE_MODE_AUTO_ACCEPT_VERSION
 
 
 def installer_shortcuts(environ: dict[str, str]) -> tuple[Path, Path]:
@@ -127,8 +140,9 @@ def automate_update_dialogs(
     ctypes_module=None,
     installer_pids=None,
     window_pid=None,
+    require_update_dialogs: bool = True,
 ) -> None:
-    """Drive v0.20.3 confirmations and its owned assisted NSIS update UI."""
+    """Drive optional legacy confirmations and the owned assisted NSIS UI."""
     if ctypes_module is None:
         import ctypes as ctypes_module
     if user32 is None:
@@ -152,9 +166,13 @@ def automate_update_dialogs(
     deadline = time.monotonic() + timeout_s
 
     while not stop_event.is_set() and time.monotonic() < deadline:
-        expected_title = next(
-            (title for title in UPDATE_DIALOG_BUTTONS if title not in clicked),
-            None,
+        expected_title = (
+            next(
+                (title for title in UPDATE_DIALOG_BUTTONS if title not in clicked),
+                None,
+            )
+            if require_update_dialogs
+            else None
         )
         if expected_title is None and installer_image_name is None:
             return
@@ -170,7 +188,8 @@ def automate_update_dialogs(
             if expected_title is not None and title != expected_title:
                 return True
             if expected_title is None and (
-                not title.startswith("STL Studio") or window_pid(hwnd) not in owned_installer_pids
+                not title.startswith("STL Studio")
+                or window_pid(hwnd) not in owned_installer_pids
             ):
                 return True
 
@@ -209,7 +228,11 @@ def automate_update_dialogs(
         user32.EnumWindows(enum_windows_proc(inspect_window), 0)
         stop_event.wait(0.25)
 
-    if not stop_event.is_set() and len(clicked) != len(UPDATE_DIALOG_BUTTONS):
+    if (
+        require_update_dialogs
+        and not stop_event.is_set()
+        and len(clicked) != len(UPDATE_DIALOG_BUTTONS)
+    ):
         missing = [title for title in UPDATE_DIALOG_BUTTONS if title not in clicked]
         raise TimeoutError(f"updater confirmation dialogs did not appear: {missing}")
 
@@ -511,6 +534,7 @@ def main(argv: list[str] | None = None) -> int:
             })
             dialog_stop = threading.Event()
             clicked_dialogs: list[str] = []
+            require_update_dialogs = bootstrap_requires_update_dialogs(installer)
             dialog_thread = threading.Thread(
                 target=automate_update_dialogs,
                 args=(
@@ -520,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
                     candidate_installer.name,
                     observed_windows,
                 ),
+                kwargs={"require_update_dialogs": require_update_dialogs},
                 daemon=True,
             )
             dialog_thread.start()
@@ -535,7 +560,9 @@ def main(argv: list[str] | None = None) -> int:
             finally:
                 dialog_stop.set()
                 dialog_thread.join(timeout=5)
-            if clicked_dialogs != list(UPDATE_DIALOG_BUTTONS):
+            if require_update_dialogs and clicked_dialogs != list(
+                UPDATE_DIALOG_BUTTONS
+            ):
                 raise RuntimeError(
                     f"updater confirmations were incomplete: {clicked_dialogs}"
                 )

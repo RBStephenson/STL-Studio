@@ -43,13 +43,15 @@ to validate the downloaded assets and GitHub attestations independently.
 Production certificate acquisition and signed-installer verification remain
 separate release decisions and are excluded from this qualification gate.
 
-For bootstrap releases that predate the smoke hook, the harness replaces the
-installed copy's generated updater feed configuration with the loopback feed
-and clicks the existing Download and Restart confirmation dialogs. The
-published executable and updater implementation remain unchanged. Because
-v0.20.3 uses an assisted NSIS installer, the harness also drives only the
-candidate installer's allowlisted navigation buttons and records every matched
-window and button set in failure diagnostics.
+For bootstrap releases through v0.20.3, which predate the smoke-mode
+auto-accept hook, the harness replaces the installed copy's generated updater
+feed configuration with the loopback feed and clicks the existing Download and
+Restart confirmation dialogs. Starting with v0.20.4, smoke mode accepts those
+two updater actions directly, so the harness does not wait for obsolete dialog
+titles. Both paths still drive only the candidate assisted NSIS installer's
+allowlisted navigation buttons and record every matched window and button set
+in failure diagnostics. The published executable and updater implementation
+remain unchanged.
 
 Update rehearsals use the disposable GitHub-hosted runner account's normal
 per-user data directories because the assisted installer relaunch does not
