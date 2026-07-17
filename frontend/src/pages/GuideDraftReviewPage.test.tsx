@@ -90,6 +90,20 @@ describe("GuideDraftReviewPage (#492)", () => {
     expect(g.startDraft).not.toHaveBeenCalled(); // no auto-start
   });
 
+  it("shows a loading skeleton and retries a failed guide load", async () => {
+    const g = await mocks();
+    g.get.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(GUIDE as never);
+    renderPage();
+
+    expect(screen.getByTestId("guide-draft-loading-skeleton")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("offline");
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByTestId("reference-upload")).toBeInTheDocument();
+    expect(g.get).toHaveBeenCalledTimes(2);
+  });
+
   it("generates on click, polls to done, then accepts into the editor", async () => {
     const g = await mocks();
     g.get.mockResolvedValue(GUIDE as never);

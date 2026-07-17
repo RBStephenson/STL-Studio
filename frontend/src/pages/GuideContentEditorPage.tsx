@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Eye, EyeOff, Sparkles } from "lucide-react";
 import { api, Guide, GuideTab, GuideValidationResult, TabInput } from "../api/client";
@@ -7,6 +7,8 @@ import GuideReader from "../components/guide/GuideReader";
 import GuideValidationPanel from "../components/guide/GuideValidationPanel";
 import ReferenceImageUpload from "../components/guide/ReferenceImageUpload";
 import { useToast } from "../context/ToastContext";
+import ErrorState from "../components/ErrorState";
+import { SkeletonBlock, SkeletonPanel } from "../components/SkeletonBlock";
 
 export default function GuideContentEditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -25,7 +27,7 @@ export default function GuideContentEditorPage() {
   const [validation, setValidation] = useState<GuideValidationResult | null>(null);
   const [validating, setValidating] = useState(false);
 
-  const refreshValidation = async (guideId: number) => {
+  const refreshValidation = useCallback(async (guideId: number) => {
     setValidating(true);
     try {
       setValidation(await api.painting.guides.validate(guideId));
@@ -34,19 +36,23 @@ export default function GuideContentEditorPage() {
     } finally {
       setValidating(false);
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    let alive = true;
+  const loadGuide = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    api.painting.guides
-      .get(Number(id))
-      .then((g) => { if (alive) { setGuide(g); refreshValidation(g.id); } })
-      .catch((e) => { if (alive) setLoadError(e?.message || "Could not load this guide."); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [id]);
+    try {
+      const loaded = await api.painting.guides.get(Number(id));
+      setGuide(loaded);
+      void refreshValidation(loaded.id);
+    } catch (e) {
+      setLoadError((e as Error)?.message || "Could not load this guide.");
+    } finally {
+      setLoading(false);
+    }
+  }, [id, refreshValidation]);
+
+  useEffect(() => { void loadGuide(); }, [loadGuide]);
 
   const save = async (tabs: TabInput[]) => {
     setBusy(true);
@@ -96,8 +102,15 @@ export default function GuideContentEditorPage() {
         )}
       </div>
 
-      {loading && <p className="text-sm text-text-secondary-alt">Loading…</p>}
-      {loadError && <p role="alert" className="text-sm text-rose-400">{loadError}</p>}
+      {loading && (
+        <SkeletonPanel className="grid gap-4 rounded-lg border border-border-subtle p-5 lg:grid-cols-2" data-testid="guide-content-loading-skeleton">
+          <SkeletonBlock className="h-64 w-full" />
+          <SkeletonBlock className="hidden h-64 w-full lg:block" />
+        </SkeletonPanel>
+      )}
+      {loadError && (
+        <ErrorState title="Couldn't load this guide" message={loadError} onRetry={() => void loadGuide()} />
+      )}
 
       {!loading && !loadError && guide && (
         <div className="mb-4 space-y-4">

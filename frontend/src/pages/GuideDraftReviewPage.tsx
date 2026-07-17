@@ -15,6 +15,8 @@ import GuideValidationPanel from "../components/guide/GuideValidationPanel";
 import PaintPicker, { PickedPaint } from "../components/guide/PaintPicker";
 import ReferenceImageUpload from "../components/guide/ReferenceImageUpload";
 import { useToast } from "../context/ToastContext";
+import ErrorState from "../components/ErrorState";
+import { SkeletonBlock, SkeletonPanel } from "../components/SkeletonBlock";
 
 const POLL_MS = 1200;
 
@@ -84,6 +86,7 @@ export default function GuideDraftReviewPage() {
   const [resolutions, setResolutions] = useState<Record<string, PickedPaint>>({});
   const [forcing, setForcing] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [loadingGuide, setLoadingGuide] = useState(true);
 
   const poll = useCallback(async () => {
     try {
@@ -99,18 +102,26 @@ export default function GuideDraftReviewPage() {
 
   // Load the guide (for the diff + the attached reference image). Generation is
   // user-triggered (#536) so an attached image reaches vision on the first pass.
-  useEffect(() => {
-    let alive = true;
+  const loadGuide = useCallback(async () => {
+    setLoadingGuide(true);
     setFatal(null);
-    api.painting.guides.get(guideId).then(
-      (g) => { if (alive) { setGuide(g); setRefImageId(g.reference_image_id); } },
-      (e) => { if (alive) setFatal((e as Error)?.message || "Could not load the guide."); },
-    );
+    try {
+      const loaded = await api.painting.guides.get(guideId);
+      setGuide(loaded);
+      setRefImageId(loaded.reference_image_id);
+    } catch (e) {
+      setFatal((e as Error)?.message || "Could not load the guide.");
+    } finally {
+      setLoadingGuide(false);
+    }
+  }, [guideId]);
+
+  useEffect(() => {
+    void loadGuide();
     return () => {
-      alive = false;
       if (pollRef.current) clearTimeout(pollRef.current);
     };
-  }, [guideId]);
+  }, [loadGuide]);
 
   const generate = () => {
     setFatal(null);
@@ -210,7 +221,17 @@ export default function GuideDraftReviewPage() {
         )}
       </div>
 
-      {fatal && <p role="alert" className="text-sm text-rose-400 mb-4">{fatal}</p>}
+      {loadingGuide && (
+        <SkeletonPanel className="max-w-xl space-y-4 rounded-lg border border-gray-800 p-5" data-testid="guide-draft-loading-skeleton">
+          <SkeletonBlock className="h-4 w-32" />
+          <SkeletonBlock className="h-28 w-full" />
+          <SkeletonBlock className="h-9 w-36" />
+        </SkeletonPanel>
+      )}
+      {!loadingGuide && fatal && !guide && (
+        <ErrorState title="Couldn't load this guide" message={fatal} onRetry={() => void loadGuide()} />
+      )}
+      {guide && fatal && <p role="alert" className="text-sm text-rose-400 mb-4">{fatal}</p>}
 
       {job?.status === "error" && (
         <p role="alert" className="text-sm text-rose-400 border border-rose-900/50 rounded-lg p-4 mb-4">

@@ -77,4 +77,22 @@ describe("GuideEditorPage", () => {
     expect(patch).not.toHaveProperty("tabs");
     expect(navigate).toHaveBeenCalledWith("/painting/guides/5");
   });
+
+  it("shows a loading skeleton and retries a failed guide load", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.painting.guides.get)
+      .mockRejectedValueOnce(new Error("network unavailable"))
+      .mockResolvedValueOnce({
+        id: 5, slug: "robocop", title: "RoboCop", franchise: null, technique_tags: [], paint_lines_used: [],
+      } as never);
+
+    renderAt("/painting/guides/5/edit");
+    expect(screen.getByTestId("guide-editor-loading-skeleton")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("network unavailable");
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByDisplayValue("RoboCop")).toBeInTheDocument();
+    expect(api.painting.guides.get).toHaveBeenCalledTimes(2);
+  });
 });
