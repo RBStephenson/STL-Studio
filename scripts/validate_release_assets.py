@@ -4,16 +4,40 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 from pathlib import Path
 
 
 CHECKSUM_NAME = "SHA256SUMS"
+SBOM_NAMES = (
+    "stl-studio-backend-windows.cdx.json",
+    "stl-studio-desktop-windows.cdx.json",
+    "stl-studio-backend-linux.cdx.json",
+)
 
 
 def required_names(version: str) -> tuple[str, ...]:
     installer = f"STL-Studio-Setup-{version}.exe"
-    return (installer, f"{installer}.blockmap", "latest.yml", "stl-studio-linux")
+    return (
+        installer,
+        f"{installer}.blockmap",
+        "latest.yml",
+        "stl-studio-linux",
+        *SBOM_NAMES,
+    )
+
+
+def validate_sbom(path: Path) -> None:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ValueError(f"invalid SBOM JSON: {path.name}") from error
+    if document.get("bomFormat") != "CycloneDX":
+        raise ValueError(f"SBOM is not CycloneDX: {path.name}")
+    components = document.get("components")
+    if not isinstance(components, list) or not components:
+        raise ValueError(f"SBOM contains no components: {path.name}")
 
 
 def sha256(path: Path) -> str:
@@ -59,6 +83,9 @@ def validate(directory: Path, version: str) -> None:
         raise ValueError("latest.yml version does not match the release version")
     if not path_match or path_match.group(1).strip() != installer:
         raise ValueError("latest.yml path does not match the published installer")
+
+    for name in SBOM_NAMES:
+        validate_sbom(directory / name)
 
     entries: dict[str, str] = {}
     for line in (directory / CHECKSUM_NAME).read_text(encoding="utf-8").splitlines():

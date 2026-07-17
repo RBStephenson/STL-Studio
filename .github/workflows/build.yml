@@ -80,9 +80,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install backend deps + PyInstaller
+      - name: Install backend runtime dependencies
         working-directory: backend
-        run: pip install -r requirements.txt pyinstaller
+        run: |
+          pip install -r requirements.txt
+          pip freeze > ../backend-runtime-requirements.txt
+
+      - name: Generate backend SBOM
+        run: |
+          pip install cyclonedx-bom==7.3.0
+          cyclonedx-py requirements backend-runtime-requirements.txt --output-file stl-studio-backend-${{ matrix.label }}.cdx.json
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
 
       # The backend exe is a headless windowless sidecar (Phase 2, STUDIO-72). On
       # Windows it is wrapped by Electron below; on Linux it ships as-is with the
@@ -109,6 +119,14 @@ jobs:
         if: matrix.os == 'windows-latest'
         working-directory: desktop
         run: npm ci
+
+      # Keep the complete desktop packaging graph: Electron is a development
+      # dependency in package.json but its runtime is embedded in the installer.
+      - name: Generate desktop SBOM
+        if: matrix.os == 'windows-latest'
+        working-directory: desktop
+        shell: bash
+        run: npm sbom --sbom-format cyclonedx > ../stl-studio-desktop-windows.cdx.json
 
       # Stamps the installer with a real version so About/app.getVersion() show
       # something meaningful. Release builds get the semver tag (v1.2.3 -> 1.2.3);
@@ -202,6 +220,41 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: mv dist-standalone/stl-studio dist-standalone/stl-studio-${{ matrix.label }}
 
+      # Attest in the job that produced each subject so provenance identifies
+      # the actual platform build, rather than the later qualification job.
+      - name: Attest Windows binary provenance
+        if: ${{ inputs.release && matrix.os == 'windows-latest' }}
+        uses: actions/attest@v4
+        with:
+          subject-path: desktop/release/STL-Studio-Setup-*.exe
+
+      - name: Attest Windows backend SBOM
+        if: ${{ inputs.release && matrix.os == 'windows-latest' }}
+        uses: actions/attest@v4
+        with:
+          subject-path: desktop/release/STL-Studio-Setup-*.exe
+          sbom-path: stl-studio-backend-windows.cdx.json
+
+      - name: Attest Windows desktop SBOM
+        if: ${{ inputs.release && matrix.os == 'windows-latest' }}
+        uses: actions/attest@v4
+        with:
+          subject-path: desktop/release/STL-Studio-Setup-*.exe
+          sbom-path: stl-studio-desktop-windows.cdx.json
+
+      - name: Attest Linux binary provenance
+        if: ${{ inputs.release && matrix.os != 'windows-latest' }}
+        uses: actions/attest@v4
+        with:
+          subject-path: dist-standalone/stl-studio-${{ matrix.label }}
+
+      - name: Attest Linux backend SBOM
+        if: ${{ inputs.release && matrix.os != 'windows-latest' }}
+        uses: actions/attest@v4
+        with:
+          subject-path: dist-standalone/stl-studio-${{ matrix.label }}
+          sbom-path: stl-studio-backend-${{ matrix.label }}.cdx.json
+
       # ---- Upload to the DRAFT release (release.yml publishes it afterwards) OR
       #      keep as a CI artifact (build-check). Uploading to a draft keeps the
       #      release mutable so each platform job can attach its artifact. ----
@@ -215,6 +268,8 @@ jobs:
             desktop/release/*.exe
             desktop/release/*.blockmap
             desktop/release/latest.yml
+            stl-studio-backend-windows.cdx.json
+            stl-studio-desktop-windows.cdx.json
           draft: ${{ inputs.release_draft }}
           prerelease: ${{ inputs.release_prerelease }}
           overwrite_files: true
@@ -224,7 +279,9 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
-          files: dist-standalone/stl-studio-${{ matrix.label }}
+          files: |
+            dist-standalone/stl-studio-${{ matrix.label }}
+            stl-studio-backend-${{ matrix.label }}.cdx.json
           draft: ${{ inputs.release_draft }}
           prerelease: ${{ inputs.release_prerelease }}
           overwrite_files: true
@@ -238,6 +295,8 @@ jobs:
             desktop/release/*.exe
             desktop/release/*.blockmap
             desktop/release/latest.yml
+            stl-studio-backend-windows.cdx.json
+            stl-studio-desktop-windows.cdx.json
           retention-days: ${{ inputs.artifact_retention_days }}
 
       - name: Upload build artifact (Linux binary)
@@ -245,5 +304,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: stl-studio-${{ matrix.label }}
-          path: dist-standalone/stl-studio-${{ matrix.label }}
+          path: |
+            dist-standalone/stl-studio-${{ matrix.label }}
+            stl-studio-backend-${{ matrix.label }}.cdx.json
           retention-days: ${{ inputs.artifact_retention_days }}

@@ -106,6 +106,8 @@ jobs:
     uses: ./.github/workflows/build.yml
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     with:
       release: true
       tag: ${{ needs.version.outputs.tag }}
