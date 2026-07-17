@@ -4,14 +4,11 @@ sqlalchemy==2.0.51
 alembic==1.18.5
 pydantic==2.13.4
 pydantic-settings==2.14.2
-aiofiles==25.1.0
 httpx==0.28.1
 truststore==0.10.4
 beautifulsoup4==4.15.0
 python-multipart==0.0.32
 nh3==0.3.6  # HTML sanitization for imported guide content (#440)
-watchdog==6.0.0
-apscheduler==3.11.3
 cryptography==49.0.0  # Fernet encryption-at-rest for the AI API key (#517)
 
 # Painting module (#182). Color math + image handling are used from M1;
