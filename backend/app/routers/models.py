@@ -404,6 +404,29 @@ def create_creator(body: CreatorCreate, db: Session = Depends(get_db)):
     return result
 
 
+@router.delete("/creators/{creator_id}", status_code=204)
+def delete_creator(creator_id: int, db: Session = Depends(get_db)):
+    """Delete a creator row. Blocked while any model still references it
+    (including excluded/hidden ones — this checks the raw FK relationship,
+    not just what the library grid shows) so deleting never orphans a model
+    or silently strands its files. The caller (Creators page) surfaces the
+    409 as a toast telling the user to move or delete those models first."""
+    creator = db.get(Creator, creator_id)
+    if not creator:
+        raise HTTPException(status_code=404, detail="Creator not found")
+    model_count = db.query(Model).filter(Model.creator_id == creator_id).count()
+    if model_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Can't delete \"{creator.name}\" — it still has {model_count} "
+                f"model{'s' if model_count != 1 else ''}. Move or delete those first."
+            ),
+        )
+    db.delete(creator)
+    db.commit()
+
+
 def _stat_count(condition):
     """A single conditional-sum column for model_stats' one-pass query."""
     return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)

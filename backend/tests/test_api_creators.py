@@ -53,6 +53,43 @@ class TestCreateCreator:
         assert db.query(Creator).filter_by(name="Solo").first() is not None
 
 
+class TestDeleteCreator:
+    def test_deletes_a_creator_with_no_models(self, client, db):
+        creator = make_creator(db, name="Solo")
+        db.commit()
+
+        resp = client.delete(f"/models/creators/{creator.id}")
+        assert resp.status_code == 204
+        assert db.query(Creator).filter_by(id=creator.id).first() is None
+
+    def test_blocked_while_the_creator_still_has_models(self, client, db):
+        creator = make_creator(db, name="Abe3D")
+        make_model(db, creator, name="Bust", character="Joker")
+        db.commit()
+
+        resp = client.delete(f"/models/creators/{creator.id}")
+        assert resp.status_code == 409
+        assert "1 model" in resp.json()["detail"]
+        # Not deleted — still there for a follow-up request.
+        assert db.query(Creator).filter_by(id=creator.id).first() is not None
+
+    def test_blocked_even_for_an_excluded_model(self, client, db):
+        """The safety check counts every model row referencing this creator,
+        not just the ones the library grid shows — an excluded model is still
+        a real FK reference that a delete would orphan."""
+        creator = make_creator(db, name="Abe3D")
+        m = make_model(db, creator, name="Bust", character="Joker")
+        m.excluded = True
+        db.commit()
+
+        resp = client.delete(f"/models/creators/{creator.id}")
+        assert resp.status_code == 409
+
+    def test_unknown_creator_is_404(self, client, db):
+        resp = client.delete("/models/creators/999999")
+        assert resp.status_code == 404
+
+
 class TestUnorganizedIndicator:
     def test_model_in_place_is_not_flagged(self, client, db, tmp_path):
         _root(db, tmp_path)
