@@ -23,6 +23,8 @@ A tour of every screen and what it does.
 - [Logging](#logging)
 - [Backup, restore & reset](#backup-restore--reset)
 - [NSFW toggle](#nsfw-toggle)
+- [External storage recovery](#external-storage-recovery)
+- [Desktop updates](#desktop-updates)
 
 ---
 

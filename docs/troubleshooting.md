@@ -10,7 +10,6 @@
 - [The scan seems stuck or slow](#the-scan-seems-stuck-or-slow)
 - [Scale or type tags are wrong/missing](#scale-or-type-tags-are-wrongmissing)
 - [NSFW images are showing / blurred](#nsfw-images-are-showing--blurred)
-- [macOS won't open the app](#macos-wont-open-the-app)
 - [Where is my data stored? Is it safe?](#where-is-my-data-stored-is-it-safe)
 - [How do I back up or move my library?](#how-do-i-back-up-or-move-my-library)
 - [A collection shows 0 models after I added some](#a-collection-shows-0-models-after-i-added-some)
@@ -107,15 +106,11 @@ flagged NSFW are blurred. To change a specific model's flag, use the **NSFW**
 button on its card or detail header. You can also filter the Library by NSFW
 status.
 
-## macOS won't open the app
-
-The standalone macOS binary isn't notarized yet, so Gatekeeper blocks it on first
-launch. **Right-click the file → Open → Open.** You only need to do this once.
-
 ## Where is my data stored? Is it safe?
 
-Everything runs locally and your library never leaves your machine. The catalog
-database lives in your user data folder (see
+The catalog database and model files stay on your machine. Optional AI and
+storefront integrations make network requests only when you configure and use
+them. The catalog database lives in your user data folder (see
 [Getting Started](getting-started.md#standalone-recommended)) and survives app
 updates. The app reads your STL folders; in Docker mode they're mounted
 **read-only**, so your original files are never modified.
