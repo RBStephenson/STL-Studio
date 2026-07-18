@@ -166,6 +166,30 @@ class TestBulkEnrich:
         r = client.patch("/models/bulk/enrich", json={"ids": [a.id], "notes": "n"})
         assert r.status_code == 200  # not 422 from int("bulk")
 
+    def test_orphaned_creator_removed_once_every_model_reassigned(self, client, db):
+        """Regression (#1108): single-pack import creates a placeholder
+        Creator named after the pack folder. Once the user sets the real
+        creator name here (Import Preview's Creator field), every model
+        under the placeholder reassigns — the now-empty placeholder row
+        must not be left behind."""
+        creator, a, b, c = _setup(db)
+        r = client.patch(
+            "/models/bulk/enrich",
+            json={"ids": [a.id, b.id, c.id], "creator_name": "dakkadakka.store"},
+        )
+        assert r.status_code == 200
+        assert db.query(Creator).filter_by(id=creator.id).first() is None
+
+    def test_creator_with_remaining_models_is_not_pruned(self, client, db):
+        creator, a, b, c = _setup(db)
+        r = client.patch(
+            "/models/bulk/enrich",
+            json={"ids": [a.id, b.id], "creator_name": "New Creator"},
+        )
+        assert r.status_code == 200
+        # c still belongs to "Original Creator" — it survives.
+        assert db.query(Creator).filter_by(id=creator.id).first() is not None
+
     def test_409_when_scan_running(self, client, db):
         """Returns 409 when a scan is in progress, matching set-group / batch-set-group behaviour."""
         _, a, _, _ = _setup(db)

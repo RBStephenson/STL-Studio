@@ -1419,7 +1419,7 @@ class TestScanAllRootsMountGate:
         monkeypatch.setattr(scanner, "_prune_ignored", _cap("ignored"))
         monkeypatch.setattr(scanner, "_prune_slicer_files", lambda *a, **k: None)
         monkeypatch.setattr(scanner, "_prune_phantoms", lambda *a, **k: 0)
-        monkeypatch.setattr(scanner, "_prune_empty_creators", lambda *a, **k: None)
+        monkeypatch.setattr(scanner, "prune_empty_creators", lambda *a, **k: None)
         return captured
 
     def test_offline_root_excluded_from_prunes(self, db, tmp_path, monkeypatch):
@@ -1683,7 +1683,7 @@ class TestScanCompletionSummary:
         monkeypatch.setattr(scanner, "_prune_stale_paths", lambda *a, **k: 0)
         monkeypatch.setattr(scanner, "_prune_slicer_files", lambda *a, **k: None)
         monkeypatch.setattr(scanner, "_prune_phantoms", lambda *a, **k: 0)
-        monkeypatch.setattr(scanner, "_prune_empty_creators", lambda *a, **k: None)
+        monkeypatch.setattr(scanner, "prune_empty_creators", lambda *a, **k: None)
 
         scanner.scan_all_roots(db)
         return scanner.get_status()
