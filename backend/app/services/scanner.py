@@ -276,7 +276,7 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 # only "STL" was a slicer project is removed in the same scan.
                 _prune_slicer_files(_db)
                 removed += _prune_phantoms(_db)
-                _prune_empty_creators(_db)
+                prune_empty_creators(_db)
 
                 # Replace the in-progress "scanning <creator>" message with a
                 # summary the UI can show once the run finishes (#223).
@@ -565,9 +565,15 @@ def _prune_stale_models(
     return len(stale_ids)
 
 
-def _prune_empty_creators(db: Session):
+def prune_empty_creators(db: Session):
     """Delete Creator rows that have no models — left behind by the scraper
-    creating duplicate creators with different casing, or by stale-path pruning."""
+    creating duplicate creators with different casing, by stale-path pruning,
+    or by a caller reassigning every one of a creator's models elsewhere
+    (single-pack import's placeholder creator — named after the pack folder,
+    e.g. "Ignisaurus Clan ..." — orphaned the moment the user sets the real
+    creator name via bulk-enrich or a single-model edit; #1108). Public
+    (no leading underscore) since it's now called from outside this module,
+    not just the post-scan pass below."""
     orphans = (
         db.query(Creator)
         .filter(~Creator.id.in_(db.query(Model.creator_id).filter(Model.creator_id != None).distinct()))
@@ -577,7 +583,7 @@ def _prune_empty_creators(db: Session):
         for c in orphans:
             db.delete(c)
         db.commit()
-        logger.info(f"Post-scan: removed {len(orphans)} creator(s) with no remaining models")
+        logger.info(f"Removed {len(orphans)} creator(s) with no remaining models")
 
 
 def _prune_phantoms(db: Session, creator_id: int | None = None):

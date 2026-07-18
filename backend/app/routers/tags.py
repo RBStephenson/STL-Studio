@@ -188,4 +188,13 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
             model.source_site = body.source_site.strip() or None
         model.updated_at = utcnow()
     db.commit()
+    if creator_id is not None:
+        # Reassigning a model's creator can leave its old one with zero
+        # models — most commonly the single-pack import placeholder creator
+        # (named after the pack folder) once the user sets the real name
+        # here (#1108). A global sweep, same as the post-scan prune —
+        # cheap, and scoping it to "creators these models used to have"
+        # would need capturing old creator_ids before the loop above for no
+        # real benefit.
+        scanner.prune_empty_creators(db)
     return {"ok": True, "updated": len(models_to_update)}
