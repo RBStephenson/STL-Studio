@@ -110,6 +110,18 @@ _LABEL_TO_TYPE = {
 DEFAULT_ISSUE_TYPE = "Task"
 
 
+def github_import_description(body: str, url: str, reporter: str) -> str:
+    """Prepend a provenance line pointing back at the source GitHub issue.
+
+    Kept as a pure helper so the exact text (which feeds the marker hash) is
+    unit-testable and stays in lockstep between create-time and any later
+    reconcile.
+    """
+    who = f" (reported by @{reporter})" if reporter else ""
+    header = f"Imported from GitHub: {url}{who}"
+    return f"{header}\n\n{body}" if body else header
+
+
 def issue_type_for_labels(labels: list[str]) -> str:
     """Pick a Jira issue type from GitHub label names (Task if none match).
 

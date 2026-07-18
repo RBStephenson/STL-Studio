@@ -30,7 +30,14 @@ from typing import Callable
 
 from .github_client import GitHubClient
 from .jira_client import JiraClient
-from .models import Action, NormalizedIssue, content_hash, issue_type_for_labels, reconcile
+from .models import (
+    Action,
+    NormalizedIssue,
+    content_hash,
+    github_import_description,
+    issue_type_for_labels,
+    reconcile,
+)
 
 _log = logging.getLogger("jira_github_sync")
 
@@ -92,11 +99,22 @@ def create_jira_from_github(jira: JiraClient, github: GitHubClient, dry_run: boo
         _log.info("GitHub #%d -> create Jira %s: %s", gh["number"], issue_type, gh["title"])
         if dry_run:
             continue
-        key = jira.create_issue(gh["title"], gh["body"], issue_type)
-        marker_hash = content_hash(gh["title"], gh["body"], _NEW_JIRA_STATUS)
+        # The Jira description carries an import-provenance header; the GitHub
+        # body does not. Hash each side against its own content so a later
+        # forward-mirror run doesn't see a phantom diff (reconcile compares
+        # jsrc/ghsrc independently).
+        jira_desc = github_import_description(gh["body"], gh["url"], gh["reporter"])
+        key = jira.create_issue(gh["title"], jira_desc, issue_type)
+        jsrc = content_hash(gh["title"], jira_desc, _NEW_JIRA_STATUS)
+        ghsrc = content_hash(gh["title"], gh["body"], _NEW_JIRA_STATUS)
+        if gh["url"]:
+            try:
+                jira.add_remote_link(key, gh["url"], f"GitHub #{gh['number']}: {gh['title']}")
+            except RuntimeError:
+                _log.warning("Created Jira %s but could not add the GitHub web link", key)
         try:
             github.mark_issue(
-                gh["number"], gh["body"], _NEW_JIRA_STATUS, key, marker_hash, marker_hash
+                gh["number"], gh["body"], _NEW_JIRA_STATUS, key, jsrc, ghsrc
             )
         except RuntimeError:
             _log.error(
@@ -104,7 +122,7 @@ def create_jira_from_github(jira: JiraClient, github: GitHubClient, dry_run: boo
                 "back to GitHub -- a duplicate Jira issue may be created on the next "
                 "run. Manually add '<!-- jira-sync key=%s jsrc=%s ghsrc=%s -->' to "
                 "GitHub issue #%d to prevent this.",
-                key, gh["number"], key, marker_hash, marker_hash, gh["number"],
+                key, gh["number"], key, jsrc, ghsrc, gh["number"],
             )
 
 

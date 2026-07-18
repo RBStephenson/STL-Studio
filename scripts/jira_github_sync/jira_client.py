@@ -139,6 +139,18 @@ class JiraClient:
         )
         return result["key"]
 
+    def add_remote_link(self, key: str, url: str, title: str) -> None:
+        """Attach a web link ("remote issue link") to a Jira issue.
+
+        Shown in Jira's links panel. Used to point a reverse-created issue back
+        at the GitHub issue it came from.
+        """
+        self._request(
+            "POST",
+            f"/rest/api/3/issue/{key}/remotelink",
+            {"object": {"url": url, "title": title}},
+        )
+
 
 def _parse_jira_timestamp(value: str) -> datetime:
     # Jira returns e.g. "2026-07-18T14:03:00.000-0400"; normalize the bare

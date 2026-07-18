@@ -48,6 +48,10 @@ pair instead of duplicating it.
 
 - **Issue type**: defaults to `Task`; GitHub labels map `bug` → Bug and
   `enhancement`/`feature`/`story` → Story (`bug` wins when several apply).
+- **Back-link to GitHub**: the created Jira issue gets a web link (remote
+  issue link) to the GitHub issue, and its description is prefixed with
+  `Imported from GitHub: <url> (reported by @user)` so you can jump back to the
+  original from Jira.
 - **Scope**: only open, unlinked, non-PR issues. Closed issues, pull requests,
   milestones, and already-linked issues are skipped.
 - **Duplicate safety**: the marker is written back immediately after the Jira
