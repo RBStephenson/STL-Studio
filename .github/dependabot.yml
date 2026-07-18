@@ -12,6 +12,11 @@ updates:
         dependency-type: "development"
       prod-deps:
         dependency-type: "production"
+    ignore:
+      # typescript-eslint peer-caps TypeScript at <6.1.0; TS 7 breaks npm ci.
+      # Hold TS majors until typescript-eslint widens its peer range (STUDIO-275).
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # npm (Electron shell)
   - package-ecosystem: "npm"
