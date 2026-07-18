@@ -1952,10 +1952,11 @@ def _inbox_scan(
       Preview's Creator field is typically already filled in (typed, or via
       a metadata Fetch) before the user clicks Import, so there's no need to
       invent a placeholder only to have bulk-enrich immediately reassign
-      every model away from it. Blank/not-yet-known falls back to the
-      folder name as a placeholder, same "rename it once you know the real
-      one" contract as the existing '_Inbox' flat-layout placeholder — #1108
-      prunes that placeholder once it's later reassigned and left empty."""
+      every model away from it. Blank/not-yet-known instead reuses the same
+      shared '_Inbox' placeholder the flat-layout branch below already uses
+      (#1110 follow-up) — one common, well-known bucket for "not yet
+      triaged" content instead of a fresh one-off creator named after every
+      individual un-enriched pack's own folder."""
     global _active
     _active = job
     job.update(message="importing", models_found=0, files_found=0, cancelled=False)
@@ -1969,10 +1970,7 @@ def _inbox_scan(
 
             if single_pack:
                 known_name = (creator_name or "").strip()
-                creator = (
-                    resolve_creator(known_name, _db) if known_name
-                    else _get_or_create_creator(inbox.name, _db)
-                )
+                creator = resolve_creator(known_name if known_name else "_Inbox", _db)
                 _db.commit()
                 _msg(f"importing {inbox.name}")
                 _walk_for_models(
