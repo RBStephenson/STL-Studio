@@ -281,10 +281,11 @@ class TestSinglePackImport:
         """Regression for the reported case: a pack shaped like
         "Product (supported)" / "Product (unsupported)" / "Product (chitubox)"
         — previously split into bogus per-subfolder creators (#1048-style),
-        orphaning any pack-level metadata. Now: one creator (the pack's own
-        name), both STL-bearing variants indexed and auto-grouped into a
-        single "2 variants" card, the STL-less chitubox folder produces no
-        model at all."""
+        orphaning any pack-level metadata. Now: one creator (the shared
+        '_Inbox' placeholder, since no creator_name is given here — #1110),
+        both STL-bearing variants indexed and auto-grouped into a single
+        "2 variants" card, the STL-less chitubox folder produces no model
+        at all."""
         with tempfile.TemporaryDirectory() as tmpdir:
             inbox = Path(tmpdir)
             _make_stl_tree(inbox, {
@@ -307,7 +308,7 @@ class TestSinglePackImport:
         from app.models import Model
         models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
         assert len(models) == 2
-        assert {m.creator.name for m in models} == {Path(tmpdir).name}
+        assert {m.creator.name for m in models} == {"_Inbox"}
         # Auto-grouped into one variant group, not left as two loose models.
         group_ids = {m.variant_group_id for m in models}
         assert len(group_ids) == 1
@@ -342,7 +343,8 @@ class TestSinglePackImport:
     def test_single_pack_with_no_subfolders_still_indexes_the_pack(self, client, db):
         """A pack with STLs directly in its own root (no variant subfolders
         at all) — the plain, common case — must still work under
-        single_pack=True."""
+        single_pack=True. No creator_name given, so it lands in the shared
+        '_Inbox' placeholder (#1110)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             inbox = Path(tmpdir)
             (inbox / "part.stl").write_text("solid p\nendsolid")
@@ -353,10 +355,106 @@ class TestSinglePackImport:
             from app.models import Model
             models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
             assert len(models) == 1
-            assert models[0].creator.name == Path(tmpdir).name
+            assert models[0].creator.name == "_Inbox"
 
         r = client.get("/models?is_inbox=true")
         assert len(r.json()["items"]) == 1
+
+    def test_known_creator_name_resolves_directly_no_placeholder(self, client, db):
+        """When the caller already knows the real creator (Import Preview's
+        Creator field, typed or Fetch-populated before the user clicks
+        Import), the scan attaches models to it directly — no folder-named
+        placeholder is ever created, so there's nothing left to prune (#1110,
+        the root-cause fix for #1108's cleanup-after-the-fact)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            (inbox / "part.stl").write_text("solid p\nendsolid")
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(tmpdir, db=db, single_pack=True, creator_name="dakkadakka.store")
+
+        from app.models import Creator, Model
+        models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+        assert len(models) == 1
+        assert models[0].creator.name == "dakkadakka.store"
+        # No placeholder named after the folder was ever created.
+        assert db.query(Creator).filter(Creator.name == Path(tmpdir).name).first() is None
+        assert db.query(Creator).count() == 1
+
+    def test_two_packs_with_the_same_known_creator_share_one_row(self, client, db):
+        """Multiple packs from the same creator, each imported independently
+        via its own Import click, must resolve to the SAME creator row —
+        not one placeholder-turned-real row per pack (#1110)."""
+        with tempfile.TemporaryDirectory() as base:
+            pack_a = Path(base) / "Ignisaurus Clan Ignitium"
+            pack_b = Path(base) / "Ignisaurus Destroyers"
+            for pack in (pack_a, pack_b):
+                pack.mkdir()
+                (pack / "part.stl").write_text("solid p\nendsolid")
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(str(pack_a), db=db, single_pack=True, creator_name="dakkadakka.store")
+            scan_inbox_folder(str(pack_b), db=db, single_pack=True, creator_name="DakkaDakka.Store")
+
+        from app.models import Creator, Model
+        assert db.query(Creator).count() == 1
+        creator = db.query(Creator).first()
+        assert creator.name == "dakkadakka.store"  # first casing wins, matches resolve_creator
+        models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+        assert len(models) == 2
+        assert {m.creator_id for m in models} == {creator.id}
+
+    def test_blank_creator_name_falls_back_to_shared_inbox_placeholder(self, client, db):
+        """An empty/whitespace-only creator_name (Creator field not filled in
+        yet) lands in the shared '_Inbox' placeholder (#1110) — not a fresh
+        one-off creator named after this pack's own folder."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            (inbox / "part.stl").write_text("solid p\nendsolid")
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(tmpdir, db=db, single_pack=True, creator_name="   ")
+
+            from app.models import Model
+            models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+            assert len(models) == 1
+            assert models[0].creator.name == "_Inbox"
+
+    def test_two_unenriched_packs_share_the_inbox_placeholder(self, client, db):
+        """Two different, not-yet-enriched packs both land under the SAME
+        '_Inbox' creator — not two separate folder-named placeholders."""
+        with tempfile.TemporaryDirectory() as base:
+            pack_a = Path(base) / "Pack A"
+            pack_b = Path(base) / "Pack B"
+            for pack in (pack_a, pack_b):
+                pack.mkdir()
+                (pack / "part.stl").write_text("solid p\nendsolid")
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(str(pack_a), db=db, single_pack=True)
+            scan_inbox_folder(str(pack_b), db=db, single_pack=True)
+
+        from app.models import Creator, Model
+        assert db.query(Creator).filter(Creator.name == "_Inbox").count() == 1
+        models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+        assert len(models) == 2
+        assert {m.creator.name for m in models} == {"_Inbox"}
+
+    def test_router_scan_folder_passes_creator_name_through(self, client, db):
+        from app.models import ScanRoot
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db.add(ScanRoot(path=tmpdir, enabled=True, layout="{creator}"))
+            db.commit()
+
+            with patch("app.services.scanner.start_inbox_scan", return_value=True) as mock_start:
+                r = client.post(
+                    "/import/scan-folder",
+                    json={"path": tmpdir, "creator_name": "dakkadakka.store"},
+                )
+            assert r.status_code == 200
+            args, kwargs = mock_start.call_args
+            assert kwargs.get("creator_name") == "dakkadakka.store"
 
     def test_flat_layout_auto_links_sup_files_by_filename_instead_of_splitting(self, client, db):
         """A pack with NO variant subfolders, distinguishing supported vs

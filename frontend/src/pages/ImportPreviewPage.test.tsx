@@ -163,7 +163,7 @@ describe("ImportPreviewPage (#452 C2)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
 
-    await waitFor(() => expect(api.import.scanFolder).toHaveBeenCalledWith("/src/PackA"));
+    await waitFor(() => expect(api.import.scanFolder).toHaveBeenCalledWith("/src/PackA", "Hijos De Pulvo"));
     await waitFor(
       () => expect(api.models.bulkEnrich).toHaveBeenCalledWith([1, 2], { creator_name: "Hijos De Pulvo" }),
       { timeout: _WAIT }

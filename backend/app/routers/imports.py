@@ -219,9 +219,12 @@ def scan_folder(body: InboxScanRequest, db: Session = Depends(get_db)):
     # failure. Same launcher /scan/inbox uses. single_pack=True (#1087): this
     # endpoint is always scoped to exactly one pack (Import Preview's per-pack
     # Import button, or the browse-a-folder-directly flow) — never a multi-creator
-    # dump, unlike /scan/inbox.
+    # dump, unlike /scan/inbox. creator_name (#1110), when the caller already
+    # knows it, resolves to the real creator directly — see InboxScanRequest.
     try:
-        started = scanner.start_inbox_scan(str(p), single_pack=True)
+        started = scanner.start_inbox_scan(
+            str(p), single_pack=True, creator_name=body.creator_name,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start import: {e}")
     if not started:
