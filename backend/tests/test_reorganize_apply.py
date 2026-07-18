@@ -736,7 +736,14 @@ class TestImageCollisionSkip:
 
         resp = _apply(client, mid, [m.id])
         assert resp.status_code == 500
-        assert "already exists" in resp.json()["detail"]["message"]
+        message = resp.json()["detail"]["message"]
+        # Plain-language, actionable wording (#1112) — not a raw filesystem
+        # path dump the user can't act on. Still contains "already exists"
+        # so the import-apply collision-retry substring check keeps working.
+        assert "already exists" in message
+        assert "already exists in the library" in message
+        assert "check the library and naming" in message
+        assert stray_dest not in message
         db.refresh(m)
         assert os.path.exists(img_path)  # nothing moved — image untouched too
         assert m.folder_path == str(tmp_path / "_inbox" / "Bust").replace("\\", "/")
