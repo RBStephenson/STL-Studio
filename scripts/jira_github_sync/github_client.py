@@ -93,7 +93,7 @@ class GitHubClient:
 
         These are issues opened directly on GitHub (the sync's own creations
         always carry a marker), i.e. the candidates for reverse creation into
-        Jira. Returns light dicts with number/title/body/labels.
+        Jira. Returns light dicts with number/title/body/labels/url/reporter.
         """
         raw = self._paginated("/issues", "state=open")
         candidates: list[dict] = []
@@ -108,6 +108,8 @@ class GitHubClient:
                     "title": r.get("title") or "",
                     "body": r.get("body") or "",
                     "labels": [lbl.get("name", "") for lbl in r.get("labels", []) or []],
+                    "url": r.get("html_url") or "",
+                    "reporter": (r.get("user") or {}).get("login") or "",
                 }
             )
         return candidates

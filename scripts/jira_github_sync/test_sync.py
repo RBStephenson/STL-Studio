@@ -13,6 +13,7 @@ from jira_github_sync.models import (
     Action,
     NormalizedIssue,
     content_hash,
+    github_import_description,
     issue_type_for_labels,
     reconcile,
 )
@@ -115,6 +116,20 @@ def test_sync_group_pushes_github_edit_to_jira():
 
 # --- reverse direction: GitHub -> Jira creation (STUDIO-269) ---------------
 
+def test_github_import_description():
+    assert github_import_description("Body", "http://x/1", "alice") == (
+        "Imported from GitHub: http://x/1 (reported by @alice)\n\nBody"
+    )
+    # no reporter -> no attribution suffix
+    assert github_import_description("Body", "http://x/1", "") == (
+        "Imported from GitHub: http://x/1\n\nBody"
+    )
+    # empty body -> header only, no trailing blank lines
+    assert github_import_description("", "http://x/1", "bob") == (
+        "Imported from GitHub: http://x/1 (reported by @bob)"
+    )
+
+
 def test_issue_type_for_labels():
     assert issue_type_for_labels([]) == "Task"
     assert issue_type_for_labels(["documentation"]) == "Task"
@@ -128,10 +143,14 @@ def test_issue_type_for_labels():
 class _FakeJira:
     def __init__(self):
         self.created = []
+        self.remote_links = []
 
     def create_issue(self, title, description, issue_type):
         self.created.append((title, description, issue_type))
         return f"STUDIO-{100 + len(self.created)}"
+
+    def add_remote_link(self, key, url, title):
+        self.remote_links.append((key, url, title))
 
 
 class _FakeGitHub:
@@ -149,20 +168,35 @@ class _FakeGitHub:
         self.marked.append((number, description, status, key, jsrc, ghsrc))
 
 
-def _candidate(number=7, title="From GitHub", body="Body", labels=None):
-    return {"number": number, "title": title, "body": body, "labels": labels or []}
+def _candidate(number=7, title="From GitHub", body="Body", labels=None,
+               url="https://github.com/o/r/issues/7", reporter="alice"):
+    return {
+        "number": number, "title": title, "body": body, "labels": labels or [],
+        "url": url, "reporter": reporter,
+    }
 
 
-def test_create_jira_from_github_creates_and_marks():
+def test_create_jira_from_github_creates_marks_and_backlinks():
     jira, github = _FakeJira(), _FakeGitHub([_candidate(labels=["bug"])])
     create_jira_from_github(jira, github, dry_run=False)
-    assert jira.created == [("From GitHub", "Body", "Bug")]
-    number, desc, status, key, jsrc, ghsrc = github.marked[0]
-    assert number == 7
-    assert key == "STUDIO-101"
-    assert status == "To Do"
-    # marker hash matches what the next run will recompute from the pair
-    assert jsrc == ghsrc == content_hash("From GitHub", "Body", "To Do")
+
+    # Jira issue created with the provenance header prepended to the body.
+    title, desc, issue_type = jira.created[0]
+    assert (title, issue_type) == ("From GitHub", "Bug")
+    assert desc == "Imported from GitHub: https://github.com/o/r/issues/7 (reported by @alice)\n\nBody"
+
+    # Web link back to the GitHub issue.
+    assert jira.remote_links == [
+        ("STUDIO-101", "https://github.com/o/r/issues/7", "GitHub #7: From GitHub")
+    ]
+
+    # Marker written back with side-specific hashes (Jira desc has the header,
+    # GitHub body does not) so a future forward run sees no phantom diff.
+    number, _d, status, key, jsrc, ghsrc = github.marked[0]
+    assert (number, key, status) == (7, "STUDIO-101", "To Do")
+    assert ghsrc == content_hash("From GitHub", "Body", "To Do")
+    assert jsrc == content_hash("From GitHub", desc, "To Do")
+    assert jsrc != ghsrc
 
 
 def test_create_jira_from_github_dry_run_does_nothing():
