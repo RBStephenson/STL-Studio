@@ -13,7 +13,6 @@
 import { join } from "node:path";
 
 import { Menu, app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
-import type { WebContents } from "electron";
 import { autoUpdater } from "electron-updater";
 
 import { LOCKFILE_NAME, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
@@ -22,7 +21,6 @@ import {
   buildApplicationMenuTemplate,
   buildContextMenuTemplate,
 } from "./menu";
-import type { NavTarget } from "./menu";
 import { findFreePort, runtimeDeps } from "./runtime";
 import { getOrCreateSecretKey, regenerateSecretKey } from "./secretKey";
 import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
@@ -31,7 +29,13 @@ import { applyUserDataOverride } from "./userDataOverride";
 import { createUpdateController, readAutoUpdateEnabled } from "./updater";
 import type { UpdateController } from "./updater";
 import { readUpdateSmokeConfig } from "./updateSmoke";
-import { readWindowState, saveWindowState } from "./windowState";
+import { readWindowState } from "./windowState";
+import {
+  createWindowStatePersister,
+  editContextFromParams,
+  handleAppCommand,
+  navFor,
+} from "./windowManager";
 import { PersistentLogger, diagnosticsWereEnabled } from "./persistentLogger";
 import {
   registerProcessFailureHandlers,
@@ -55,7 +59,6 @@ const REPO_ROOT = join(__dirname, "..", "..");
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarProcess | null = null;
 let deps: SidecarDeps | null = null;
-let windowStateSaveTimer: NodeJS.Timeout | null = null;
 let backendBooting = false;
 let updateController: UpdateController | null = null;
 let persistentLogger: PersistentLogger | null = null;
@@ -122,28 +125,10 @@ registerProcessFailureHandlers(process, failureUi);
 
 startupLog("main-loaded");
 
-/** A NavTarget over a webContents' navigation history — drives both menus. */
-function navFor(wc: WebContents): NavTarget {
-  const history = wc.navigationHistory;
-  return {
-    canGoBack: () => history.canGoBack(),
-    canGoForward: () => history.canGoForward(),
-    goBack: () => history.goBack(),
-    goForward: () => history.goForward(),
-    reload: () => wc.reload(),
-  };
-}
-
 /** Install our custom application menu (no Edit menu). Navigation acts on the
  *  focused window, so this is built once and never needs rebuilding. */
 function installApplicationMenu(): void {
-  const nav: NavTarget = {
-    canGoBack: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.canGoBack() ?? false,
-    canGoForward: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.canGoForward() ?? false,
-    goBack: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.goBack(),
-    goForward: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.goForward(),
-    reload: () => BrowserWindow.getFocusedWindow()?.webContents.reload(),
-  };
+  const nav = navFor(() => BrowserWindow.getFocusedWindow()?.webContents);
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       buildApplicationMenuTemplate(nav, {
@@ -341,54 +326,25 @@ function createWindow(): BrowserWindow {
 
   // Right-click context menu: Back/Forward/Reload + clipboard when relevant.
   win.webContents.on("context-menu", (_event, params) => {
-    const template = buildContextMenuTemplate(navFor(win.webContents), {
-      isEditable: params.isEditable,
-      canCopy: params.editFlags.canCopy,
-      canPaste: params.editFlags.canPaste,
-    });
+    const template = buildContextMenuTemplate(navFor(() => win.webContents), editContextFromParams(params));
     Menu.buildFromTemplate(template).popup({ window: win });
   });
 
   // Mouse back/forward buttons.
   win.on("app-command", (_event, command) => {
-    const history = win.webContents.navigationHistory;
-    if (command === "browser-backward" && history.canGoBack()) {
-      history.goBack();
-    } else if (command === "browser-forward" && history.canGoForward()) {
-      history.goForward();
-    }
+    handleAppCommand(command, win.webContents.navigationHistory);
   });
 
-  const saveCurrentWindowState = (): void => {
-    try {
-      saveWindowState(userDataDir, {
-        bounds: win.getNormalBounds(),
-        isMaximized: win.isMaximized(),
-      });
-    } catch (err) {
-      console.warn("Failed to save window state", err);
-    }
-  };
-
-  const persistWindowState = (): void => {
-    if (windowStateSaveTimer) {
-      clearTimeout(windowStateSaveTimer);
-    }
-    windowStateSaveTimer = setTimeout(() => {
-      windowStateSaveTimer = null;
-      saveCurrentWindowState();
-    }, WINDOW_STATE_SAVE_DELAY_MS);
-  };
-
-  win.on("resize", persistWindowState);
-  win.on("move", persistWindowState);
-  win.on("close", () => {
-    if (windowStateSaveTimer) {
-      clearTimeout(windowStateSaveTimer);
-      windowStateSaveTimer = null;
-    }
-    saveCurrentWindowState();
+  const windowStatePersister = createWindowStatePersister({
+    userDataDir,
+    getState: () => ({ bounds: win.getNormalBounds(), isMaximized: win.isMaximized() }),
+    delayMs: WINDOW_STATE_SAVE_DELAY_MS,
+    onError: (error) => console.warn("Failed to save window state", error),
   });
+
+  win.on("resize", () => windowStatePersister.schedule());
+  win.on("move", () => windowStatePersister.schedule());
+  win.on("close", () => windowStatePersister.flush());
 
   return win;
 }
