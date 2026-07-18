@@ -16,7 +16,7 @@ from jira_github_sync.models import (
     issue_type_for_labels,
     reconcile,
 )
-from jira_github_sync.sync import create_jira_from_github, sync_group
+from jira_github_sync.sync import _flag_enabled, create_jira_from_github, sync_group
 
 NOW = datetime(2026, 7, 18, tzinfo=timezone.utc)
 EARLIER = NOW - timedelta(days=1)
@@ -184,3 +184,20 @@ def test_create_jira_from_github_marker_failure_is_swallowed():
     jira, github = _FakeJira(), _FakeGitHub([_candidate()], mark_raises=True)
     create_jira_from_github(jira, github, dry_run=False)
     assert len(jira.created) == 1
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("true", True), ("True", True), ("1", True), ("yes", True), ("on", True),
+        ("false", False), ("off", False), ("0", False), ("no", False), ("", False),
+    ],
+)
+def test_flag_enabled(monkeypatch, value, expected):
+    monkeypatch.setenv("SOME_FLAG", value)
+    assert _flag_enabled("SOME_FLAG") is expected
+
+
+def test_flag_enabled_unset(monkeypatch):
+    monkeypatch.delenv("SOME_FLAG", raising=False)
+    assert _flag_enabled("SOME_FLAG") is False

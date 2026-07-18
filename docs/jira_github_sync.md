@@ -1,8 +1,21 @@
 # Jira <-> GitHub Sync (STUDIO-264)
 
-Jira (project `STUDIO`) is the system of record. This sync exists purely for
-GitHub-side visibility, and to let edits made directly on GitHub issues flow
-back into Jira instead of being silently lost.
+Jira (project `STUDIO`) is the system of record. Both sync directions are
+**independently opt-in** and **off by default**; with neither enabled the run
+is a no-op.
+
+- **Reverse — GitHub → Jira** (`JIRA_GITHUB_SYNC_CREATE_JIRA`): issues opened
+  directly on the public GitHub repo are mirrored into Jira. This is the
+  primary intended use: end users file bugs/requests on GitHub, you triage in
+  Jira.
+- **Forward — Jira → GitHub** (`JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB`): open Jira
+  issues/epics are published to GitHub as issues/milestones.
+
+> ⚠️ **Forward mirroring on a public repo publishes every open Jira issue
+> publicly** — including internal or security-sensitive tickets. Only enable
+> `JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB` if every open Jira issue is safe to
+> disclose. For the "end users file issues, I work in Jira" workflow, leave
+> forward **off** and enable reverse only.
 
 ## What syncs
 
@@ -21,10 +34,12 @@ something a maintainer already dealt with.
 
 ## Creation direction
 
-By default, new items are only ever created in Jira, then mirrored to GitHub —
-Jira stays the system of record per the project's `.claude/CLAUDE.md`.
+Forward mirroring (Jira → GitHub) is gated by `JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB`
+(default off). When on, new items created in Jira are mirrored to GitHub;
+GitHub open/closed state is never touched (see above). Keep this off for a
+public repo unless every open Jira issue is safe to publish.
 
-Reverse creation (GitHub → Jira) is available but **opt-in**, gated by the
+Reverse creation (GitHub → Jira) is gated by the
 `JIRA_GITHUB_SYNC_CREATE_JIRA` repo variable (default off). When enabled, each
 **open, non-PR** GitHub issue that has **no** `jira-sync` marker (i.e. one
 opened directly on GitHub, not by this sync) creates a matching Jira issue,
@@ -88,7 +103,18 @@ Instead, gating is entirely on the GitHub side:
 - `JIRA_EMAIL` = the Jira account email the API token belongs to
 - `JIRA_PROJECT_KEY` = `STUDIO`
 - `JIRA_GITHUB_SYNC_CREATE_JIRA` = `true` to enable reverse (GitHub → Jira)
-  creation; omit or set `false` to keep it off (default)
+  creation; omit or set `false`/`off` to keep it off (default)
+- `JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB` = `true` to enable forward (Jira →
+  GitHub) mirroring; omit or set `false`/`off` to keep it off (default).
+  **Leave off on a public repo** unless all open Jira issues are safe to
+  disclose.
+
+Accepted truthy values for the flags: `true`/`1`/`yes`/`on` (case-insensitive);
+anything else (including `false`/`off`/unset) is treated as disabled.
+
+For the typical "end users file issues on GitHub, I work in Jira" setup:
+`JIRA_GITHUB_SYNC_ENABLED=true`, `JIRA_GITHUB_SYNC_CREATE_JIRA=true`, and
+`JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB` left off.
 
 **Repository secret**:
 
