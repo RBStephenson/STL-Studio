@@ -78,17 +78,27 @@ def main() -> int:
     )
     github = GitHubClient(repo=_env("GITHUB_REPOSITORY"), token=_env("GITHUB_TOKEN"))
 
+    open_issues = jira.list_open_issues()
+    open_epics = jira.list_open_epics()
+    linked_issues = github.linked_issues()
+    linked_milestones = github.linked_milestones()
+    _log.info(
+        "Fetched %d open Jira issues (%d already linked on GitHub), "
+        "%d open Jira epics (%d already linked as milestones)",
+        len(open_issues), len(linked_issues), len(open_epics), len(linked_milestones),
+    )
+
     sync_group(
-        jira.list_open_issues(),
-        github.linked_issues(),
+        open_issues,
+        linked_issues,
         create=github.create_issue,
         update=github.update_issue,
         push_to_jira=jira.update_issue,
         dry_run=dry_run,
     )
     sync_group(
-        jira.list_open_epics(),
-        github.linked_milestones(),
+        open_epics,
+        linked_milestones,
         create=github.create_milestone,
         update=github.update_milestone,
         push_to_jira=jira.update_issue,
