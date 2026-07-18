@@ -14,12 +14,12 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "devDependencies": {
-    "@types/node": "^20.16.0",
-    "@vitest/coverage-v8": "^3.2.6",
-    "electron": "^39.8.5",
+    "@types/node": "^26.1.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
-    "typescript": "^5.6.3",
-    "vitest": "^3.2.6"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
