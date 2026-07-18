@@ -1,0 +1,34 @@
+name: Jira/GitHub Sync
+
+on:
+  schedule:
+    # 01:00 UTC = 21:00 (9PM) America/New_York during EDT; EST shifts this to
+    # 8PM. Good enough for a daily visibility sync -- not time-critical.
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: jira-github-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: vars.JIRA_GITHUB_SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Run Jira <-> GitHub sync
+        env:
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_PROJECT_KEY: ${{ vars.JIRA_PROJECT_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python -m scripts.jira_github_sync.sync
