@@ -6,11 +6,12 @@ const updateMock = vi.fn(async (..._args: unknown[]) => ({ ok: true }));
 const fetchUrlMock = vi.fn(async (..._args: unknown[]) => ({}));
 const applyImagesMock = vi.fn(async (..._args: unknown[]) => ({ ok: true, image_paths: [] }));
 const toastMock = vi.fn();
+const tagsMock = vi.fn(() => new Promise<never>(() => {}));
 
 vi.mock("../api/client", () => ({
   api: {
     models: {
-      tags: vi.fn(async () => []),
+      tags: () => tagsMock(),
       update: (...a: unknown[]) => updateMock(...a),
     },
     scrape: {

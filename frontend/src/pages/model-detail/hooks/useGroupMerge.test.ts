@@ -44,9 +44,10 @@ describe("useGroupMerge", () => {
     expect(characters).toHaveBeenCalledWith(7);
   });
 
-  it("cancelMerge closes the picker", () => {
+  it("cancelMerge closes the picker", async () => {
     const { result } = renderHook(() => useGroupMerge(model, 1, reload));
     act(() => { result.current.openMergePicker(); });
+    await waitFor(() => expect(result.current.groupSuggestions).toEqual(["Knight", "Mage"]));
     act(() => { result.current.cancelMerge(); });
     expect(result.current.settingGroup).toBe(false);
   });

@@ -13,29 +13,26 @@
 import { join } from "node:path";
 
 import { Menu, app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
-import type { IpcMainInvokeEvent, WebContents } from "electron";
 import { autoUpdater } from "electron-updater";
 
+import { createAppController } from "./appController";
 import { LOCKFILE_NAME, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
+import { patchConsoleForDiagnostics, registerDiagnosticsIpcHandlers } from "./diagnostics";
 import {
   buildApplicationMenuTemplate,
   buildContextMenuTemplate,
 } from "./menu";
-import type { NavTarget } from "./menu";
 import { findFreePort, runtimeDeps } from "./runtime";
 import { getOrCreateSecretKey, regenerateSecretKey } from "./secretKey";
-import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
-import type { SidecarDeps, SidecarProcess } from "./sidecar";
 import { applyUserDataOverride } from "./userDataOverride";
-import { createUpdateController, readAutoUpdateEnabled } from "./updater";
-import type { UpdateController } from "./updater";
-import { readUpdateSmokeConfig } from "./updateSmoke";
-import { readWindowState, saveWindowState } from "./windowState";
+import { readWindowState } from "./windowState";
 import {
-  PersistentLogger,
-  diagnosticsWereEnabled,
-  persistDiagnosticsChoice,
-} from "./persistentLogger";
+  createWindowStatePersister,
+  editContextFromParams,
+  handleAppCommand,
+  navFor,
+} from "./windowManager";
+import { PersistentLogger, diagnosticsWereEnabled } from "./persistentLogger";
 import {
   registerProcessFailureHandlers,
   registerRendererFailureHandler,
@@ -56,12 +53,8 @@ const WINDOW_STATE_SAVE_DELAY_MS = 250;
 const REPO_ROOT = join(__dirname, "..", "..");
 
 let mainWindow: BrowserWindow | null = null;
-let sidecar: SidecarProcess | null = null;
-let deps: SidecarDeps | null = null;
-let windowStateSaveTimer: NodeJS.Timeout | null = null;
-let backendBooting = false;
-let updateController: UpdateController | null = null;
 let persistentLogger: PersistentLogger | null = null;
+let quitting = false;
 
 const IS_MAC = process.platform === "darwin";
 
@@ -77,44 +70,51 @@ if (diagnosticsWereEnabled(userDataDir)) {
   }
 }
 
-const originalConsole = {
-  log: console.log.bind(console),
-  warn: console.warn.bind(console),
-  error: console.error.bind(console),
-};
-console.log = (...values: unknown[]) => {
-  originalConsole.log(...values);
-  persistentLogger?.write("INFO", values);
-};
-console.warn = (...values: unknown[]) => {
-  originalConsole.warn(...values);
-  persistentLogger?.write("WARNING", values);
-};
-console.error = (...values: unknown[]) => {
-  originalConsole.error(...values);
-  persistentLogger?.write("ERROR", values);
-};
+patchConsoleForDiagnostics(console, (level, values) => persistentLogger?.write(level, values));
 
-function assertTrustedDiagnosticsSender(event: IpcMainInvokeEvent): void {
-  const source = new URL(event.sender.getURL());
-  if (source.protocol !== "http:" || !["localhost", "127.0.0.1"].includes(source.hostname)) {
-    throw new Error("Diagnostics request rejected from an untrusted page");
-  }
-}
-
-ipcMain.handle("diagnostics:open-logs", async (event) => {
-  assertTrustedDiagnosticsSender(event);
-  return shell.openPath(logDir);
-});
-ipcMain.handle("diagnostics:set-enabled", (event, enabled: boolean) => {
-  assertTrustedDiagnosticsSender(event);
-  persistDiagnosticsChoice(userDataDir, enabled);
-  persistentLogger = enabled ? new PersistentLogger(logDir) : null;
+registerDiagnosticsIpcHandlers({
+  ipcMain,
+  logDir,
+  userDataDir,
+  openPath: (path) => shell.openPath(path),
+  createLogger: (directory) => new PersistentLogger(directory),
+  setLogger: (logger) => {
+    persistentLogger = logger;
+  },
 });
 
 function startupLog(checkpoint: string): void {
   console.log(`[startup] ${checkpoint}`);
 }
+
+const appController = createAppController<BrowserWindow>({
+  userDataDir,
+  logDir,
+  appVersion: app.getVersion(),
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  env: process.env,
+  resolveBackendExePath: () =>
+    resolveBackendExe({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, repoRoot: REPO_ROOT }),
+  createSidecarDeps: () =>
+    runtimeDeps(userDataDir, LOCKFILE_NAME, (level, values) => persistentLogger?.write(level, values)),
+  findFreePort,
+  backendBaseUrl: (port) => baseUrl(port),
+  getOrCreateSecretKey: (dir) => getOrCreateSecretKey(dir),
+  regenerateSecretKeyFile: (dir) => regenerateSecretKey(dir),
+  autoUpdaterAdapter: autoUpdater,
+  setUpdateFeedUrl: (url) => autoUpdater.setFeedURL({ provider: "generic", url }),
+  fetchJson: async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`settings request returned ${response.status}`);
+    return response.json();
+  },
+  showErrorBox: (title, content) => dialog.showErrorBox(title, content),
+  showMessageBox: (win, opts) => (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)),
+  showKeyRevealWindow: (key) => showKeyRevealWindow(key),
+  loadPlaceholderPage: (win) => win.loadFile(PLACEHOLDER_HTML),
+  log: (message) => console.log(message),
+});
 
 const failureUi: FailureUi = {
   log(message, error) {
@@ -147,134 +147,21 @@ registerProcessFailureHandlers(process, failureUi);
 
 startupLog("main-loaded");
 
-/** A NavTarget over a webContents' navigation history — drives both menus. */
-function navFor(wc: WebContents): NavTarget {
-  const history = wc.navigationHistory;
-  return {
-    canGoBack: () => history.canGoBack(),
-    canGoForward: () => history.canGoForward(),
-    goBack: () => history.goBack(),
-    goForward: () => history.goForward(),
-    reload: () => wc.reload(),
-  };
-}
-
 /** Install our custom application menu (no Edit menu). Navigation acts on the
  *  focused window, so this is built once and never needs rebuilding. */
 function installApplicationMenu(): void {
-  const nav: NavTarget = {
-    canGoBack: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.canGoBack() ?? false,
-    canGoForward: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.canGoForward() ?? false,
-    goBack: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.goBack(),
-    goForward: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.goForward(),
-    reload: () => BrowserWindow.getFocusedWindow()?.webContents.reload(),
-  };
+  const nav = navFor(() => BrowserWindow.getFocusedWindow()?.webContents);
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       buildApplicationMenuTemplate(nav, {
         isMac: IS_MAC,
-        onRegenerateKey: regenerateEncryptionKey,
-        onCheckForUpdates: checkForUpdatesManually,
+        onRegenerateKey: () => {
+          if (mainWindow) void appController.regenerateEncryptionKey(mainWindow);
+        },
+        onCheckForUpdates: () => appController.checkForUpdatesManually(),
       }),
     ),
   );
-}
-
-function checkForUpdatesManually(): void {
-  if (!updateController) {
-    dialog.showErrorBox(
-      "STL Studio updates",
-      "The backend is still starting. Try checking again in a moment.",
-    );
-    return;
-  }
-  void updateController.check(true);
-}
-
-async function stopOwnedSidecar(): Promise<void> {
-  if (!sidecar || !deps) return;
-  const proc = sidecar;
-  const d = deps;
-  sidecar = null;
-  await stopSidecar(d, proc);
-}
-
-async function initializeUpdater(win: BrowserWindow, backendUrl: string): Promise<void> {
-  if (updateController) return;
-  const smoke = readUpdateSmokeConfig(process.env);
-  if (smoke) {
-    autoUpdater.setFeedURL({ provider: "generic", url: smoke.feedUrl });
-    console.log(`[updater-smoke] feed=${smoke.feedUrl}`);
-  }
-  let enabled = false;
-  try {
-    enabled = await readAutoUpdateEnabled(backendUrl, async (url) => {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`settings request returned ${response.status}`);
-      return response.json();
-    });
-  } catch (error) {
-    console.warn("Could not read automatic-update setting; skipping startup check", error);
-  }
-
-  updateController = createUpdateController({
-    updater: autoUpdater,
-    currentVersion: app.getVersion(),
-    enabled: smoke ? true : enabled,
-    supported: app.isPackaged && process.platform === "win32",
-    stopApplication: stopOwnedSidecar,
-    log: (message) => console.log(`[updater] ${message}`),
-    ui: {
-      async confirmDownload(version) {
-        if (smoke) {
-          console.log(`[updater-smoke] accepting download ${version}`);
-          return true;
-        }
-        const { response } = await dialog.showMessageBox(win, {
-          type: "info",
-          buttons: ["Download", "Later"],
-          defaultId: 0,
-          cancelId: 1,
-          title: "STL Studio update available",
-          message: `STL Studio ${version} is available`,
-          detail: "Download it in the background? You can keep using STL Studio while it downloads.",
-        });
-        return response === 0;
-      },
-      async showCurrent(version) {
-        await dialog.showMessageBox(win, {
-          type: "info",
-          buttons: ["OK"],
-          title: "STL Studio updates",
-          message: "You're up to date",
-          detail: `STL Studio ${version} is the newest available version.`,
-        });
-      },
-      showError(message) {
-        dialog.showErrorBox("STL Studio update failed", message);
-      },
-      showProgress(percent) {
-        win.setProgressBar(percent === null ? -1 : percent / 100);
-      },
-      async confirmRestart(version) {
-        if (smoke) {
-          console.log(`[updater-smoke] accepting restart ${version}`);
-          return true;
-        }
-        const { response } = await dialog.showMessageBox(win, {
-          type: "info",
-          buttons: ["Restart and Install", "Later"],
-          defaultId: 0,
-          cancelId: 1,
-          title: "STL Studio update ready",
-          message: `STL Studio ${version} is ready to install`,
-          detail: "Restart now to finish the update, or keep working and install it later.",
-        });
-        return response === 0;
-      },
-    },
-  });
-  void updateController.check();
 }
 
 /** A small non-modal window showing the encryption key once, with a Copy
@@ -305,36 +192,6 @@ function showKeyRevealWindow(key: string): void {
   void win.loadFile(KEY_REVEAL_HTML, { query: { key } });
 }
 
-/** Warn, generate a fresh key, restart the sidecar so the backend picks it up
- *  (secrets.py caches its Fernet instance for the process lifetime), and show
- *  the new key once. Regenerating invalidates every currently-stored
- *  encrypted secret (AI/Cults3D/MMF API keys) — decrypt failures are treated
- *  as "unset" by the backend, so the user simply re-enters them. */
-async function regenerateEncryptionKey(): Promise<void> {
-  if (!mainWindow) {
-    return;
-  }
-  const { response } = await dialog.showMessageBox(mainWindow, {
-    type: "warning",
-    buttons: ["Cancel", "Regenerate"],
-    defaultId: 0,
-    cancelId: 0,
-    title: "Regenerate encryption key?",
-    message: "This will invalidate all saved API keys",
-    detail:
-      "Your AI, Cults3D, and MyMiniFactory API keys are encrypted with the current key and will stop decrypting once it's replaced. You'll need to re-enter them. This cannot be undone.",
-  });
-  if (response !== 1) {
-    return;
-  }
-  regenerateSecretKey(app.getPath("userData"));
-  if (sidecar && deps) {
-    await stopSidecar(deps, sidecar);
-    sidecar = null;
-  }
-  await bootBackendAndLoad(mainWindow, { forceReveal: true });
-}
-
 function createWindow(): BrowserWindow {
   const savedState = readWindowState(userDataDir, screen.getAllDisplays());
   const win = new BrowserWindow({
@@ -361,115 +218,32 @@ function createWindow(): BrowserWindow {
   win.webContents.on("will-navigate", (event, url) => {
     if (!isBackendRetryUrl(url)) return;
     event.preventDefault();
-    void win.loadFile(SPLASH_HTML).then(() => bootBackendAndLoad(win));
+    void win.loadFile(SPLASH_HTML).then(() => appController.bootBackendAndLoad(win));
   });
 
   // Right-click context menu: Back/Forward/Reload + clipboard when relevant.
   win.webContents.on("context-menu", (_event, params) => {
-    const template = buildContextMenuTemplate(navFor(win.webContents), {
-      isEditable: params.isEditable,
-      canCopy: params.editFlags.canCopy,
-      canPaste: params.editFlags.canPaste,
-    });
+    const template = buildContextMenuTemplate(navFor(() => win.webContents), editContextFromParams(params));
     Menu.buildFromTemplate(template).popup({ window: win });
   });
 
   // Mouse back/forward buttons.
   win.on("app-command", (_event, command) => {
-    const history = win.webContents.navigationHistory;
-    if (command === "browser-backward" && history.canGoBack()) {
-      history.goBack();
-    } else if (command === "browser-forward" && history.canGoForward()) {
-      history.goForward();
-    }
+    handleAppCommand(command, win.webContents.navigationHistory);
   });
 
-  const saveCurrentWindowState = (): void => {
-    try {
-      saveWindowState(userDataDir, {
-        bounds: win.getNormalBounds(),
-        isMaximized: win.isMaximized(),
-      });
-    } catch (err) {
-      console.warn("Failed to save window state", err);
-    }
-  };
-
-  const persistWindowState = (): void => {
-    if (windowStateSaveTimer) {
-      clearTimeout(windowStateSaveTimer);
-    }
-    windowStateSaveTimer = setTimeout(() => {
-      windowStateSaveTimer = null;
-      saveCurrentWindowState();
-    }, WINDOW_STATE_SAVE_DELAY_MS);
-  };
-
-  win.on("resize", persistWindowState);
-  win.on("move", persistWindowState);
-  win.on("close", () => {
-    if (windowStateSaveTimer) {
-      clearTimeout(windowStateSaveTimer);
-      windowStateSaveTimer = null;
-    }
-    saveCurrentWindowState();
+  const windowStatePersister = createWindowStatePersister({
+    userDataDir,
+    getState: () => ({ bounds: win.getNormalBounds(), isMaximized: win.isMaximized() }),
+    delayMs: WINDOW_STATE_SAVE_DELAY_MS,
+    onError: (error) => console.warn("Failed to save window state", error),
   });
+
+  win.on("resize", () => windowStatePersister.schedule());
+  win.on("move", () => windowStatePersister.schedule());
+  win.on("close", () => windowStatePersister.flush());
 
   return win;
-}
-
-/** Spawn the backend, wait for health, and load it — or show an error dialog and
- *  fall back to the placeholder page so the window is never blank-and-silent.
- *  Resolves (generating on first run) the Fernet key the backend needs to
- *  encrypt/decrypt saved API keys and injects it as STL_SECRET_KEY (STUDIO-147).
- *  `forceReveal` shows the one-time key window even when the key already
- *  existed on disk — used after a manual regenerate. */
-async function bootBackendAndLoad(
-  win: BrowserWindow,
-  opts: { forceReveal?: boolean } = {},
-): Promise<void> {
-  if (backendBooting) return;
-  startupLog("backend-boot-begin");
-  backendBooting = true;
-  deps = runtimeDeps(userDataDir, LOCKFILE_NAME, (level, values) => persistentLogger?.write(level, values));
-  const exePath = resolveBackendExe({
-    packaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    repoRoot: REPO_ROOT,
-  });
-  const secretKey = getOrCreateSecretKey(app.getPath("userData"));
-  try {
-    const port = await findFreePort();
-    const result = await startSidecar(deps, {
-      exePath,
-      args: ["--port", String(port)],
-      env: {
-        STL_SECRET_KEY: secretKey.key,
-        STL_STUDIO_VERSION: app.getVersion(),
-        DEPLOYMENT_MODE: "electron",
-        STL_STUDIO_LOG_DIR: logDir,
-      },
-      port,
-    });
-    sidecar = result.proc;
-    // Swap the splash for the app, then drop the splash from history so Back
-    // never returns to it.
-    await win.loadURL(baseUrl(result.port));
-    win.webContents.navigationHistory.clear();
-    await initializeUpdater(win, baseUrl(result.port));
-    if (secretKey.isNew || opts.forceReveal) {
-      showKeyRevealWindow(secretKey.key);
-    }
-  } catch (err) {
-    const message =
-      err instanceof SidecarStartError
-        ? err.message
-        : `Unexpected error starting the backend: ${String(err)}`;
-    dialog.showErrorBox("STL Studio — backend failed to start", message);
-    await win.loadFile(PLACEHOLDER_HTML);
-  } finally {
-    backendBooting = false;
-  }
 }
 
 // Single-instance lock: a second launch hands focus to the running window
@@ -493,12 +267,12 @@ if (!gotLock) {
     installApplicationMenu();
     mainWindow = createWindow();
     startupLog("window-created");
-    await bootBackendAndLoad(mainWindow);
+    await appController.bootBackendAndLoad(mainWindow);
 
     app.on("activate", async () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createWindow();
-        await bootBackendAndLoad(mainWindow);
+        await appController.bootBackendAndLoad(mainWindow);
       }
     });
   });
@@ -509,13 +283,14 @@ if (!gotLock) {
     }
   });
 
-  // Terminate the sidecar before the process exits. `before-quit` covers the
-  // normal path; the kill is idempotent so a double-fire is harmless.
+  // Terminate the sidecar before the process exits. The `quitting` guard
+  // keeps this idempotent — app.quit() re-fires before-quit, and without it
+  // this handler would loop forever.
   app.on("before-quit", async (event) => {
-    if (sidecar && deps) {
-      event.preventDefault();
-      await stopOwnedSidecar();
-      app.quit();
-    }
+    if (quitting) return;
+    quitting = true;
+    event.preventDefault();
+    await appController.stopOwnedSidecar();
+    app.quit();
   });
 }

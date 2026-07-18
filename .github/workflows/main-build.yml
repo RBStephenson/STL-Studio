@@ -47,8 +47,13 @@ jobs:
   build:
     needs: prepare
     uses: ./.github/workflows/build.yml
+    # build.yml emits provenance and SBOM attestations whenever release=true.
+    # Reusable workflow permissions can only be reduced, so every release caller
+    # must explicitly pass the OIDC and attestation grants alongside contents.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     with:
       release: true
       tag: rolling

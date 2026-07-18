@@ -5,27 +5,29 @@ There are two ways to run STL Studio:
 - **[Standalone](#standalone-recommended)** — a single downloadable app. No Docker, no setup. Recommended for most people.
 - **[Docker](#docker-advanced)** — for people who already run Docker and want the containerized version.
 
+Before installing, review the [Support and compatibility policy](support-policy.md)
+for supported operating systems and architectures, upgrade paths, rollback limits,
+and diagnostic privacy.
+
 ---
 
 ## Standalone (recommended)
 
 ### 1. Download
 
-Go to the [Releases page](https://github.com/RBStephenson/STL-Inventory/releases)
+Go to the [Releases page](https://github.com/RBStephenson/STL-Studio/releases)
 and download the file for your operating system:
 
 | OS | File |
 |----|------|
-| Windows | `STL Studio Setup <version>.exe` (installer) |
+| Windows | `STL-Studio-Setup-<version>.exe` (installer) |
 | Linux | `stl-studio-linux` |
 
 For testing the newest successful `main` build before a versioned release, use
 the rolling `Main Build` prerelease on the same Releases page.
 
-> **macOS:** there's no prebuilt macOS download yet — a signed/notarized build is
-> deferred ([#17](https://github.com/RBStephenson/STL-Inventory/issues/17)). On a
-> Mac, run the [Docker](#docker-advanced) setup or launch from source
-> (`python packaging/standalone.py`).
+> **macOS:** there is no supported prebuilt macOS download. Use the
+> [Docker](#docker-advanced) setup if you want to run STL Studio on a Mac.
 
 ### 2. Run it
 
@@ -39,8 +41,7 @@ Windows SmartScreen may warn on first run: **More info → Run anyway**.
 to have it open the browser for you once it's ready, or `--port <n>` to listen on
 a different port.
 
-> **Desktop window:** the Windows installer above is the Electron desktop app
-> ([#528](https://github.com/RBStephenson/STL-Inventory/issues/528)). Linux still
+> **Desktop window:** Windows uses the Electron desktop app. Linux still
 > runs the headless binary you open in your browser; a packaged window there is
 > future work.
 
@@ -87,7 +88,6 @@ survives app updates:
 | OS | Location |
 |----|----------|
 | Windows | `%LOCALAPPDATA%\STL-Inventory\` |
-| macOS | `~/Library/Application Support/STL-Inventory/` |
 | Linux | `~/.local/share/stl-inventory/` |
 
 > **Optional — PDF export of painting guides:** exporting a painting guide to PDF

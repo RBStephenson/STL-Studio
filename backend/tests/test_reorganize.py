@@ -252,6 +252,46 @@ class TestCollisions:
         assert all(e["collision_kind"] == "same_destination" for e in entries)
         assert all(e["suggested_suffix"] is None for e in entries)
 
+    def test_support_status_folders_suggest_but_do_not_auto_resolve_on_reorganize_page(
+        self, client, db, tmp_path,
+    ):
+        """The Reorganize page (no inbox_source) keeps its existing
+        suggest-not-auto-apply behavior even now that support-status names are
+        a recognized suggestion source (#1087) — only import-apply auto-folds
+        the suggestion into the entry."""
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust", filename="a.stl", subdir="Bust (supported)")
+        _model_with_file(db, tmp_path, title="Bust", filename="b.stl", subdir="Bust (unsupported)")
+
+        entries = client.get("/reorganize/preview").json()["entries"]
+
+        assert all(e["collision"] for e in entries)
+        assert all(e["eligible"] is False for e in entries)
+        assert {e["suggested_suffix"] for e in entries} == {"supported", "unsupported"}
+
+
+class TestSiblingFilenameCollision:
+    """Two distinct source filenames can collapse to the identical
+    destination name — most commonly slugify_filenames stripping enough
+    that e.g. "arm_2_R_sup.stl" and "arm_2_R__sup.stl" both slug to
+    "arm-2-r-sup.stl". Left unchecked, apply either silently overwrites one
+    file with the other or hard-fails mid-batch (#1087 — cost a real
+    build-kit pack a file with no way to recover it)."""
+
+    def test_slug_collision_within_one_model_gets_disambiguated(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path, filename="arm_2_R_sup.stl")
+        f2 = Path(m.folder_path) / "arm_2_R__sup.stl"
+        f2.write_bytes(b"solid\nendsolid\n")
+        make_stl_file(db, m, filename="arm_2_R__sup.stl", path=str(f2))
+        client.patch("/settings", json={"reorganize_slugify_filenames": True})
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        proposed = sorted(f["proposed_path"].rsplit("/", 1)[-1] for f in entry["files"])
+        assert proposed == ["arm-2-r-sup-2.stl", "arm-2-r-sup.stl"]
+        # No two files in the same entry ever propose the identical path.
+        assert len({f["proposed_path"] for f in entry["files"]}) == len(entry["files"])
+
 
 class TestScanRootEscape:
     def test_model_outside_all_roots_escapes(self, client, db, tmp_path):

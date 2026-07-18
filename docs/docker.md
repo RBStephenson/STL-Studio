@@ -19,8 +19,8 @@ Every successful `main` build and every release publishes backend and frontend
 images to the GitHub Container Registry (GHCR), so you don't have to build from
 source:
 
-- `ghcr.io/rbstephenson/stl-inventory-backend`
-- `ghcr.io/rbstephenson/stl-inventory-frontend`
+- `ghcr.io/rbstephenson/stl-studio-backend`
+- `ghcr.io/rbstephenson/stl-studio-frontend`
 
 **Available tags**
 
@@ -34,8 +34,8 @@ source:
 Pull them directly:
 
 ```
-docker pull ghcr.io/rbstephenson/stl-inventory-backend:latest
-docker pull ghcr.io/rbstephenson/stl-inventory-frontend:latest
+docker pull ghcr.io/rbstephenson/stl-studio-backend:latest
+docker pull ghcr.io/rbstephenson/stl-studio-frontend:latest
 ```
 
 > The bundled `docker-compose.yml` builds the images from source
@@ -125,7 +125,7 @@ frontend already handles the `/api` split internally.
 # everything for the hostname to the frontend's published port.
 services:
   stl-inventory-backend:
-    image: ghcr.io/rbstephenson/stl-inventory-backend:latest
+    image: ghcr.io/rbstephenson/stl-studio-backend:latest
     environment:
       - DATABASE_URL=sqlite:////data/stl_inventory.db
       - STL_ROOTS=/mnt/drive1
@@ -135,7 +135,7 @@ services:
       - /host/library:/mnt/drive1
 
   stl-inventory-frontend:
-    image: ghcr.io/rbstephenson/stl-inventory-frontend:latest
+    image: ghcr.io/rbstephenson/stl-studio-frontend:latest
     environment:
       - BACKEND_ORIGIN=http://stl-inventory-backend:8000   # match the backend name
     ports:
@@ -197,7 +197,7 @@ paths and hostname with your own; everything else is deployment-ready.
 ```yaml
 services:
   stl-inventory-backend:
-    image: ghcr.io/rbstephenson/stl-inventory-backend:latest
+    image: ghcr.io/rbstephenson/stl-studio-backend:latest
     container_name: stl-inventory-backend
     restart: unless-stopped
     environment:
@@ -214,7 +214,7 @@ services:
       - /mnt/pool/models/import:/import
 
   stl-inventory-frontend:
-    image: ghcr.io/rbstephenson/stl-inventory-frontend:latest
+    image: ghcr.io/rbstephenson/stl-studio-frontend:latest
     container_name: stl-inventory-frontend
     restart: unless-stopped
     environment:

@@ -67,7 +67,7 @@ describe("KitBuilder", () => {
     expect(screen.getByRole("button", { name: /sword supported/i })).toBeInTheDocument();
   });
 
-  it("selecting a base and its variant are independent, not mutually exclusive", () => {
+  it("selecting a base and its variant are independent, not mutually exclusive", async () => {
     const files = [
       file(1, "sword.stl"),
       file(2, "sword-supported.stl", { sup_of_id: 1 }),
@@ -78,6 +78,7 @@ describe("KitBuilder", () => {
     fireEvent.click(screen.getByRole("button", { name: /supported/i }));
 
     expect(screen.getByText(/2 selected/)).toBeInTheDocument();
+    expect(await screen.findByTestId("stl-viewer")).toBeInTheDocument();
   });
 
   it("clicking a selected item again deselects just that item", () => {

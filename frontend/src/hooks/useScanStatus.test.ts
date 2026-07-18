@@ -30,8 +30,8 @@ describe("useScanStatus", () => {
     toastMock.mockReset();
     vi.useFakeTimers();
   });
-  afterEach(() => {
-    vi.runOnlyPendingTimers();
+  afterEach(async () => {
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
     vi.useRealTimers();
   });
 

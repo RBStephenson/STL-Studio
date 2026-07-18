@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Users, Zap, X, RefreshCw, Loader2, Plus } from "lucide-react";
+import { Users, Zap, X, RefreshCw, Loader2, Plus, Trash2 } from "lucide-react";
 import { api, Creator, ScanStatus } from "../api/client";
 import StorefrontEnrich from "../components/StorefrontEnrich";
 import RefreshEnrich from "../components/RefreshEnrich";
 import CreateCreatorModal from "../components/CreateCreatorModal";
 import { useToast } from "../context/ToastContext";
+import { useConfirm } from "../context/ConfirmContext";
 import ErrorState from "../components/ErrorState";
 import EmptyState from "../components/EmptyState";
 import { errMsg } from "../utils/err";
@@ -19,7 +20,9 @@ export default function Creators() {
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   const loadCreators = () => {
     setLoading(true);
@@ -55,6 +58,29 @@ export default function Creators() {
       /* ignore — e.g. another scan started elsewhere */
     } finally {
       setScanningId(null);
+    }
+  };
+
+  const deleteCreator = async (c: Creator) => {
+    if (deletingId !== null) return;
+    const ok = await confirm({
+      title: "Delete this creator?",
+      message: c.model_count > 0
+        ? `"${c.name}" will be permanently deleted. Its ${c.model_count} model${c.model_count !== 1 ? "s" : ""} will be sent back to the inbox so you can assign a new creator — they are not deleted.`
+        : `"${c.name}" will be permanently deleted. This cannot be undone.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    setDeletingId(c.id);
+    try {
+      await api.models.deleteCreator(c.id);
+      setCreators((prev) => prev.filter((x) => x.id !== c.id));
+      toast(`"${c.name}" deleted.`, "success");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't delete creator — try again.", "error");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -144,10 +170,21 @@ export default function Creators() {
         {filtered.map((c) => (
           <div
             key={c.id}
-            className={`group bg-panel border rounded-lg overflow-hidden flex flex-col transition-colors ${
+            className={`group relative bg-panel border rounded-lg overflow-hidden flex flex-col transition-colors ${
               enriching?.id === c.id ? "border-accent-start" : "border-border-subtle hover:border-accent-start"
             }`}
           >
+            <button
+              onClick={() => deleteCreator(c)}
+              disabled={deletingId !== null}
+              title={`Delete ${c.name}`}
+              aria-label={`Delete ${c.name}`}
+              className={`absolute top-2 right-2 z-10 p-1.5 rounded bg-black/60 hover:bg-red-950/80 text-text-primary-alt2 hover:text-red-400 focus-visible:opacity-100 transition-opacity disabled:opacity-40 ${
+                deletingId === c.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              }`}
+            >
+              {deletingId === c.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+            </button>
             <Link
               to={`/?creator_id=${c.id}`}
               className="flex-1 p-4 flex flex-col gap-1 hover:bg-panel-secondary/50 transition-colors"
