@@ -358,6 +358,82 @@ class TestSinglePackImport:
         r = client.get("/models?is_inbox=true")
         assert len(r.json()["items"]) == 1
 
+    def test_known_creator_name_resolves_directly_no_placeholder(self, client, db):
+        """When the caller already knows the real creator (Import Preview's
+        Creator field, typed or Fetch-populated before the user clicks
+        Import), the scan attaches models to it directly — no folder-named
+        placeholder is ever created, so there's nothing left to prune (#1110,
+        the root-cause fix for #1108's cleanup-after-the-fact)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            (inbox / "part.stl").write_text("solid p\nendsolid")
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(tmpdir, db=db, single_pack=True, creator_name="dakkadakka.store")
+
+        from app.models import Creator, Model
+        models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+        assert len(models) == 1
+        assert models[0].creator.name == "dakkadakka.store"
+        # No placeholder named after the folder was ever created.
+        assert db.query(Creator).filter(Creator.name == Path(tmpdir).name).first() is None
+        assert db.query(Creator).count() == 1
+
+    def test_two_packs_with_the_same_known_creator_share_one_row(self, client, db):
+        """Multiple packs from the same creator, each imported independently
+        via its own Import click, must resolve to the SAME creator row —
+        not one placeholder-turned-real row per pack (#1110)."""
+        with tempfile.TemporaryDirectory() as base:
+            pack_a = Path(base) / "Ignisaurus Clan Ignitium"
+            pack_b = Path(base) / "Ignisaurus Destroyers"
+            for pack in (pack_a, pack_b):
+                pack.mkdir()
+                (pack / "part.stl").write_text("solid p\nendsolid")
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(str(pack_a), db=db, single_pack=True, creator_name="dakkadakka.store")
+            scan_inbox_folder(str(pack_b), db=db, single_pack=True, creator_name="DakkaDakka.Store")
+
+        from app.models import Creator, Model
+        assert db.query(Creator).count() == 1
+        creator = db.query(Creator).first()
+        assert creator.name == "dakkadakka.store"  # first casing wins, matches resolve_creator
+        models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+        assert len(models) == 2
+        assert {m.creator_id for m in models} == {creator.id}
+
+    def test_blank_creator_name_falls_back_to_placeholder(self, client, db):
+        """An empty/whitespace-only creator_name (Creator field not filled in
+        yet) must not change today's behavior — the folder-name placeholder
+        is still created."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            (inbox / "part.stl").write_text("solid p\nendsolid")
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(tmpdir, db=db, single_pack=True, creator_name="   ")
+
+            from app.models import Model
+            models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+            assert len(models) == 1
+            assert models[0].creator.name == Path(tmpdir).name
+
+    def test_router_scan_folder_passes_creator_name_through(self, client, db):
+        from app.models import ScanRoot
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db.add(ScanRoot(path=tmpdir, enabled=True, layout="{creator}"))
+            db.commit()
+
+            with patch("app.services.scanner.start_inbox_scan", return_value=True) as mock_start:
+                r = client.post(
+                    "/import/scan-folder",
+                    json={"path": tmpdir, "creator_name": "dakkadakka.store"},
+                )
+            assert r.status_code == 200
+            args, kwargs = mock_start.call_args
+            assert kwargs.get("creator_name") == "dakkadakka.store"
+
     def test_flat_layout_auto_links_sup_files_by_filename_instead_of_splitting(self, client, db):
         """A pack with NO variant subfolders, distinguishing supported vs
         unsupported purely by a "-sup" filename suffix, has no folder signal
