@@ -139,6 +139,26 @@ class JiraClient:
         )
         return result["key"]
 
+    def get_issue(self, key: str) -> dict:
+        """Fetch the current summary/description/status for one issue.
+
+        Returns a plain dict: {summary, description, status_name,
+        status_category}. status_category is Jira's category key ("new" /
+        "indeterminate" / "done") -- "done" is what marks an issue complete
+        regardless of the specific workflow status name.
+        """
+        result = self._request(
+            "GET", f"/rest/api/3/issue/{key}?fields=summary,description,status"
+        )
+        fields = result["fields"]
+        status = fields.get("status") or {}
+        return {
+            "summary": fields.get("summary") or "",
+            "description": _adf_to_text(fields.get("description")),
+            "status_name": status.get("name", ""),
+            "status_category": (status.get("statusCategory") or {}).get("key", ""),
+        }
+
     def add_remote_link(self, key: str, url: str, title: str) -> None:
         """Attach a web link ("remote issue link") to a Jira issue.
 

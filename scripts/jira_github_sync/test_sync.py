@@ -17,7 +17,12 @@ from jira_github_sync.models import (
     issue_type_for_labels,
     reconcile,
 )
-from jira_github_sync.sync import _flag_enabled, create_jira_from_github, sync_group
+from jira_github_sync.sync import (
+    _flag_enabled,
+    create_jira_from_github,
+    sync_group,
+    update_linked_github,
+)
 
 NOW = datetime(2026, 7, 18, tzinfo=timezone.utc)
 EARLIER = NOW - timedelta(days=1)
@@ -141,9 +146,10 @@ def test_issue_type_for_labels():
 
 
 class _FakeJira:
-    def __init__(self):
+    def __init__(self, issues=None):
         self.created = []
         self.remote_links = []
+        self._issues = issues or {}
 
     def create_issue(self, title, description, issue_type):
         self.created.append((title, description, issue_type))
@@ -152,12 +158,20 @@ class _FakeJira:
     def add_remote_link(self, key, url, title):
         self.remote_links.append((key, url, title))
 
+    def get_issue(self, key):
+        resp = self._issues.get(key)
+        if resp is None:
+            raise RuntimeError(f"no such issue {key}")
+        return resp
+
 
 class _FakeGitHub:
-    def __init__(self, candidates, mark_raises=False):
-        self._candidates = candidates
+    def __init__(self, candidates=None, mark_raises=False, linked=None):
+        self._candidates = candidates or []
         self.marked = []
         self._mark_raises = mark_raises
+        self._linked = linked or {}
+        self.status_applied = []
 
     def unlinked_open_issues(self):
         return self._candidates
@@ -166,6 +180,14 @@ class _FakeGitHub:
         if self._mark_raises:
             raise RuntimeError("boom")
         self.marked.append((number, description, status, key, jsrc, ghsrc))
+
+    def linked_issues(self):
+        return self._linked
+
+    def apply_status(self, number, description, status, key, jsrc, ghsrc, state=None):
+        self.status_applied.append(
+            {"number": number, "status": status, "key": key, "state": state}
+        )
 
 
 def _candidate(number=7, title="From GitHub", body="Body", labels=None,
@@ -218,6 +240,67 @@ def test_create_jira_from_github_marker_failure_is_swallowed():
     jira, github = _FakeJira(), _FakeGitHub([_candidate()], mark_raises=True)
     create_jira_from_github(jira, github, dry_run=False)
     assert len(jira.created) == 1
+
+
+# --- scoped Jira -> GitHub status back-update (STUDIO-273) ------------------
+
+def _jira_resp(summary="From GitHub", description="Body", status="In Progress", category="indeterminate"):
+    return {
+        "summary": summary, "description": description,
+        "status_name": status, "status_category": category,
+    }
+
+
+def _linked_entry(status="To Do", gh_state="open", number=7, jsrc="j", ghsrc="g"):
+    issue = _issue(status=status, gh_number=number, gh_state=gh_state)
+    return {"STUDIO-1": (issue, jsrc, ghsrc)}
+
+
+def test_update_linked_github_pushes_status_change():
+    github = _FakeGitHub(linked=_linked_entry(status="To Do", gh_state="open"))
+    jira = _FakeJira(issues={"STUDIO-1": _jira_resp(status="In Progress", category="indeterminate")})
+    update_linked_github(jira, github, dry_run=False)
+    assert len(github.status_applied) == 1
+    call = github.status_applied[0]
+    assert call["status"] == "In Progress"
+    assert call["state"] is None  # not done -> no state change from open
+
+
+def test_update_linked_github_closes_on_done():
+    github = _FakeGitHub(linked=_linked_entry(status="In Progress", gh_state="open"))
+    jira = _FakeJira(issues={"STUDIO-1": _jira_resp(status="Done", category="done")})
+    update_linked_github(jira, github, dry_run=False)
+    assert github.status_applied[0]["state"] == "closed"
+
+
+def test_update_linked_github_reopens_when_reverted():
+    github = _FakeGitHub(linked=_linked_entry(status="Done", gh_state="closed"))
+    jira = _FakeJira(issues={"STUDIO-1": _jira_resp(status="To Do", category="new")})
+    update_linked_github(jira, github, dry_run=False)
+    assert github.status_applied[0]["state"] == "open"
+
+
+def test_update_linked_github_noop_when_unchanged():
+    # GH already shows In Progress + open, Jira still In Progress (not done).
+    github = _FakeGitHub(linked=_linked_entry(status="In Progress", gh_state="open"))
+    jira = _FakeJira(issues={"STUDIO-1": _jira_resp(status="In Progress", category="indeterminate")})
+    update_linked_github(jira, github, dry_run=False)
+    assert github.status_applied == []
+
+
+def test_update_linked_github_dry_run_makes_no_writes():
+    github = _FakeGitHub(linked=_linked_entry(status="To Do", gh_state="open"))
+    jira = _FakeJira(issues={"STUDIO-1": _jira_resp(status="Done", category="done")})
+    update_linked_github(jira, github, dry_run=True)
+    assert github.status_applied == []
+
+
+def test_update_linked_github_skips_missing_jira_issue():
+    # Jira key 404s (deleted) -> skip, don't crash.
+    github = _FakeGitHub(linked=_linked_entry())
+    jira = _FakeJira(issues={})  # get_issue raises
+    update_linked_github(jira, github, dry_run=False)
+    assert github.status_applied == []
 
 
 @pytest.mark.parametrize(

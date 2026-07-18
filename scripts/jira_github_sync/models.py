@@ -47,6 +47,7 @@ class NormalizedIssue:
     updated: datetime
     is_epic: bool = False
     gh_number: int | None = None  # GitHub issue/milestone number, once linked
+    gh_state: str | None = None  # GitHub "open"/"closed" state, when known
 
 
 class Action(str, Enum):
