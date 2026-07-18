@@ -1542,8 +1542,19 @@ def _collect_gallery_images(leaf: Path, boundary: Path,
         )
 
         for sub in sorted(subdirs):
-            if sub.name.lower() not in PREFERRED_IMAGE_DIRS and not _has_stls_cached(sub):
-                found.extend(_image_files_recursive(sub))
+            if sub.name.lower() in PREFERRED_IMAGE_DIRS or _has_stls_cached(sub):
+                continue
+            # A no-STL sibling that's itself a print-format-variant folder
+            # (e.g. "Product (chitubox)" next to "Product (supported)" /
+            # "Product (unsupported)") almost always bundles its own copy of
+            # the SAME marketing images, not new content — sweeping those in
+            # duplicates every other variant's own gallery with redundant,
+            # identically-numbered files (#1114). A genuine bonus-images
+            # folder ("renders", "Render Images", ...) has no such signal
+            # and is still swept in below.
+            if name_parser.support_status(sub.name) or name_parser.slicer(sub.name):
+                continue
+            found.extend(_image_files_recursive(sub))
 
         return found
 

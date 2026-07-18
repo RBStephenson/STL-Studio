@@ -486,3 +486,48 @@ class TestSinglePackImport:
         assert files["warrior-2-sup.stl"].sup_of_id == files["warrior-2.stl"].id
         assert files["warrior-1.stl"].sup_of_id is None
         assert files["sergeant.stl"].sup_of_id is None
+
+    def test_gallery_images_skip_chitubox_siblings_own_bundled_copies(self, client, db):
+        """Regression (#1114): a no-STL sibling folder that's itself a
+        recognized format-variant (a "(chitubox)" project-file folder next
+        to "(supported)"/"(unsupported)") often bundles its own redundant
+        copy of the same numbered marketing images. Sweeping those in
+        padded every variant's gallery with duplicates and made the two
+        variants' image counts diverge instead of matching."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            _make_stl_tree(inbox, {
+                # Pack-root-shared images — legitimately swept into every variant.
+                "1.jpg": "root1", "2.jpg": "root2",
+                "Widget Team (supported)": {
+                    "a_sup.stl": "solid a\nendsolid",
+                },
+                "Widget Team (unsupported)": {
+                    "a.stl": "solid a\nendsolid",
+                    # This variant's OWN bundled images — legitimately its own.
+                    "1.jpg": "unsup1", "2.jpg": "unsup2",
+                },
+                "Widget Team (chitubox)": {
+                    "a.chitubox": "not an stl",
+                    # Redundant copies bundled alongside the project files —
+                    # must NOT get swept into either variant's gallery.
+                    "1.jpg": "chitubox1", "2.jpg": "chitubox2",
+                },
+            })
+
+            from app.services.scanner import scan_inbox_folder
+            scan_inbox_folder(tmpdir, db=db, single_pack=True)
+
+        from app.models import Model
+        models = {m.folder_path.rsplit("/", 1)[-1]: m
+                  for m in db.query(Model).filter(Model.is_inbox == True).all()}  # noqa: E712
+        supported = models["Widget Team (supported)"]
+        unsupported = models["Widget Team (unsupported)"]
+
+        # Neither variant's gallery includes anything from the chitubox folder.
+        assert not any("chitubox" in p for p in (supported.image_paths or []))
+        assert not any("chitubox" in p for p in (unsupported.image_paths or []))
+        # supported: only the 2 pack-root-shared images (no own subfolder images).
+        assert len(supported.image_paths or []) == 2
+        # unsupported: the 2 shared + its own 2 — 4, not 4 + chitubox's 2 = 6.
+        assert len(unsupported.image_paths or []) == 4
