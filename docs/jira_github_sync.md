@@ -1,8 +1,21 @@
 # Jira <-> GitHub Sync (STUDIO-264)
 
-Jira (project `STUDIO`) is the system of record. This sync exists purely for
-GitHub-side visibility, and to let edits made directly on GitHub issues flow
-back into Jira instead of being silently lost.
+Jira (project `STUDIO`) is the system of record. Both sync directions are
+**independently opt-in** and **off by default**; with neither enabled the run
+is a no-op.
+
+- **Reverse — GitHub → Jira** (`JIRA_GITHUB_SYNC_CREATE_JIRA`): issues opened
+  directly on the public GitHub repo are mirrored into Jira. This is the
+  primary intended use: end users file bugs/requests on GitHub, you triage in
+  Jira.
+- **Forward — Jira → GitHub** (`JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB`): open Jira
+  issues/epics are published to GitHub as issues/milestones.
+
+> ⚠️ **Forward mirroring on a public repo publishes every open Jira issue
+> publicly** — including internal or security-sensitive tickets. Only enable
+> `JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB` if every open Jira issue is safe to
+> disclose. For the "end users file issues, I work in Jira" workflow, leave
+> forward **off** and enable reverse only.
 
 ## What syncs
 
@@ -21,11 +34,29 @@ something a maintainer already dealt with.
 
 ## Creation direction
 
-New items are only ever created in Jira, then mirrored to GitHub. The sync
-never creates a Jira issue from a GitHub-only issue — that would fight the
-Jira-is-SoT convention in the project's `.claude/CLAUDE.md`. If someone opens
-an issue directly on GitHub, it's simply not touched by this sync (no marker,
-no match).
+Forward mirroring (Jira → GitHub) is gated by `JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB`
+(default off). When on, new items created in Jira are mirrored to GitHub;
+GitHub open/closed state is never touched (see above). Keep this off for a
+public repo unless every open Jira issue is safe to publish.
+
+Reverse creation (GitHub → Jira) is gated by the
+`JIRA_GITHUB_SYNC_CREATE_JIRA` repo variable (default off). When enabled, each
+**open, non-PR** GitHub issue that has **no** `jira-sync` marker (i.e. one
+opened directly on GitHub, not by this sync) creates a matching Jira issue,
+after which the GitHub issue is stamped with the marker so later runs link the
+pair instead of duplicating it.
+
+- **Issue type**: defaults to `Task`; GitHub labels map `bug` → Bug and
+  `enhancement`/`feature`/`story` → Story (`bug` wins when several apply).
+- **Scope**: only open, unlinked, non-PR issues. Closed issues, pull requests,
+  milestones, and already-linked issues are skipped.
+- **Duplicate safety**: the marker is written back immediately after the Jira
+  issue is created. If that write-back ever fails, the run logs an error with
+  the exact marker to paste onto the GitHub issue by hand — otherwise the next
+  run would create a second Jira issue for it.
+
+With the flag off (the default), issues opened directly on GitHub are simply
+left untouched (no marker, no match).
 
 ## Conflict resolution
 
@@ -71,11 +102,28 @@ Instead, gating is entirely on the GitHub side:
 - `JIRA_BASE_URL` = `https://rbrentstephenson.atlassian.net`
 - `JIRA_EMAIL` = the Jira account email the API token belongs to
 - `JIRA_PROJECT_KEY` = `STUDIO`
+- `JIRA_GITHUB_SYNC_CREATE_JIRA` = `true` to enable reverse (GitHub → Jira)
+  creation; omit or set `false`/`off` to keep it off (default)
+- `JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB` = `true` to enable forward (Jira →
+  GitHub) mirroring; omit or set `false`/`off` to keep it off (default).
+  **Leave off on a public repo** unless all open Jira issues are safe to
+  disclose.
+
+Accepted truthy values for the flags: `true`/`1`/`yes`/`on` (case-insensitive);
+anything else (including `false`/`off`/unset) is treated as disabled.
+
+For the typical "end users file issues on GitHub, I work in Jira" setup:
+`JIRA_GITHUB_SYNC_ENABLED=true`, `JIRA_GITHUB_SYNC_CREATE_JIRA=true`, and
+`JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB` left off.
 
 **Repository secret**:
 
 - `JIRA_API_TOKEN` — an Atlassian API token
-  (https://id.atlassian.com/manage-profile/security/api-tokens)
+  (https://id.atlassian.com/manage-profile/security/api-tokens). Use a
+  **classic unscoped** token ("Create API token"), not a scoped one — scoped
+  tokens are rejected by the site-URL Basic-auth flow this client uses and
+  fail silently (the request is treated as anonymous: `/myself` returns 401
+  while search returns an empty result set).
 
 `GITHUB_TOKEN` is provided automatically by Actions; no secret needed for it.
 

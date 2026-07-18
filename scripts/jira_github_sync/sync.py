@@ -7,15 +7,19 @@ Required environment variables:
     JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
     GITHUB_TOKEN, GITHUB_REPOSITORY (owner/repo)
 
-Optional:
-    JIRA_GITHUB_SYNC_DRY_RUN=1  -- log decisions without writing to either side
+Optional direction flags (both off by default; neither on => no-op):
+    JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB  -- forward: mirror Jira -> GitHub
+    JIRA_GITHUB_SYNC_CREATE_JIRA       -- reverse: create Jira from GitHub issues
+    JIRA_GITHUB_SYNC_DRY_RUN=1         -- log decisions without writing anywhere
 
 Gating: this script is not run by the app itself (STL Studio is a local
 desktop app; its DB isn't reachable from a GitHub Actions runner), so unlike
 other STL Studio features it is NOT gated by an app_settings flag / Settings
-toggle. It's gated by the `jira-github-sync.yml` workflow being enabled and
-the `JIRA_GITHUB_SYNC_ENABLED` repo variable (checked in the workflow, not
-here) -- see docs/jira_github_sync.md.
+toggle. The `jira-github-sync.yml` workflow gates the whole run on the
+`JIRA_GITHUB_SYNC_ENABLED` repo variable; the two direction flags above then
+select which way(s) data flows. Forward mirroring publishes Jira issues to
+GitHub, so on a public repo keep it off unless every open Jira issue is safe
+to disclose -- see docs/jira_github_sync.md.
 """
 from __future__ import annotations
 
@@ -26,9 +30,12 @@ from typing import Callable
 
 from .github_client import GitHubClient
 from .jira_client import JiraClient
-from .models import Action, NormalizedIssue, reconcile
+from .models import Action, NormalizedIssue, content_hash, issue_type_for_labels, reconcile
 
 _log = logging.getLogger("jira_github_sync")
+
+# Status a freshly-created Jira issue lands in (project workflow initial state).
+_NEW_JIRA_STATUS = "To Do"
 
 
 def _env(name: str) -> str:
@@ -36,6 +43,10 @@ def _env(name: str) -> str:
     if not value:
         raise SystemExit(f"Missing required environment variable: {name}")
     return value
+
+
+def _flag_enabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def sync_group(
@@ -66,6 +77,37 @@ def sync_group(
             push_to_jira(jira.key, github.title, github.description)
 
 
+def create_jira_from_github(jira: JiraClient, github: GitHubClient, dry_run: bool) -> None:
+    """Reverse direction: mirror GitHub-originated issues into Jira.
+
+    Only open, non-PR GitHub issues without a jira-sync marker qualify (the
+    sync's own creations always carry one). After creating the Jira issue, the
+    GitHub issue is stamped with the marker so the next run links the pair
+    instead of creating a second Jira issue.
+    """
+    candidates = github.unlinked_open_issues()
+    _log.info("Found %d unlinked open GitHub issue(s) to mirror into Jira", len(candidates))
+    for gh in candidates:
+        issue_type = issue_type_for_labels(gh["labels"])
+        _log.info("GitHub #%d -> create Jira %s: %s", gh["number"], issue_type, gh["title"])
+        if dry_run:
+            continue
+        key = jira.create_issue(gh["title"], gh["body"], issue_type)
+        marker_hash = content_hash(gh["title"], gh["body"], _NEW_JIRA_STATUS)
+        try:
+            github.mark_issue(
+                gh["number"], gh["body"], _NEW_JIRA_STATUS, key, marker_hash, marker_hash
+            )
+        except RuntimeError:
+            _log.error(
+                "Created Jira %s from GitHub #%d but FAILED to write the link marker "
+                "back to GitHub -- a duplicate Jira issue may be created on the next "
+                "run. Manually add '<!-- jira-sync key=%s jsrc=%s ghsrc=%s -->' to "
+                "GitHub issue #%d to prevent this.",
+                key, gh["number"], key, marker_hash, marker_hash, gh["number"],
+            )
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     dry_run = os.environ.get("JIRA_GITHUB_SYNC_DRY_RUN", "") == "1"
@@ -79,6 +121,34 @@ def main() -> int:
     github = GitHubClient(repo=_env("GITHUB_REPOSITORY"), token=_env("GITHUB_TOKEN"))
 
     jira.log_identity()
+
+    # Both directions are independently opt-in. With neither flag set the run
+    # is a no-op. IMPORTANT: forward mirroring publishes Jira issues to GitHub,
+    # which leaks internal/private tickets if the repo is public -- so it is
+    # off by default and must be turned on deliberately (see docs).
+    if _flag_enabled("JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB"):
+        _mirror_jira_to_github(jira, github, dry_run)
+    else:
+        _log.info(
+            "Forward mirroring (Jira->GitHub) disabled; set "
+            "JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB=true to enable"
+        )
+
+    if _flag_enabled("JIRA_GITHUB_SYNC_CREATE_JIRA"):
+        create_jira_from_github(jira, github, dry_run)
+    else:
+        _log.info(
+            "Reverse creation (GitHub->Jira) disabled; set "
+            "JIRA_GITHUB_SYNC_CREATE_JIRA=true to enable"
+        )
+
+    return 0
+
+
+def _mirror_jira_to_github(jira: JiraClient, github: GitHubClient, dry_run: bool) -> None:
+    """Forward direction: mirror open Jira issues/epics out to GitHub
+    issues/milestones. Publishes Jira content to GitHub -- keep off for public
+    repos unless every open Jira issue is safe to disclose."""
     open_issues = jira.list_open_issues()
     open_epics = jira.list_open_epics()
     linked_issues = github.linked_issues()
@@ -105,7 +175,6 @@ def main() -> int:
         push_to_jira=jira.update_issue,
         dry_run=dry_run,
     )
-    return 0
 
 
 if __name__ == "__main__":

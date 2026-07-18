@@ -97,3 +97,29 @@ def reconcile(
     if jira_wins:
         return Decision(Action.PUSH_JIRA_TO_GITHUB, new_jsrc=jira_hash, new_ghsrc=jira_hash)
     return Decision(Action.PUSH_GITHUB_TO_JIRA, new_jsrc=gh_hash, new_ghsrc=gh_hash)
+
+
+# GitHub label (lower-cased) -> Jira issue type, for reverse (GitHub->Jira)
+# creation. Anything unmapped becomes a Task.
+_LABEL_TO_TYPE = {
+    "bug": "Bug",
+    "enhancement": "Story",
+    "feature": "Story",
+    "story": "Story",
+}
+DEFAULT_ISSUE_TYPE = "Task"
+
+
+def issue_type_for_labels(labels: list[str]) -> str:
+    """Pick a Jira issue type from GitHub label names (Task if none match).
+
+    "bug" wins over story-ish labels when both are present, since a bug is the
+    more specific/actionable classification.
+    """
+    lowered = {label.lower() for label in labels}
+    if "bug" in lowered:
+        return "Bug"
+    for label in lowered:
+        if label in _LABEL_TO_TYPE:
+            return _LABEL_TO_TYPE[label]
+    return DEFAULT_ISSUE_TYPE

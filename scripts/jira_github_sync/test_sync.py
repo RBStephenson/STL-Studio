@@ -9,8 +9,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from jira_github_sync.models import Action, NormalizedIssue, content_hash, reconcile
-from jira_github_sync.sync import sync_group
+from jira_github_sync.models import (
+    Action,
+    NormalizedIssue,
+    content_hash,
+    issue_type_for_labels,
+    reconcile,
+)
+from jira_github_sync.sync import _flag_enabled, create_jira_from_github, sync_group
 
 NOW = datetime(2026, 7, 18, tzinfo=timezone.utc)
 EARLIER = NOW - timedelta(days=1)
@@ -105,3 +111,93 @@ def test_sync_group_pushes_github_edit_to_jira():
         dry_run=False,
     )
     assert calls["push"] == ("STUDIO-1", "Edited on GitHub", "Desc")
+
+
+# --- reverse direction: GitHub -> Jira creation (STUDIO-269) ---------------
+
+def test_issue_type_for_labels():
+    assert issue_type_for_labels([]) == "Task"
+    assert issue_type_for_labels(["documentation"]) == "Task"
+    assert issue_type_for_labels(["Bug"]) == "Bug"  # case-insensitive
+    assert issue_type_for_labels(["enhancement"]) == "Story"
+    assert issue_type_for_labels(["feature"]) == "Story"
+    # bug wins over story-ish labels when both present
+    assert issue_type_for_labels(["enhancement", "bug"]) == "Bug"
+
+
+class _FakeJira:
+    def __init__(self):
+        self.created = []
+
+    def create_issue(self, title, description, issue_type):
+        self.created.append((title, description, issue_type))
+        return f"STUDIO-{100 + len(self.created)}"
+
+
+class _FakeGitHub:
+    def __init__(self, candidates, mark_raises=False):
+        self._candidates = candidates
+        self.marked = []
+        self._mark_raises = mark_raises
+
+    def unlinked_open_issues(self):
+        return self._candidates
+
+    def mark_issue(self, number, description, status, key, jsrc, ghsrc):
+        if self._mark_raises:
+            raise RuntimeError("boom")
+        self.marked.append((number, description, status, key, jsrc, ghsrc))
+
+
+def _candidate(number=7, title="From GitHub", body="Body", labels=None):
+    return {"number": number, "title": title, "body": body, "labels": labels or []}
+
+
+def test_create_jira_from_github_creates_and_marks():
+    jira, github = _FakeJira(), _FakeGitHub([_candidate(labels=["bug"])])
+    create_jira_from_github(jira, github, dry_run=False)
+    assert jira.created == [("From GitHub", "Body", "Bug")]
+    number, desc, status, key, jsrc, ghsrc = github.marked[0]
+    assert number == 7
+    assert key == "STUDIO-101"
+    assert status == "To Do"
+    # marker hash matches what the next run will recompute from the pair
+    assert jsrc == ghsrc == content_hash("From GitHub", "Body", "To Do")
+
+
+def test_create_jira_from_github_dry_run_does_nothing():
+    jira, github = _FakeJira(), _FakeGitHub([_candidate()])
+    create_jira_from_github(jira, github, dry_run=True)
+    assert jira.created == []
+    assert github.marked == []
+
+
+def test_create_jira_from_github_no_candidates():
+    jira, github = _FakeJira(), _FakeGitHub([])
+    create_jira_from_github(jira, github, dry_run=False)
+    assert jira.created == []
+
+
+def test_create_jira_from_github_marker_failure_is_swallowed():
+    # A failed marker write-back must not crash the whole run; the Jira issue
+    # was still created and the error is logged for manual repair.
+    jira, github = _FakeJira(), _FakeGitHub([_candidate()], mark_raises=True)
+    create_jira_from_github(jira, github, dry_run=False)
+    assert len(jira.created) == 1
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("true", True), ("True", True), ("1", True), ("yes", True), ("on", True),
+        ("false", False), ("off", False), ("0", False), ("no", False), ("", False),
+    ],
+)
+def test_flag_enabled(monkeypatch, value, expected):
+    monkeypatch.setenv("SOME_FLAG", value)
+    assert _flag_enabled("SOME_FLAG") is expected
+
+
+def test_flag_enabled_unset(monkeypatch):
+    monkeypatch.delenv("SOME_FLAG", raising=False)
+    assert _flag_enabled("SOME_FLAG") is False
