@@ -75,6 +75,7 @@ class GitHubClient:
                 updated=datetime.fromisoformat(raw["updated_at"].replace("Z", "+00:00")),
                 is_epic=is_epic,
                 gh_number=raw["number"],
+                gh_state=raw.get("state"),  # "open" / "closed" (milestones too)
             )
             linked[info["key"]] = (issue, info["jsrc"], info["ghsrc"])
         return linked
@@ -157,3 +158,22 @@ class GitHubClient:
             f"/issues/{number}",
             {"body": self._body(description, status, key, jsrc, ghsrc)},
         )
+
+    def apply_status(
+        self,
+        number: int,
+        description: str,
+        status: str,
+        key: str,
+        jsrc: str,
+        ghsrc: str,
+        state: str | None = None,
+    ) -> None:
+        """Push a Jira status change back onto a linked GitHub issue: rewrite
+        the body (preserving the reporter's `description`, refreshing the
+        status line + marker) and optionally flip open/closed state. `state` is
+        "open"/"closed"/None (None leaves the state untouched)."""
+        payload: dict = {"body": self._body(description, status, key, jsrc, ghsrc)}
+        if state is not None:
+            payload["state"] = state
+        self._request("PATCH", f"/issues/{number}", payload)

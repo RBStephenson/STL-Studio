@@ -27,10 +27,10 @@ is a no-op.
 Only **open** (non-`Done`-category) Jira epics/issues are considered.
 
 Fields synced: title (`summary`), description, and a mirrored
-`**Jira status:** <status>` line in the GitHub body. GitHub issue/milestone
-**open/closed state is never touched by the sync** — closing is left to
-humans on the GitHub side, so a stale sync run can't reopen or close
-something a maintainer already dealt with.
+`**Jira status:** <status>` line in the GitHub body. GitHub open/closed state
+is left alone **except** by the scoped status back-update
+(`JIRA_GITHUB_SYNC_UPDATE_GITHUB`, below), which may close/reopen a linked
+GitHub issue to track its Jira ticket reaching / leaving Done.
 
 ## Creation direction
 
@@ -58,6 +58,29 @@ pair instead of duplicating it.
   issue is created. If that write-back ever fails, the run logs an error with
   the exact marker to paste onto the GitHub issue by hand — otherwise the next
   run would create a second Jira issue for it.
+
+### Status back-update (Jira → GitHub, linked issues only)
+
+Gated by `JIRA_GITHUB_SYNC_UPDATE_GITHUB` (default off). When on, each run
+looks at GitHub issues that **already carry a `jira-sync` marker** and reflects
+their Jira ticket's current state back:
+
+- refreshes the `**Jira status:** <status>` line in the GitHub body, and
+- **closes** the GitHub issue when its Jira ticket reaches the Done category
+  (**reopens** it if the ticket later moves back).
+
+It is deliberately narrow and safe for a public repo:
+
+- only touches **already-linked** issues — it never creates a GitHub issue, so
+  nothing internal from Jira is published (unlike full forward mirroring).
+- the reporter's original **body text and the issue title are left untouched**;
+  only the status line and open/closed state change.
+- if a linked issue's Jira key can't be fetched (e.g. deleted), it's skipped
+  with a warning rather than failing the run.
+
+This closes the loop for a reporter who filed on GitHub: they see the status
+move and the issue close when you finish it in Jira. Updates arrive on the
+**daily run** (or a manual dispatch), not instantly — there is no Jira webhook.
 
 With the flag off (the default), issues opened directly on GitHub are simply
 left untouched (no marker, no match).
@@ -112,13 +135,18 @@ Instead, gating is entirely on the GitHub side:
   GitHub) mirroring; omit or set `false`/`off` to keep it off (default).
   **Leave off on a public repo** unless all open Jira issues are safe to
   disclose.
+- `JIRA_GITHUB_SYNC_UPDATE_GITHUB` = `true` to enable the scoped status
+  back-update (refresh status line + close/reopen on Done) for already-linked
+  GitHub issues; omit or set `false`/`off` to keep it off (default). Safe on a
+  public repo — it only writes to issues that originated on GitHub.
 
 Accepted truthy values for the flags: `true`/`1`/`yes`/`on` (case-insensitive);
 anything else (including `false`/`off`/unset) is treated as disabled.
 
 For the typical "end users file issues on GitHub, I work in Jira" setup:
-`JIRA_GITHUB_SYNC_ENABLED=true`, `JIRA_GITHUB_SYNC_CREATE_JIRA=true`, and
-`JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB` left off.
+`JIRA_GITHUB_SYNC_ENABLED=true`, `JIRA_GITHUB_SYNC_CREATE_JIRA=true`,
+`JIRA_GITHUB_SYNC_UPDATE_GITHUB=true` (so reporters see status/close flow back),
+and `JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB` left off.
 
 **Repository secret**:
 

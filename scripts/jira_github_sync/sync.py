@@ -7,9 +7,11 @@ Required environment variables:
     JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
     GITHUB_TOKEN, GITHUB_REPOSITORY (owner/repo)
 
-Optional direction flags (both off by default; neither on => no-op):
-    JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB  -- forward: mirror Jira -> GitHub
+Optional direction flags (all off by default; none on => no-op):
+    JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB  -- forward: mirror Jira -> GitHub (all issues)
     JIRA_GITHUB_SYNC_CREATE_JIRA       -- reverse: create Jira from GitHub issues
+    JIRA_GITHUB_SYNC_UPDATE_GITHUB     -- scoped: push Jira status back to LINKED
+                                          GitHub issues only (status line + close/reopen)
     JIRA_GITHUB_SYNC_DRY_RUN=1         -- log decisions without writing anywhere
 
 Gating: this script is not run by the app itself (STL Studio is a local
@@ -126,6 +128,52 @@ def create_jira_from_github(jira: JiraClient, github: GitHubClient, dry_run: boo
             )
 
 
+def update_linked_github(jira: JiraClient, github: GitHubClient, dry_run: bool) -> None:
+    """Scoped Jira -> GitHub back-update for already-linked issues only.
+
+    For each GitHub issue that carries a jira-sync marker, pull its Jira
+    ticket's current status and reflect it back: refresh the '**Jira status:**'
+    line, and close the GitHub issue when the Jira ticket reaches the Done
+    category (reopen if it later moves back). The reporter's original body text
+    and the issue title are left untouched, and no new GitHub issues are ever
+    created -- so this is safe on a public repo (it only writes to issues that
+    are already public because they originated on GitHub).
+    """
+    linked = github.linked_issues()
+    _log.info("Checking %d linked GitHub issue(s) for Jira status changes", len(linked))
+    for key, (gh, _jsrc, _ghsrc) in linked.items():
+        try:
+            ji = jira.get_issue(key)
+        except RuntimeError:
+            _log.warning(
+                "Linked GitHub #%s points at Jira %s which could not be fetched "
+                "(deleted?); skipping", gh.gh_number, key,
+            )
+            continue
+
+        new_status = ji["status_name"]
+        desired_state = "closed" if ji["status_category"] == "done" else "open"
+        status_changed = new_status != gh.status
+        state_changed = gh.gh_state is not None and gh.gh_state != desired_state
+        if not status_changed and not state_changed:
+            continue
+
+        _log.info(
+            "Jira %s -> GitHub #%s: status='%s'%s",
+            key, gh.gh_number, new_status,
+            f", state->{desired_state}" if state_changed else "",
+        )
+        if dry_run:
+            continue
+
+        new_ghsrc = content_hash(gh.title, gh.description, new_status)
+        new_jsrc = content_hash(ji["summary"], ji["description"], new_status)
+        github.apply_status(
+            gh.gh_number, gh.description, new_status, key, new_jsrc, new_ghsrc,
+            state=desired_state if state_changed else None,
+        )
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     dry_run = os.environ.get("JIRA_GITHUB_SYNC_DRY_RUN", "") == "1"
@@ -158,6 +206,14 @@ def main() -> int:
         _log.info(
             "Reverse creation (GitHub->Jira) disabled; set "
             "JIRA_GITHUB_SYNC_CREATE_JIRA=true to enable"
+        )
+
+    if _flag_enabled("JIRA_GITHUB_SYNC_UPDATE_GITHUB"):
+        update_linked_github(jira, github, dry_run)
+    else:
+        _log.info(
+            "Jira->GitHub status back-update disabled; set "
+            "JIRA_GITHUB_SYNC_UPDATE_GITHUB=true to enable"
         )
 
     return 0

@@ -31,6 +31,7 @@ jobs:
           JIRA_PROJECT_KEY: ${{ vars.JIRA_PROJECT_KEY }}
           JIRA_GITHUB_SYNC_CREATE_JIRA: ${{ vars.JIRA_GITHUB_SYNC_CREATE_JIRA }}
           JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB: ${{ vars.JIRA_GITHUB_SYNC_MIRROR_TO_GITHUB }}
+          JIRA_GITHUB_SYNC_UPDATE_GITHUB: ${{ vars.JIRA_GITHUB_SYNC_UPDATE_GITHUB }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python -m scripts.jira_github_sync.sync
