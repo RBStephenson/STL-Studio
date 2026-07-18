@@ -55,6 +55,27 @@ class JiraClient:
             detail = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"Jira {method} {path} failed ({exc.code}): {detail}") from exc
 
+    def log_identity(self) -> None:
+        """Log which account the API token actually authenticates as.
+
+        Basic auth resolves identity from the token, not the email field, so a
+        token minted under the wrong account silently returns empty result
+        sets (no 401) for projects that account can't see. This makes the real
+        acting account visible in the run log.
+        """
+        try:
+            me = self._request("GET", "/rest/api/3/myself")
+        except RuntimeError as exc:
+            _log.warning("Could not resolve token identity via /myself: %s", exc)
+            return
+        _log.info(
+            "Jira token authenticates as: %s <%s> (accountId=%s, accountType=%s)",
+            me.get("displayName", "?"),
+            me.get("emailAddress", "?"),
+            me.get("accountId", "?"),
+            me.get("accountType", "?"),
+        )
+
     def _search(self, jql: str, is_epic: bool) -> list[NormalizedIssue]:
         issues: list[NormalizedIssue] = []
         next_token: str | None = None
@@ -67,7 +88,6 @@ class JiraClient:
             if next_token:
                 body["nextPageToken"] = next_token
             result = self._request("POST", "/rest/api/3/search/jql", body)
-            _log.info("Jira search/jql response keys: %s", sorted(result.keys()))
             for raw in result.get("issues", []):
                 fields = raw["fields"]
                 issues.append(

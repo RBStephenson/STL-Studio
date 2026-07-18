@@ -78,6 +78,7 @@ def main() -> int:
     )
     github = GitHubClient(repo=_env("GITHUB_REPOSITORY"), token=_env("GITHUB_TOKEN"))
 
+    jira.log_identity()
     open_issues = jira.list_open_issues()
     open_epics = jira.list_open_epics()
     linked_issues = github.linked_issues()
