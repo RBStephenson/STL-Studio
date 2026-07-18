@@ -561,11 +561,40 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
    already-ingested-but-not-yet-moved pack under the current source in one go
    (e.g. after a Quick import).
 
+### Format-variant packs (supported / unsupported / pre-supported)
+
+A pack is treated as **one product**, even when it ships several print-ready
+copies of the same files in sibling folders — the extremely common
+`Product (supported)` / `Product (unsupported)` / `Product (chitubox)`
+convention. Each STL-bearing variant becomes its own model, and the two are
+auto-grouped into a single card (**"N variants"**) the same way manually
+grouped variants are — a bogus creator is never invented per format folder.
+A sibling folder that carries no STLs of its own (a slicer-project folder
+like the `(chitubox)` one above) is recognized as part of that same
+format-variant convention and never mistaken for a "product" of its own —
+including for gallery images: any preview images it bundles are its own
+project-file leftovers, not new content, so they aren't added to a variant's
+gallery. Every variant instead gets the pack's shared, pack-root-level
+gallery images plus any images sitting directly alongside its own STLs.
+
+If two variants would otherwise land on the identical destination path (they
+share the same Creator/Title), Import auto-resolves the collision by
+appending the distinguishing "supported"/"unsupported" suffix to the folder
+name — no manual intervention needed. This is scoped to Import only; the
+Reorganize page still only *suggests* a disambiguating suffix for you to
+confirm, never applies one automatically.
+
 ### Notes
 
 - **Quick import (whole folder)** on `/import` keeps the original one-shot index
   of the entire source in a single pass (each immediate subdir = a creator,
   loose files → an `_Inbox` creator) — handy when you don't need per-pack review.
+- **Creator resolution** — if a pack card's **Creator** field is already filled
+  in (typed, or via **Fetch**) before you click **Import**, its models attach
+  to that real creator directly. Leave it blank and the pack lands under the
+  shared **`_Inbox`** creator instead, same as Quick import's loose files —
+  rename it once you know the real creator, and every model already in it
+  moves with it.
 - **Inbox flag** — un-filed imports are marked **inbox**; the Library's
   `?is_inbox=1` filter shows just these.
 - The **move** step follows the Reorganize page's slug-formatting setting
@@ -576,7 +605,9 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
   Library**, off by default) and a writable destination — Docker mounts are
   read-only, so moves are effectively standalone-only. Importing and enriching
   work everywhere. Packs missing a creator/character (or otherwise blocked) are
-  reported as skipped, not moved.
+  reported as skipped, not moved. A destination that's already occupied by an
+  unrelated file reports "a model with this name already exists in the
+  library — check the library and naming" rather than a raw file path.
 
 ## Creators & per-creator rescan
 
