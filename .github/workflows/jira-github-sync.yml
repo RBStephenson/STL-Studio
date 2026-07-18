@@ -29,6 +29,7 @@ jobs:
           JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_PROJECT_KEY: ${{ vars.JIRA_PROJECT_KEY }}
+          JIRA_GITHUB_SYNC_CREATE_JIRA: ${{ vars.JIRA_GITHUB_SYNC_CREATE_JIRA }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python -m scripts.jira_github_sync.sync

@@ -26,9 +26,12 @@ from typing import Callable
 
 from .github_client import GitHubClient
 from .jira_client import JiraClient
-from .models import Action, NormalizedIssue, reconcile
+from .models import Action, NormalizedIssue, content_hash, issue_type_for_labels, reconcile
 
 _log = logging.getLogger("jira_github_sync")
+
+# Status a freshly-created Jira issue lands in (project workflow initial state).
+_NEW_JIRA_STATUS = "To Do"
 
 
 def _env(name: str) -> str:
@@ -36,6 +39,10 @@ def _env(name: str) -> str:
     if not value:
         raise SystemExit(f"Missing required environment variable: {name}")
     return value
+
+
+def _flag_enabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
 
 
 def sync_group(
@@ -64,6 +71,37 @@ def sync_group(
             update(github.gh_number, jira, decision.new_jsrc, decision.new_ghsrc)
         elif decision.action == Action.PUSH_GITHUB_TO_JIRA:
             push_to_jira(jira.key, github.title, github.description)
+
+
+def create_jira_from_github(jira: JiraClient, github: GitHubClient, dry_run: bool) -> None:
+    """Reverse direction: mirror GitHub-originated issues into Jira.
+
+    Only open, non-PR GitHub issues without a jira-sync marker qualify (the
+    sync's own creations always carry one). After creating the Jira issue, the
+    GitHub issue is stamped with the marker so the next run links the pair
+    instead of creating a second Jira issue.
+    """
+    candidates = github.unlinked_open_issues()
+    _log.info("Found %d unlinked open GitHub issue(s) to mirror into Jira", len(candidates))
+    for gh in candidates:
+        issue_type = issue_type_for_labels(gh["labels"])
+        _log.info("GitHub #%d -> create Jira %s: %s", gh["number"], issue_type, gh["title"])
+        if dry_run:
+            continue
+        key = jira.create_issue(gh["title"], gh["body"], issue_type)
+        marker_hash = content_hash(gh["title"], gh["body"], _NEW_JIRA_STATUS)
+        try:
+            github.mark_issue(
+                gh["number"], gh["body"], _NEW_JIRA_STATUS, key, marker_hash, marker_hash
+            )
+        except RuntimeError:
+            _log.error(
+                "Created Jira %s from GitHub #%d but FAILED to write the link marker "
+                "back to GitHub -- a duplicate Jira issue may be created on the next "
+                "run. Manually add '<!-- jira-sync key=%s jsrc=%s ghsrc=%s -->' to "
+                "GitHub issue #%d to prevent this.",
+                key, gh["number"], key, marker_hash, marker_hash, gh["number"],
+            )
 
 
 def main() -> int:
@@ -105,6 +143,12 @@ def main() -> int:
         push_to_jira=jira.update_issue,
         dry_run=dry_run,
     )
+
+    if _flag_enabled("JIRA_GITHUB_SYNC_CREATE_JIRA"):
+        create_jira_from_github(jira, github, dry_run)
+    else:
+        _log.info("Reverse creation (GitHub->Jira) disabled; set JIRA_GITHUB_SYNC_CREATE_JIRA=true to enable")
+
     return 0
 
 

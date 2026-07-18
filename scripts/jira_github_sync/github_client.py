@@ -88,6 +88,30 @@ class GitHubClient:
         raw = [r for r in raw if "pull_request" not in r]
         return self._linked(raw, "body", is_epic=False)
 
+    def unlinked_open_issues(self) -> list[dict]:
+        """Open, non-PR issues that carry no jira-sync marker.
+
+        These are issues opened directly on GitHub (the sync's own creations
+        always carry a marker), i.e. the candidates for reverse creation into
+        Jira. Returns light dicts with number/title/body/labels.
+        """
+        raw = self._paginated("/issues", "state=open")
+        candidates: list[dict] = []
+        for r in raw:
+            if "pull_request" in r:
+                continue
+            if parse_marker(r.get("body") or ""):
+                continue
+            candidates.append(
+                {
+                    "number": r["number"],
+                    "title": r.get("title") or "",
+                    "body": r.get("body") or "",
+                    "labels": [lbl.get("name", "") for lbl in r.get("labels", []) or []],
+                }
+            )
+        return candidates
+
     @staticmethod
     def _body(description: str, status: str, key: str, jsrc: str, ghsrc: str) -> str:
         return f"{description}\n\n**Jira status:** {status}\n\n{marker(key, jsrc, ghsrc)}"
@@ -118,4 +142,16 @@ class GitHubClient:
             "PATCH",
             f"/issues/{number}",
             {"title": jira.title, "body": self._body(jira.description, jira.status, jira.key, jsrc, ghsrc)},
+        )
+
+    def mark_issue(
+        self, number: int, description: str, status: str, key: str, jsrc: str, ghsrc: str
+    ) -> None:
+        """Stamp a jira-sync marker (+ status line) onto an existing GitHub
+        issue after it's been mirrored into Jira, so later runs treat the pair
+        as linked instead of creating a duplicate Jira issue."""
+        self._request(
+            "PATCH",
+            f"/issues/{number}",
+            {"body": self._body(description, status, key, jsrc, ghsrc)},
         )

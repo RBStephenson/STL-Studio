@@ -21,11 +21,27 @@ something a maintainer already dealt with.
 
 ## Creation direction
 
-New items are only ever created in Jira, then mirrored to GitHub. The sync
-never creates a Jira issue from a GitHub-only issue — that would fight the
-Jira-is-SoT convention in the project's `.claude/CLAUDE.md`. If someone opens
-an issue directly on GitHub, it's simply not touched by this sync (no marker,
-no match).
+By default, new items are only ever created in Jira, then mirrored to GitHub —
+Jira stays the system of record per the project's `.claude/CLAUDE.md`.
+
+Reverse creation (GitHub → Jira) is available but **opt-in**, gated by the
+`JIRA_GITHUB_SYNC_CREATE_JIRA` repo variable (default off). When enabled, each
+**open, non-PR** GitHub issue that has **no** `jira-sync` marker (i.e. one
+opened directly on GitHub, not by this sync) creates a matching Jira issue,
+after which the GitHub issue is stamped with the marker so later runs link the
+pair instead of duplicating it.
+
+- **Issue type**: defaults to `Task`; GitHub labels map `bug` → Bug and
+  `enhancement`/`feature`/`story` → Story (`bug` wins when several apply).
+- **Scope**: only open, unlinked, non-PR issues. Closed issues, pull requests,
+  milestones, and already-linked issues are skipped.
+- **Duplicate safety**: the marker is written back immediately after the Jira
+  issue is created. If that write-back ever fails, the run logs an error with
+  the exact marker to paste onto the GitHub issue by hand — otherwise the next
+  run would create a second Jira issue for it.
+
+With the flag off (the default), issues opened directly on GitHub are simply
+left untouched (no marker, no match).
 
 ## Conflict resolution
 
@@ -71,11 +87,17 @@ Instead, gating is entirely on the GitHub side:
 - `JIRA_BASE_URL` = `https://rbrentstephenson.atlassian.net`
 - `JIRA_EMAIL` = the Jira account email the API token belongs to
 - `JIRA_PROJECT_KEY` = `STUDIO`
+- `JIRA_GITHUB_SYNC_CREATE_JIRA` = `true` to enable reverse (GitHub → Jira)
+  creation; omit or set `false` to keep it off (default)
 
 **Repository secret**:
 
 - `JIRA_API_TOKEN` — an Atlassian API token
-  (https://id.atlassian.com/manage-profile/security/api-tokens)
+  (https://id.atlassian.com/manage-profile/security/api-tokens). Use a
+  **classic unscoped** token ("Create API token"), not a scoped one — scoped
+  tokens are rejected by the site-URL Basic-auth flow this client uses and
+  fail silently (the request is treated as anonymous: `/myself` returns 401
+  while search returns an empty result set).
 
 `GITHUB_TOKEN` is provided automatically by Actions; no secret needed for it.
 

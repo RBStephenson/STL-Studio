@@ -118,6 +118,27 @@ class JiraClient:
             {"fields": {"summary": title, "description": _text_to_adf(description)}},
         )
 
+    def create_issue(self, title: str, description: str, issue_type: str) -> str:
+        """Create a Jira issue in the configured project; return its new key.
+
+        Used only for the reverse (GitHub->Jira) direction. Jira remains the
+        system of record: this exists so an issue opened directly on GitHub can
+        be reflected into Jira, not to let GitHub drive Jira wholesale.
+        """
+        result = self._request(
+            "POST",
+            "/rest/api/3/issue",
+            {
+                "fields": {
+                    "project": {"key": self.project_key},
+                    "issuetype": {"name": issue_type},
+                    "summary": title,
+                    "description": _text_to_adf(description),
+                }
+            },
+        )
+        return result["key"]
+
 
 def _parse_jira_timestamp(value: str) -> datetime:
     # Jira returns e.g. "2026-07-18T14:03:00.000-0400"; normalize the bare
