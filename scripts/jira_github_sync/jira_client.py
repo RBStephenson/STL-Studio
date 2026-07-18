@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
 from .models import NormalizedIssue
+
+_log = logging.getLogger("jira_github_sync")
 
 _JQL_EPICS = 'project = {project} AND issuetype = Epic AND statusCategory != Done ORDER BY key'
 _JQL_ISSUES = (
@@ -64,6 +67,7 @@ class JiraClient:
             if next_token:
                 body["nextPageToken"] = next_token
             result = self._request("POST", "/rest/api/3/search/jql", body)
+            _log.info("Jira search/jql response keys: %s", sorted(result.keys()))
             for raw in result.get("issues", []):
                 fields = raw["fields"]
                 issues.append(
