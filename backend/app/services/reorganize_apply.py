@@ -403,10 +403,21 @@ def apply_manifest(
                     on_progress(moved, total)
         except Exception as e:
             # 2a does not auto-undo: stop, keep the partial log for recovery, and
-            # leave the DB untouched so the catalog isn't half-rewritten.
+            # leave the DB untouched so the catalog isn't half-rewritten. A raw
+            # "destination already exists: /mnt/.../some-slug.stl" dump isn't
+            # actionable for a user reading the toast (#1112) — collapse the
+            # common collision case (a filename move landed on something
+            # already sitting at the destination) to plain language; the real
+            # path still goes into `detail` for logs/support, just not the
+            # user-facing message.
+            reason = (
+                "a model with this name already exists in the library — "
+                "check the library and naming" if isinstance(e, FileExistsError)
+                else str(e)
+            )
             raise ApplyError(
-                f"Move failed after {moved} file(s) — recovery log written, DB unchanged: {e}",
-                status=500, detail={"undo_log": str(log.path), "moved": moved},
+                f"Move failed after {moved} file(s) — recovery log written, DB unchanged: {reason}",
+                status=500, detail={"undo_log": str(log.path), "moved": moved, "raw_error": str(e)},
             ) from e
         finally:
             log.close()
