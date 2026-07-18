@@ -12,11 +12,14 @@ import type {
 export const importApi = {
   sourceContents: (source: string) =>
     request<SourceContents>(`/import/source-contents?source=${encodeURIComponent(source)}`),
-  scanFolder: (path: string) =>
+  // creatorName (#1110): pass the pack's already-known Creator field value
+  // (typed, or Fetch-populated) so a single-pack scan attaches models to the
+  // real creator directly instead of a folder-named placeholder.
+  scanFolder: (path: string, creatorName?: string) =>
     request<{ running: boolean; message: string }>("/import/scan-folder", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
+      body: JSON.stringify({ path, creator_name: creatorName || undefined }),
     }),
   preview: (source: string) =>
     request<ImportPreview>(`/import/preview?source=${encodeURIComponent(source)}`),

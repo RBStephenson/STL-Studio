@@ -32,7 +32,7 @@ from app.services.variant_sync import propagate_source_url
 from app.services.tag_sync import sync_model_tags
 from app.services import ai_organize, reorganize
 from app.services.reorganize_template import ReorganizeTemplateError
-from app.services.scanner import resolve_creator
+from app.services.scanner import resolve_creator, prune_empty_creators
 from app.routers.reorganize import _stored_template, _slugify_all, _slugify_filenames
 from app.config import settings
 from app.utils import utcnow, like_escape
@@ -1020,7 +1020,8 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
         if model.primary_image_path and model.primary_image_path not in data["image_paths"]:
             model.primary_image_path = None
 
-    if data.get("creator_name"):
+    reassigned_creator = bool(data.get("creator_name"))
+    if reassigned_creator:
         model.creator_id = resolve_creator(data["creator_name"], db).id
 
     if data.get("source_url"):
@@ -1029,6 +1030,11 @@ async def update_model(model_id: int, body: ModelUpdate, db: Session = Depends(g
     model.updated_at = utcnow()
     sync_model_tags(model, db)
     db.commit()
+    if reassigned_creator:
+        # Same leftover as bulk-enrich (#1108): reassigning this model's
+        # creator can leave its old one — most commonly a single-pack
+        # import's placeholder creator — with zero models.
+        prune_empty_creators(db)
     return {"ok": True}
 
 

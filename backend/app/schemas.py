@@ -333,6 +333,14 @@ class GroupingStrategyBody(BaseModel):
 
 class InboxScanRequest(BaseModel):
     path: str
+    # Import Preview already knows the pack's Creator field value (typed by
+    # the user, or pre-filled via a metadata Fetch) before the user clicks
+    # Import — passing it through lets a single-pack scan attach models to
+    # the REAL creator directly instead of a folder-named placeholder that
+    # then needs cleanup once bulk-enrich reassigns it (#1108). Optional and
+    # ignored by /scan/inbox (the whole-dump-folder Approach B scan, which
+    # has no single creator to attach to).
+    creator_name: str | None = None
 
 
 class ScanRootCreate(BaseModel):

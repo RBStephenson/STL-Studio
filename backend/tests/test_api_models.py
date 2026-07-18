@@ -586,6 +586,32 @@ class TestModelUpdate:
         resp = client.patch("/models/99999", json={"title": "X"})
         assert resp.status_code == 404
 
+    def test_reassigning_creator_prunes_the_now_empty_old_one(self, client, db):
+        """Regression (#1108): single-pack import creates a placeholder
+        Creator named after the pack folder. Editing a model's creator here
+        (a single-model equivalent of Import Preview's bulk-enrich Creator
+        field) must not leave that now-empty placeholder behind."""
+        from app.models import Creator
+        old_creator = make_creator(db, name="Ignisaurus Clan Warriors Tactical Squad")
+        model = make_model(db, old_creator)
+        commit_all(db)
+
+        resp = client.patch(f"/models/{model.id}", json={"creator_name": "dakkadakka.store"})
+        assert resp.status_code == 200
+        assert db.query(Creator).filter_by(id=old_creator.id).first() is None
+
+    def test_reassigning_creator_leaves_a_still_used_one_alone(self, client, db):
+        from app.models import Creator
+        shared_creator = make_creator(db, name="Shared Creator")
+        model = make_model(db, shared_creator)
+        other_model = make_model(db, shared_creator, name="Other")
+        commit_all(db)
+
+        resp = client.patch(f"/models/{model.id}", json={"creator_name": "New Creator"})
+        assert resp.status_code == 200
+        assert db.query(Creator).filter_by(id=shared_creator.id).first() is not None
+        assert other_model.creator_id == shared_creator.id
+
 
 # ---------------------------------------------------------------------------
 # DELETE /models/{id}/other-files (#880)

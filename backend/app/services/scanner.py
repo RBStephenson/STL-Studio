@@ -276,7 +276,7 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 # only "STL" was a slicer project is removed in the same scan.
                 _prune_slicer_files(_db)
                 removed += _prune_phantoms(_db)
-                _prune_empty_creators(_db)
+                prune_empty_creators(_db)
 
                 # Replace the in-progress "scanning <creator>" message with a
                 # summary the UI can show once the run finishes (#223).
@@ -565,9 +565,15 @@ def _prune_stale_models(
     return len(stale_ids)
 
 
-def _prune_empty_creators(db: Session):
+def prune_empty_creators(db: Session):
     """Delete Creator rows that have no models — left behind by the scraper
-    creating duplicate creators with different casing, or by stale-path pruning."""
+    creating duplicate creators with different casing, by stale-path pruning,
+    or by a caller reassigning every one of a creator's models elsewhere
+    (single-pack import's placeholder creator — named after the pack folder,
+    e.g. "Ignisaurus Clan ..." — orphaned the moment the user sets the real
+    creator name via bulk-enrich or a single-model edit; #1108). Public
+    (no leading underscore) since it's now called from outside this module,
+    not just the post-scan pass below."""
     orphans = (
         db.query(Creator)
         .filter(~Creator.id.in_(db.query(Model.creator_id).filter(Model.creator_id != None).distinct()))
@@ -577,7 +583,7 @@ def _prune_empty_creators(db: Session):
         for c in orphans:
             db.delete(c)
         db.commit()
-        logger.info(f"Post-scan: removed {len(orphans)} creator(s) with no remaining models")
+        logger.info(f"Removed {len(orphans)} creator(s) with no remaining models")
 
 
 def _prune_phantoms(db: Session, creator_id: int | None = None):
@@ -1826,15 +1832,21 @@ def abort_inbox_scan(message: str = "error: failed to start") -> None:
     write_lock.release_scan()
 
 
-def start_inbox_scan(path: str, single_pack: bool = False) -> bool:
+def start_inbox_scan(path: str, single_pack: bool = False, creator_name: str | None = None) -> bool:
     """Launch an inbox import off the request path. Acquires the write lock
     synchronously (authoritative 200) then runs the work on the shared runner.
     Returns False if the library is busy. Used by both /scan/inbox and
-    /import/scan-folder (single_pack=True, #1087 — see _inbox_scan)."""
+    /import/scan-folder (single_pack=True, #1087 — see _inbox_scan).
+
+    ``creator_name`` (#1110): only consulted when single_pack=True — see
+    _inbox_scan."""
     if not prepare_inbox_scan():
         return False
     try:
-        runner.start(_SCAN_KEY, _inbox_scan, single_flight=False, path=path, single_pack=single_pack)
+        runner.start(
+            _SCAN_KEY, _inbox_scan, single_flight=False,
+            path=path, single_pack=single_pack, creator_name=creator_name,
+        )
     except Exception:
         abort_inbox_scan()
         raise
@@ -1843,7 +1855,7 @@ def start_inbox_scan(path: str, single_pack: bool = False) -> bool:
 
 def scan_inbox_folder(
     path: str, db: Session | None = None, _lock_already_held: bool = False,
-    single_pack: bool = False,
+    single_pack: bool = False, creator_name: str | None = None,
 ) -> None:
     """Index an arbitrary folder as inbox models without adding it as a scan root.
     Synchronous — direct callers (tests) run it inline against a caller-owned
@@ -1853,12 +1865,19 @@ def scan_inbox_folder(
     ``single_pack`` (#1087): the caller already knows `path` is one product's
     own folder (Import Preview scopes each pack's Import button to exactly the
     folder it grouped as one pack) — see _inbox_scan for why that changes the
-    indexing strategy."""
+    indexing strategy.
+
+    ``creator_name`` (#1110): the caller's already-known real creator name
+    (e.g. Import Preview's Creator field, typed or Fetch-populated before the
+    user clicks Import) — only consulted when single_pack=True."""
     if not _lock_already_held:
         if not write_lock.try_acquire_for_scan():
             logger.warning("Inbox scan skipped: library write lock is held")
             return
-    runner.run_inline(_SCAN_KEY, _inbox_scan, path=path, db=db, single_pack=single_pack)
+    runner.run_inline(
+        _SCAN_KEY, _inbox_scan, path=path, db=db,
+        single_pack=single_pack, creator_name=creator_name,
+    )
 
 
 def _auto_link_sups_for_creator(db: Session, creator_id: int) -> None:
@@ -1899,6 +1918,7 @@ def _auto_link_sups_for_creator(db: Session, creator_id: int) -> None:
 
 def _inbox_scan(
     job: JobHandle, path: str, db: Session | None = None, single_pack: bool = False,
+    creator_name: str | None = None,
 ) -> None:
     """Inbox-import worker. All indexed models get is_inbox=True. Assumes the
     write lock is held; releases it.
@@ -1924,15 +1944,25 @@ def _inbox_scan(
       and silently orphaned any pack-level Fetch metadata/gallery images
       (which live at the pack root, one level above where those bogus
       creators' models ended up). Fixed by treating the whole pack folder as
-      one creator (named after the folder, same "rename it once you know the
-      real one" contract as the existing '_Inbox' flat-layout placeholder)
-      and delegating straight to _walk_for_models — the same product/variant
-      detection a real scan root's creator folder already gets, which already
-      knows how to keep genuinely distinct products separate while grouping
-      format variants of one product together. Auto-grouping runs afterward
-      (regular scans get this for free via _scan_root; Approach B never
-      needed it since each of its creators typically holds one model, but a
-      single-pack creator routinely holds several variants of one thing)."""
+      one creator and delegating straight to _walk_for_models — the same
+      product/variant detection a real scan root's creator folder already
+      gets, which already knows how to keep genuinely distinct products
+      separate while grouping format variants of one product together.
+      Auto-grouping runs afterward (regular scans get this for free via
+      _scan_root; Approach B never needed it since each of its creators
+      typically holds one model, but a single-pack creator routinely holds
+      several variants of one thing).
+
+      That one creator resolves to ``creator_name`` (case-insensitive
+      get-or-create, #1110) when the caller already knows it — Import
+      Preview's Creator field is typically already filled in (typed, or via
+      a metadata Fetch) before the user clicks Import, so there's no need to
+      invent a placeholder only to have bulk-enrich immediately reassign
+      every model away from it. Blank/not-yet-known instead reuses the same
+      shared '_Inbox' placeholder the flat-layout branch below already uses
+      (#1110 follow-up) — one common, well-known bucket for "not yet
+      triaged" content instead of a fresh one-off creator named after every
+      individual un-enriched pack's own folder."""
     global _active
     _active = job
     job.update(message="importing", models_found=0, files_found=0, cancelled=False)
@@ -1945,7 +1975,8 @@ def _inbox_scan(
             _load_scan_rules(_db)
 
             if single_pack:
-                creator = _get_or_create_creator(inbox.name, _db)
+                known_name = (creator_name or "").strip()
+                creator = resolve_creator(known_name if known_name else "_Inbox", _db)
                 _db.commit()
                 _msg(f"importing {inbox.name}")
                 _walk_for_models(

@@ -281,14 +281,17 @@ export default function ImportPreviewPage() {
     setApplyProgress((m) => ({ ...m, [entry.path]: { moved: 0, total: 0 } }));
     setDownloadProgress((m) => ({ ...m, [entry.path]: { downloaded: 0, total: 0 } }));
     try {
-      await api.import.scanFolder(entry.path);
+      const f = fields[entry.path] ?? EMPTY_FIELDS;
+      // Pass the already-known Creator field so the scan attaches models to
+      // the real creator directly, rather than a folder-named placeholder
+      // bulk-enrich below would immediately reassign away from (#1110).
+      await api.import.scanFolder(entry.path, f.creator.trim());
       await waitForScan(entry.path);
       // The just-ingested pack's models, fetched fresh.
       const preview = await api.import.preview(source);
       const ids = preview.packs
         .filter((p) => p.source_path === entry.path || (isFlat && p.source_path === source))
         .flatMap((p) => p.model_ids);
-      const f = fields[entry.path] ?? EMPTY_FIELDS;
       // Download CDN gallery images into the pack folder before apply so they
       // travel to the library folder with the rest of the pack's files.
       if (f.images.length) {
