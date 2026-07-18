@@ -104,14 +104,23 @@ describe("runtimeDeps", () => {
     );
   });
 
-  it("killTree() terminates a running spawned process", async () => {
-    const { deps: d } = deps();
-    const proc = d.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
-    const pid = proc.pid;
-    expect(pid).toBeGreaterThan(0);
+  it(
+    "killTree() terminates a running spawned process",
+    // On POSIX, killTree() unconditionally waits out SHUTDOWN_GRACE_MS
+    // (5s) before resolving — it sends SIGTERM then only checks/escalates
+    // to SIGKILL once the grace timer fires, it doesn't resolve early on
+    // exit. That alone can exceed vitest's default 5s test timeout on a
+    // slower CI runner, so give this one headroom.
+    async () => {
+      const { deps: d } = deps();
+      const proc = d.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+      const pid = proc.pid;
+      expect(pid).toBeGreaterThan(0);
 
-    const exited = new Promise<void>((resolve) => proc.on("exit", () => resolve()));
-    await d.killTree(pid as number);
-    await exited;
-  });
+      const exited = new Promise<void>((resolve) => proc.on("exit", () => resolve()));
+      await d.killTree(pid as number);
+      await exited;
+    },
+    10_000,
+  );
 });
