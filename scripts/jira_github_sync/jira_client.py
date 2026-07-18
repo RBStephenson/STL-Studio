@@ -1,9 +1,16 @@
-"""Minimal Jira Cloud REST v2 client (stdlib only, no extra CI dependency).
+"""Minimal Jira Cloud REST v3 client (stdlib only, no extra CI dependency).
 
 Only the operations the sync needs: list open STUDIO epics/issues, and push a
-title/description/status-label update back onto an existing issue. This script
-never creates Jira issues -- Jira is the system of record for issue creation
-(see project CLAUDE.md); GitHub only ever gets issues Jira already has.
+title/description update back onto an existing issue. This script never
+creates Jira issues -- Jira is the system of record for issue creation (see
+project CLAUDE.md); GitHub only ever gets issues Jira already has.
+
+Uses /rest/api/3/search/jql (cursor-paginated via nextPageToken) since
+/rest/api/2/search was retired (HTTP 410) -- see
+https://developer.atlassian.com/changelog/#CHANGE-2046. v3 fields, including
+`description`, are Atlassian Document Format (ADF); _adf_to_text /
+_text_to_adf convert between that and the plain text the rest of this sync
+works with.
 """
 from __future__ import annotations
 
@@ -47,32 +54,30 @@ class JiraClient:
 
     def _search(self, jql: str, is_epic: bool) -> list[NormalizedIssue]:
         issues: list[NormalizedIssue] = []
-        start_at = 0
+        next_token: str | None = None
         while True:
-            result = self._request(
-                "POST",
-                "/rest/api/2/search",
-                {
-                    "jql": jql,
-                    "startAt": start_at,
-                    "maxResults": 100,
-                    "fields": ["summary", "description", "status", "updated"],
-                },
-            )
+            body = {
+                "jql": jql,
+                "maxResults": 100,
+                "fields": ["summary", "description", "status", "updated"],
+            }
+            if next_token:
+                body["nextPageToken"] = next_token
+            result = self._request("POST", "/rest/api/3/search/jql", body)
             for raw in result.get("issues", []):
                 fields = raw["fields"]
                 issues.append(
                     NormalizedIssue(
                         key=raw["key"],
                         title=fields.get("summary") or "",
-                        description=fields.get("description") or "",
+                        description=_adf_to_text(fields.get("description")),
                         status=fields.get("status", {}).get("name", ""),
                         updated=_parse_jira_timestamp(fields["updated"]),
                         is_epic=is_epic,
                     )
                 )
-            start_at += len(result.get("issues", []))
-            if start_at >= result.get("total", 0) or not result.get("issues"):
+            next_token = result.get("nextPageToken")
+            if not next_token or not result.get("issues"):
                 break
         return issues
 
@@ -85,8 +90,8 @@ class JiraClient:
     def update_issue(self, key: str, title: str, description: str) -> None:
         self._request(
             "PUT",
-            f"/rest/api/2/issue/{key}",
-            {"fields": {"summary": title, "description": description}},
+            f"/rest/api/3/issue/{key}",
+            {"fields": {"summary": title, "description": _text_to_adf(description)}},
         )
 
 
@@ -97,3 +102,44 @@ def _parse_jira_timestamp(value: str) -> datetime:
         value = f"{value[:-2]}:{value[-2:]}"
     dt = datetime.fromisoformat(value)
     return dt.astimezone(timezone.utc)
+
+
+def _adf_to_text(doc: dict | None) -> str:
+    """Flatten an Atlassian Document Format node tree to plain text.
+
+    Good enough for diffing/mirroring purposes -- this sync doesn't need to
+    round-trip rich formatting, just detect and carry forward edits.
+    """
+    if not doc:
+        return ""
+
+    lines: list[str] = []
+
+    def walk(node: dict, buf: list[str]) -> None:
+        if node.get("type") == "text":
+            buf.append(node.get("text", ""))
+            return
+        for child in node.get("content", []) or []:
+            walk(child, buf)
+
+    for block in doc.get("content", []) or []:
+        buf: list[str] = []
+        walk(block, buf)
+        lines.append("".join(buf))
+    return "\n".join(lines).strip()
+
+
+def _text_to_adf(text: str) -> dict:
+    """Wrap plain text as one ADF paragraph per non-empty line."""
+    paragraphs = [line for line in text.splitlines()] or [""]
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": line}] if line else [],
+            }
+            for line in paragraphs
+        ],
+    }
