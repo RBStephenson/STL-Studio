@@ -189,6 +189,20 @@ describe("initializeUpdater (via bootBackendAndLoad)", () => {
     await controller.bootBackendAndLoad(fakeWin());
     expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("Could not read automatic-update setting"));
   });
+
+  it("enables prereleases on the updater when allow_prerelease_updates is true", async () => {
+    const { controller, deps } = harness({
+      fetchJson: vi.fn().mockResolvedValue({ auto_update_enabled: true, allow_prerelease_updates: true }),
+    });
+    await controller.bootBackendAndLoad(fakeWin());
+    expect(deps.autoUpdaterAdapter.allowPrerelease).toBe(true);
+  });
+
+  it("leaves prereleases off when the setting is absent", async () => {
+    const { controller, deps } = harness({ fetchJson: vi.fn().mockResolvedValue({ auto_update_enabled: true }) });
+    await controller.bootBackendAndLoad(fakeWin());
+    expect(deps.autoUpdaterAdapter.allowPrerelease).toBe(false);
+  });
 });
 
 describe("regenerateEncryptionKey", () => {

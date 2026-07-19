@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createUpdateController, readAutoUpdateEnabled } from "./updater";
+import { createUpdateController, readAutoUpdateEnabled, readAllowPrereleaseUpdates } from "./updater";
 import type { DownloadProgress, UpdateInfo, UpdaterAdapter, UpdateUi } from "./updater";
 
 type Listener = (...args: never[]) => void;
 
-function harness(enabled = true, supported = true) {
+function harness(enabled = true, supported = true, allowPrerelease = false) {
   const listeners = new Map<string, Listener>();
   const updater: UpdaterAdapter = {
     autoDownload: true,
@@ -25,7 +25,7 @@ function harness(enabled = true, supported = true) {
   };
   const stopApplication = vi.fn().mockResolvedValue(undefined);
   const controller = createUpdateController({
-    updater, ui, currentVersion: "1.0.0", enabled, supported,
+    updater, ui, currentVersion: "1.0.0", enabled, allowPrerelease, supported,
     stopApplication, log: vi.fn(),
   });
   const emit = (event: string, value?: UpdateInfo | DownloadProgress | Error) =>
@@ -77,11 +77,29 @@ describe("createUpdateController", () => {
     expect(updater.checkForUpdates).not.toHaveBeenCalled();
     expect(ui.showError).toHaveBeenCalledWith(expect.stringMatching(/installed Windows app/i));
   });
+
+  it("applies the allowPrerelease option to the updater (default off)", () => {
+    const { updater } = harness(true, true, false);
+    expect(updater.allowPrerelease).toBe(false);
+  });
+
+  it("enables prereleases when the option is on", () => {
+    const { updater } = harness(true, true, true);
+    expect(updater.allowPrerelease).toBe(true);
+  });
 });
 
 describe("readAutoUpdateEnabled", () => {
   it("accepts only an explicit true from backend settings", async () => {
     await expect(readAutoUpdateEnabled("http://127.0.0.1:1", async () => ({ auto_update_enabled: true }))).resolves.toBe(true);
     await expect(readAutoUpdateEnabled("http://127.0.0.1:1", async () => ({}))).resolves.toBe(false);
+  });
+});
+
+describe("readAllowPrereleaseUpdates", () => {
+  it("accepts only an explicit true from backend settings", async () => {
+    await expect(readAllowPrereleaseUpdates("http://127.0.0.1:1", async () => ({ allow_prerelease_updates: true }))).resolves.toBe(true);
+    await expect(readAllowPrereleaseUpdates("http://127.0.0.1:1", async () => ({ allow_prerelease_updates: false }))).resolves.toBe(false);
+    await expect(readAllowPrereleaseUpdates("http://127.0.0.1:1", async () => ({}))).resolves.toBe(false);
   });
 });

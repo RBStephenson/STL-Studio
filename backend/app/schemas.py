@@ -599,6 +599,9 @@ class AppSettingsRead(BaseModel):
     # Electron desktop startup checks GitHub Releases when enabled. Manual
     # checks remain available from the desktop Help menu when this is off.
     auto_update_enabled: bool = True
+    # Opt in to pre-release (beta) app updates. When on, the desktop updater also
+    # offers prerelease-flagged GitHub releases; off = stable releases only.
+    allow_prerelease_updates: bool = False
     # Collections page: give every card the same box size (the one cover art
     # already uses) instead of a compact box for collections with no cover.
     collections_uniform_size: bool = True
@@ -648,6 +651,7 @@ class AppSettingsUpdate(BaseModel):
     persistent_diagnostics_enabled: Optional[bool] = None
     storage_recovery_enabled: Optional[bool] = None
     auto_update_enabled: Optional[bool] = None
+    allow_prerelease_updates: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")

@@ -7,7 +7,7 @@
  * test with fully injected boundaries — no real Electron runtime, filesystem,
  * or network required to exercise the boot/failure/update-init branches.
  */
-import { readAutoUpdateEnabled, createUpdateController } from "./updater";
+import { readAutoUpdateEnabled, readAllowPrereleaseUpdates, createUpdateController } from "./updater";
 import type { UpdateController, UpdaterAdapter, UpdateUi } from "./updater";
 import { readUpdateSmokeConfig } from "./updateSmoke";
 import { SidecarStartError, startSidecar, stopSidecar } from "./sidecar";
@@ -106,8 +106,10 @@ export function createAppController<Win extends BrowserWindowLike>(
       deps.log(`[updater-smoke] feed=${smoke.feedUrl}`);
     }
     let enabled = false;
+    let allowPrerelease = false;
     try {
       enabled = await readAutoUpdateEnabled(backendUrl, deps.fetchJson);
+      allowPrerelease = await readAllowPrereleaseUpdates(backendUrl, deps.fetchJson);
     } catch (error) {
       deps.log(`Could not read automatic-update setting; skipping startup check: ${String(error)}`);
     }
@@ -166,6 +168,9 @@ export function createAppController<Win extends BrowserWindowLike>(
       updater: deps.autoUpdaterAdapter,
       currentVersion: deps.appVersion,
       enabled: smoke ? true : enabled,
+      // Smoke mode serves a specific candidate feed (which may be a prerelease
+      // version) on loopback, so it must accept prereleases regardless of setting.
+      allowPrerelease: smoke ? true : allowPrerelease,
       supported: deps.isPackaged && deps.platform === "win32",
       stopApplication: stopOwnedSidecar,
       log: (message) => deps.log(`[updater] ${message}`),

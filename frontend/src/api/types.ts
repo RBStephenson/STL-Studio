@@ -303,6 +303,7 @@ export interface AppSettings {
   storage_recovery_enabled: boolean;
   // Installed Electron app checks GitHub Releases automatically on startup.
   auto_update_enabled: boolean;
+  allow_prerelease_updates: boolean;
   // Collections page: every card gets the same box size (the one cover art
   // already uses) instead of a compact box for collections with no cover.
   collections_uniform_size: boolean;

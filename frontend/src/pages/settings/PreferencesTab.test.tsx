@@ -37,6 +37,18 @@ describe("PreferencesTab system info setting", () => {
     expect(updateMock).toHaveBeenCalledWith({ auto_update_enabled: false });
   });
 
+  it("persists the pre-release opt-in when enabled", async () => {
+    render(<PreferencesTab />);
+    await userEvent.click(screen.getByRole("checkbox", { name: /include pre-release/i }));
+    expect(updateMock).toHaveBeenCalledWith({ allow_prerelease_updates: true });
+  });
+
+  it("hides the pre-release opt-in when automatic updates are off", () => {
+    autoUpdateEnabled = false;
+    render(<PreferencesTab />);
+    expect(screen.queryByRole("checkbox", { name: /include pre-release/i })).toBeNull();
+  });
+
   it("persists the default-off storage recovery flag when enabled", async () => {
     render(<PreferencesTab />);
     await userEvent.click(screen.getByRole("checkbox", { name: /external storage recovery/i }));

@@ -40,6 +40,7 @@ DEFAULTS = {
     "persistent_diagnostics_enabled": False,
     "storage_recovery_enabled": False,
     "auto_update_enabled": True,
+    "allow_prerelease_updates": False,
     "collections_uniform_size": True,
 }
 
@@ -48,6 +49,12 @@ def test_auto_update_enabled_defaults_on_and_round_trips(client):
     assert client.get("/settings").json()["auto_update_enabled"] is True
     assert client.patch("/settings", json={"auto_update_enabled": False}).status_code == 200
     assert client.get("/settings").json()["auto_update_enabled"] is False
+
+
+def test_allow_prerelease_updates_defaults_off_and_round_trips(client):
+    assert client.get("/settings").json()["allow_prerelease_updates"] is False
+    assert client.patch("/settings", json={"allow_prerelease_updates": True}).status_code == 200
+    assert client.get("/settings").json()["allow_prerelease_updates"] is True
 
 
 def test_reorganize_enabled_round_trips(client):
