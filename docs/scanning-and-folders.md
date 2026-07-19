@@ -96,7 +96,9 @@ containers/formats (`STL`, `Lychee`, and slicer folders like `LYS`, `CTB`,
 Otherwise every creator's `LYS` (or `STL`, `Supported`, …) folder would collapse
 into one giant cross-character variant group. The real character is inherited from
 the nearest meaningful ancestor instead, so `Spiderman/Supported/LYS/` groups under
-*Spiderman*.
+*Spiderman*. A model left with a stale structural name by an older scan (e.g. a
+folder that used to be called `LYS`) self-heals to the derived character name on
+the next rescan — a genuine name you set yourself is always left untouched.
 
 When the heuristic gets it wrong, you can fix it by
 [merging the model into a group](features.md#fixing-mis-grouped-models) —

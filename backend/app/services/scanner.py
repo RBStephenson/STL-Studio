@@ -1292,10 +1292,14 @@ def _index_model(
             )
             db.add(model)
             db.flush()
-        elif model.name in (folder.name, clean_name):
+        elif model.name in (folder.name, clean_name) or name_parser.is_structural_folder(model.name):
             # Name still matches what the scanner would generate (raw or current
-            # derivation) — the user hasn't renamed it, so let parser improvements
-            # refresh it. A user-edited name is left untouched.
+            # derivation), OR is a stale structural token (e.g. "LYS"/"STL") that
+            # the scanner would never intentionally assign as a final name — in
+            # both cases the user hasn't really renamed it, so let parser
+            # improvements refresh it (e.g. once STUDIO-281 made "lys" structural,
+            # the #641 leaf-naming now resolves it to the character). A genuine
+            # user-edited (non-structural) name is still left untouched. (STUDIO-282)
             model.name = clean_name
 
         # Scanner-owned structured variant attributes (support/cut/slicer/version).
