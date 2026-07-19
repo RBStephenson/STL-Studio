@@ -41,6 +41,7 @@ const DEFAULTS: AppSettings = {
   persistent_diagnostics_enabled: false,
   storage_recovery_enabled: false,
   auto_update_enabled: true,
+  allow_prerelease_updates: false,
   collections_uniform_size: true,
 };
 

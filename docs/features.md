@@ -1103,3 +1103,8 @@ Automatic checks can be disabled under **Settings â†’ Preferences â†’ 
 Updates**. **Help â†’ Check for Updatesâ€¦** remains available for a manual check.
 The setting takes effect the next time the desktop app starts. Docker, source,
 Linux, and unpackaged development builds do not use the Electron update channel.
+
+To receive beta builds early, enable **Include pre-release (beta) versions** in
+the same section. When on, the app also offers prerelease releases; leave it off
+(the default) to stay on stable releases only. Betas get new features sooner but
+may be less stable. This option also takes effect on the next app start.

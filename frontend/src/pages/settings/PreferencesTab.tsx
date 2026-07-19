@@ -275,6 +275,24 @@ export default function PreferencesTab() {
             </p>
           </div>
         </label>
+        {settings.auto_update_enabled && (
+          <label className="flex items-start gap-3 cursor-pointer select-none mt-3 ml-7">
+            <input
+              type="checkbox"
+              checked={settings.allow_prerelease_updates}
+              onChange={() => update({ allow_prerelease_updates: !settings.allow_prerelease_updates }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+              className="mt-0.5 accent-indigo-500"
+            />
+            <div>
+              <p className="text-sm text-text-primary-alt2">Include pre-release (beta) versions</p>
+              <p className="text-xs text-text-secondary-alt mt-0.5">
+                Receive beta builds as soon as they're published. Betas get new features earlier but
+                may be less stable. Leave off to stay on stable releases only. Takes effect the next
+                time STL Studio starts.
+              </p>
+            </div>
+          </label>
+        )}
       </section>
 
       {/* About & diagnostics */}

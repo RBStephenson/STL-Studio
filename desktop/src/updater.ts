@@ -36,6 +36,7 @@ export interface UpdateControllerOptions {
   ui: UpdateUi;
   currentVersion: string;
   enabled: boolean;
+  allowPrerelease: boolean;
   supported: boolean;
   stopApplication: () => Promise<void>;
   log: (message: string) => void;
@@ -52,7 +53,10 @@ export function createUpdateController(options: UpdateControllerOptions): Update
 
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
-  updater.allowPrerelease = false;
+  // Off by default; a user opts into beta builds via the allow_prerelease_updates
+  // setting (STUDIO-284). When true, electron-updater considers prerelease-flagged
+  // GitHub releases too.
+  updater.allowPrerelease = options.allowPrerelease;
 
   updater.on("update-available", (info) => {
     void (async () => {
@@ -126,11 +130,26 @@ export function createUpdateController(options: UpdateControllerOptions): Update
   };
 }
 
-export async function readAutoUpdateEnabled(
+async function readBooleanSetting(
   backendUrl: string,
+  key: string,
   fetchJson: (url: string) => Promise<unknown>,
 ): Promise<boolean> {
   const value = await fetchJson(`${backendUrl}/api/settings`);
   return typeof value === "object" && value !== null &&
-    (value as { auto_update_enabled?: unknown }).auto_update_enabled === true;
+    (value as Record<string, unknown>)[key] === true;
+}
+
+export async function readAutoUpdateEnabled(
+  backendUrl: string,
+  fetchJson: (url: string) => Promise<unknown>,
+): Promise<boolean> {
+  return readBooleanSetting(backendUrl, "auto_update_enabled", fetchJson);
+}
+
+export async function readAllowPrereleaseUpdates(
+  backendUrl: string,
+  fetchJson: (url: string) => Promise<unknown>,
+): Promise<boolean> {
+  return readBooleanSetting(backendUrl, "allow_prerelease_updates", fetchJson);
 }
