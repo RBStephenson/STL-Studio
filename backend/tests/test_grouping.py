@@ -403,3 +403,38 @@ class TestRep:
 
         assert _groups(db, creator)[0].rep_model_id == rep.id
 
+
+class TestStructuralFolderNames:
+    def test_lys_folders_do_not_group_across_characters(self, db):
+        # STUDIO-281: a model whose folder name is a slicer format ("LYS") has no
+        # product identity. Pre-fix, character_key("LYS") == "lys", so every
+        # creator's LYS folder collapsed into one giant cross-character group via
+        # the name signal. They must stay ungrouped (no other shared signal here).
+        creator = make_creator(db)
+        # Two distinct products, each with a folder literally named "LYS" (distinct
+        # paths). Create under unique names for distinct folder_paths, then set the
+        # scanned name to "LYS" as the scanner would for a slicer-format leaf.
+        a = make_model(db, creator, name="spiderman-lys")
+        b = make_model(db, creator, name="batman-lys")
+        a.name = b.name = "LYS"
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+
+    def test_character_still_groups_across_slicer_format_folders(self, db):
+        # The flip side: two models for the same character that differ only by
+        # slicer format ("Spiderman LYS" vs "Spiderman STL") DO group — the format
+        # token is stripped from the identity, leaving "Spiderman".
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Spiderman LYS")
+        b = make_model(db, creator, name="Spiderman STL")
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+

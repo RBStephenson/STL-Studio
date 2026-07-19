@@ -304,6 +304,18 @@ class TestCharacterKey:
     def test_distinct_products_keep_distinct_keys(self):
         assert character_key("AleCask_32mm_UnSupported") != character_key("Barrel_32mm_UnSupported")
 
+    def test_slicer_folder_names_have_no_identity(self):
+        # STUDIO-281: a bare slicer/format folder is not a character — without this,
+        # every creator's "LYS" folder collapsed into one cross-character bucket.
+        assert character_key("LYS") == ""
+        assert character_key("CTB") == ""
+
+    def test_slicer_token_stripped_from_character_name(self):
+        # A character nested under / suffixed with a slicer format must reduce to the
+        # same identity regardless of format, so LYS and STL variants group together.
+        assert character_key("Spiderman LYS") == character_key("Spiderman STL")
+        assert character_key("Spiderman LYS") == "Spiderman"
+
     def test_plain_name_unchanged(self):
         assert character_key("Catwoman") == "Catwoman"
 
@@ -404,6 +416,8 @@ class TestIsStructuralFolder:
         "75mm", "178mm", "Bust", "1-10 Scale", "1-10 Scale Split", "Supported Solid",
         "32mm Supported", "parts", "base",
         "Full_cutted", "Full cutted", "Full cut", "cutted",
+        # Slicer project/output + pre-slice prep folders (STUDIO-281).
+        "LYS", "lys", "CTB", "Chitu", "Sliced", "Presliced", "Pre-Sliced",
     ])
     def test_structural_names(self, name):
         assert name_parser.is_structural_folder(name) is True
