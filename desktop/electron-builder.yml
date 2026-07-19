@@ -21,6 +21,12 @@ publish:
   provider: github
   owner: RBStephenson
   repo: STL-Studio
+  # Always publish the update feed to the "latest" channel, even for prerelease
+  # versions (e.g. 1.0.0-beta.1) which electron-builder would otherwise route to a
+  # "beta" channel (beta.yml). The release validator/qualifier expect latest.yml,
+  # and stable users are kept off betas by the GitHub prerelease flag combined with
+  # electron-updater's allowPrerelease=false — not by the channel name. (STUDIO-283)
+  channel: latest
 
 # App code shipped inside the asar archive.
 files:

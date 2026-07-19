@@ -160,6 +160,17 @@ def test_validate_candidate_feed_checks_version_and_assets(tmp_path):
         smoke_installer.validate_candidate_feed(tmp_path, "1.2.4")
 
 
+def test_validate_candidate_feed_accepts_prerelease(tmp_path):
+    # STUDIO-283: a prerelease candidate (v1.0.0-beta.1) validates like any other —
+    # the installer glob and latest.yml version compare are string-based, so the
+    # prerelease suffix flows through unchanged.
+    installer = tmp_path / "STL-Studio-Setup-1.0.0-beta.1.exe"
+    installer.touch()
+    Path(f"{installer}.blockmap").touch()
+    (tmp_path / "latest.yml").write_text("version: 1.0.0-beta.1\n", encoding="utf-8")
+    smoke_installer.validate_candidate_feed(tmp_path, "1.0.0-beta.1")
+
+
 def test_write_update_feed_config_replaces_published_provider(tmp_path):
     app_exe = tmp_path / "install" / "STL Studio.exe"
     config = app_exe.parent / "resources" / "app-update.yml"
