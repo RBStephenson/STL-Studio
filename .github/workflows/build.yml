@@ -129,9 +129,10 @@ jobs:
         run: npm sbom --sbom-format cyclonedx > ../stl-studio-desktop-windows.cdx.json
 
       # Stamps the installer with a real version so About/app.getVersion() show
-      # something meaningful. Release builds get the semver tag (v1.2.3 -> 1.2.3);
-      # the rolling main build's tag ("rolling") isn't semver, so it falls back to
-      # a 0.0.0-<sha> prerelease version instead.
+      # something meaningful. Release builds get the semver tag (v1.2.3 -> 1.2.3,
+      # incl. prerelease tags like v1.0.0-beta.1 -> 1.0.0-beta.1); the rolling main
+      # build's tag ("rolling") isn't semver, so it falls back to a 0.0.0-<sha>
+      # prerelease version instead.
       - name: Set desktop app version
         if: ${{ matrix.os == 'windows-latest' && (inputs.release || inputs.desktop_version != '') }}
         working-directory: desktop
@@ -141,7 +142,8 @@ jobs:
           tag="${{ inputs.tag }}"
           if [ -n "$requested" ]; then
             version="$requested"
-          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            # Plain vX.Y.Z or a semver prerelease (v1.0.0-beta.1) — use it verbatim.
             version="${tag#v}"
           else
             version="0.0.0-$(git rev-parse --short HEAD)"

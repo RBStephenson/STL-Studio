@@ -62,3 +62,24 @@ per-user data directories because the assisted installer relaunch does not
 preserve process-level AppData overrides. A clean-profile preflight prevents
 the rehearsal from using pre-existing STL Studio data; the runner is destroyed
 after the job.
+
+## Prerelease (beta) releases
+
+Cut a beta/RC by using a semver **prerelease tag** — a version with a hyphen,
+e.g. `v1.0.0-beta.1` (Actions → Release → explicit version, or push the tag).
+The pipeline handles prerelease tags end to end:
+
+- The desktop build stamps the full prerelease version (`1.0.0-beta.1`), not the
+  `0.0.0-<sha>` rolling fallback.
+- The GitHub release is created with `--prerelease`, so GitHub never marks it
+  **Latest**.
+- The updater feed is still published as `latest.yml` (electron-builder's channel
+  is pinned to `latest`), so qualification/validation are identical to a stable
+  release.
+- Stable users are **not** offered the beta: `electron-updater` runs with
+  `allowPrerelease=false` and skips prerelease-flagged GitHub releases. A user
+  opts into betas with the **Allow pre-release updates** setting; the auto-update
+  channel then includes prerelease builds.
+
+Everything else in this checklist (draft-until-complete, SHA256SUMS, installed
+update rehearsal from the latest published stable version) applies unchanged.

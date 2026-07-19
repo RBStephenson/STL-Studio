@@ -80,8 +80,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${{ steps.compute.outputs.tag }}"
+          # A semver prerelease tag carries a hyphen (v1.0.0-beta.1). Flag the
+          # GitHub release as a prerelease so it is never marked "Latest" and
+          # electron-updater (allowPrerelease=false) keeps it away from stable
+          # users. Un-drafting in the publish job preserves the prerelease flag.
+          prerelease_flag=""
+          case "$tag" in
+            *-*) prerelease_flag="--prerelease" ;;
+          esac
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --draft --generate-notes --title "$tag"
+            gh release create "$tag" --draft $prerelease_flag --generate-notes --title "$tag"
           else
             echo "Release $tag already exists — leaving as-is."
           fi

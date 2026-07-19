@@ -29,6 +29,18 @@ def test_write_and_validate_complete_release(tmp_path):
     assert len(manifest.read_text(encoding="utf-8").splitlines()) == 7
 
 
+def test_write_and_validate_prerelease(tmp_path):
+    # STUDIO-283: a prerelease version (from a v1.0.0-beta.1 tag) must validate
+    # exactly like a stable one — installer stamped with the full version and the
+    # feed published as latest.yml (electron-builder channel forced to "latest").
+    make_assets(tmp_path, version="1.0.0-beta.1")
+
+    write_checksums(tmp_path, "1.0.0-beta.1")
+    validate(tmp_path, "1.0.0-beta.1")
+
+    assert required_names("1.0.0-beta.1")[0] == "STL-Studio-Setup-1.0.0-beta.1.exe"
+
+
 def test_validate_rejects_metadata_installer_mismatch(tmp_path):
     make_assets(tmp_path)
     write_checksums(tmp_path, "1.2.3")
