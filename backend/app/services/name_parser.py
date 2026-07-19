@@ -370,6 +370,11 @@ def display_name(folder_name: str, creator_name: str | None = None) -> str:
 # "Unsupported" folder collapses into one giant cross-character bucket.
 _STRUCTURAL_EXACT: set[str] = {
     "stl", "stls", "lychee", "chitubox", "files", "print", "print files",
+    # Slicer project/output folders and pre-slice prep folders — a format/prep
+    # container, never a character (STUDIO-281). "lys" is Lychee's project-file
+    # extension; creators routinely name the folder after it. Without this, every
+    # creator's "LYS" folder collapses into one cross-character variant bucket.
+    "lys", "ctb", "chitu", "sliced", "presliced", "pre-sliced", "pre sliced",
     "presupport", "presupports", "presupported", "pre-supported", "pre supported",
     "supported", "unsupported", "no_supported", "no supported", "no_support",
     "nosupport", "nosupports", "supports", "support",
@@ -394,7 +399,7 @@ _SUPPORT_FORMAT = re.compile(
     r"solid|hollow|"
     r"without|uncut|no[\s_-]?cuts?|full[\s_-]?cut(?:s|ted)?|cut(?:s|ted)?|"
     r"ready[\s_-]?to[\s_-]?slice|readytoslice|"
-    r"lychee|chitubox|merged|split"
+    r"lychee|chitubox|lys|ctb|merged|split"
     r")\b",
     re.I,
 )
@@ -421,7 +426,7 @@ _SCALE_MM_ANY = re.compile(r"(?<!\d)\d{1,4}\s*mm\b", re.I)
 # character) intact, since there is no word boundary between "2" and "B".
 _VARIANT_JUNK = re.compile(
     r"\b("
-    r"scale|stls?|lychee|chitubox|files?|renders?|images?|previews?|photos?|"
+    r"scale|stls?|lys|ctb|lychee|chitubox|files?|renders?|images?|previews?|photos?|"
     r"extras?|merge[d]?|version|without|cut(?:s|ted)?|nsfw|sfw|"
     r"\d+"
     r")\b",

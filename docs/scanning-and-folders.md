@@ -89,6 +89,15 @@ If none match, the scanner recurses deeper, carrying the deepest **meaningful**
 (non-structural) folder name along as **character** context, which powers
 [variant grouping](features.md#variant-grouping).
 
+Structural folders — support status (`Supported`/`Unsupported`/`Presupported`),
+containers/formats (`STL`, `Lychee`, and slicer folders like `LYS`, `CTB`,
+`Chitu`), pre-slice prep (`Sliced`/`Presliced`), render folders (`Renders`,
+`Images`), and pure scale/cut descriptors — are **never** used as the character.
+Otherwise every creator's `LYS` (or `STL`, `Supported`, …) folder would collapse
+into one giant cross-character variant group. The real character is inherited from
+the nearest meaningful ancestor instead, so `Spiderman/Supported/LYS/` groups under
+*Spiderman*.
+
 When the heuristic gets it wrong, you can fix it by
 [merging the model into a group](features.md#fixing-mis-grouped-models) —
 the correction is a durable group membership, so future rescans leave it
