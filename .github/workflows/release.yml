@@ -27,6 +27,7 @@ jobs:
       contents: write   # to create and push the new tag
     outputs:
       tag: ${{ steps.compute.outputs.tag }}
+      prerelease: ${{ steps.compute.outputs.prerelease }}
       bootstrap_tag: ${{ steps.bootstrap.outputs.tag }}
     steps:
       - name: Checkout
@@ -38,15 +39,14 @@ jobs:
         id: compute
         run: |
           set -euo pipefail
+          is_push=false
           if [ "${{ github.event_name }}" = "push" ]; then
             # Triggered by a manual tag push — just use it.
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "Using pushed tag ${GITHUB_REF_NAME}"
-            exit 0
-          fi
-
-          # Allow an explicit version to override auto-computation.
-          if [ -n "${{ inputs.version }}" ]; then
+            newtag="${GITHUB_REF_NAME}"
+            is_push=true
+            echo "Using pushed tag ${newtag}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            # Allow an explicit version to override auto-computation.
             newtag="${{ inputs.version }}"
             echo "Using explicit version: ${newtag}"
           else
@@ -62,15 +62,29 @@ jobs:
             newtag="v${major}.${minor}.${patch}"
             echo "Latest tag: ${latest} -> new tag: ${newtag}"
           fi
-          if git rev-parse "$newtag" >/dev/null 2>&1; then
-            echo "Tag $newtag already exists — skipping tag creation."
-          else
-            git config user.name  "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag -a "$newtag" -m "Release $newtag"
-            git push origin "$newtag"
-          fi
+
+          # A semver prerelease tag carries a hyphen (v1.0.0-beta.1). Derived on
+          # every path (incl. tag push) so the build job's uploader can flag the
+          # GitHub release prerelease — otherwise it defaults to false and the
+          # beta wrongly becomes "Latest" (STUDIO-285).
+          case "$newtag" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
           echo "tag=$newtag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+          # Create+push the tag for the workflow_dispatch paths; a tag push already has it.
+          if [ "$is_push" != "true" ]; then
+            if git rev-parse "$newtag" >/dev/null 2>&1; then
+              echo "Tag $newtag already exists — skipping tag creation."
+            else
+              git config user.name  "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag -a "$newtag" -m "Release $newtag"
+              git push origin "$newtag"
+            fi
+          fi
 
       # Create the release as a DRAFT up front. The parallel build jobs upload
       # their platform binaries to this draft; a published release is immutable,
@@ -120,6 +134,9 @@ jobs:
       release: true
       tag: ${{ needs.version.outputs.tag }}
       ref: ${{ needs.version.outputs.tag }}
+      # Flag the uploaded release as a prerelease for hyphenated tags, so the
+      # softprops uploader doesn't stamp prerelease:false and steal "Latest".
+      release_prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
 
   qualify:
     needs: [version, release]
