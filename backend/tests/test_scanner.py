@@ -1976,3 +1976,49 @@ def test_start_scans_return_false_when_write_lock_held():
         assert scanner.start_creator_scan(1) is False
     finally:
         write_lock.release_scan()
+
+
+class TestStructuralNameHealing:
+    """STUDIO-282: a model whose stored name is a stale structural token
+    ("LYS"/"STL"/…) must be re-derived on rescan, not treated as a user rename."""
+
+    def _one_leaf_model(self, db, creator, creator_dir):
+        # Two structural-variant leaves under one character → each is its own
+        # model, named after the character via the #641 leaf-naming.
+        _stl(creator_dir / "Auron" / "STL")
+        _stl(creator_dir / "Auron" / "Supported STL")
+        _walk(db, creator, creator_dir)
+        models = _models(db, creator)
+        assert len(models) == 2
+        assert all(m.name == "Auron" for m in models), [m.name for m in models]
+        return models
+
+    def test_stale_structural_name_is_refreshed(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        creator = make_creator(db, "Creator")
+        models = self._one_leaf_model(db, creator, creator_dir)
+        # Simulate stale pre-fix data: the folder was once "LYS" and the name stuck
+        # across a rename, so it no longer matches the folder or derived name.
+        stale = models[0]
+        stale.name = "LYS"
+        db.flush()
+
+        _walk(db, creator, creator_dir)
+        db.refresh(stale)
+
+        assert stale.name == "Auron"
+        assert not name_parser.is_structural_folder(stale.name)
+
+    def test_user_edited_name_is_preserved(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        creator = make_creator(db, "Creator")
+        models = self._one_leaf_model(db, creator, creator_dir)
+        edited = models[0]
+        edited.name = "My Favorite Mini"
+        db.flush()
+
+        _walk(db, creator, creator_dir)
+        db.refresh(edited)
+
+        # A genuine, non-structural user name must never be clobbered by the scan.
+        assert edited.name == "My Favorite Mini"
