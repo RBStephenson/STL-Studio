@@ -449,6 +449,63 @@ class TestIsStructuralFolder:
 
 
 # ---------------------------------------------------------------------------
+# Generic-name qualification (STUDIO-287)
+# ---------------------------------------------------------------------------
+
+class TestGenericNameQualification:
+    @pytest.mark.parametrize("name", ["Bases", "Base", "Parts", "Base Supported"])
+    def test_generic_names(self, name):
+        assert name_parser.is_generic_name(name) is True
+
+    @pytest.mark.parametrize("name", [
+        "Gridrunner", "Grim Realms", "Bases Round and Oval", "Civilians",
+    ])
+    def test_identifying_names_not_generic(self, name):
+        assert name_parser.is_generic_name(name) is False
+
+    def test_empty_name_is_not_generic(self):
+        # Guards the bool(name.strip()) short-circuit — an empty name has nothing
+        # to qualify and must not send the scanner up the ancestor chain.
+        assert name_parser.is_generic_name("") is False
+        assert name_parser.is_generic_name("   ") is False
+
+    @pytest.mark.parametrize("name", ["Models", "model", "STL", "Print Files"])
+    def test_container_folders(self, name):
+        assert name_parser.is_container_folder(name) is True
+
+    @pytest.mark.parametrize("name", ["RPG Bases", "Gridrunner", "October 2024"])
+    def test_non_container_folders(self, name):
+        assert name_parser.is_container_folder(name) is False
+
+    @pytest.mark.parametrize("folder,expected", [
+        # Ordering prefixes stripped, separators collapsed.
+        ("52 - OCTOBER 2024 REANIMATION", "October 2024 Reanimation"),
+        ("59 - October 24 - Orc and Carnival 2 Bases",
+         "October 24 Orc And Carnival 2 Bases"),
+        ("03 - Bases", "Bases"),
+        ("12_Winter Release", "Winter Release"),
+        # Raw name is kept even when every token is a parts word — this is the
+        # whole point of not routing the qualifier through display_name.
+        ("RPG Bases", "RPG Bases"),
+        # An interior hyphen inside a word survives.
+        ("Pre-Order Bundle", "Pre-Order Bundle"),
+    ])
+    def test_qualifier_from_folder(self, folder, expected):
+        assert name_parser.qualifier_from_folder(folder) == expected
+
+    @pytest.mark.parametrize("generic,qualifier,expected", [
+        ("Bases", "October 2024 Reanimation", "October 2024 Reanimation Bases"),
+        # Qualifier already ends with the generic word — no doubling up.
+        ("Bases", "RPG Bases", "RPG Bases"),
+        ("Bases", "rpg bases", "rpg bases"),
+        # No usable qualifier falls back to the generic name unchanged.
+        ("Bases", "", "Bases"),
+    ])
+    def test_qualify_generic_name(self, generic, qualifier, expected):
+        assert name_parser.qualify_generic_name(generic, qualifier) == expected
+
+
+# ---------------------------------------------------------------------------
 # Structured attribute extractors
 # ---------------------------------------------------------------------------
 
