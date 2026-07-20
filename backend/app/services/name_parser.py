@@ -529,7 +529,8 @@ def is_structural_folder(name: str) -> bool:
 
     Catches support-status (presupport/supported/unsupported…), container folders
     (stl/lychee), render folders (renders/images), and folders made up *only* of
-    scale/type tokens (e.g. "75mm", "Bust", "1-10 Scale Split").
+    scale/type tokens (e.g. "75mm", "Bust", "1-10 Scale Split", and sized base
+    folders like "Bases 25mm-32mm (Round+Square)").
     """
     low = name.lower().strip()
     if low in _STRUCTURAL_EXACT or _is_parts_name(low):
@@ -539,8 +540,22 @@ def is_structural_folder(name: str) -> bool:
         return True
     # Every word is itself structural/scale (e.g. "Render Images",
     # "Colored Turntable", "Supported Solid", "75mm Bust").
-    _EXTRA = {"colored", "color", "turntable", "scale"}
-    tokens = [t for t in re.split(r"[\s_\-]+", low) if t]
+    # Base geometry words are included so a parts folder that spells out the base
+    # shapes it contains still reads as structural (STUDIO-286): One Page Rules
+    # ships "Bases 25mm-32mm (Round+Square)" under *every* unit, and without this
+    # each one becomes a product whose siblings collapse into one cross-product
+    # variant group. A shape word alone never triggers this — the all() below
+    # still requires every other token to be structural too, so a real character
+    # ("Round Table Knight") is unaffected.
+    _EXTRA = {
+        "colored", "color", "turntable", "scale",
+        "round", "square", "oval", "rectangle", "rectangular",
+        "hex", "hexagonal", "circular",
+    }
+    # Split on "+", brackets, slashes and commas as well as whitespace/underscore/
+    # dash: shape lists arrive glued as "(round+square)", which would otherwise
+    # survive as one unrecognised token and fail the all() check.
+    tokens = [t for t in re.split(r"[\s_\-+()\[\]/,]+", low) if t]
     return bool(tokens) and all(
         t in _STRUCTURAL_EXACT
         or _is_parts_name(t)
