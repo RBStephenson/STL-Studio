@@ -425,6 +425,10 @@ class TestIsStructuralFolder:
         "Bases 60mm-100mm (Round+Rectangle)",
         "Bases 50mm-60mm (Oval+Rectangle)",
         "Bases (Round)", "Base 32mm Round", "Bases Hex",
+        # Cut-prep siblings (STUDIO-288). "Full_cutted" was already covered; its
+        # "Semi_cutted" counterpart and the plural "cuts" forms were not.
+        "Semi_cutted", "semi_cutted", "SEMI_CUTTED", "Semi cut", "semi-cutted",
+        "Semi cuts", "Full_cuts",
     ])
     def test_structural_names(self, name):
         assert name_parser.is_structural_folder(name) is True
@@ -436,6 +440,9 @@ class TestIsStructuralFolder:
         # the all-tokens rule is what keeps STUDIO-286's vocabulary safe.
         "Round Table Knight", "Oval Office Diorama", "Rectangle Sam",
         "Squarejaw Sarge",
+        # Bare "semi" is deliberately absent from the cut-prep vocabulary — these
+        # are the names it would wrongly swallow (STUDIO-288).
+        "Semi", "Semiramis", "Semiramis Fate", "Semi Truck Driver",
     ])
     def test_character_names(self, name):
         assert name_parser.is_structural_folder(name) is False
