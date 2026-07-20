@@ -1792,7 +1792,12 @@ class TestCleanNameAndAttributes:
 
         assert self._model_at(db, creator, leaf).name == "Goblin"
 
-    def test_user_rename_not_clobbered_on_rescan(self, db, tmp_path):
+    def test_stored_name_is_rederived_on_rescan(self, db, tmp_path):
+        # STUDIO-290: was test_user_rename_not_clobbered_on_rescan, which asserted
+        # the opposite. Model.name is scanner-owned — ModelUpdate exposes no `name`
+        # field, so no API or UI can rename a model and the "user rename" this
+        # protected cannot occur. The guard's real effect was to freeze names that
+        # an older parser derived, making them immune to later fixes.
         creator_dir = tmp_path / "Creator"
         leaf = creator_dir / "Ada Wong 1-6 Unsupported"
         _stl(leaf)
@@ -1800,12 +1805,13 @@ class TestCleanNameAndAttributes:
 
         _walk(db, creator, creator_dir)
         m = self._model_at(db, creator, leaf)
+        derived = m.name
         m.name = "My Custom Name"
         db.commit()
 
         _walk(db, creator, creator_dir)
 
-        assert self._model_at(db, creator, leaf).name == "My Custom Name"
+        assert self._model_at(db, creator, leaf).name == derived
 
     def test_untouched_name_refreshes_on_rescan(self, db, tmp_path):
         # A model whose name still equals the scanner derivation should pick up
@@ -2069,8 +2075,8 @@ def test_start_scans_return_false_when_write_lock_held():
 
 
 class TestStructuralNameHealing:
-    """STUDIO-282: a model whose stored name is a stale structural token
-    ("LYS"/"STL"/…) must be re-derived on rescan, not treated as a user rename."""
+    """STUDIO-282/290: a model's stored name is scanner-owned and is re-derived on
+    every rescan, so parser improvements always reach existing rows."""
 
     def _one_leaf_model(self, db, creator, creator_dir):
         # Two structural-variant leaves under one character → each is its own
@@ -2099,16 +2105,57 @@ class TestStructuralNameHealing:
         assert stale.name == "Auron"
         assert not name_parser.is_structural_folder(stale.name)
 
-    def test_user_edited_name_is_preserved(self, db, tmp_path):
+    def test_stale_derived_fragment_is_refreshed(self, db, tmp_path):
+        # STUDIO-290: the defect the old predicate caused. A name an OLDER parser
+        # derived ("Semi" from "Semi_cutted") matches neither the folder name nor
+        # the current derivation, and is not itself structural — so it used to be
+        # mistaken for a user rename and pinned forever, silently immune to every
+        # later fix. STUDIO-288 shipped correct and changed nothing on rescan.
+        creator_dir = tmp_path / "Creator"
+        creator = make_creator(db, "Creator")
+        models = self._one_leaf_model(db, creator, creator_dir)
+        stale = models[0]
+        stale.name = "Semi"
+        db.flush()
+
+        _walk(db, creator, creator_dir)
+        db.refresh(stale)
+
+        assert stale.name == "Auron"
+
+    def test_arbitrary_stale_name_is_refreshed(self, db, tmp_path):
+        # Model.name is scanner-owned end to end — set at creation and in the
+        # healing branch, nowhere else. ModelUpdate exposes no `name` field, so no
+        # API or UI can rename a model; any stored name is therefore some past run
+        # of this derivation and is safe to refresh unconditionally.
+        #
+        # This replaces the old test_user_edited_name_is_preserved, which pinned
+        # the opposite behavior. That test encoded a guard against a user rename
+        # that cannot occur, and the guard is what froze stale names. If a rename
+        # feature is added, record the intent explicitly and reinstate a test for
+        # it — do NOT restore shape-based inference.
         creator_dir = tmp_path / "Creator"
         creator = make_creator(db, "Creator")
         models = self._one_leaf_model(db, creator, creator_dir)
         edited = models[0]
-        edited.name = "My Favorite Mini"
+        edited.name = "Some Entirely Unrelated Name"
         db.flush()
 
         _walk(db, creator, creator_dir)
         db.refresh(edited)
 
-        # A genuine, non-structural user name must never be clobbered by the scan.
-        assert edited.name == "My Favorite Mini"
+        assert edited.name == "Auron"
+
+    def test_correct_name_is_stable_across_rescans(self, db, tmp_path):
+        # Unconditional refresh must be idempotent — a correctly derived name is
+        # rewritten to the same value, not churned.
+        creator_dir = tmp_path / "Creator"
+        creator = make_creator(db, "Creator")
+        models = self._one_leaf_model(db, creator, creator_dir)
+        target = models[0]
+
+        _walk(db, creator, creator_dir)
+        _walk(db, creator, creator_dir)
+        db.refresh(target)
+
+        assert target.name == "Auron"
