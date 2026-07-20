@@ -418,6 +418,13 @@ class TestIsStructuralFolder:
         "Full_cutted", "Full cutted", "Full cut", "cutted",
         # Slicer project/output + pre-slice prep folders (STUDIO-281).
         "LYS", "lys", "CTB", "Chitu", "Sliced", "Presliced", "Pre-Sliced",
+        # Sized/shaped base folders (STUDIO-286). One Page Rules ships one under
+        # every unit; the shape list arrives glued inside parens with a "+".
+        "Bases 25mm-32mm (Round+Square)",
+        "Bases 100mm-150mm (Oval+Rectangle)",
+        "Bases 60mm-100mm (Round+Rectangle)",
+        "Bases 50mm-60mm (Oval+Rectangle)",
+        "Bases (Round)", "Base 32mm Round", "Bases Hex",
     ])
     def test_structural_names(self, name):
         assert name_parser.is_structural_folder(name) is True
@@ -425,6 +432,10 @@ class TestIsStructuralFolder:
     @pytest.mark.parametrize("name", [
         "Auron - Final Fantasy X", "Alita", "Barbatos - Gundam", "Goblin Warband",
         "Chibi Kirara - Inuyasha", "Spider Noir",
+        # A base-geometry word next to a real name must NOT read as structural —
+        # the all-tokens rule is what keeps STUDIO-286's vocabulary safe.
+        "Round Table Knight", "Oval Office Diorama", "Rectangle Sam",
+        "Squarejaw Sarge",
     ])
     def test_character_names(self, name):
         assert name_parser.is_structural_folder(name) is False

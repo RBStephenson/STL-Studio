@@ -438,3 +438,32 @@ class TestStructuralFolderNames:
         assert len(groups) == 1
         assert {m.id for m in groups[0].models} == {a.id, b.id}
 
+    def test_sized_base_folders_do_not_group_across_products(self, db):
+        # STUDIO-286: One Page Rules ships a "Bases <range> (<Shape>+<Shape>)"
+        # folder under every unit. Pre-fix these were not structural (the glued
+        # "(round+square)" token defeated the all-tokens check), so every unit's
+        # base folder collapsed into one cross-product group of 200+ models.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="burrower-bases")
+        b = make_model(db, creator, name="human-monk-bases")
+        a.name = b.name = "Bases 25mm-32mm (Round+Square)"
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+
+    def test_differently_sized_base_folders_also_ungrouped(self, db):
+        # Same defect, mixed labels — the three real-world variants observed in
+        # the library must not group with each other either.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="unit-a-bases")
+        b = make_model(db, creator, name="unit-b-bases")
+        a.name = "Bases 100mm-150mm (Oval+Rectangle)"
+        b.name = "Bases 60mm-100mm (Round+Rectangle)"
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+
