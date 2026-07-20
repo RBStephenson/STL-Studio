@@ -1947,6 +1947,35 @@ class TestGenericNameQualification:
         assert rpg == "RPG Bases", f"sibling release bled in: {rpg!r}"
         assert "October" not in rpg
 
+    def test_variant_cut_ancestor_does_not_outrank_the_figure(self, db, tmp_path):
+        # STUDIO-291: regression from STUDIO-287's ancestor-over-character change.
+        # "Alternative_Cut" is a variant folder, not a product — before the fix a
+        # structural leaf beneath it was named "Alternative" instead of the figure,
+        # while its sibling one level shallower was named correctly.
+        creator_dir = tmp_path / "Tanuki Figures"
+        _stl(creator_dir / "Gohan_SSJ2_TanukiFigures" / "Supported" / "Alternative_Cut" / "STL", name="g.stl")
+        _stl(creator_dir / "Gohan_SSJ2_TanukiFigures" / "No_Supported" / "Alternative_Cut", name="g.stl")
+        creator = make_creator(db, "Tanuki Figures")
+
+        _walk(db, creator, creator_dir)
+
+        names = self._names(db, creator)
+        assert names == {"Gohan SSJ2"}, names
+        assert "Alternative" not in names
+
+    def test_no_cuts_folder_resolves_to_the_figure(self, db, tmp_path):
+        # The uncut member of the Full_cutted/Semi_cutted family (STUDIO-288) was
+        # never listed, so "No_cuts" read as a product.
+        creator_dir = tmp_path / "PolyMind Studios"
+        _stl(creator_dir / "Cloud" / "No_cuts", name="c.stl")
+        _stl(creator_dir / "Kratos" / "No_Cuts", name="k.stl")
+        creator = make_creator(db, "PolyMind Studios")
+
+        _walk(db, creator, creator_dir)
+
+        names = self._names(db, creator)
+        assert names == {"Cloud", "Kratos"}, names
+
     def test_identifying_leaf_name_untouched(self, db, tmp_path):
         # Regression guard: a correctly derived name never enters the qualifier
         # branch, so it keeps its bare product name.

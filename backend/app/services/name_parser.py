@@ -458,6 +458,11 @@ _STRUCTURAL_EXACT: set[str] = {
     "full cuts", "full_cuts", "fullcuts",
     "semi cut", "semi cutted", "semi_cut", "semi_cutted", "semicut", "semicutted",
     "semi-cut", "semi-cutted", "semi cuts", "semi_cuts", "semicuts",
+    # "No_cuts" is the uncut member of the same family (PolyMind ships it beside
+    # Full_cutted/Semi_cutted). "uncut" was already covered; these spellings were
+    # not, so the folder read as a product. Listed exactly, like the "no_supported"
+    # forms above. (STUDIO-291)
+    "no cut", "no cuts", "no_cut", "no_cuts", "nocut", "nocuts",
 }
 
 
@@ -624,10 +629,23 @@ def is_structural_folder(name: str) -> bool:
     # variant group. A shape word alone never triggers this — the all() below
     # still requires every other token to be structural too, so a real character
     # ("Round Table Knight") is unaffected.
+    # Variant-selection words ("Alternative_Cut", "standard version") describe
+    # which cut/version of a product a folder holds, not which product it is.
+    # Without them a leaf under such a folder took ITS name once the ancestor
+    # started outranking the walk character in STUDIO-287 — "Gohan_SSJ2/Supported/
+    # Alternative_Cut/STL" was named "Alternative" instead of the figure
+    # (STUDIO-291). Bare "version" only: "Vi Version2" must keep the character
+    # "Vi", and "version2" is a different token.
     _EXTRA = {
         "colored", "color", "turntable", "scale",
         "round", "square", "oval", "rectangle", "rectangular",
         "hex", "hexagonal", "circular",
+        "alternative", "alt", "version", "variant", "standard",
+        # Bare "cut"/"cuts" — only the "cutted" and "full cut"/"semi cut" compound
+        # forms were listed, so "Alternative_Cut" and "base cut" still read as
+        # products. Safe here because the all() below demands every OTHER token be
+        # structural too: "Batman … Medium Cuts (Saturn Size)" is unaffected.
+        "cut", "cuts",
     }
     # Split on "+", brackets, slashes and commas as well as whitespace/underscore/
     # dash: shape lists arrive glued as "(round+square)", which would otherwise
