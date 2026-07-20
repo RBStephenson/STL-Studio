@@ -100,7 +100,10 @@ into one giant cross-character variant group. The real character is inherited fr
 the nearest meaningful ancestor instead, so `Spiderman/Supported/LYS/` groups under
 *Spiderman*. A model left with a stale structural name by an older scan (e.g. a
 folder that used to be called `LYS`) self-heals to the derived character name on
-the next rescan — a genuine name you set yourself is always left untouched.
+the next rescan. A model's name is owned by the scanner and re-derived on every
+scan, so improvements to the naming rules always reach models that were indexed
+by an earlier version. (Your own edits live on the **title** field, which the
+scanner never touches.)
 
 When naming such a folder, the nearest **owning ancestor** takes precedence over
 the carried character, and a folder sitting directly under the creator counts as a

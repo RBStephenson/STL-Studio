@@ -1324,14 +1324,25 @@ def _index_model(
             )
             db.add(model)
             db.flush()
-        elif model.name in (folder.name, clean_name) or name_parser.is_structural_folder(model.name):
-            # Name still matches what the scanner would generate (raw or current
-            # derivation), OR is a stale structural token (e.g. "LYS"/"STL") that
-            # the scanner would never intentionally assign as a final name — in
-            # both cases the user hasn't really renamed it, so let parser
-            # improvements refresh it (e.g. once STUDIO-281 made "lys" structural,
-            # the #641 leaf-naming now resolves it to the character). A genuine
-            # user-edited (non-structural) name is still left untouched. (STUDIO-282)
+        else:
+            # Model.name is scanner-owned: it is set here and at the Model(...)
+            # construction above, and NOWHERE else in the codebase. There is no
+            # rename endpoint (ModelUpdate has no `name` field — users edit `title`)
+            # and no UI path, so a name always reflects some past run of this
+            # derivation. Refresh it unconditionally so parser improvements reach
+            # existing rows.
+            #
+            # This replaces the STUDIO-282 predicate, which only refreshed a name
+            # that matched the folder name, matched the new derivation, or was
+            # itself structural. That guarded against a user rename which cannot
+            # happen, and the cost was severe: any name an older parser *derived*
+            # ("Semi" from "Semi_cutted") matched none of the three cases and was
+            # pinned forever, silently immune to every future fix. STUDIO-288
+            # landed correct yet changed nothing on rescan for exactly this reason.
+            #
+            # If a rename feature is ever added, it must record that intent
+            # explicitly (e.g. a name_is_user_set column) and this branch must
+            # honour it — do not reintroduce shape-based inference. (STUDIO-290)
             model.name = clean_name
 
         # Scanner-owned structured variant attributes (support/cut/slicer/version).
