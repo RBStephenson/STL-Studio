@@ -429,6 +429,11 @@ class TestIsStructuralFolder:
         # "Semi_cutted" counterpart and the plural "cuts" forms were not.
         "Semi_cutted", "semi_cutted", "SEMI_CUTTED", "Semi cut", "semi-cutted",
         "Semi cuts", "Full_cuts",
+        # Variant-selection folders (STUDIO-291). These pick which cut/version of
+        # a product a folder holds; they are not the product.
+        "Alternative_Cut", "Alternative", "alternative", "Alt Cut",
+        "base cut", "standard version",
+        "No_cuts", "no_cuts", "No_Cuts", "No cut",
     ])
     def test_structural_names(self, name):
         assert name_parser.is_structural_folder(name) is True
@@ -443,6 +448,14 @@ class TestIsStructuralFolder:
         # Bare "semi" is deliberately absent from the cut-prep vocabulary — these
         # are the names it would wrongly swallow (STUDIO-288).
         "Semi", "Semiramis", "Semiramis Fate", "Semi Truck Driver",
+        # STUDIO-291 guards. The variant vocabulary must not swallow a real name
+        # that merely contains one of its words. "Vi Version2" is the sharp case:
+        # "version2" is a different token from "version", so the character "Vi"
+        # survives. The rest are real products seen in the live library.
+        "Vi Version2", "December2025_SciFiAlternativeMonth",
+        "WonderWoman Bombshell 3 versions", "Standard Bearer",
+        "Alternative Girl", "Cut Throat Jake", "head cut into two parts",
+        "Batman Kingdom Come Sculpture Medium Cuts (Saturn Size)",
     ])
     def test_character_names(self, name):
         assert name_parser.is_structural_folder(name) is False
