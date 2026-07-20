@@ -102,6 +102,19 @@ the nearest meaningful ancestor instead, so `Spiderman/Supported/LYS/` groups un
 folder that used to be called `LYS`) self-heals to the derived character name on
 the next rescan — a genuine name you set yourself is always left untouched.
 
+When naming such a folder, the nearest **owning ancestor** takes precedence over
+the carried character, and a folder sitting directly under the creator counts as a
+product by its **position** even when every word in it looks structural — so
+`RPG Bases/RPG Bases Supported` is named *RPG Bases*, not after whichever release
+the scanner happened to walk just before it. Pure container levels (`Models`,
+`Files`, `STL`) are stepped over when looking for that owner.
+
+If the resulting name still has no identity of its own — a bare parts word like
+`Bases` — it is qualified by the release or product that owns it, so
+`…/52 - OCTOBER 2024 REANIMATION/Models/05 - Bases Supported` becomes
+*October 2024 Reanimation Bases* rather than colliding with every other `Bases`
+folder in the library.
+
 When the heuristic gets it wrong, you can fix it by
 [merging the model into a group](features.md#fixing-mis-grouped-models) —
 the correction is a durable group membership, so future rescans leave it

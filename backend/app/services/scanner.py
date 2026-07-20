@@ -1268,20 +1268,52 @@ def _index_model(
 
         # A structural leaf folder (STL, supported, presupported, renders…) carries
         # no product identity — naming the model "STL"/"supported" produces junk
-        # cards (#641). Name it after its product instead: the grouping character,
-        # else the nearest non-structural ancestor folder.
+        # cards (#641). Name it after its product instead.
+        #
+        # The nearest non-structural ANCESTOR wins over the walk `character`: the
+        # ancestor is positionally guaranteed to own this folder, whereas the
+        # character is carried down the walk and can survive across sibling
+        # subtrees. Preferring the character named "RPG Bases/RPG Bases Supported"
+        # after an unrelated sibling release (STUDIO-289). The character remains the
+        # fallback for layouts where no ancestor qualifies.
         if (name_parser.is_structural_folder(folder.name)
                 or _is_nested_variant_boundary(folder.name)):
-            product = character
+            product = None
+            top_level = None          # last ancestor before the creator boundary
+            for anc in folder.parents:
+                if anc == creator_boundary or anc == anc.parent:
+                    break
+                if name_parser.is_container_folder(anc.name):
+                    continue
+                top_level = anc.name
+                if not name_parser.is_structural_folder(anc.name):
+                    product = anc.name
+                    break
+            # No ancestor reads as a product by its words alone. A folder sitting
+            # directly under the creator is one by POSITION regardless — "RPG Bases"
+            # is a real release even though every token in it is a parts word.
+            # Preferring it over `character` is what stops an unrelated sibling
+            # release's name from leaking in. (STUDIO-287 case B / STUDIO-289)
             if not product:
-                for anc in folder.parents:
-                    if anc == creator_boundary or anc == anc.parent:
-                        break
-                    if not name_parser.is_structural_folder(anc.name):
-                        product = anc.name
-                        break
+                product = top_level or character
             if product:
                 clean_name = name_parser.display_name(product, creator.name) or product
+
+        # A name with no identity of its own ("Bases", "Parts") collides with every
+        # other such folder in the library — 11 Titan Forge models all landed on
+        # "Bases" in one variant group. Qualify it with the owning release/product
+        # instead. Only fires when the derived name is generic, so a correctly
+        # derived name ("Gridrunner") never enters this branch. (STUDIO-287)
+        if name_parser.is_generic_name(clean_name):
+            for anc in folder.parents:
+                if anc == creator_boundary or anc == anc.parent:
+                    break
+                if name_parser.is_container_folder(anc.name):
+                    continue
+                qualifier = name_parser.qualifier_from_folder(anc.name)
+                if qualifier:
+                    clean_name = name_parser.qualify_generic_name(clean_name, qualifier)
+                    break
 
         is_new = model is None
         if is_new:

@@ -1867,6 +1867,96 @@ class TestStructuralLeafNaming:
         assert "Dragon" in self._names(db, creator)  # display_name strips the "Bust" type token
 
 
+class TestGenericNameQualification:
+    """STUDIO-287: a leaf whose derived name is a bare parts word ("Bases") has no
+    identity of its own and collides with every other such folder. It must be
+    qualified by the owning release/product instead."""
+
+    def _names(self, db, creator):
+        return {m.name for m in _models(db, creator)}
+
+    def test_generic_leaf_qualified_by_release_skipping_container(self, db, tmp_path):
+        # {creator}/{release}/Models/NN - Bases {support} — "Models" is a pure
+        # container and must be skipped, so the qualifier is the release. Without
+        # the skip these would be named "Models", which is worse than "Bases".
+        creator_dir = tmp_path / "Titan Forge Miniatures"
+        _stl(creator_dir / "52 - OCTOBER 2024 REANIMATION" / "Models" / "05 - Bases Supported", name="b.stl")
+        _stl(creator_dir / "52 - OCTOBER 2024 REANIMATION" / "Models" / "05 - Bases Unsupported", name="b.stl")
+        creator = make_creator(db, "Titan Forge Miniatures")
+
+        _walk(db, creator, creator_dir)
+
+        names = self._names(db, creator)
+        assert names == {"October 2024 Reanimation Bases"}
+        assert "Bases" not in names
+        assert "Models" not in names
+
+    def test_generic_leaf_qualified_by_structural_looking_product(self, db, tmp_path):
+        # {creator}/RPG Bases/RPG Bases {support} — "RPG Bases" is a genuine
+        # product even though every token is a parts/type word. The qualifier
+        # comes from the RAW folder name, and must not double up into
+        # "RPG Bases Bases".
+        creator_dir = tmp_path / "Titan Forge Miniatures"
+        _stl(creator_dir / "RPG Bases" / "RPG Bases Supported", name="b.stl")
+        _stl(creator_dir / "RPG Bases" / "RPG Bases Unsupported", name="b.stl")
+        creator = make_creator(db, "Titan Forge Miniatures")
+
+        _walk(db, creator, creator_dir)
+
+        names = self._names(db, creator)
+        assert names == {"RPG Bases"}
+        assert "Bases" not in names
+        assert "RPG Bases Bases" not in names
+
+    def test_distinct_releases_do_not_collide(self, db, tmp_path):
+        # The actual defect: two unrelated releases' base folders both derived to
+        # "Bases" and shared one variant group.
+        creator_dir = tmp_path / "Titan Forge Miniatures"
+        _stl(creator_dir / "RPG Bases" / "RPG Bases Supported", name="b.stl")
+        _stl(creator_dir / "59 - October 24 - Orc and Carnival 2 Bases" / "03 - Bases", name="b.stl")
+        creator = make_creator(db, "Titan Forge Miniatures")
+
+        _walk(db, creator, creator_dir)
+
+        names = self._names(db, creator)
+        assert len(names) == 2, f"releases collided: {names}"
+        assert "RPG Bases" in names
+        assert "October 24 Orc And Carnival 2 Bases" in names
+
+    def test_sibling_release_name_does_not_bleed(self, db, tmp_path):
+        # STUDIO-289: the walk `character` survives across sibling subtrees, so a
+        # structural leaf under one release could be named after a DIFFERENT
+        # release walked earlier. The nearest owning ancestor must win over the
+        # carried character. Without the fix "RPG Bases Supported" is named
+        # "October Orc And Carnival Bases".
+        creator_dir = tmp_path / "Titan Forge Miniatures"
+        _stl(creator_dir / "59 - October 24 - Orc and Carnival 2 Bases" / "03 - Bases", name="b.stl")
+        _stl(creator_dir / "RPG Bases" / "RPG Bases Supported", name="b.stl")
+        creator = make_creator(db, "Titan Forge Miniatures")
+
+        _walk(db, creator, creator_dir)
+
+        by_path = {_rel(m, creator_dir): m.name for m in _models(db, creator)}
+        rpg = next(v for k, v in by_path.items() if k.startswith("RPG Bases"))
+        assert rpg == "RPG Bases", f"sibling release bled in: {rpg!r}"
+        assert "October" not in rpg
+
+    def test_identifying_leaf_name_untouched(self, db, tmp_path):
+        # Regression guard: a correctly derived name never enters the qualifier
+        # branch, so it keeps its bare product name.
+        creator_dir = tmp_path / "Titan Forge Miniatures"
+        _stl(creator_dir / "52 - OCTOBER 2024 REANIMATION" / "Models" / "01 - Gridrunner supported", name="g.stl")
+        _stl(creator_dir / "52 - OCTOBER 2024 REANIMATION" / "Models" / "02 - Grim Realms Supported", name="g.stl")
+        creator = make_creator(db, "Titan Forge Miniatures")
+
+        _walk(db, creator, creator_dir)
+
+        names = self._names(db, creator)
+        assert "Gridrunner" in names
+        assert "Grim Realms" in names
+        assert not any(n.startswith("October 2024") for n in names)
+
+
 class TestCaseInsensitiveIdentity:
     """STUDIO-78: a case-only path change (Windows rename of an ancestor folder)
     must reuse the existing model in place, not orphan+recreate it — which would

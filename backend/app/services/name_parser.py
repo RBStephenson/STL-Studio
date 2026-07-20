@@ -364,6 +364,72 @@ def display_name(folder_name: str, creator_name: str | None = None) -> str:
     return " ".join(_titlecase_token(t) for t in key.split())
 
 
+# Leading "05 - " / "3. " / "12_" ordering prefixes. Creators use them to force
+# folder sort order; they carry no identity. display_name already drops them via
+# _VARIANT_JUNK's bare-\d+ rule, but a *qualifier* is taken from the raw folder
+# name (see qualifier_from_folder), which has to strip them itself.
+_ORDER_PREFIX = re.compile(r"^\s*\d+\s*[-_.)]\s*")
+
+# Pure container folders — a nesting level with no identity of its own. Distinct
+# from _STRUCTURAL_EXACT: those describe a *variant* of a product ("Supported"),
+# these are just a shelf the products sit on. Skipped when walking up for a
+# qualifier so "…/{release}/Models/05 - Bases" qualifies as the release, not
+# "Models" (STUDIO-287).
+_CONTAINER_EXACT: set[str] = {
+    "models", "model", "files", "file", "stl", "stls", "print files", "print",
+}
+
+
+def is_container_folder(name: str) -> bool:
+    """True if `name` is a pure nesting level carrying no product identity."""
+    return name.lower().strip() in _CONTAINER_EXACT
+
+
+def is_generic_name(name: str) -> bool:
+    """True if `name` has no product identity of its own — every token is a
+    parts/structural word ("Bases", "Base Supported", "Parts").
+
+    Used to decide whether a derived model name needs qualifying by its owning
+    release/product. Deliberately reuses is_structural_folder so the two stay in
+    agreement; the distinction is only *where* the answer is applied.
+    """
+    return bool(name.strip()) and is_structural_folder(name)
+
+
+def qualifier_from_folder(folder_name: str) -> str:
+    """Title-cased qualifier taken from an ancestor's RAW folder name.
+
+    Only the ordering prefix is stripped — NOT the full display_name pipeline.
+    display_name("RPG Bases") is itself "Bases" (every token is a parts/type
+    word), which would qualify a generic "Bases" as "Bases Bases". The raw name
+    is what actually distinguishes one release from another. (STUDIO-287)
+    """
+    raw = _ORDER_PREFIX.sub("", folder_name).strip(" -_")
+    # Collapse " - "/" _ " separators so a release folder that chains segments
+    # ("59 - October 24 - Orc and Carnival 2 Bases") reads as one phrase rather
+    # than keeping an orphaned dash. Hyphens *inside* a word ("Pre-Order") are
+    # untouched — only separators flanked by whitespace go.
+    raw = re.sub(r"\s+[-_]+\s+", " ", raw)
+    raw = re.sub(r"[\s_]+", " ", raw).strip()
+    if not raw:
+        return ""
+    return " ".join(_titlecase_token(t) for t in raw.split())
+
+
+def qualify_generic_name(generic: str, qualifier: str) -> str:
+    """Combine an owning release/product qualifier with a generic leaf name.
+
+    When the qualifier already ends with the generic word the qualifier stands
+    alone ("RPG Bases" + "Bases" -> "RPG Bases", not "RPG Bases Bases").
+    Falls back to the generic name when there is no usable qualifier.
+    """
+    if not qualifier:
+        return generic
+    if qualifier.lower().endswith(generic.lower()):
+        return qualifier
+    return f"{qualifier} {generic}"
+
+
 # Folder names that describe structure or a variant (support status, container,
 # render folder) rather than a character/product. These must never be used as the
 # variant-grouping "character" — otherwise every creator's "Presupport" / "75mm" /
