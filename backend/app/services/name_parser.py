@@ -383,8 +383,15 @@ _STRUCTURAL_EXACT: set[str] = {
     "split", "merged", "solid", "hollow",
     # "full cut" / "full cutted" — print-prep term meaning pre-separated body parts,
     # analogous to "presupported". Must not be treated as a character/product name.
+    # "semi cut" is the same family, one step less separated; creators (PolyMind)
+    # ship a Full_cutted/Semi_cutted pair per character, so omitting the semi forms
+    # collapsed every such character into one "Semi" group (STUDIO-288). Bare "semi"
+    # is deliberately NOT listed — too likely to appear inside a real name.
     "cutted",
     "full cut", "full cutted", "full_cut", "full_cutted", "fullcut", "fullcutted",
+    "full cuts", "full_cuts", "fullcuts",
+    "semi cut", "semi cutted", "semi_cut", "semi_cutted", "semicut", "semicutted",
+    "semi-cut", "semi-cutted", "semi cuts", "semi_cuts", "semicuts",
 }
 
 
@@ -397,7 +404,11 @@ _SUPPORT_FORMAT = re.compile(
     r"un[\s_-]?supported|presupport(?:ed)?|unsupported|support(?:ed|s)?|presup|pre|"
     r"no[\s_-]?supports?|nosupports?|"
     r"solid|hollow|"
-    r"without|uncut|no[\s_-]?cuts?|full[\s_-]?cut(?:s|ted)?|cut(?:s|ted)?|"
+    r"without|uncut|no[\s_-]?cuts?|full[\s_-]?cut(?:s|ted)?|"
+    # "semi cut"/"semi cutted" only as a unit — bare "semi" must survive so a real
+    # name keeps its identity ("Semiramis" is protected by \b, "Semi Truck" is not
+    # if this were relaxed to a lone alternative). STUDIO-288.
+    r"semi[\s_-]?cut(?:s|ted)?|cut(?:s|ted)?|"
     r"ready[\s_-]?to[\s_-]?slice|readytoslice|"
     r"lychee|chitubox|lys|ctb|merged|split"
     r")\b",

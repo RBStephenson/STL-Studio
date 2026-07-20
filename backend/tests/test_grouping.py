@@ -453,6 +453,35 @@ class TestStructuralFolderNames:
 
         assert _groups(db, creator) == []
 
+    def test_semi_cutted_folders_do_not_group_across_characters(self, db):
+        # STUDIO-288: PolyMind ships a Full_cutted/Semi_cutted pair per character.
+        # "Full_cutted" was structural but "Semi_cutted" was not, so every
+        # character's semi folder became a product named "Semi" and 20 of them
+        # collapsed into one group.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="cloud-semi")
+        b = make_model(db, creator, name="kratos-semi")
+        a.name = b.name = "Semi_cutted"
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+
+    def test_character_still_groups_across_cut_prep_folders(self, db):
+        # Flip side: the two cut-prep variants of the SAME character still group,
+        # since both tokens are stripped from the identity leaving "Cloud".
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Cloud Full_cutted")
+        b = make_model(db, creator, name="Cloud Semi_cutted")
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+
     def test_differently_sized_base_folders_also_ungrouped(self, db):
         # Same defect, mixed labels — the three real-world variants observed in
         # the library must not group with each other either.
