@@ -390,6 +390,48 @@ class TestPruneEmptyGroups:
         labels = {g.label for g in db.query(VariantGroup)}
         assert labels == {"Full", "Manual"}
 
+    def test_only_excluded_members_pruned_without_dangling_reference(self, db):
+        """STUDIO-301: a group whose only members are excluded counts as empty
+        (excluded models are invisible) and must be deleted — but the excluded
+        model's variant_group_id must be cleared too, or un-excluding it later
+        leaves it pointing at a deleted (or id-recycled) group."""
+        creator = make_creator(db)
+        only_member = make_model(db, creator, name="Hidden")
+        only_member.excluded = True
+        g = VariantGroup(creator_id=creator.id, label="OnlyExcluded", source="auto")
+        db.add(g); db.flush()
+        only_member.variant_group_id = g.id
+        db.flush()
+        group_id = g.id
+
+        n = grouping.prune_empty_groups(db)
+
+        assert n == 1
+        assert db.query(VariantGroup).filter(VariantGroup.id == group_id).first() is None
+        db.refresh(only_member)
+        assert only_member.variant_group_id is None, "dangling reference must be cleared"
+
+    def test_mixed_excluded_and_active_members_survives(self, db):
+        """A group with at least one non-excluded member is genuinely non-empty
+        and must not be touched — the excluded sibling's reference stays intact."""
+        creator = make_creator(db)
+        active = make_model(db, creator, name="Visible")
+        hidden = make_model(db, creator, name="Hidden")
+        hidden.excluded = True
+        g = VariantGroup(creator_id=creator.id, label="Mixed", source="auto")
+        db.add(g); db.flush()
+        active.variant_group_id = g.id
+        hidden.variant_group_id = g.id
+        db.flush()
+        group_id = g.id
+
+        n = grouping.prune_empty_groups(db)
+
+        assert n == 0
+        assert db.query(VariantGroup).filter(VariantGroup.id == group_id).first() is not None
+        db.refresh(hidden)
+        assert hidden.variant_group_id == group_id
+
 
 class TestRep:
     def test_rep_prefers_is_group_rep(self, db):
