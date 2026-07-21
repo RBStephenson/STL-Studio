@@ -177,7 +177,13 @@ async def _scrape_mmf_store_products(username: str, referer: str) -> list[Storef
                 data = r.json()
             except Exception as e:
                 logger.warning(f"MMF store API page {page} failed for {username!r}: {e}")
-                return []
+                # A page-1 failure means we have nothing — return [] so the
+                # caller falls back to the embedded-object-ID scrape path. A
+                # later-page failure still has real product data collected
+                # from earlier pages; discarding it (STUDIO-305) meant one
+                # transient failure on a large store threw away everything
+                # already fetched instead of returning the partial listing.
+                return products if products else []
 
             page_products = data.get("products") or []
             for raw in page_products:
@@ -212,10 +218,11 @@ def _mmf_store_product(raw: dict) -> StorefrontProduct | None:
         source_url = f"{_MMF_BASE}{slug}"
     else:
         source_url = f"{_MMF_BASE}/object/3d-print-{slug}"
-    tags = [
-        t for t in (raw.get("tags") or raw.get("category_name") or [])
-        if isinstance(t, str) and t
-    ]
+    raw_tags = raw.get("tags") or raw.get("category_name") or []
+    # category_name is a fallback field and can come back as a plain string
+    # rather than a list — iterating it directly would split it into one
+    # single-character "tag" per letter (STUDIO-305).
+    tags = [t for t in raw_tags if isinstance(t, str) and t] if isinstance(raw_tags, list) else []
     return StorefrontProduct(
         title=title,
         source_url=source_url,
