@@ -16,6 +16,7 @@ from app.models import Creator, Model, STLFile, VariantGroup
 from app.services import scanner, name_parser
 from app.services.job_runner import JobHandle, JobState
 from app.services.scan_rules import IgnoreMatcher
+from app.utils import utcnow
 from tests.conftest import make_creator
 
 
@@ -1480,6 +1481,78 @@ class TestScanAllRootsMountGate:
 
         assert captured["stale_paths"] == [str(tmp_path)]
         assert captured["stale_models"] == [str(tmp_path)]
+
+
+class TestScanRootLastScannedBaseline:
+    """STUDIO-295: root.last_scanned must only advance when the root was
+    online AND its creator walk raised no errors this run — otherwise a file
+    changed during the offline/failed window compares against a baseline
+    that's newer than reality and is wrongly treated as unchanged forever
+    (compounds the STUDIO-294 skip check)."""
+
+    def _stub_prunes(self, monkeypatch):
+        monkeypatch.setattr(scanner, "_prune_stale_models", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_stale_paths", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_stale_stl_files", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_ignored", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_slicer_files", lambda *a, **k: None)
+        monkeypatch.setattr(scanner, "_prune_phantoms", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "prune_empty_creators", lambda *a, **k: None)
+
+    def test_offline_root_leaves_last_scanned_unchanged(self, db, tmp_path, monkeypatch):
+        from datetime import timedelta
+        from app.models import ScanRoot
+
+        prior = utcnow() - timedelta(days=1)
+        root = ScanRoot(path=str(tmp_path), enabled=True, last_scanned=prior)  # empty dir → offline
+        db.add(root)
+        db.commit()
+        self._stub_prunes(monkeypatch)
+
+        scanner.scan_all_roots(db)
+        db.refresh(root)
+
+        assert root.last_scanned == prior, "offline root must not advance its baseline"
+
+    def test_failed_creator_walk_leaves_last_scanned_unchanged(self, db, tmp_path, monkeypatch):
+        from datetime import timedelta
+        from app.models import ScanRoot
+
+        (tmp_path / "creator").mkdir()  # non-empty → online
+        prior = utcnow() - timedelta(days=1)
+        root = ScanRoot(path=str(tmp_path), enabled=True, last_scanned=prior)
+        db.add(root)
+        db.commit()
+        self._stub_prunes(monkeypatch)
+        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db: {999})  # simulate a failed creator
+
+        scanner.scan_all_roots(db)
+        db.refresh(root)
+
+        assert root.last_scanned == prior, "root with a failed creator walk must not advance its baseline"
+
+    def test_clean_online_walk_advances_last_scanned_to_scan_start(self, db, tmp_path, monkeypatch):
+        from datetime import timedelta
+        from app.models import ScanRoot
+
+        (tmp_path / "creator").mkdir()  # non-empty → online
+        prior = utcnow() - timedelta(days=1)
+        root = ScanRoot(path=str(tmp_path), enabled=True, last_scanned=prior)
+        db.add(root)
+        db.commit()
+        self._stub_prunes(monkeypatch)
+        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db: set())
+
+        before = utcnow()
+        scanner.scan_all_roots(db)
+        after = utcnow()
+        db.refresh(root)
+
+        assert root.last_scanned is not None and root.last_scanned != prior
+        assert before <= root.last_scanned <= after, (
+            "baseline must be the pre-walk scan_start timestamp, not stale, "
+            "not from mid/post-walk"
+        )
 
 
 # ---------------------------------------------------------------------------

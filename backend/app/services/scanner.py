@@ -226,6 +226,11 @@ def _full_scan(job: JobHandle, db: Session | None = None):
             if cleared:
                 logger.info(f"Pre-scan: cleared needs_review on {cleared} previously-indexed models")
 
+            # Captured BEFORE any root is walked and used as the new last_scanned
+            # baseline (not each root's post-walk timestamp): a file changed
+            # mid-walk, after its own folder was already visited, has an mtime
+            # older than an end-of-walk stamp and would be wrongly skipped next
+            # run (STUDIO-295).
             scan_start = utcnow()
             roots = _db.query(ScanRoot).filter(ScanRoot.enabled == True).all()
             root_paths = [r.path for r in roots]
@@ -236,8 +241,16 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 if _cancelled():
                     job.update(state=JobState.CANCELLED, message="cancelled", cancelled=True)
                     break
-                failed_creator_ids |= _scan_root(root, _db)
-                root.last_scanned = utcnow()
+                root_failed = _scan_root(root, _db)
+                failed_creator_ids |= root_failed
+                # Only advance the baseline for a root that was ONLINE (missing or
+                # detached-mount-empty roots present as "no creators found", which
+                # root_failed alone can't distinguish from a genuinely empty root)
+                # AND walked with no creator failures this run. Otherwise keep the
+                # prior last_scanned so the next scan re-checks everything it may
+                # have missed while offline/failing (STUDIO-295).
+                if not root_failed and _root_available(root.path):
+                    root.last_scanned = scan_start
                 _db.commit()
 
             if not _cancelled():
