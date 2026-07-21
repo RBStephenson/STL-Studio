@@ -293,7 +293,16 @@ def prune_empty_groups(db: Session) -> int:
     """Delete auto variant groups that have no (non-excluded) members. Cleans up
     orphans left by older races (#639) and is a cheap post-scan safety net. Manual
     groups are left alone — a user may have emptied one intentionally. Returns the
-    number deleted."""
+    number deleted.
+
+    "Empty" only counts non-excluded members (excluded models are meant to be
+    invisible), but a group whose ONLY members are excluded still has models
+    pointing at it via variant_group_id. Those references are cleared before the
+    group is deleted — otherwise un-excluding such a model later leaves it
+    pointing at a deleted (or, worse, an id SQLite has since reused for an
+    unrelated group) VariantGroup row (STUDIO-301). Un-excluding re-triggers
+    regroup_creator, which will re-propose it into a fresh group anyway.
+    """
     member_counts = (
         db.query(Model.variant_group_id, func.count(Model.id).label("cnt"))
         .filter(Model.excluded == False)  # noqa: E712
@@ -307,9 +316,12 @@ def prune_empty_groups(db: Session) -> int:
         .filter(member_counts.c.cnt == None)  # noqa: E711
         .all()
     )
-    for g in empties:
-        db.delete(g)
     if empties:
+        empty_ids = [g.id for g in empties]
+        for m in db.query(Model).filter(Model.variant_group_id.in_(empty_ids)):
+            m.variant_group_id = None
+        for g in empties:
+            db.delete(g)
         db.flush()
     return len(empties)
 
