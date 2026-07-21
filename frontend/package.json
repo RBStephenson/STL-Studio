@@ -19,7 +19,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
-    "@tanstack/react-query": "^5.101.2",
+    "@tanstack/react-query": "^5.101.3",
     "dompurify": "^3.4.12",
     "lucide-react": "^1.25.0",
     "react": "^19.2.7",
