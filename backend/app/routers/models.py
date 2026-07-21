@@ -68,10 +68,12 @@ def _apply_filters(
     q = q.filter(Model.excluded == excluded)
     if search:
         like = f"%{like_escape(search)}%"
+        # Description is prose (scraped creator blurbs) and excluded: substring
+        # matching against it produces false positives on common words embedded
+        # in filler text (e.g. "hank" matches "thanks") (STUDIO-310).
         q = q.filter(
             Model.title.ilike(like, escape="\\")
             | Model.name.ilike(like, escape="\\")
-            | Model.description.ilike(like, escape="\\")
             | Model.character.ilike(like, escape="\\")
         )
     if creator_id:

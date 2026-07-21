@@ -77,6 +77,36 @@ class TestListModels:
         assert data["total"] == 1
         assert data["items"][0]["name"] == "Undead Knight"
 
+    def test_search_ignores_description(self, client, db):
+        """STUDIO-310: description is prose (scraped blurbs) and must not be
+        substring-matched — "hank" matching "Thanks for downloading!" flooded
+        results with unrelated models."""
+        creator = make_creator(db)
+        make_model(db, creator, name="Hank", description="A friendly fisherman.")
+        make_model(
+            db, creator, name="Unrelated Warrior",
+            description="Thanks for downloading! Hope you enjoy.",
+        )
+        commit_all(db)
+
+        resp = client.get("/models?q=hank")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "Hank"
+
+    def test_search_by_character_still_substring(self, client, db):
+        """Non-prose identity fields (title/name/character) keep substring
+        matching — e.g. "hulk" must still match "Hulkbuster"."""
+        creator = make_creator(db)
+        make_model(db, creator, name="A", character="Hulkbuster")
+        make_model(db, creator, name="B", character="Someone Else")
+        commit_all(db)
+
+        resp = client.get("/models?q=hulk")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "A"
+
     def test_search_percent_not_wildcard(self, client, db):
         """STUDIO-87: `%` in the q query param must be matched literally,
         not as a SQL LIKE any-sequence wildcard."""

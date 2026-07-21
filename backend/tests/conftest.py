@@ -109,6 +109,7 @@ def make_model(
     thumbnail_path: str | None = None,
     needs_review: bool = False,
     tags: list | None = None,
+    description: str | None = None,
 ) -> Model:
     m = Model(
         name=name,
@@ -117,6 +118,7 @@ def make_model(
         character=character,
         thumbnail_path=thumbnail_path,
         needs_review=needs_review,
+        description=description,
         tags=tags or [],
         auto_tags=[],
         created_at=utcnow(),
