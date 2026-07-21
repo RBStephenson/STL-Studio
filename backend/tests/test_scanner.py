@@ -1301,6 +1301,40 @@ class TestPruneStalePaths:
         assert scanner._prune_stale_paths(db, [str(online)]) == 0
         assert "orphan" in {m.name for m in db.query(Model).all()}
 
+    def test_model_under_failed_creator_walk_is_protected(self, db, tmp_path):
+        """STUDIO-296: a creator whose walk raised mid-scan was only partially
+        re-indexed — its untouched models' folders can look stale for reasons
+        that have nothing to do with an actual deletion (a transient error
+        partway through, same STUDIO-79 rationale as the other two prunes).
+        Model.folder_path missing under a protected creator must survive."""
+        creator = make_creator(db, "Creator")
+        protected_missing = self._model(db, creator, "protected", tmp_path / "gone", on_disk=False)
+        clean_creator = make_creator(db, "OtherCreator")
+        clean_missing = self._model(db, clean_creator, "unprotected", tmp_path / "also_gone", on_disk=False)
+        # Kept under the UNPROTECTED creator: the cap check only sees models
+        # left after excluding the protected creator, so it needs its own
+        # non-stale sibling to stay under the 50% cap.
+        self._model(db, clean_creator, "kept", tmp_path / "kept")
+        protected_id, clean_missing_id = protected_missing.id, clean_missing.id
+
+        removed = scanner._prune_stale_paths(
+            db, [str(tmp_path)], protected_creator_ids={creator.id},
+        )
+
+        assert removed == 1
+        remaining_ids = {m.id for m in db.query(Model).all()}
+        assert protected_id in remaining_ids, "protected creator's missing-folder model must survive"
+        assert clean_missing_id not in remaining_ids, "unprotected creator's missing-folder model still pruned"
+
+    def test_no_protected_ids_behaves_as_before(self, db, tmp_path):
+        """Default param (no protected_creator_ids) matches pre-STUDIO-296
+        behaviour exactly — existing positional-arg call sites/tests unaffected."""
+        creator = make_creator(db, "Creator")
+        self._model(db, creator, "kept", tmp_path / "kept")
+        self._model(db, creator, "renamed", tmp_path / "old_name", on_disk=False)
+
+        assert scanner._prune_stale_paths(db, [str(tmp_path)]) == 1
+
 
 class TestPruneStaleStlFiles:
     """_index_stl_files only ever adds rows by exact path — a file renamed
