@@ -1134,7 +1134,15 @@ const SECTIONS: Section[] = [
           building tools and content for the community.
         </p>
         <p>Thank you for being here, and happy printing!</p>
-        <p className="text-text-secondary-alt">— Brent the Programmer</p>
+        <p className="text-text-secondary-alt">
+          — Brent the Programmer,{" "}
+          <a href="https://brenttheprogrammer.com" target="_blank" rel="noreferrer">
+            brenttheprogrammer.com
+          </a>
+        </p>
+        <p className="text-text-secondary-alt italic">
+          Trust the process. Take care of yourself. One brushstroke at a time.
+        </p>
         <p>
           Need help? Review the{" "}
           <a
