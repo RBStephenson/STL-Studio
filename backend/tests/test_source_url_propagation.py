@@ -1,23 +1,27 @@
 """
-Tests for source_url propagation across a variant group (#202): a URL written
-to one variant is copied to same-group siblings that don't have one, via all
-three write paths (metadata editor, Find on Web apply, storefront enrichment).
+Tests for source_url propagation across a variant group (#202, STUDIO-304): a
+URL written to one variant is copied to same-group siblings that don't have
+one, via all three write paths (metadata editor, Find on Web apply, storefront
+enrichment). Propagation is keyed on the durable variant_group_id (#678), not
+the legacy `character` field — two distinct durable groups can share a
+character (e.g. a bust split from a 75mm figure), so grouping here must not.
 """
 from unittest.mock import AsyncMock
 
 from app.services import enrich_refresh
-from tests.conftest import make_creator, make_model
+from tests.conftest import make_creator, make_model, make_variant_group
 
 URL = "https://www.myminifactory.com/object/print-ada-wong-12345"
 
 
 def _group(db, n=3, character="Ada Wong"):
-    """Creator + n models in the same variant group; returns (creator, models)."""
+    """Creator + n models in the same durable variant group; returns (creator, models)."""
     creator = make_creator(db)
     models = [
         make_model(db, creator, name=f"Ada Wong v{i}", character=character)
         for i in range(n)
     ]
+    make_variant_group(db, creator, models)
     db.commit()
     return creator, models
 
