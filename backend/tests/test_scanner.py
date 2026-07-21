@@ -2188,3 +2188,66 @@ class TestStructuralNameHealing:
         db.refresh(target)
 
         assert target.name == "Auron"
+
+
+class TestIncrementalSkipBaseline:
+    """STUDIO-294: the folder-unchanged skip compares st_mtime (POSIX epoch)
+    against last_scanned (naive UTC). Converting last_scanned with .timestamp()
+    read it as LOCAL time, inflating the baseline by the host's UTC offset —
+    folders changed within that window after a scan were wrongly skipped and
+    their new files never indexed. utc_timestamp() must be used instead."""
+
+    def _rewalk(self, db, creator, creator_dir, last_scanned):
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=last_scanned,
+        )
+
+    def _stl_count(self, db, creator):
+        model = _models(db, creator)[0]
+        return db.query(STLFile).filter(STLFile.model_id == model.id).count()
+
+    def test_folder_changed_after_baseline_is_reindexed(self, db, tmp_path):
+        from datetime import timedelta
+        from app.utils import utcnow
+
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron", name="a.stl")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+        assert self._stl_count(db, creator) == 1
+
+        # New file lands after the recorded baseline → must be re-indexed. With
+        # the pre-fix local-time reading of a naive-UTC baseline, any change
+        # within ~|UTC offset| of the baseline looked "unchanged" and was
+        # skipped; a 1-minute-old baseline sits squarely inside that window on
+        # every non-UTC host, so this fails without the fix (and is a plain
+        # correctness check on UTC hosts).
+        baseline = utcnow() - timedelta(minutes=1)
+        _stl(creator_dir / "Auron", name="b.stl")
+
+        self._rewalk(db, creator, creator_dir, last_scanned=baseline)
+        assert self._stl_count(db, creator) == 2, "change after baseline must be indexed"
+
+    def test_folder_unchanged_since_baseline_skips_file_indexing(self, db, tmp_path):
+        from datetime import timedelta
+        from app.utils import utcnow
+
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron", name="a.stl")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+
+        # Baseline far in the future relative to the folder's mtime → the skip
+        # path must engage (this is the intended fast path, unchanged by the fix).
+        baseline = utcnow() + timedelta(days=1)
+        # Sneak a file in without the walk noticing wouldn't be possible with a
+        # real mtime bump, so instead delete the STL row: a skipped folder never
+        # re-runs _index_stl_files, so the row must stay gone.
+        model = _models(db, creator)[0]
+        db.query(STLFile).filter(STLFile.model_id == model.id).delete()
+        db.commit()
+
+        self._rewalk(db, creator, creator_dir, last_scanned=baseline)
+        assert self._stl_count(db, creator) == 0, "unchanged folder must skip file indexing"

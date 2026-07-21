@@ -45,7 +45,7 @@ from app.services.tag_sync import sync_model_tags
 from app.services import write_lock
 from app.services import ai_organize
 from app.services.ai_organize import clean_name
-from app.utils import utcnow
+from app.utils import utcnow, utc_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -1258,7 +1258,10 @@ def _index_model(
         folder_unchanged = (
             model is not None
             and last_scanned is not None
-            and folder.stat().st_mtime < last_scanned.timestamp()
+            # utc_timestamp, not .timestamp(): last_scanned is naive UTC, and
+            # .timestamp() would read it as local time — skewing the baseline
+            # by the host's UTC offset and skipping real changes (STUDIO-294).
+            and folder.stat().st_mtime < utc_timestamp(last_scanned)
         )
 
         # Clean, human-readable display name derived from the raw folder name
