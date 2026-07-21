@@ -285,7 +285,7 @@ def test_refresh_passes_mmf_key_to_fetch(db, monkeypatch):
 
     result = enrich_refresh.run_refresh(db=db)
     assert result["refreshed"] == 1
-    fetch.assert_awaited_once_with(_URL, mmf_api_key="test-mmf-key")
+    fetch.assert_awaited_once_with(_URL, mmf_api_key="test-mmf-key", external_id=None)
 
 
 def test_refresh_shared_scraped_model_not_mutated_across_siblings(db, monkeypatch):
@@ -314,7 +314,7 @@ def test_refresh_error_isolation_reports_errors_and_keeps_others(db, monkeypatch
     b = _enriched_model(db, creator, name="dragon b", url="https://www.myminifactory.com/object/b-2")
     db.commit()
 
-    async def _fetch(url, mmf_api_key=None):
+    async def _fetch(url, mmf_api_key=None, external_id=None):
         return _deep(source_url=url, external_id=url)
 
     monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", _fetch)
@@ -350,7 +350,7 @@ def test_refresh_chunks_candidates_and_updates_progress_mid_job(db, monkeypatch)
 
     seen_progress = []
 
-    async def _fetch(url, mmf_api_key=None):
+    async def _fetch(url, mmf_api_key=None, external_id=None):
         # Snapshot progress mid-job — later chunks must see earlier chunks' work.
         status = enrich_refresh.runner.status(enrich_refresh._JOB_KEY)
         seen_progress.append(status["progress"].get("refreshed", 0))
@@ -381,7 +381,7 @@ def test_refresh_chunk_failure_does_not_block_later_chunks(db, monkeypatch):
 
     monkeypatch.setattr(enrich_refresh, "_CHUNK_SIZE", 1)
 
-    async def _fetch(url, mmf_api_key=None):
+    async def _fetch(url, mmf_api_key=None, external_id=None):
         if url.endswith("a-1"):
             return None  # first chunk's fetch fails
         return _deep(source_url=url, external_id=url)

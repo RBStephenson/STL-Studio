@@ -300,3 +300,64 @@ class TestFetchBundleProducts:
 
         assert len(result) == 3
         assert result[0].name == "Katra Umeldahn"
+
+
+# ---------------------------------------------------------------------------
+# fetch_mini (STUDIO-303)
+# ---------------------------------------------------------------------------
+
+class TestFetchMini:
+    """A bundle URL is shared by every miniature within it — fetch_mini must
+    return that one mini's own title/thumbnail, not the bundle's."""
+
+    def _mock_client(self):
+        page_resp = MagicMock()
+        page_resp.raise_for_status = MagicMock()
+        page_resp.text = _PAGE_WITH_BND_ID
+        page_resp.url = "https://app.lootstudios.com/bundle/elemental-revenge/"
+
+        ajax_resp = MagicMock()
+        ajax_resp.raise_for_status = MagicMock()
+        ajax_resp.text = _MINI_LISTING_HTML
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=page_resp)
+        mock_client.post = AsyncMock(return_value=ajax_resp)
+        return mock_client
+
+    def test_returns_the_matching_minis_own_title_and_thumbnail(self):
+        from app.services.scrapers.loot_studios import fetch_mini, _mini_external_id
+        from app.services.scrapers.loot_studios import BundleMiniature
+
+        katra_id = _mini_external_id(BundleMiniature(
+            name="Katra Umeldahn",
+            thumbnail_url="https://assets.loot-studios.com/app/ElementalRevenge/FN2605AC01.png",
+            bundle_slug="ElementalRevenge",
+        ))
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value = self._mock_client()
+            result = asyncio.run(fetch_mini(
+                "https://app.lootstudios.com/bundle/elemental-revenge/", katra_id
+            ))
+
+        assert result is not None
+        # Not the bundle's own title ("Elemental Revenge") — the mini's.
+        assert result.title == "Katra Umeldahn"
+        assert result.thumbnail_url == "https://assets.loot-studios.com/app/ElementalRevenge/FN2605AC01.png"
+        assert result.source_url == "https://app.lootstudios.com/bundle/elemental-revenge/"
+        assert result.external_id == katra_id
+        assert result.source_site == SITE
+
+    def test_returns_none_when_mini_not_found_in_bundle(self):
+        from app.services.scrapers.loot_studios import fetch_mini
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value = self._mock_client()
+            result = asyncio.run(fetch_mini(
+                "https://app.lootstudios.com/bundle/elemental-revenge/", "not-a-real-id"
+            ))
+
+        assert result is None

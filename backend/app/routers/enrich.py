@@ -205,16 +205,21 @@ async def bulk_apply(
     def _item_for(m):
         return item_map.get(m.id) or group_item[m.variant_group_id]
 
-    # Fetch each *unique* product URL once (variants share a listing), bounded so
-    # we don't hammer a source. MMF needs the key threaded; Cults self-resolves.
+    # Fetch each *unique* product once (variants share a listing), bounded so we
+    # don't hammer a source. MMF needs the key threaded; Cults self-resolves. A
+    # Loot Studios bundle URL is shared by every miniature within it, so the key
+    # folds in external_id there to fetch each mini's own detail (STUDIO-303).
     mmf_key = secrets.resolve_mmf_api_key(db)
-    unique_urls = {item.source_url for item in body.items if item.source_url}
-    fetched = await fetch_unique_deep(unique_urls, mmf_key)
+    unique_keys = {
+        enrich_refresh.fetch_key(item.source_url, item.source_site, item.external_id)
+        for item in body.items if item.source_url
+    }
+    fetched = await fetch_unique_deep(unique_keys, mmf_key)
 
     applied = deep = shallow = errors = 0
     for model in models:
         item = _item_for(model)
-        base = fetched.get(item.source_url)
+        base = fetched.get(enrich_refresh.fetch_key(item.source_url, item.source_site, item.external_id))
 
         if base is not None:
             # Fill in the source identity from the match without mutating the
