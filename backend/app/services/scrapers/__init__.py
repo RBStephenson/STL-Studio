@@ -15,11 +15,19 @@ SITE_PATTERNS = [
 __all__ = ["detect_site", "ScrapedModel", "SearchResult"]
 
 
-async def fetch_url(url: str, mmf_api_key: Optional[str] = None) -> Optional[ScrapedModel]:
+async def fetch_url(
+    url: str, mmf_api_key: Optional[str] = None, external_id: Optional[str] = None
+) -> Optional[ScrapedModel]:
     """Detect site from URL and fetch metadata.
 
     ``mmf_api_key`` (DB secret or env fallback, resolved by the caller) enables
     the MyMiniFactory API path; other sites ignore it.
+
+    ``external_id`` routes a Loot Studios bundle URL to that specific
+    miniature's own detail (STUDIO-303) instead of the bundle-level record —
+    a bundle URL is shared by every miniature match within it, so fetching
+    the bundle itself would return the same bundle title/cover for all of
+    them. Other sites ignore it; their URLs already resolve to one product.
     """
     site = detect_site(url)
     if site == "myminifactory":
@@ -29,6 +37,8 @@ async def fetch_url(url: str, mmf_api_key: Optional[str] = None) -> Optional[Scr
     if site == "cults3d":
         return await cults3d.fetch(url)
     if site == "loot-studios":
+        if external_id:
+            return await loot_studios.fetch_mini(url, external_id)
         return await loot_studios.fetch(url)
     return None
 

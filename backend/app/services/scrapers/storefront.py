@@ -637,7 +637,9 @@ async def _scrape_loot_studios(url: str) -> list[StorefrontProduct]:
             title=m.name,
             source_url=f"https://app.lootstudios.com/bundle/{bundle_slug}/",
             source_site="loot-studios",
-            external_id=m.thumbnail_url.split("/")[-1].split(".")[0],
+            # Shared with fetch_mini's lookup key (STUDIO-303) so match-time
+            # and fetch-time IDs can never drift apart.
+            external_id=ls._mini_external_id(m),
             thumbnail_url=m.thumbnail_url,
         )
         for m in minis

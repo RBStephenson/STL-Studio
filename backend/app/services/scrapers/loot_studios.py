@@ -151,6 +151,39 @@ async def fetch(url: str) -> Optional[ScrapedModel]:
     return _parse_bundle(r.text, str(r.url))
 
 
+def _mini_external_id(mini: BundleMiniature) -> str:
+    """Mirrors storefront.py's per-mini external_id derivation (filename stem
+    of the mini's own thumbnail URL, on the CDN it's served from) — kept in
+    one place so match-time and fetch-time IDs can never drift apart."""
+    return mini.thumbnail_url.split("/")[-1].split(".")[0]
+
+
+async def fetch_mini(bundle_url: str, external_id: str) -> Optional[ScrapedModel]:
+    """Fetch a single miniature's own detail (name + own thumbnail) within a
+    bundle (STUDIO-303).
+
+    A bundle-level fetch on ``bundle_url`` returns bundle-wide metadata (the
+    bundle's own title/cover), which is wrong for a mini match — every mini
+    in the bundle shares that same URL, so applying the bundle record to each
+    one clobbered its own title and thumbnail with the bundle's. This re-walks
+    the bundle's miniature list and returns only the one matching
+    ``external_id``, so title/thumbnail overwrite is safe again.
+    """
+    minis = await fetch_bundle_products(bundle_url)
+    for mini in minis:
+        if _mini_external_id(mini) == external_id:
+            return ScrapedModel(
+                title=mini.name,
+                source_url=bundle_url,
+                source_site=SITE,
+                external_id=external_id,
+                creator_name="Loot Studios",
+                thumbnail_url=mini.thumbnail_url,
+            )
+    logger.warning(f"Loot Studios: mini {external_id!r} not found in bundle {bundle_url}")
+    return None
+
+
 async def fetch_store_catalog() -> list[dict]:
     """Call GetMyLootsCache to get all published bundles without authentication.
 

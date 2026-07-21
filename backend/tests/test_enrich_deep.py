@@ -246,6 +246,55 @@ def test_shared_scraped_model_not_mutated_across_siblings(client, db, monkeypatc
     assert shared.external_id is None  # the shared object was never mutated
 
 
+def test_loot_studios_minis_sharing_bundle_url_get_their_own_title_and_thumbnail(
+    client, db, monkeypatch
+):
+    """STUDIO-303: two miniatures matched within the same Loot Studios bundle
+    share one source_url (the bundle URL) — deep fetch must resolve each mini's
+    own detail, not stomp both with the bundle's title/cover."""
+    from app.services.scrapers.base import ScrapedModel as SM
+    from app.services.scrapers import loot_studios
+
+    creator = make_creator(db)
+    katra = make_model(db, creator, name="katra")
+    almira = make_model(db, creator, name="almira")
+    db.commit()
+
+    bundle_url = "https://app.lootstudios.com/bundle/elemental-revenge/"
+
+    async def fake_fetch_mini(url, external_id):
+        assert url == bundle_url
+        return {
+            "katra-id": SM(
+                title="Katra Umeldahn", source_url=url, source_site="loot-studios",
+                external_id="katra-id",
+            ),
+            "almira-id": SM(
+                title="Almira, Sky Voice", source_url=url, source_site="loot-studios",
+                external_id="almira-id",
+            ),
+        }[external_id]
+
+    monkeypatch.setattr(loot_studios, "fetch_mini", fake_fetch_mini)
+
+    resp = client.post("/enrich/storefront/apply", json={
+        "items": [
+            {"model_id": katra.id, "source_url": bundle_url, "source_site": "loot-studios",
+             "external_id": "katra-id", "title": "Katra Umeldahn"},
+            {"model_id": almira.id, "source_url": bundle_url, "source_site": "loot-studios",
+             "external_id": "almira-id", "title": "Almira, Sky Voice"},
+        ],
+    })
+    assert resp.status_code == 200
+    assert resp.json()["enriched_deep"] == 2
+
+    db.refresh(katra); db.refresh(almira)
+    assert katra.title == "Katra Umeldahn"
+    assert almira.title == "Almira, Sky Voice"
+    assert katra.external_id == "katra-id"
+    assert almira.external_id == "almira-id"
+
+
 def test_apply_error_isolation_reports_errors_and_keeps_others(client, db, monkeypatch):
     """#699 2.3: one model raising during apply must not 500 the batch or roll
     back the others — it's counted in ``errors`` instead."""
@@ -289,7 +338,7 @@ def test_bulk_apply_passes_mmf_key_to_fetch(client, db, monkeypatch):
 
     resp = client.post("/enrich/storefront/apply", json={"items": [_item(model)]})
     assert resp.status_code == 200
-    fetch.assert_awaited_once_with(_URL, mmf_api_key="test-mmf-key")
+    fetch.assert_awaited_once_with(_URL, mmf_api_key="test-mmf-key", external_id=None)
 
 
 # ---------------------------------------------------------------------------

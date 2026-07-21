@@ -54,27 +54,45 @@ def get_status() -> dict:
     return status
 
 
-async def fetch_unique_deep(
-    urls: set[str], mmf_key: Optional[str]
-) -> dict[str, Optional[ScrapedModel]]:
-    """Fetch full detail for each unique product URL once, bounded-concurrently.
+FetchKey = tuple[str, Optional[str]]
 
-    Variants share a product listing, so a URL is only fetched once and fanned
-    out to every model that references it. A URL whose fetch fails maps to None
-    so callers can decide how to degrade. Shared by the bulk-apply router path
-    and the refresh below so their fetch behaviour can't drift.
+
+def fetch_key(url: str, source_site: Optional[str], external_id: Optional[str]) -> FetchKey:
+    """The dedup/lookup key for a product detail fetch.
+
+    A URL alone identifies one product on every site except Loot Studios,
+    where every miniature within a bundle shares the same bundle URL — the
+    external_id is what actually distinguishes them, so it must be part of
+    the key there (STUDIO-303). Other sites fold external_id out (None) so
+    variants sharing a URL still collapse to a single fetch, same as before.
+    """
+    return (url, external_id) if source_site == "loot-studios" else (url, None)
+
+
+async def fetch_unique_deep(
+    keys: set[FetchKey], mmf_key: Optional[str]
+) -> dict[FetchKey, Optional[ScrapedModel]]:
+    """Fetch full detail for each unique (url, fetch-scoped id) key once,
+    bounded-concurrently.
+
+    Variants share a product listing, so a key is only fetched once and
+    fanned out to every model that references it. A key whose fetch fails
+    maps to None so callers can decide how to degrade. Shared by the
+    bulk-apply router path and the refresh below so their fetch behaviour
+    can't drift.
     """
     sem = asyncio.Semaphore(_FETCH_CONCURRENCY)
 
-    async def _one(url: str):
+    async def _one(key: FetchKey):
+        url, external_id = key
         async with sem:
             try:
-                return url, await scrapers.fetch_url(url, mmf_api_key=mmf_key)
+                return key, await scrapers.fetch_url(url, mmf_api_key=mmf_key, external_id=external_id)
             except Exception as e:
                 logger.warning(f"Enrich: detail fetch failed for {url}: {e}")
-                return url, None
+                return key, None
 
-    return dict(await asyncio.gather(*(_one(u) for u in urls)))
+    return dict(await asyncio.gather(*(_one(k) for k in keys)))
 
 
 # STUDIO-89: process candidates in bounded pages instead of materializing the
@@ -118,11 +136,14 @@ async def _do_refresh(
         chunk_models = (
             db.query(Model).filter(Model.id.in_(chunk_ids)).order_by(Model.id).all()
         )
-        unique_urls = {m.source_url for m in chunk_models if m.source_url}
-        fetched = await fetch_unique_deep(unique_urls, mmf_key)
+        unique_keys = {
+            fetch_key(m.source_url, m.source_site, m.external_id)
+            for m in chunk_models if m.source_url
+        }
+        fetched = await fetch_unique_deep(unique_keys, mmf_key)
 
         for model in chunk_models:
-            base = fetched.get(model.source_url)
+            base = fetched.get(fetch_key(model.source_url, model.source_site, model.external_id))
             if base is None:
                 failed += 1
                 continue
