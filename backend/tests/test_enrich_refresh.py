@@ -208,6 +208,22 @@ def test_refresh_does_not_reassign_creator(db, monkeypatch):
     assert model.creator_id == creator.id
 
 
+def test_refresh_leaves_needs_review_set(db, monkeypatch):
+    """STUDIO-306: refresh re-fetches unreviewed deep data same as bulk apply
+    (#699 1.3) — it must not clear a flag no human has looked at."""
+    creator = make_creator(db)
+    model = _enriched_model(db, creator, name="dragon", needs_review=True)
+    db.commit()
+
+    monkeypatch.setattr(enrich_refresh.scrapers, "fetch_url", AsyncMock(return_value=_deep()))
+
+    result = enrich_refresh.run_refresh(db=db)
+    assert result["refreshed"] == 1
+
+    db.refresh(model)
+    assert model.needs_review is True
+
+
 def test_refresh_failed_fetch_leaves_model_untouched(db, monkeypatch):
     creator = make_creator(db)
     model = _enriched_model(db, creator, name="orphan")
