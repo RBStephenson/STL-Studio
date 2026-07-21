@@ -176,3 +176,65 @@ def test_no_object_ids_returns_empty():
                _store_page_client("<script>nothing here</script>")):
         products = asyncio.run(storefront.scrape_storefront(_STORE_URL, mmf_api_key="k"))
     assert products == []
+
+
+def test_mmf_store_product_string_category_name_is_not_split_into_chars():
+    """STUDIO-305: category_name is a fallback and can come back as a plain
+    string rather than a list — must not be iterated character-by-character."""
+    product = storefront._mmf_store_product({
+        **_api_product(111),
+        "tags": None,
+        "category_name": "Fantasy",
+    })
+    assert product.tags == []
+
+
+def test_mmf_store_api_page_failure_after_first_page_returns_partial(monkeypatch):
+    """STUDIO-305: a transient failure on a later page must not discard the
+    products already collected from earlier successful pages."""
+    monkeypatch.setattr(storefront, "_MMF_STORE_PAGE_SIZE", 2)
+    calls = {"n": 0}
+
+    async def fake_get(url, params=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json = MagicMock(return_value={
+                "products": [_api_product(111), _api_product(222)], "total": 4,
+            })
+            return resp
+        raise RuntimeError("transient network failure")
+
+    client = MagicMock()
+    client.get = AsyncMock(side_effect=fake_get)
+    cls = MagicMock()
+    cls.return_value.__aenter__ = AsyncMock(return_value=client)
+    cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.services.scrapers.storefront.httpx.AsyncClient", cls):
+        products = asyncio.run(
+            storefront.scrape_storefront(
+                "https://www.myminifactory.com/users/DM-Stash?show=store",
+                mmf_api_key="k",
+            )
+        )
+
+    assert [p.external_id for p in products] == ["111", "222"]
+
+
+def test_mmf_store_api_page_1_failure_falls_back_to_scrape():
+    """A first-page failure has no partial data to return, so the caller must
+    still fall back to the embedded-object-ID scrape path."""
+    client = MagicMock()
+    client.get = AsyncMock(side_effect=RuntimeError("network down"))
+    cls = MagicMock()
+    cls.return_value.__aenter__ = AsyncMock(return_value=client)
+    cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.services.scrapers.storefront.httpx.AsyncClient", cls):
+        products = asyncio.run(
+            storefront._scrape_mmf_store_products("someone", referer=_STORE_URL)
+        )
+
+    assert products == []
