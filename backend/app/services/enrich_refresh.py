@@ -137,10 +137,13 @@ async def _do_refresh(
             try:
                 # Refresh operates on already-matched data, so it overwrites aggressively —
                 # but still never re-points creator_id (#699 1.1); a refresh isn't a review.
+                # clear_needs_review stays False (STUDIO-306): a refresh re-fetches the same
+                # kind of unreviewed deep data bulk apply does, so it can't clear the flag
+                # bulk apply deliberately leaves set (#699 1.3) — no human looked at either.
                 await apply_scraped_to_model(
                     db, model, scraped,
                     overwrite_title=True, thumbnail_fill_only=False,
-                    reassign_creator=False, clear_needs_review=True,
+                    reassign_creator=False, clear_needs_review=False,
                 )
                 refreshed += 1
             except Exception as e:
