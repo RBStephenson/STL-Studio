@@ -266,7 +266,9 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                     _db, scan_start, available_paths,
                     protected_creator_ids=failed_creator_ids,
                 )
-                removed += _prune_stale_paths(_db, available_paths)
+                removed += _prune_stale_paths(
+                    _db, available_paths, protected_creator_ids=failed_creator_ids,
+                )
                 _prune_stale_stl_files(
                     _db, available_paths, protected_creator_ids=failed_creator_ids,
                 )
@@ -330,7 +332,11 @@ def _exceeds_prune_cap(stale_count: int, total: int, reason: str) -> bool:
     return False
 
 
-def _prune_stale_paths(db: Session, available_root_paths: list[str]):
+def _prune_stale_paths(
+    db: Session,
+    available_root_paths: list[str],
+    protected_creator_ids: set[int] | None = None,
+):
     """Remove models whose folder_path no longer exists on disk — cleans up rows
     left behind after a creator/character folder is renamed under a still-mounted
     root (e.g. 'polyminds studios' → 'PolyMind Studios'). The scanner never visits
@@ -343,10 +349,17 @@ def _prune_stale_paths(db: Session, available_root_paths: list[str]):
     dropped. Models not attributable to any online root are left untouched. The 50%
     cap (shared with the other prunes) is a second safety net against a botched run.
 
+    Models under a creator whose walk FAILED this run (protected_creator_ids) are
+    also never pruned here — same STUDIO-79 rationale as _prune_stale_models and
+    _prune_stale_stl_files: a transient error partway through a creator's walk
+    (root listable, but a subfolder flakes) must not look like a deleted folder
+    (STUDIO-296).
+
     Returns the number of models pruned (for the scan completion summary, #223).
     """
     if not available_root_paths:
         return 0
+    protected = protected_creator_ids or set()
     roots_norm = [os.path.normcase(os.path.normpath(p)) for p in available_root_paths]
 
     def _under_online_root(folder_path: str | None) -> bool:
@@ -355,8 +368,15 @@ def _prune_stale_paths(db: Session, available_root_paths: list[str]):
         n = os.path.normcase(os.path.normpath(folder_path))
         return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
-    rows = db.query(Model.id, Model.folder_path).filter(Model.folder_path != None).all()  # noqa: E711
-    under = [r for r in rows if _under_online_root(r.folder_path)]
+    rows = (
+        db.query(Model.id, Model.folder_path, Model.creator_id)
+        .filter(Model.folder_path != None)  # noqa: E711
+        .all()
+    )
+    under = [
+        r for r in rows
+        if r.creator_id not in protected and _under_online_root(r.folder_path)
+    ]
     total = len(under)
     stale_ids = [r.id for r in under if not Path(r.folder_path).exists()]
     if not stale_ids:
