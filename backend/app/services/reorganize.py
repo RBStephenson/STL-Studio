@@ -17,6 +17,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, field
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
@@ -169,22 +170,37 @@ def _stat_file(path: str) -> tuple[int, int, bool, bool]:
 # feeds the read-only preview.
 _STAT_CACHE_TTL = 5.0  # seconds
 _stat_cache: dict[str, tuple[float, int, int, bool, bool]] = {}  # path -> (cached_at, size, mtime_ns, is_symlink, missing)
+# Last time a sweep of expired entries ran (STUDIO-314) — the TTL above is
+# only ever checked at read time, so without this an entry for a path that's
+# never looked up again (a model moved out of the library, a one-off preview
+# scope) sits in the dict forever, growing it to "every path ever touched
+# this process's lifetime" instead of "paths touched recently".
+_stat_cache_last_sweep = 0.0
 
 
 def _clear_stat_cache() -> None:
     """Test/apply hook — drop every cached entry so the next _stat_file_cached
     call re-stats from disk."""
+    global _stat_cache_last_sweep
     _stat_cache.clear()
+    _stat_cache_last_sweep = 0.0
 
 
 def _stat_file_cached(path: str) -> tuple[int, int, bool, bool]:
     """TTL-cached wrapper around _stat_file — see _stat_cache's comment."""
+    global _stat_cache_last_sweep
     now = time.monotonic()
     cached = _stat_cache.get(path)
     if cached is not None and now - cached[0] < _STAT_CACHE_TTL:
         return cached[1], cached[2], cached[3], cached[4]
     result = _stat_file(path)
     _stat_cache[path] = (now, *result)
+    # Opportunistic sweep, throttled to at most once per TTL window so this
+    # doesn't turn every single stat call into an O(cache size) scan.
+    if now - _stat_cache_last_sweep >= _STAT_CACHE_TTL:
+        for stale_path in [p for p, entry in _stat_cache.items() if now - entry[0] >= _STAT_CACHE_TTL]:
+            del _stat_cache[stale_path]
+        _stat_cache_last_sweep = now
     return result
 
 
@@ -292,13 +308,34 @@ def build_manifest(
             if _key(m.folder_path or "") == skey or _key(m.folder_path or "").startswith(skey + "/")
         ]
     elif root_id is not None:
-        # Limit to models physically under the selected root.
+        # Limit to models physically under the selected root. A coarse SQL
+        # prefix filter runs first so a root-scoped preview on a library with
+        # several scan roots doesn't load (and joinedload the STL rows for)
+        # every model just to discard most of them in Python (STUDIO-314) —
+        # it only narrows the candidate set, though: LIKE-based prefix
+        # matching isn't casefold/NFC-safe across every DB backend, so the
+        # exact case-insensitive check below still runs and remains the
+        # actual filter of record. Both '/' and '\' separator forms of each
+        # root are matched — folder_path is stored as-is from the OS (a
+        # Windows/standalone install stores backslashes), while root_keys'
+        # canon form is always '/'-normalized, so matching only the canon
+        # form would silently exclude every real Windows row.
         root_canons = [c for c, _ in root_keys]
-        models = [
-            m for m in models_q.all()
-            if any(_key(m.folder_path or "").startswith(rk + "/") or _key(m.folder_path or "") == rk
-                   for _, rk in root_keys)
-        ] if root_canons else []
+        if not root_canons:
+            models = []
+        else:
+            root_prefixes = {p for c in root_canons for p in (c, c.replace("/", "\\"))}
+            like_clauses = (
+                [Model.folder_path.like(p + "/%") for p in root_prefixes]
+                + [Model.folder_path.like(p + "\\%") for p in root_prefixes]
+                + [Model.folder_path == p for p in root_prefixes]
+            )
+            candidates = models_q.filter(or_(*like_clauses)).all()
+            models = [
+                m for m in candidates
+                if any(_key(m.folder_path or "").startswith(rk + "/") or _key(m.folder_path or "") == rk
+                       for _, rk in root_keys)
+            ]
     else:
         models = models_q.all()
 
@@ -768,10 +805,26 @@ def _build_entry(
         if is_missing:
             continue
         is_symlink = is_symlink or link
+        # Same collapse risk as STL filenames above, and just as real: two
+        # gallery images with the same basename in different subfolders (or
+        # differing only by case) both flatten to proposed_dir/<basename>.
+        # Apply forgives an image FileExistsError by skipping the move
+        # (reorganize_apply.apply_manifest), so unlike an STL collision this
+        # wouldn't even fail loudly — the second image would just silently
+        # stay behind. Shares dest_name_counts with the STL loop above so the
+        # whole proposed_dir namespace is disambiguated together, not just
+        # within each file kind (STUDIO-314).
+        dest_filename = os.path.basename(p)
+        dest_key = dest_filename.casefold()
+        count = dest_name_counts.get(dest_key, 0) + 1
+        dest_name_counts[dest_key] = count
+        if count > 1:
+            stem, ext = os.path.splitext(dest_filename)
+            dest_filename = f"{stem}-{count}{ext}"
         files.append(FileMove(
             stl_file_id=None,
             current_path=_canon(p),
-            proposed_path=_canon(proposed_dir + "/" + os.path.basename(p)),
+            proposed_path=_canon(proposed_dir + "/" + dest_filename),
             size_bytes=size,
             mtime_ns=mtime_ns,
             content_hash=None,
