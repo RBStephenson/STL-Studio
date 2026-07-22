@@ -532,6 +532,32 @@ class TestUndo:
         assert resp.status_code == 403
 
 
+class TestManifestRetention:
+    """STUDIO-313: prune-on-preview must never touch a manifest with a live
+    undo log — undo reads that exact row's trusted applied_inbox_roots to
+    confine inbox restores."""
+
+    def test_applied_manifest_survives_later_prune(self, client, db, tmp_path, write_mode):
+        from app.models import ReorganizeManifest
+
+        _root(db, tmp_path)
+        m1 = _seed(db, tmp_path, title="Bust", filename="a.stl")
+
+        # Previewed but never applied — the next preview should prune this one.
+        stale_id = _preview(client)["manifest_id"]
+
+        m2 = _seed(db, tmp_path, title="Cape", filename="b.stl")
+        applied_preview = _preview(client)
+        applied_id = applied_preview["manifest_id"]
+        assert _apply(client, applied_id, [m1.id, m2.id]).status_code == 200
+
+        # A third preview triggers the prune pass.
+        _preview(client)
+
+        assert db.query(ReorganizeManifest).filter_by(id=stale_id).first() is None
+        assert db.query(ReorganizeManifest).filter_by(id=applied_id).first() is not None
+
+
 class TestManifestIdValidation:
     @pytest.mark.parametrize("bad_id", ["../../etc/passwd", "abc", "../" * 5, "g" * 32])
     def test_apply_rejects_non_token_manifest_id(self, client, db, tmp_path, write_mode, bad_id):

@@ -152,6 +152,32 @@ def _stored_template(db: Session, template: str | None) -> str | None:
     return row.value if row is not None else None
 
 
+def _prune_stale_manifests(db: Session) -> None:
+    """Delete previously-persisted manifest rows that were never applied
+    (STUDIO-313).
+
+    Every preview call persists a *full* manifest payload — every entry in the
+    library, with per-file move lists and fingerprints — as its own row, and
+    the Reorganize page re-previews the whole library on every resolved-field
+    edit (collision detection is global). Left unpruned that's unbounded DB
+    growth from routine use, not just an edge case.
+
+    A manifest with no undo log on disk was never applied (or applying it
+    failed before any file moved) — apply always operates on the manifest the
+    UI just re-previewed, so a stale, never-applied row can no longer be
+    targeted by anything and is safe to drop. A manifest whose undo log
+    exists is kept indefinitely: undo reads this exact row's trusted
+    ``applied_inbox_roots`` field to confine inbox restores, and the log
+    itself is never deleted once written (undo doesn't clean it up), so
+    there's no reliable point at which the manifest becomes safe to drop
+    either. That bounds growth to "one row per file actually moved", not
+    "one row per preview" — the applied case is the rare, deliberate one.
+    """
+    for row in db.query(ReorganizeManifest).all():
+        if not reorganize_apply.undo_log_path(row.id).exists():
+            db.delete(row)
+
+
 def _build_and_persist(
     db: Session,
     template: str | None,
@@ -191,6 +217,7 @@ def _build_and_persist(
         entries=entries,
         stats=_compute_stats(entries),
     )
+    _prune_stale_manifests(db)
     # Persist the immutable artifact so Phase 2 can execute + verify it.
     db.add(ReorganizeManifest(
         id=response.manifest_id,
