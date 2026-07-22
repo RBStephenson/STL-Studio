@@ -498,6 +498,25 @@ class TestResolution:
         assert db.query(ReorganizeManifest).filter_by(id=mid).first() is not None
 
 
+class TestManifestRetention:
+    """STUDIO-313: a never-applied manifest must not survive a later preview —
+    otherwise every resolved-field edit on the Reorganize page (each of which
+    re-previews the whole library) leaves a dead row behind forever."""
+
+    def test_prior_unapplied_manifest_pruned_on_next_preview(self, client, db, tmp_path):
+        from app.models import ReorganizeManifest
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path)
+
+        first_id = client.get("/reorganize/preview").json()["manifest_id"]
+        assert db.query(ReorganizeManifest).filter_by(id=first_id).first() is not None
+
+        second_id = client.get("/reorganize/preview").json()["manifest_id"]
+        assert first_id != second_id
+        assert db.query(ReorganizeManifest).filter_by(id=first_id).first() is None
+        assert db.query(ReorganizeManifest).filter_by(id=second_id).first() is not None
+
+
 class TestStats:
     def test_stats_summary_counts(self, client, db, tmp_path):
         _root(db, tmp_path)
