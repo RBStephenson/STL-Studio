@@ -162,6 +162,12 @@ def _safe_move(src: str, dst: str) -> None:
     # Cross-device: copy to a temp sibling, fsync, verify, atomic swap, unlink src.
     tmp = dst_n + ".reorgtmp"
     shutil.copyfile(src_n, tmp)
+    # copyfile() alone leaves tmp with a fresh mtime — the undo log records the
+    # source's pre-move (size, mtime_ns) fingerprint, and undo re-stats the
+    # destination against that recorded value to detect drift. Without
+    # preserving mtime here, every cross-device move would look "drifted" to
+    # undo and be skipped, even though nothing actually changed (STUDIO-312).
+    shutil.copystat(src_n, tmp)
     with open(tmp, "rb") as fh:
         os.fsync(fh.fileno())
     if os.path.getsize(tmp) != os.path.getsize(src_n):

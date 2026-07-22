@@ -337,10 +337,15 @@ class TestSafeMovePrimitive:
                 raise OSError(errno.EXDEV, "cross-device")
             return real_rename(a, b)
 
+        src_mtime_ns = src.stat().st_mtime_ns
         monkeypatch.setattr(os, "rename", fake_rename)
         _safe_move(str(src), str(dst))
         assert dst.read_bytes() == b"payload"
         assert not src.exists()
+        # STUDIO-312: the destination must carry the source's mtime, not a
+        # fresh copy-time one — undo's drift check re-stats the destination
+        # against the fingerprint recorded at preview time.
+        assert dst.stat().st_mtime_ns == src_mtime_ns
 
     def test_never_overwrites_existing_destination(self, tmp_path):
         src = tmp_path / "a" / "head.stl"
@@ -436,6 +441,36 @@ class TestUndo:
         db.refresh(m)
         # folder_path restored to the original source dir.
         assert m.folder_path == src.rsplit("/", 1)[0]
+
+    def test_undo_restores_cross_device_move(self, client, db, tmp_path, write_mode, monkeypatch):
+        """STUDIO-312 regression: a move that falls back to the EXDEV copy path
+        must still be undo-able — the destination's mtime has to match the
+        fingerprint recorded at preview time, or undo's drift check skips it."""
+        _root(db, tmp_path)
+        m = _seed(db, tmp_path)
+        preview = _preview(client)
+        mid = preview["manifest_id"]
+        entry = preview["entries"][0]
+        src = entry["files"][0]["current_path"]
+        dst = entry["files"][0]["proposed_path"]
+
+        real_rename = os.rename
+
+        def fake_rename(a, b):
+            if os.path.normpath(str(b)) == os.path.normpath(dst.replace("/", os.sep)):
+                raise OSError(errno.EXDEV, "cross-device")
+            return real_rename(a, b)
+
+        monkeypatch.setattr(os, "rename", fake_rename)
+        assert _apply(client, mid, [m.id]).status_code == 200
+        assert os.path.exists(dst) and not os.path.exists(src)
+
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid})
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["reversed_files"] == 1
+        assert data["skipped"] == []
+        assert os.path.exists(src) and not os.path.exists(dst)
 
     def test_undo_is_idempotent(self, client, db, tmp_path, write_mode):
         _root(db, tmp_path)
