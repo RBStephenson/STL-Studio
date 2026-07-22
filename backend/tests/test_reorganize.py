@@ -292,6 +292,30 @@ class TestSiblingFilenameCollision:
         # No two files in the same entry ever propose the identical path.
         assert len({f["proposed_path"] for f in entry["files"]}) == len(entry["files"])
 
+    def test_gallery_image_basename_collision_gets_disambiguated(self, client, db, tmp_path):
+        """STUDIO-314: two gallery images with the same basename in different
+        subfolders both flatten to proposed_dir/<basename> — apply forgives
+        an image FileExistsError by skipping the move, so unlike an STL
+        collision this wouldn't even fail loudly. Must be disambiguated the
+        same way STL filenames already are (#1087)."""
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path)
+        folder = Path(m.folder_path)
+        sub_a, sub_b = folder / "a", folder / "b"
+        sub_a.mkdir()
+        sub_b.mkdir()
+        img_a, img_b = sub_a / "cover.jpg", sub_b / "cover.jpg"
+        img_a.write_bytes(b"one")
+        img_b.write_bytes(b"two")
+        m.image_paths = [str(img_a).replace("\\", "/"), str(img_b).replace("\\", "/")]
+        db.commit()
+
+        entry = client.get("/reorganize/preview").json()["entries"][0]
+        image_moves = [f for f in entry["files"] if f["kind"] == "image"]
+        assert len(image_moves) == 2
+        proposed = {f["proposed_path"] for f in image_moves}
+        assert len(proposed) == 2  # no collision — both get a real destination
+
 
 class TestScanRootEscape:
     def test_model_outside_all_roots_escapes(self, client, db, tmp_path):
@@ -315,6 +339,36 @@ class TestScanRootEscape:
         entry = client.get("/reorganize/preview").json()["entries"][0]
         assert entry["escapes_scan_root"] is True
         assert entry["eligible"] is False
+
+
+class TestRootScopedPreview:
+    """STUDIO-314: root_id now runs a coarse SQL prefix filter before the
+    exact case-insensitive check, to avoid loading every model in the
+    library just to discard most of them in Python. The SQL filter is only
+    a narrowing pre-pass — this exercises that the exact result is
+    unaffected (right models included, unrelated ones excluded, even when
+    they sit on a same-prefix sibling root)."""
+
+    def test_only_models_under_selected_root_are_included(self, client, db, tmp_path):
+        root_a = tmp_path / "library-a"
+        # Deliberately a prefix-sharing sibling, not a nested subdir — proves
+        # the SQL LIKE pre-filter's "/"-anchored pattern isn't fooled into
+        # treating "library-ab" as being under "library-a".
+        root_b = tmp_path / "library-ab"
+        root_a.mkdir()
+        root_b.mkdir()
+        ra = db.query(ScanRoot).filter_by(path=str(root_a)).first() or ScanRoot(path=str(root_a), enabled=True)
+        rb = ScanRoot(path=str(root_b), enabled=True)
+        db.add_all([ra, rb])
+        db.commit()
+
+        m_a = _model_with_file(db, root_a, creator_name="InA")
+        m_b = _model_with_file(db, root_b, creator_name="InB")
+
+        scoped = client.get("/reorganize/preview", params={"root_id": ra.id}).json()
+        scoped_ids = {e["model_id"] for e in scoped["entries"]}
+        assert m_a.id in scoped_ids
+        assert m_b.id not in scoped_ids
 
 
 class TestOverrideCapture:

@@ -149,6 +149,12 @@ def _safe_move(src: str, dst: str) -> None:
     # refuse, so stage through a temp name.
     if same_entry and src_n != dst_n:
         tmp = src_n + ".reorgtmp"
+        # A prior crash mid-move can leave this tmp behind — it's ours by
+        # construction (nothing else writes this suffix) and dead, so clear
+        # it before staging rather than letting a stale file make the rename
+        # fail outright (STUDIO-314).
+        if os.path.exists(tmp):
+            os.unlink(tmp)
         os.rename(src_n, tmp)
         os.replace(tmp, dst_n)
         return
@@ -161,6 +167,11 @@ def _safe_move(src: str, dst: str) -> None:
             raise
     # Cross-device: copy to a temp sibling, fsync, verify, atomic swap, unlink src.
     tmp = dst_n + ".reorgtmp"
+    # Same crash-leftover concern as above — a stale tmp from an earlier
+    # interrupted EXDEV copy would otherwise later surface as a bogus
+    # "destination already exists" once treated as real debris (STUDIO-314).
+    if os.path.exists(tmp):
+        os.unlink(tmp)
     shutil.copyfile(src_n, tmp)
     # copyfile() alone leaves tmp with a fresh mtime — the undo log records the
     # source's pre-move (size, mtime_ns) fingerprint, and undo re-stats the
@@ -453,10 +464,16 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
 
     GroupOverride no longer needs this (#678 Phase 5): the equivalent flag
     (Model.no_group) lives on the Model row itself, so it moves for free."""
+    # Collected across every entry and applied in one PackOverride scan at the
+    # end, instead of one full-table query per entry (STUDIO-314) — the
+    # override table is small today, but the per-entry query pattern doesn't
+    # scale with the number of moves in a batch.
+    override_pairs: list[tuple[str, str]] = []
     for entry in selected:
         if entry.get("package_mode"):
             _repath_package_db(db, entry)
             _repath_character_assets(db, entry)
+            override_pairs.append((entry["source_path"], entry["proposed_dir"]))
             continue
         model = db.get(Model, entry["model_id"])
         if model is not None:
@@ -481,7 +498,8 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
         old_dir = _entry_source_dir(entry)
         new_dir = entry["proposed_dir"]
         if old_dir is not None:
-            _repath_overrides(db, PackOverride, old_dir, new_dir)
+            override_pairs.append((old_dir, new_dir))
+    _repath_overrides(db, PackOverride, override_pairs)
     db.commit()
 
 
@@ -518,7 +536,6 @@ def _repath_package_db(db: Session, entry: dict) -> None:
             if replaced:
                 stl.path = replaced
                 stl.filename = os.path.basename(replaced)
-    _repath_overrides(db, PackOverride, old, new)
 
 
 def _repath_character_assets(db: Session, entry: dict) -> None:
@@ -574,17 +591,27 @@ def _entry_source_dir(entry: dict) -> str | None:
     return cur.rsplit("/", 1)[0] if "/" in cur else None
 
 
-def _repath_overrides(db: Session, model_cls, old_dir: str, new_dir: str) -> None:
-    """Repath any path-keyed override row (e.g. PackOverride) whose path is the
-    moved dir or nested under it, preserving the suffix below the model dir."""
-    old_key = _key(old_dir)
+def _repath_overrides(db: Session, model_cls, pairs: list[tuple[str, str]]) -> None:
+    """Repath any path-keyed override row (e.g. PackOverride) whose path is one
+    of ``(old_dir, new_dir)`` pairs' moved dir or nested under it, preserving
+    the suffix below the model dir.
+
+    Takes every pair from a whole apply/undo batch and applies them in a
+    single table scan, rather than callers running one full-table query per
+    moved entry (STUDIO-314) — cheap today with a small override table, but
+    the per-entry pattern didn't scale with batch size."""
+    if not pairs:
+        return
+    keyed = [(_key(old), old, new) for old, new in pairs]
     for row in db.query(model_cls).all():
         rk = _key(row.path or "")
-        if rk == old_key:
-            row.path = new_dir
-        elif rk.startswith(old_key + "/"):
-            suffix = row.path[len(old_dir):]
-            row.path = new_dir + suffix
+        for old_key, old_dir, new_dir in keyed:
+            if rk == old_key:
+                row.path = new_dir
+                break
+            if rk.startswith(old_key + "/"):
+                row.path = new_dir + row.path[len(old_dir):]
+                break
 
 
 def _prune_empty_sources(selected: list[dict]) -> None:
@@ -775,7 +802,24 @@ def _repath_db_undo(
     override_dirs: set[tuple[str, str]] = set()   # (proposed_dir, source_dir)
     for to, frm, kind, model_id in reversed_moves:
         if kind == "character_asset":
-            for model in db.query(Model).all():
+            # A character-level shared asset can be referenced by every model
+            # in its character group, so all of them need repathing — but
+            # that group is bounded (character_model_ids on the manifest
+            # entry that owns this asset), not the whole library. Scoping to
+            # it avoids an O(records × every model in the DB) scan plus an
+            # unconditional image-manifest invalidation on unrelated models
+            # (STUDIO-314). Falls back to the full table only if the trusted
+            # manifest row is unavailable or predates character_model_ids.
+            scoped_ids = None
+            for entry in (manifest_payload or {}).get("entries", []):
+                if entry.get("model_id") == model_id and entry.get("character_model_ids"):
+                    scoped_ids = entry["character_model_ids"]
+                    break
+            query = (
+                db.query(Model).filter(Model.id.in_(scoped_ids))
+                if scoped_ids is not None else db.query(Model)
+            )
+            for model in query.all():
                 _repath_model_image(model, to, frm)
                 model.other_files = [frm if _key(path) == _key(to) else path
                                      for path in (model.other_files or [])]
@@ -805,9 +849,10 @@ def _repath_db_undo(
             model.updated_at = utcnow()
         override_dirs.add((_parent(to), _parent(frm)))
 
-    for proposed_dir, source_dir in override_dirs:
-        if proposed_dir and source_dir:
-            _repath_overrides(db, PackOverride, proposed_dir, source_dir)
+    _repath_overrides(db, PackOverride, [
+        (proposed_dir, source_dir) for proposed_dir, source_dir in override_dirs
+        if proposed_dir and source_dir
+    ])
     reversed_pairs = {(_key(to), _key(frm)) for to, frm, _kind, _mid in reversed_moves}
 
     def restored_path(path: str | None, old: str, new: str) -> str | None:
@@ -816,6 +861,7 @@ def _repath_db_undo(
             return path
         return candidate if (_key(path), _key(candidate or "")) in reversed_pairs else path
 
+    package_override_pairs: list[tuple[str, str]] = []
     for entry in (manifest_payload or {}).get("entries", []):
         if not entry.get("package_mode"):
             continue
@@ -835,5 +881,6 @@ def _repath_db_undo(
             model.primary_image_path = restored_path(model.primary_image_path, old, new)
             model.image_manifest = None
             model.image_manifest_sig = None
-        _repath_overrides(db, PackOverride, old, new)
+        package_override_pairs.append((old, new))
+    _repath_overrides(db, PackOverride, package_override_pairs)
     db.commit()

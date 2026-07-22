@@ -209,6 +209,53 @@ class TestPackageApply:
         db.refresh(first)
         assert first.thumbnail_path == complete_owner["character_proposed_dir"] + "/img/preview.jpg"
 
+    def test_character_asset_undo_does_not_touch_unrelated_models(self, client, db, tmp_path, write_mode):
+        """STUDIO-314: undoing a character-level shared-asset move must only
+        repath (and invalidate the image manifest of) models in that
+        character's own group — not every model in the library."""
+        _root(db, tmp_path)
+        creator = make_creator(db, name="Abe3d")
+        character = tmp_path / "MessyCreator" / "Ada Wong"
+        first_dir = character / "Release One"
+        second_dir = character / "Release Two"
+        image = character / "img" / "preview.jpg"
+        first_dir.mkdir(parents=True)
+        second_dir.mkdir()
+        image.parent.mkdir()
+        first_file = first_dir / "body.stl"
+        second_file = second_dir / "alt.stl"
+        first_file.write_bytes(b"one")
+        second_file.write_bytes(b"two")
+        image.write_bytes(b"jpg")
+        first = make_model(db, creator, name="Release One", character="Ada Wong")
+        second = make_model(db, creator, name="Release Two", character="Ada Wong")
+        first.folder_path = str(first_dir).replace("\\", "/")
+        second.folder_path = str(second_dir).replace("\\", "/")
+        first.thumbnail_path = str(image).replace("\\", "/")
+        db.commit()
+        make_stl_file(db, first, filename="body.stl", path=str(first_file).replace("\\", "/"))
+        make_stl_file(db, second, filename="alt.stl", path=str(second_file).replace("\\", "/"))
+
+        # An unrelated model elsewhere in the library — must be left alone.
+        bystander = _seed(db, tmp_path, title="Unrelated", filename="c.stl", character="Someone Else")
+        bystander.image_manifest = {"sentinel": True}
+        bystander.image_manifest_sig = "sentinel-sig"
+        db.commit()
+
+        client.patch("/settings", json={"reorganize_package_mode_enabled": True})
+        preview = client.get("/reorganize/preview", params={"template": "{creator}/{character}"}).json()
+        entries = [e for e in preview["entries"] if e["model_id"] in (first.id, second.id)]
+        response = client.post("/reorganize/apply", json={
+            "manifest_id": preview["manifest_id"], "entry_ids": [e["model_id"] for e in entries],
+        })
+        assert response.status_code == 200, response.text
+
+        undo = client.post("/reorganize/undo", json={"manifest_id": preview["manifest_id"]})
+        assert undo.status_code == 200, undo.text
+        db.refresh(bystander)
+        assert bystander.image_manifest == {"sentinel": True}
+        assert bystander.image_manifest_sig == "sentinel-sig"
+
 
 class TestOnProgress:
     """on_progress(moved, total) is purely additive — no callback means no
@@ -367,6 +414,42 @@ class TestSafeMovePrimitive:
         # New name exists; on a case-insensitive FS it's the same inode renamed.
         names = {p.name for p in tmp_path.iterdir()}
         assert "foo.stl" in names
+
+    def test_case_only_rename_clears_stale_tmp_debris(self, tmp_path):
+        """STUDIO-314: a prior crash mid-rename can leave src.reorgtmp behind;
+        the next attempt must clear it rather than fail on it."""
+        src = tmp_path / "Foo.stl"
+        src.write_bytes(b"x")
+        dst = tmp_path / "foo.stl"
+        stale_tmp = tmp_path / "Foo.stl.reorgtmp"
+        stale_tmp.write_bytes(b"leftover from a crashed run")
+        _safe_move(str(src), str(dst))
+        names = {p.name for p in tmp_path.iterdir()}
+        assert "foo.stl" in names
+        assert "Foo.stl.reorgtmp" not in names
+
+    def test_cross_device_clears_stale_tmp_debris(self, tmp_path, monkeypatch):
+        """STUDIO-314: a prior crashed EXDEV copy can leave dst.reorgtmp
+        behind; it must not be mistaken for a real collision."""
+        src = tmp_path / "a" / "head.stl"
+        src.parent.mkdir(parents=True)
+        src.write_bytes(b"payload")
+        dst = tmp_path / "b" / "head.stl"
+        dst.parent.mkdir(parents=True)
+        stale_tmp = tmp_path / "b" / "head.stl.reorgtmp"
+        stale_tmp.write_bytes(b"leftover from a crashed run")
+
+        real_rename = os.rename
+
+        def fake_rename(a, b):
+            if str(b) == str(dst):
+                raise OSError(errno.EXDEV, "cross-device")
+            return real_rename(a, b)
+
+        monkeypatch.setattr(os, "rename", fake_rename)
+        _safe_move(str(src), str(dst))
+        assert dst.read_bytes() == b"payload"
+        assert not stale_tmp.exists()
 
 
 class TestCrashMidBatch:
@@ -616,6 +699,32 @@ class TestOverrideRepath:
         assert resp.status_code == 200
         new_dir = entry["proposed_dir"]
         assert db.query(PackOverride).filter_by(path=new_dir).first() is not None
+
+    def test_multiple_entries_each_repath_their_own_override(self, db, tmp_path, write_mode, client):
+        """STUDIO-314: _repath_overrides now batches every entry's (old, new)
+        pair into a single PackOverride scan instead of one query per entry —
+        each override must still land at its OWN entry's new path, not get
+        skipped or cross-applied to a sibling entry's destination."""
+        _root(db, tmp_path)
+        m1 = _seed(db, tmp_path, title="Bust", filename="a.stl")
+        m2 = _seed(db, tmp_path, title="Cape", filename="b.stl")
+        old1, old2 = m1.folder_path, m2.folder_path
+        db.add(PackOverride(path=old1))
+        db.add(PackOverride(path=old2))
+        db.commit()
+
+        preview = _preview(client)
+        by_id = {e["model_id"]: e for e in preview["entries"]}
+        mid = preview["manifest_id"]
+        resp = client.post("/reorganize/apply",
+                           json={"manifest_id": mid, "entry_ids": [m1.id, m2.id]})
+        assert resp.status_code == 200, resp.text
+
+        new1, new2 = by_id[m1.id]["proposed_dir"], by_id[m2.id]["proposed_dir"]
+        assert db.query(PackOverride).filter_by(path=new1).first() is not None
+        assert db.query(PackOverride).filter_by(path=new2).first() is not None
+        assert db.query(PackOverride).filter_by(path=old1).first() is None
+        assert db.query(PackOverride).filter_by(path=old2).first() is None
 
     def test_no_group_pin_survives_a_move_with_no_repathing(self, db, tmp_path, write_mode, client):
         """Model.no_group (#678 Phase 5) lives on the Model row, not a path-keyed

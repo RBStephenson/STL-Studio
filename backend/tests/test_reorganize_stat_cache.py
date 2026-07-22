@@ -113,3 +113,32 @@ class TestStatCache:
         # preview build (same overrides API surface as previewWithOverrides).
         reorg.build_manifest(db, None, overrides={999: {"creator": "Doesn't Matter"}})
         assert len(stat_calls) == 2  # no new stat calls — both files served from cache
+
+    def test_expired_entries_are_swept_not_kept_forever(self, db, tmp_path, monkeypatch):
+        """STUDIO-314: the TTL was only ever checked at read time — an entry
+        for a path that's never looked up again (model moved elsewhere, a
+        one-off preview scope) used to sit in the dict forever. A sweep must
+        actually remove expired entries, not just skip using them."""
+        _root(db, tmp_path)
+        m1, f1 = _model_with_file(db, tmp_path, creator_name="Abe3D", title="Bust")
+
+        fake_now = [0.0]
+        monkeypatch.setattr(reorg.time, "monotonic", lambda: fake_now[0])
+
+        reorg.build_manifest(db, None)
+        assert len(reorg._stat_cache) == 1
+
+        # Remove the first model so its cache entry falls out of scope —
+        # never refreshed again, same as a model that moved or was deleted —
+        # then advance past the TTL and trigger a second, unrelated stat call
+        # to perform the opportunistic sweep.
+        db.delete(m1.stl_files[0])
+        db.delete(m1)
+        db.commit()
+        fake_now[0] += reorg._STAT_CACHE_TTL + 0.1
+        _model_with_file(db, tmp_path, creator_name="Zeta3D", title="Rogue")
+        reorg.build_manifest(db, None)
+
+        # The first model's now-expired, never-revisited entry must be gone —
+        # only the fresh entry from this second build remains.
+        assert len(reorg._stat_cache) == 1
