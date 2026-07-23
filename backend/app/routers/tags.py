@@ -7,13 +7,28 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Model, ModelTag
 from app.schemas import BulkTagUpdate, BulkEnrichUpdate, TagRenameBody, TagMergeBody
-from app.services.tag_sync import sync_model_tags, bulk_sync_model_tags
+from app.services.tag_sync import bulk_sync_model_tags
 from app.services import scanner
 from app.services.scanner import resolve_creator
 from app.services.variant_sync import propagate_source_url
 from app.utils import utcnow
 
 router = APIRouter(prefix="/models", tags=["models"])
+
+
+def _suppress_auto_tag(model: Model, tag: str) -> None:
+    """Suppress `tag` on this model if the scanner applied it (auto_tags).
+
+    model_tags rows regenerate from auto_tags on every sync, so merely
+    removing a tag from model.tags can't make an auto-applied tag go away —
+    it resurrects on the next sync (STUDIO-328). removed_auto_tags is the
+    existing suppression list _tag_map_for already honors; recording the tag
+    there is what actually deletes an auto tag."""
+    autos = {a.strip().lower() for a in (model.auto_tags or []) if a.strip()}
+    if tag in autos:
+        removed = list(model.removed_auto_tags or [])
+        if tag not in removed:
+            model.removed_auto_tags = removed + [tag]
 
 
 @router.get("/tags/all")
@@ -64,8 +79,16 @@ def rename_tag(body: TagRenameBody, db: Session = Depends(get_db)):
             # deduplicate while preserving order
             seen: set[str] = set()
             tags = [t for t in tags if not (t in seen or seen.add(t))]  # type: ignore[func-returns-value]
-            model.tags = tags
-        sync_model_tags(model, db)
+        # The model may carry `old` only as an auto tag (that's how it joined
+        # `affected` at all) — suppress the auto tag and promote the renamed
+        # value to a user tag, otherwise the rename silently no-ops and the
+        # old tag resurrects on the next sync (STUDIO-328).
+        _suppress_auto_tag(model, old)
+        if new not in tags:
+            tags.append(new)
+        model.tags = tags
+        model.updated_at = utcnow()
+    bulk_sync_model_tags(affected, db)
     db.commit()
     return {"ok": True, "updated": len(affected)}
 
@@ -90,13 +113,16 @@ def merge_tags(body: TagMergeBody, db: Session = Depends(get_db)):
         .all()
     )
     for model in affected:
-        tags = list(model.tags or [])
-        if source in tags:
-            tags = [t for t in tags if t != source]
-            if target not in tags:
-                tags.append(target)
-            model.tags = tags
-        sync_model_tags(model, db)
+        tags = [t for t in (model.tags or []) if t != source]
+        # Same auto-tag handling as rename (STUDIO-328): the model may carry
+        # `source` only as an auto tag — suppress it and make sure the target
+        # lands as a user tag either way.
+        _suppress_auto_tag(model, source)
+        if target not in tags:
+            tags.append(target)
+        model.tags = tags
+        model.updated_at = utcnow()
+    bulk_sync_model_tags(affected, db)
     db.commit()
     return {"ok": True, "updated": len(affected)}
 
@@ -119,7 +145,11 @@ def delete_tag(tag: str, db: Session = Depends(get_db)):
     )
     for model in affected:
         model.tags = [t for t in (model.tags or []) if t != tag]
-        sync_model_tags(model, db)
+        # Auto tags resurrect from auto_tags on the next sync unless
+        # suppressed (STUDIO-328) — this is what actually deletes them.
+        _suppress_auto_tag(model, tag)
+        model.updated_at = utcnow()
+    bulk_sync_model_tags(affected, db)
     db.commit()
     return {"ok": True, "updated": len(affected)}
 
@@ -141,6 +171,10 @@ def bulk_tag_models(body: BulkTagUpdate, db: Session = Depends(get_db)):
             current = list(dict.fromkeys(current + add_tags))
         if remove_set:
             current = [t for t in current if t not in remove_set]
+            # Removing an auto-applied tag must suppress it, not just drop it
+            # from user tags — otherwise it resurrects on sync (STUDIO-328).
+            for t in remove_set:
+                _suppress_auto_tag(model, t)
         model.tags = current
         model.updated_at = utcnow()
 

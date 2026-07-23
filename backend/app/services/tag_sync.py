@@ -80,7 +80,9 @@ def rebuild_all_tags(db: Session) -> int:
     offset = 0
 
     while True:
-        models = db.query(Model).offset(offset).limit(batch_size).all()
+        # Ordered pagination: OFFSET over an unordered query can skip or
+        # repeat rows between batches, silently dropping tag rows mid-rebuild.
+        models = db.query(Model).order_by(Model.id).offset(offset).limit(batch_size).all()
         if not models:
             break
         for model in models:
