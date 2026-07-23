@@ -960,12 +960,24 @@ def bulk_delete_models(body: BulkDeleteRequest, db: Session = Depends(get_db)):
 
     model_ids = [m.id for m in models_to_delete]
 
-    # Delete child records manually (no ON DELETE CASCADE on these FKs).
+    # Delete child records manually — PRAGMA foreign_keys is off, so the DDL
+    # ondelete clauses never fire (see collections.py's matching note).
     db.query(CollectionModel).filter(CollectionModel.model_id.in_(model_ids)).delete(
         synchronize_session=False
     )
     db.query(STLFile).filter(STLFile.model_id.in_(model_ids)).delete(
         synchronize_session=False
+    )
+    # model_tags feed the tag list/counts and the Library tag filter — leaving
+    # them behind accumulates ghost tags after every bulk delete (STUDIO-324).
+    db.query(ModelTag).filter(ModelTag.model_id.in_(model_ids)).delete(
+        synchronize_session=False
+    )
+    # A variant group whose designated rep is being deleted keeps a stale
+    # rep_model_id (the DDL SET NULL is likewise unenforced) — null it so the
+    # rep heuristic takes over cleanly (STUDIO-324).
+    db.query(VariantGroup).filter(VariantGroup.rep_model_id.in_(model_ids)).update(
+        {VariantGroup.rep_model_id: None}, synchronize_session=False
     )
     db.query(Model).filter(Model.id.in_(model_ids)).delete(synchronize_session=False)
     db.commit()
@@ -1084,7 +1096,11 @@ def get_neighbors(
     exclude_tag: str | None = None,
     has_thumbnail: bool | None = None,
     needs_review: bool | None = None,
-    is_inbox: bool | None = None,
+    # Mirrors list_models' default (STUDIO-325): the grid hides inbox models
+    # unless explicitly asked, so Prev/Next must walk the same set — a None
+    # (no-filter) default made neighbors include inbox models the grid never
+    # showed whenever the client omitted the param.
+    is_inbox: bool = False,
     nsfw: bool | None = None,
     is_favorite: bool | None = None,
     print_status: str | None = None,

@@ -104,6 +104,42 @@ class TestBulkDelete:
         assert resp.json()["folders_removed"] == 1
         assert not (tmp_path / "pack").exists()
 
+    def test_bulk_delete_removes_model_tag_rows(self, client, db, tmp_path):
+        """STUDIO-324: PRAGMA foreign_keys is off, so the DDL CASCADE on
+        model_tags never fires — the manual cascade must delete them, or
+        ghost tags accumulate in tag lists/counts after every bulk delete."""
+        from app.models import ModelTag
+        creator = make_creator(db)
+        model = make_model(db, creator)
+        db.add(ModelTag(model_id=model.id, tag="dragon", is_auto=False))
+        db.commit()
+        mid = model.id
+
+        resp = self._delete(client, [mid], delete_files=False)
+        assert resp.status_code == 200
+        assert db.query(ModelTag).filter(ModelTag.model_id == mid).count() == 0
+
+    def test_bulk_delete_nulls_stale_variant_group_rep(self, client, db, tmp_path):
+        """STUDIO-324: deleting a group's designated rep must null
+        variant_groups.rep_model_id (DDL SET NULL is unenforced) so the rep
+        heuristic takes over instead of a dangling pointer persisting."""
+        from app.models import VariantGroup
+        creator = make_creator(db)
+        rep = make_model(db, creator, name="Rep")
+        sibling = make_model(db, creator, name="Sibling")
+        group = VariantGroup(creator_id=creator.id, label="G", rep_model_id=rep.id)
+        db.add(group)
+        db.flush()
+        rep.variant_group_id = group.id
+        sibling.variant_group_id = group.id
+        db.commit()
+        gid, rid = group.id, rep.id
+
+        resp = self._delete(client, [rid], delete_files=False)
+        assert resp.status_code == 200
+        db.expire_all()
+        assert db.get(VariantGroup, gid).rep_model_id is None
+
     def test_delete_files_rejects_folder_outside_roots(self, client, db, tmp_path):
         """A folder_path outside every scan root must be refused before any
         rmtree — the path-injection guard."""
