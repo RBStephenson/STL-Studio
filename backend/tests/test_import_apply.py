@@ -253,6 +253,51 @@ class TestImportApplyPreservesUnmovedFiles:
         # (the missing sibling file) is resolved.
         assert present.exists()
 
+    def test_ineligible_model_image_paths_remapped_when_files_moved(
+        self, client, db, tmp_path, write_mode,
+    ):
+        """STUDIO-317: in a mixed-eligibility batch (so _run_import_apply_job's
+        background path runs, not the synchronous all-ineligible shortcut), an
+        ineligible model whose destination dir already exists still gets its
+        non-STL files physically moved by _move_non_stl_files — image_paths /
+        thumbnail_path must be remapped to the new location too, not left
+        pointing at the now-emptied source folder."""
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+
+        # Ineligible model: destination pre-exists (simulated interrupted prior
+        # run) and it has a missing sibling STL file -> missing_files_on_disk.
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        image = pack / "preview.jpg"; image.write_bytes(b"\xff\xd8\xff")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust")
+        m.image_paths = [str(image).replace("\\", "/")]
+        m.thumbnail_path = str(image).replace("\\", "/")
+        db.add(STLFile(model_id=m.id, path=str(pack / "gone.stl").replace("\\", "/"),
+                       filename="gone.stl", size_bytes=1024))
+        dest_dir = tmp_path / "library" / "abe3d" / "bust"
+        dest_dir.mkdir(parents=True)
+
+        # A second, eligible model in the same source so eligible_ids isn't
+        # empty and the batch goes through the background job path.
+        pack2 = tmp_path / "inbox" / "Knight"; pack2.mkdir(parents=True)
+        f2 = pack2 / "head.stl"; f2.write_bytes(b"solid\nendsolid\n")
+        _inbox_model(db, pack2, creator=creator, character="Knight", title="Knight", with_file=f2)
+        db.commit()
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 1
+        assert body["skipped"] == 1
+
+        db.refresh(m)
+        assert not image.exists()  # moved out of the source folder
+        moved_image = dest_dir / "preview.jpg"
+        assert moved_image.exists()
+        assert [p.replace("\\", "/") for p in m.image_paths] == [str(moved_image).replace("\\", "/")]
+        assert m.thumbnail_path.replace("\\", "/") == str(moved_image).replace("\\", "/")
+
 
 class TestImportApplyScoping:
     """Regression coverage for the source -> entry.path scoping bug: apply
