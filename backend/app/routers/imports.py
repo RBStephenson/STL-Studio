@@ -545,8 +545,17 @@ def _move_non_stl_files(
             removed=m.removed_image_paths or [],
             boundary=old_boundary,
         )
-        if new_others:
-            m.other_files = new_others
+        # Merge, not overwrite (STUDIO-318): the old `m.other_files = new_others`
+        # gave every model sharing old_folder the whole folder's rediscovered
+        # file list and dropped anything the user had added that lived
+        # elsewhere, the same class of bug the image_paths merge above
+        # already fixed (#903-follow-up).
+        m.other_files = scanner._merge_scan_gallery_paths(
+            existing=m.other_files or [],
+            discovered=new_others,
+            removed=[],
+            boundary=old_boundary,
+        )
         # Remap thumbnail_path if it pointed into the old folder (stale after
         # move). normpath first: thumbnail_path/folder_path are stored with
         # forward slashes (see Model helpers), so a raw
@@ -765,6 +774,7 @@ def _run_import_apply_job(
     src: str,
     all_old_to_new: dict[str, str],
     all_folder_map: dict[int, str],
+    all_proposed_dirs: dict[int, str],
     slugify_all: bool,
     slugify_filenames: bool,
     is_single_pack: bool = False,
@@ -817,6 +827,7 @@ def _run_import_apply_job(
                     old = all_folder_map.get(entry.model_id)
                     if old:
                         all_old_to_new[old] = entry.proposed_dir
+                    all_proposed_dirs[entry.model_id] = entry.proposed_dir
 
         handle.update(message="Cleaning up")
         # Move all remaining non-STL files (images, PDFs, etc.) from each old
@@ -837,11 +848,27 @@ def _run_import_apply_job(
                 # destination already exists; eligible packs always get moved.
                 if not os.path.isdir(new_folder):
                     continue
-                models_here = [
-                    model_by_id[mid]
-                    for mid, old in all_folder_map.items()
-                    if old == old_folder and mid in model_by_id
-                ]
+                # STUDIO-319: all_old_to_new is first-wins per old_folder.
+                # Model.folder_path is DB-unique, so two distinct models can't
+                # literally share an old_folder today — this can't currently
+                # trigger — but if that constraint is ever relaxed, a model
+                # whose OWN proposed_dir differs from the winning new_folder
+                # is excluded here rather than silently having its
+                # image_paths/thumbnail_path remapped to the wrong
+                # destination. Defensive only; left in as cheap insurance.
+                models_here = []
+                for mid, old in all_folder_map.items():
+                    if old != old_folder or mid not in model_by_id:
+                        continue
+                    own_dir = all_proposed_dirs.get(mid)
+                    if own_dir and own_dir != new_folder:
+                        logger.warning(
+                            "Import destination collision: model %s wants %r but "
+                            "old_folder %r already claimed by %r — leaving model %s "
+                            "unmoved for retry", mid, own_dir, old_folder, new_folder, mid,
+                        )
+                        continue
+                    models_here.append(model_by_id[mid])
                 _move_non_stl_files(old_folder, new_folder, models_here, db)
                 # Resolve before checking/removing so symlink traversal is
                 # collapsed first. "new_folder already exists" is not proof
@@ -962,6 +989,13 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
     # destination already exists on disk (covers "files missing on disk" ineligible
     # models whose STLs were already moved by a prior import).
     all_old_to_new: dict[str, str] = {}
+    # Every entry's own proposed_dir (STUDIO-319) — lets the job tell a real
+    # destination collision (two models sharing old_folder but wanting
+    # different new folders) apart from two entries that simply agree, so the
+    # loser isn't silently remapped to the winner's destination.
+    all_proposed_dirs: dict[int, str] = {
+        e.model_id: e.proposed_dir for e in resp.entries if e.proposed_dir
+    }
     for entry in resp.entries:
         old = all_folder_map.get(entry.model_id, "")
         if old and old not in all_old_to_new and entry.proposed_dir:
@@ -980,6 +1014,7 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
         _IMPORT_APPLY_KEY, _run_import_apply_job, single_flight=True,
         manifest_id=resp.manifest_id, eligible_ids=eligible_ids, ineligible=ineligible,
         src=src, all_old_to_new=all_old_to_new, all_folder_map=all_folder_map,
+        all_proposed_dirs=all_proposed_dirs,
         slugify_all=slugify_all, slugify_filenames=slugify_filenames,
         is_single_pack=is_single_pack,
     )
