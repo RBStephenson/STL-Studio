@@ -1,8 +1,15 @@
 """Tests for GET /import/preview — pack-grouped inbox projection (Child B, #451)."""
 import os
 
+import pytest
+
 from app.models import Creator, ImportSourceMapping, Model, ScanRoot, STLFile
 from app.utils import utcnow
+
+# Case-insensitive path matching (STUDIO-315/316) is a Windows-filesystem
+# concern — os.path.normcase is a no-op on POSIX, so "Inbox" vs "INBOX" are
+# genuinely different paths there and these scenarios don't apply.
+windows_only = pytest.mark.skipif(os.name != "nt", reason="path-casing behavior is Windows-only")
 
 
 def _creator(db, name):
@@ -127,7 +134,16 @@ class TestImportPreview:
         packs = client.get("/import/preview", params={"source": src}).json()["packs"]
         assert {p["name"] for p in packs} == {"In"}
 
+    def test_empty_source_returns_no_packs(self, db, client):
+        body = client.get("/import/preview", params={"source": "/tmp/nothing"}).json()
+        assert body["packs"] == []
 
+    def test_missing_source_param_is_400(self, db, client):
+        r = client.get("/import/preview", params={"source": ""})
+        assert r.status_code == 400
+
+
+@windows_only
 class TestImportPreviewCaseInsensitiveBucketing:
     """STUDIO-316: folder_path is stored with whatever case the scanner found on
     disk, but Windows paths are case-insensitive — a source queried with
@@ -155,6 +171,7 @@ class TestImportPreviewCaseInsensitiveBucketing:
         assert packs[0]["file_count"] == 3
 
 
+@windows_only
 class TestImportPreviewMappingResolution:
     """STUDIO-315: preview/get-mapping must resolve a stored mapping the same
     way apply does (_mapped_source_for: normcase + longest-prefix), not a raw
@@ -189,11 +206,3 @@ class TestImportPreviewMappingResolution:
         body = client.get("/import/source-mapping", params={"path": queried}).json()
         assert body is not None
         assert body["library_id"] == lib.id
-
-    def test_empty_source_returns_no_packs(self, db, client):
-        body = client.get("/import/preview", params={"source": "/tmp/nothing"}).json()
-        assert body["packs"] == []
-
-    def test_missing_source_param_is_400(self, db, client):
-        r = client.get("/import/preview", params={"source": ""})
-        assert r.status_code == 400
