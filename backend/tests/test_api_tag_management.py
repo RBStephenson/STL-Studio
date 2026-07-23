@@ -339,3 +339,76 @@ class TestBulkTagModels:
             json={"ids": [], "add_tags": ["figure"], "remove_tags": []},
         )
         assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# STUDIO-328: tag operations must suppress auto-tags, not just edit user tags
+# — otherwise the tag resurrects from auto_tags on the next sync.
+# ---------------------------------------------------------------------------
+
+class TestTagOpsOnAutoTags:
+    def _auto_tagged_model(self, db, tag="statue"):
+        creator = make_creator(db)
+        m = make_model(db, creator, name="AutoOnly")
+        m.auto_tags = [tag]
+        sync_model_tags(m, db)
+        db.commit()
+        return m
+
+    def test_delete_auto_tag_suppresses_it(self, client, db):
+        m = self._auto_tagged_model(db)
+        r = client.delete("/models/tags/statue")
+        assert r.status_code == 200
+
+        db.refresh(m)
+        assert "statue" in (m.removed_auto_tags or [])
+        # The index row is gone — and a re-sync must NOT bring it back.
+        sync_model_tags(m, db)
+        db.commit()
+        assert db.query(ModelTag).filter(ModelTag.tag == "statue").count() == 0
+
+    def test_rename_auto_tag_promotes_new_user_tag(self, client, db):
+        m = self._auto_tagged_model(db)
+        r = client.patch(
+            "/models/tags/rename",
+            json={"old_tag": "statue", "new_tag": "figurine"},
+        )
+        assert r.status_code == 200
+
+        db.refresh(m)
+        assert "statue" in (m.removed_auto_tags or [])
+        assert "figurine" in (m.tags or [])
+        sync_model_tags(m, db)
+        db.commit()
+        tags = {row.tag for row in db.query(ModelTag).filter(ModelTag.model_id == m.id)}
+        assert tags == {"figurine"}
+
+    def test_merge_from_auto_source_lands_target(self, client, db):
+        m = self._auto_tagged_model(db)
+        r = client.post(
+            "/models/tags/merge",
+            json={"source_tag": "statue", "target_tag": "figure"},
+        )
+        assert r.status_code == 200
+
+        db.refresh(m)
+        assert "statue" in (m.removed_auto_tags or [])
+        assert "figure" in (m.tags or [])
+        sync_model_tags(m, db)
+        db.commit()
+        tags = {row.tag for row in db.query(ModelTag).filter(ModelTag.model_id == m.id)}
+        assert tags == {"figure"}
+
+    def test_bulk_remove_auto_tag_suppresses_it(self, client, db):
+        m = self._auto_tagged_model(db)
+        r = client.patch(
+            "/models/bulk",
+            json={"ids": [m.id], "add_tags": [], "remove_tags": ["statue"]},
+        )
+        assert r.status_code == 200
+
+        db.refresh(m)
+        assert "statue" in (m.removed_auto_tags or [])
+        sync_model_tags(m, db)
+        db.commit()
+        assert db.query(ModelTag).filter(ModelTag.model_id == m.id).count() == 0
