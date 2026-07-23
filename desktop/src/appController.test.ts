@@ -113,6 +113,95 @@ describe("bootBackendAndLoad", () => {
     );
   });
 
+  it("terminates the spawned backend when a quit arrives during the health poll (STUDIO-336)", async () => {
+    const killed: number[] = [];
+    let spawned!: () => void;
+    const hasSpawned = new Promise<void>((resolve) => {
+      spawned = resolve;
+    });
+    let releaseProbe!: () => void;
+    const probeGate = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    const { controller, deps } = harness({
+      createSidecarDeps: () => fakeSidecarDeps({
+        spawn: (): SidecarProcess => {
+          spawned();
+          return { pid: 4242, on: vi.fn() };
+        },
+        // Never healthy, and blocked until the test releases it — this is the
+        // window during which the user quits.
+        probe: async () => {
+          await probeGate;
+          return false;
+        },
+        killTree: async (pid) => {
+          killed.push(pid);
+        },
+      }),
+    });
+    const win = fakeWin();
+
+    const booting = controller.bootBackendAndLoad(win);
+    await hasSpawned;
+    await controller.stopOwnedSidecar();
+
+    expect(killed).toEqual([4242]);
+
+    releaseProbe();
+    await booting;
+
+    // We killed it; that is not a startup failure worth alarming the user about.
+    expect(deps.showErrorBox).not.toHaveBeenCalled();
+    expect(deps.loadPlaceholderPage).not.toHaveBeenCalled();
+    expect(win.loadURL).not.toHaveBeenCalled();
+  });
+
+  it("does not load the backend URL when a quit arrives just before the window swap", async () => {
+    let spawned!: () => void;
+    const hasSpawned = new Promise<void>((resolve) => {
+      spawned = resolve;
+    });
+    let releaseProbe!: () => void;
+    const probeGate = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    const { controller, deps } = harness({
+      createSidecarDeps: () => fakeSidecarDeps({
+        spawn: (): SidecarProcess => {
+          spawned();
+          return { pid: 4242, on: vi.fn() };
+        },
+        probe: async () => {
+          await probeGate;
+          return true;
+        },
+      }),
+    });
+    const win = fakeWin();
+
+    const booting = controller.bootBackendAndLoad(win);
+    await hasSpawned;
+    await controller.stopOwnedSidecar();
+    releaseProbe();
+    await booting;
+
+    expect(win.loadURL).not.toHaveBeenCalled();
+    expect(deps.showErrorBox).not.toHaveBeenCalled();
+  });
+
+  it("still boots normally after a stop (regenerate-key flow clears the stop flag)", async () => {
+    const { controller, deps } = harness();
+    const win = fakeWin();
+
+    await controller.bootBackendAndLoad(win);
+    await controller.stopOwnedSidecar();
+    await controller.bootBackendAndLoad(win);
+
+    expect(win.loadURL).toHaveBeenNthCalledWith(2, "http://127.0.0.1:5555");
+    expect(deps.showErrorBox).not.toHaveBeenCalled();
+  });
+
   it("reveals the key window when the secret key is newly generated", async () => {
     const { controller, deps } = harness({
       getOrCreateSecretKey: vi.fn().mockReturnValue({ key: "fresh-key", isNew: true }),
