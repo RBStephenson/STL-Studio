@@ -118,6 +118,27 @@ describe("FileLinkCombo", () => {
     vi.useRealTimers();
   });
 
+  it("does not call onCancel after unmount when blurred moments before (STUDIO-348)", () => {
+    vi.useFakeTimers();
+    try {
+      const onCancel = vi.fn();
+      const { unmount } = render(
+        <FileLinkCombo options={OPTIONS} onPick={vi.fn()} onCancel={onCancel} />,
+      );
+      fireEvent.blur(screen.getByRole("textbox"));
+      unmount();
+
+      // onCancel updates parent state; firing it after the row is gone is a
+      // setState on a dead tree, which under jsdom takes down the whole run.
+      // Asserted on the callback rather than the timer count because this
+      // component autofocuses, so React keeps pending work of its own here.
+      expect(() => vi.advanceTimersByTime(500)).not.toThrow();
+      expect(onCancel).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("calls onCancel immediately on Escape", () => {
     const onCancel = vi.fn();
     render(<FileLinkCombo options={OPTIONS} onPick={vi.fn()} onCancel={onCancel} />);
