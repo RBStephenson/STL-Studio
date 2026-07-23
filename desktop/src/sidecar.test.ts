@@ -134,6 +134,40 @@ describe("startSidecar", () => {
     expect(calls.clearLock).toBeGreaterThanOrEqual(1);
   });
 
+  it("hands the process to onSpawn before the health poll begins (STUDIO-336)", async () => {
+    const seen: Array<SidecarProcess | "probed"> = [];
+    const { deps } = makeDeps({
+      probe: async () => {
+        seen.push("probed");
+        return true;
+      },
+    });
+    await startSidecar(deps, {
+      exePath: "/backend.exe",
+      args: [],
+      port: 8484,
+      onSpawn: (proc) => seen.push(proc),
+    });
+    expect(seen[0]).toMatchObject({ pid: 4242 });
+    expect(seen).toContain("probed");
+  });
+
+  it("still hands the process to onSpawn when the health poll later times out", async () => {
+    const onSpawn = vi.fn();
+    const { deps } = makeDeps({ probe: async () => false });
+    await expect(
+      startSidecar(deps, {
+        exePath: "/backend.exe",
+        args: [],
+        port: 8484,
+        timeoutMs: 500,
+        onSpawn,
+      }),
+    ).rejects.toBeInstanceOf(SidecarStartError);
+    expect(onSpawn).toHaveBeenCalledOnce();
+    expect(onSpawn.mock.calls[0][0]).toMatchObject({ pid: 4242 });
+  });
+
   it("reaps an orphan before spawning a fresh backend", async () => {
     const lock: LockRecord = { pid: 111, port: 8484 };
     // First probe (reap check) true = orphan is ours; subsequent probes (health)

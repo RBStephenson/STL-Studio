@@ -57,6 +57,11 @@ export interface StartOptions {
   port: number;
   timeoutMs?: number;
   intervalMs?: number;
+  /** Invoked as soon as the process exists, before the lockfile write and the
+   *  health poll. The caller takes ownership of the process here rather than on
+   *  a successful return, so a quit that races the (up to 30s) health poll can
+   *  still terminate it instead of orphaning it (STUDIO-336). */
+  onSpawn?: (proc: SidecarProcess) => void;
 }
 
 export interface StartResult {
@@ -135,6 +140,7 @@ export async function startSidecar(
   const args = opts.args ?? [];
   deps.log(`spawning backend: ${opts.exePath} ${args.join(" ")}`);
   const proc = deps.spawn(opts.exePath, args, opts.env);
+  opts.onSpawn?.(proc);
 
   proc.on("error", (err) => deps.log(`sidecar process error: ${err.message}`));
   proc.on("exit", (code) => deps.log(`sidecar exited with code ${code}`));

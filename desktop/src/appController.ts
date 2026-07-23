@@ -89,8 +89,14 @@ export function createAppController<Win extends BrowserWindowLike>(
   let sidecarDeps: SidecarDeps | null = null;
   let updateController: UpdateController | null = null;
   let backendBooting = false;
+  // Set while a stop we initiated is in flight, so a boot racing it knows the
+  // backend went away because we killed it — not because it failed to start —
+  // and skips the startup-error dialog. Cleared at the top of every boot so
+  // stop-then-boot flows (regenerateEncryptionKey) still work.
+  let stopRequested = false;
 
   async function stopOwnedSidecar(): Promise<void> {
+    stopRequested = true;
     if (!sidecar || !sidecarDeps) return;
     const proc = sidecar;
     const d = sidecarDeps;
@@ -194,6 +200,7 @@ export function createAppController<Win extends BrowserWindowLike>(
     if (backendBooting) return;
     deps.log("[startup] backend-boot-begin");
     backendBooting = true;
+    stopRequested = false;
     sidecarDeps = deps.createSidecarDeps();
     const exePath = deps.resolveBackendExePath();
     const secretKey = deps.getOrCreateSecretKey(deps.userDataDir);
@@ -209,8 +216,17 @@ export function createAppController<Win extends BrowserWindowLike>(
           STL_STUDIO_LOG_DIR: deps.logDir,
         },
         port,
+        // Take ownership at spawn time, not on success — see STUDIO-336.
+        onSpawn: (proc) => {
+          sidecar = proc;
+        },
       });
-      sidecar = result.proc;
+      // A quit arriving during the health poll already terminated this process;
+      // there's nothing left to point the window at.
+      if (stopRequested) {
+        deps.log("[startup] backend-boot-abandoned (stop requested)");
+        return;
+      }
       const backendUrl = deps.backendBaseUrl(result.port);
       // Swap the splash for the app, then drop the splash from history so Back
       // never returns to it.
@@ -221,6 +237,18 @@ export function createAppController<Win extends BrowserWindowLike>(
         deps.showKeyRevealWindow(secretKey.key);
       }
     } catch (err) {
+      // startSidecar kills the process tree itself when the health poll times
+      // out, so drop our (now dead) handle. Any other error leaves a live
+      // backend we must keep owning so quit still terminates it.
+      if (err instanceof SidecarStartError) {
+        sidecar = null;
+      }
+      // We killed the backend ourselves (quit / key regenerate) — the resulting
+      // health-poll failure is expected, not something to alarm the user about.
+      if (stopRequested) {
+        deps.log(`[startup] backend-boot-abandoned (stop requested): ${String(err)}`);
+        return;
+      }
       const message =
         err instanceof SidecarStartError
           ? err.message
