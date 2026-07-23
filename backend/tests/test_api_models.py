@@ -985,6 +985,28 @@ class TestGetNeighbors:
         assert data["prev_id"] is not None
         assert data["next_id"] is None
 
+    def test_neighbors_hide_inbox_models_by_default(self, client, db):
+        """STUDIO-325: the grid hides inbox models by default (list_models
+        is_inbox=False); neighbors must walk the same set, not skip through
+        inbox cards the grid never showed."""
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Alpha")
+        boxed = make_model(db, creator, name="Boxed")
+        boxed.is_inbox = True
+        c = make_model(db, creator, name="Gamma")
+        commit_all(db)
+
+        resp = client.get(f"/models/{a.id}/neighbors?group_variants=false")
+        assert resp.status_code == 200
+        # Next hops straight to Gamma — the inbox model is invisible, exactly
+        # as it is on the grid.
+        assert resp.json()["next_id"] == c.id
+
+        # Explicit inbox view still works: the inbox model is the whole set.
+        resp = client.get(f"/models/{boxed.id}/neighbors?group_variants=false&is_inbox=true")
+        assert resp.status_code == 200
+        assert resp.json() == {"prev_id": None, "next_id": None}
+
     def test_only_model_has_no_neighbors(self, client, db):
         creator = make_creator(db)
         a = make_model(db, creator, name="Solo")
