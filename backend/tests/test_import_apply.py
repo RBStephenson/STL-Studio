@@ -744,3 +744,34 @@ class TestImportApplyCleansUpNonStlFiles:
 
         db.refresh(m)
         assert m.image_paths == []
+
+    def test_other_files_merged_not_overwritten(self, client, db, tmp_path, write_mode):
+        """STUDIO-318: other_files must be merged (like image_paths already is),
+        not overwritten — a manually-added entry pointing outside old_folder
+        must survive an apply that also discovers a new non-image file."""
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
+        (pack / "notes.txt").write_bytes(b"paint notes")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+
+        # A manually-added other_files entry that lives OUTSIDE old_folder —
+        # must not be clobbered by the folder-wide overwrite.
+        elsewhere = tmp_path / "elsewhere.pdf"
+        elsewhere.write_bytes(b"%PDF-1.4")
+        m.other_files = [str(elsewhere).replace("\\", "/")]
+        db.commit()
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 1
+
+        db.refresh(m)
+        other = [p.replace("\\", "/") for p in m.other_files]
+        assert str(elsewhere).replace("\\", "/") in other
+        assert any(p.endswith("notes.txt") for p in other)
+
+
