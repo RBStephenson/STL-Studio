@@ -252,16 +252,26 @@ def import_preview(source: str, db: Session = Depends(get_db)):
     models = (
         db.query(Model)
         .filter(Model.is_inbox == True)  # noqa: E712
-        .filter((Model.folder_path == src) | (Model.folder_path.like(f"{prefix}%")))
+        # ilike, not == (STUDIO-316): the flat-layout case needs an exact match
+        # too, and SQLite's `==` is byte-case-sensitive — a folder_path stored
+        # with different casing than `src` would never even reach the Python
+        # normcase filtering below.
+        .filter(Model.folder_path.ilike(src) | Model.folder_path.like(f"{prefix}%"))
         .all()
     )
 
     # Only count models actually under `src` after normalization (LIKE is a coarse
-    # prefilter; normpath comparison is authoritative).
+    # prefilter; normpath comparison is authoritative). Compared case-insensitively
+    # (normcase) — Windows folder_path/src casing can differ (e.g. `D:\Import` vs
+    # `d:\import`), which otherwise silently drops the model from every pack
+    # while still preserving mp's original casing for grouping/display (STUDIO-316).
+    src_key = os.path.normcase(src)
+    prefix_key = os.path.normcase(prefix)
     buckets: dict[str, list[Model]] = {}
     for m in models:
         mp = os.path.normpath(m.folder_path)
-        if mp != src and not mp.startswith(prefix):
+        mp_key = os.path.normcase(mp)
+        if mp_key != src_key and not mp_key.startswith(prefix_key):
             continue
         buckets.setdefault(_pack_key(mp, src), []).append(m)
 
@@ -277,8 +287,9 @@ def import_preview(source: str, db: Session = Depends(get_db)):
         members = buckets[key]
         tag_sets = [tuple(sorted(m.tags or [])) for m in members]
         # Flat-layout pack (a model sitting directly in src) → src itself;
-        # otherwise the pack lives at src/<key>.
-        is_flat = any(os.path.normpath(m.folder_path) == src for m in members)
+        # otherwise the pack lives at src/<key>. normcase (STUDIO-316) for the
+        # same reason as the bucketing filter above.
+        is_flat = any(os.path.normcase(os.path.normpath(m.folder_path)) == src_key for m in members)
         packs.append(ImportPreviewPack(
             name=key,
             source_path=src if is_flat else os.path.join(src, key),
@@ -292,11 +303,7 @@ def import_preview(source: str, db: Session = Depends(get_db)):
             tags=list(_collapse(tag_sets) or ()),
         ))
 
-    mapping = (
-        db.query(ImportSourceMapping)
-        .filter(ImportSourceMapping.source_path == src)
-        .first()
-    )
+    mapping = _mapped_source_for(db, src)
     return ImportPreviewResponse(
         source=src,
         library_id=mapping.library_id if mapping else None,
@@ -306,15 +313,16 @@ def import_preview(source: str, db: Session = Depends(get_db)):
 
 @router.get("/source-mapping", response_model=SourceMappingRead | None)
 def get_source_mapping(path: str, db: Session = Depends(get_db)):
-    """Return the destination library mapped to a source root, or null (#450)."""
+    """Return the destination library mapped to a source root, or null (#450).
+
+    Resolved via _mapped_source_for (STUDIO-315) — the same normcase +
+    longest-prefix match POST /import/apply uses — so a mapping saved under a
+    different case or trailing separator than the queried path still surfaces
+    here instead of silently reading back as unmapped."""
     source = path.strip()
     if not source:
         raise HTTPException(status_code=400, detail="path is required")
-    return (
-        db.query(ImportSourceMapping)
-        .filter(ImportSourceMapping.source_path == source)
-        .first()
-    )
+    return _mapped_source_for(db, source)
 
 
 @router.put("/source-mapping", response_model=SourceMappingRead)
@@ -539,11 +547,19 @@ def _move_non_stl_files(
         )
         if new_others:
             m.other_files = new_others
-        # Remap thumbnail_path if it pointed into the old folder (stale after move).
-        if m.thumbnail_path and m.thumbnail_path.startswith(old_folder + os.sep):
-            rel = os.path.relpath(m.thumbnail_path, old_folder)
-            remapped = os.path.join(new_folder, rel)
-            m.thumbnail_path = remapped if os.path.exists(remapped) else None
+        # Remap thumbnail_path if it pointed into the old folder (stale after
+        # move). normpath first: thumbnail_path/folder_path are stored with
+        # forward slashes (see Model helpers), so a raw
+        # `.startswith(old_folder + os.sep)` against Windows' backslash
+        # os.sep never matched — this silently skipped every remap on
+        # Windows until normpath puts both sides on the same separator.
+        if m.thumbnail_path:
+            thumb_norm = os.path.normpath(m.thumbnail_path)
+            old_norm = os.path.normpath(old_folder)
+            if thumb_norm.startswith(old_norm + os.sep):
+                rel = os.path.relpath(thumb_norm, old_norm)
+                remapped = os.path.join(new_folder, rel)
+                m.thumbnail_path = remapped if os.path.exists(remapped) else None
 
 
 def _copy_shared_pack_images(
@@ -806,9 +822,15 @@ def _run_import_apply_job(
         # Move all remaining non-STL files (images, PDFs, etc.) from each old
         # folder to the new library folder, then remove the now-empty source.
         try:
+            # All manifest entries (not just eligible_ids), STUDIO-317: an
+            # ineligible model whose destination already exists on disk still
+            # gets its files physically moved by _move_non_stl_files below, so
+            # it must be in models_here to get image_paths/thumbnail_path
+            # remapped too — otherwise its gallery keeps pointing at the
+            # now-deleted source folder despite the files having moved.
             model_by_id = {
                 m.id: m
-                for m in db.query(Model).filter(Model.id.in_(eligible_ids)).all()
+                for m in db.query(Model).filter(Model.id.in_(list(all_folder_map))).all()
             }
             for old_folder, new_folder in all_old_to_new.items():
                 # For ineligible packs only move non-STL files if the

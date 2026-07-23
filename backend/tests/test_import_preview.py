@@ -1,8 +1,15 @@
 """Tests for GET /import/preview — pack-grouped inbox projection (Child B, #451)."""
 import os
 
+import pytest
+
 from app.models import Creator, ImportSourceMapping, Model, ScanRoot, STLFile
 from app.utils import utcnow
+
+# Case-insensitive path matching (STUDIO-315/316) is a Windows-filesystem
+# concern — os.path.normcase is a no-op on POSIX, so "Inbox" vs "INBOX" are
+# genuinely different paths there and these scenarios don't apply.
+windows_only = pytest.mark.skipif(os.name != "nt", reason="path-casing behavior is Windows-only")
 
 
 def _creator(db, name):
@@ -134,3 +141,68 @@ class TestImportPreview:
     def test_missing_source_param_is_400(self, db, client):
         r = client.get("/import/preview", params={"source": ""})
         assert r.status_code == 400
+
+
+@windows_only
+class TestImportPreviewCaseInsensitiveBucketing:
+    """STUDIO-316: folder_path is stored with whatever case the scanner found on
+    disk, but Windows paths are case-insensitive — a source queried with
+    different casing than a model's stored folder_path must still bucket that
+    model into its pack instead of silently dropping it."""
+
+    def test_model_included_when_source_case_differs_from_folder_path(self, db, client, tmp_path):
+        src = str(tmp_path / "Inbox")
+        _inbox_model(db, os.path.join(src, "Pack", "a"), n_files=2)
+        db.commit()
+
+        queried = str(tmp_path / "INBOX")  # same folder, different case
+        packs = client.get("/import/preview", params={"source": queried}).json()["packs"]
+        assert {p["name"] for p in packs} == {"Pack"}
+        assert packs[0]["file_count"] == 2
+
+    def test_flat_layout_model_included_when_source_case_differs(self, db, client, tmp_path):
+        src = str(tmp_path / "Flat")
+        _inbox_model(db, src, name="loose", n_files=3)
+        db.commit()
+
+        queried = str(tmp_path / "FLAT")
+        packs = client.get("/import/preview", params={"source": queried}).json()["packs"]
+        assert len(packs) == 1
+        assert packs[0]["file_count"] == 3
+
+
+@windows_only
+class TestImportPreviewMappingResolution:
+    """STUDIO-315: preview/get-mapping must resolve a stored mapping the same
+    way apply does (_mapped_source_for: normcase + longest-prefix), not a raw
+    exact-string match — otherwise a case or trailing-separator difference
+    between the stored and queried source hides a library mapping that apply
+    itself would have found."""
+
+    def test_preview_library_id_resolves_despite_case_difference(self, db, client, tmp_path):
+        src = str(tmp_path / "Inbox")
+        lib = ScanRoot(path=str(tmp_path / "lib"), enabled=True, layout="{creator}",
+                       name="minis", is_writable=True)
+        db.add(lib)
+        db.flush()
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        _inbox_model(db, os.path.join(src, "Pack", "a"), n_files=1)
+        db.commit()
+
+        queried = str(tmp_path / "INBOX")
+        body = client.get("/import/preview", params={"source": queried}).json()
+        assert body["library_id"] == lib.id
+
+    def test_source_mapping_endpoint_resolves_despite_case_difference(self, db, client, tmp_path):
+        src = str(tmp_path / "Inbox")
+        lib = ScanRoot(path=str(tmp_path / "lib"), enabled=True, layout="{creator}",
+                       name="minis", is_writable=True)
+        db.add(lib)
+        db.flush()
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        db.commit()
+
+        queried = str(tmp_path / "INBOX")
+        body = client.get("/import/source-mapping", params={"path": queried}).json()
+        assert body is not None
+        assert body["library_id"] == lib.id
