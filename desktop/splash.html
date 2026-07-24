@@ -75,6 +75,14 @@
         var el = document.getElementById("msg");
         if (el) el.textContent = "Still starting — first launch can take a moment…";
       }, 15000);
+      // Past the window where a plain slow boot explains it, the likelier cause
+      // is antivirus scanning the newly-installed files after an update
+      // (STUDIO-341) — name it, so a long wait reads as expected rather than
+      // hung. HEALTH_POLL_TIMEOUT_MS is 90s; this fires well before that ceiling.
+      setTimeout(function () {
+        var el = document.getElementById("msg");
+        if (el) el.textContent = "Still starting — antivirus may be scanning the newly installed files after an update…";
+      }, 25000);
     </script>
   </body>
 </html>

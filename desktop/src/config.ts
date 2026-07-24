@@ -24,10 +24,13 @@ export function isBackendRetryUrl(url: string): boolean {
   return url === BACKEND_RETRY_URL;
 }
 
-/** Health-poll cadence and ceiling (ms). Python + uvicorn cold start is the
- *  slow part; 30s is generous headroom before we surface a startup error. */
+/** Health-poll cadence and ceiling (ms). Python + uvicorn cold start is
+ *  normally fast, but the first launch after an update can be dominated by
+ *  antivirus scanning the newly-installed files rather than by the backend
+ *  itself (STUDIO-341) — 90s gives that room without a real cost, since the
+ *  failure mode here is "user waits longer," not "user loses data." */
 export const HEALTH_POLL_INTERVAL_MS = 250;
-export const HEALTH_POLL_TIMEOUT_MS = 30_000;
+export const HEALTH_POLL_TIMEOUT_MS = 90_000;
 
 /** Grace period between SIGTERM and the SIGKILL fallback on POSIX (ms). */
 export const SHUTDOWN_GRACE_MS = 5_000;

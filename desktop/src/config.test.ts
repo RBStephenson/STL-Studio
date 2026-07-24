@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { isBackendRetryUrl, resolveBackendExe } from "./config";
+import { HEALTH_POLL_TIMEOUT_MS, isBackendRetryUrl, resolveBackendExe } from "./config";
 
 const exeName = process.platform === "win32" ? "stl-studio.exe" : "stl-studio";
 
@@ -19,6 +19,14 @@ function withPlatform(platform: NodeJS.Platform, fn: () => void): void {
     Object.defineProperty(process, "platform", { value: original });
   }
 }
+
+describe("health poll ceiling", () => {
+  it("gives a post-update antivirus scan room without a false 'failed to start' (STUDIO-341)", () => {
+    // Guards against an accidental regression back toward the 30s ceiling
+    // that produced a coin-flip false failure on a Norton machine.
+    expect(HEALTH_POLL_TIMEOUT_MS).toBe(90_000);
+  });
+});
 
 describe("backend retry URL", () => {
   it("accepts only the internal retry navigation", () => {
