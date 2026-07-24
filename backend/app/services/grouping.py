@@ -13,6 +13,13 @@ four signals, strongest first:
   4. name key            — name_parser.character_key, the existing heuristic
      (weakest on its own; the baseline when no content signal exists).
 
+A signal is credited in a group's `reason`/`confidence` only when its evidence
+edge actually connected two previously separate components (STUDIO-242). A
+signal that merely re-observes an already-connected pair corroborates the
+cluster but did not form it, so it takes no attribution; a pair rejected at a
+hierarchy boundary takes none either. `_strongest_signal` then picks the
+highest-precedence signal among those that did the connecting.
+
 The engine derives auto groups from scratch. By default it does not read the
 model's current `character` assignment; the hierarchy feature flag deliberately
 adds that scanner-owned context as a constrained signal. It writes
@@ -25,6 +32,7 @@ proposals.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from enum import Enum
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -78,6 +86,20 @@ _CONFIDENCE = {"override": 0.95, "hash": 0.9, "hierarchy": 0.85, "filename": 0.7
 _HIERARCHY_SETTING = "hierarchy_variant_grouping_enabled"
 
 
+class _MergeResult(Enum):
+    """Outcome of offering one evidence edge to the union-find (STUDIO-242).
+
+    Only ``MERGED`` means the edge actually connected two components, so only
+    ``MERGED`` may credit the offering signal in the group's reason/confidence.
+    ``ALREADY_CONNECTED`` is corroborating evidence, not the reason the cluster
+    exists; ``REJECTED_HIERARCHY`` is not evidence at all.
+    """
+
+    MERGED = "merged"
+    ALREADY_CONNECTED = "already_connected"
+    REJECTED_HIERARCHY = "rejected_hierarchy"
+
+
 class _UnionFind:
     def __init__(self, ids: list[int], boundaries: dict[int, str | None] | None = None):
         self.parent = {i: i for i in ids}
@@ -91,16 +113,16 @@ class _UnionFind:
             self.parent[x], x = root, self.parent[x]
         return root
 
-    def union(self, a: int, b: int) -> bool:
+    def union(self, a: int, b: int) -> _MergeResult:
         ra, rb = self.find(a), self.find(b)
         if ra == rb:
-            return True
+            return _MergeResult.ALREADY_CONNECTED
         combined = self.boundaries[ra] | self.boundaries[rb]
         if len(combined) > 1:
-            return False
+            return _MergeResult.REJECTED_HIERARCHY
         self.parent[rb] = ra
         self.boundaries[ra] = combined
-        return True
+        return _MergeResult.MERGED
 
 
 def _hierarchy_enabled(db: Session) -> bool:
@@ -189,7 +211,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
             if len(bucket) >= 2:
                 first = bucket[0]
                 for other in bucket[1:]:
-                    if uf.union(first, other):
+                    if uf.union(first, other) is _MergeResult.MERGED:
                         signal.setdefault(first, "hierarchy")
                         signal.setdefault(other, "hierarchy")
 
@@ -202,9 +224,9 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         if 2 <= len(bucket) <= _HASH_BUCKET_CAP:
             first = bucket[0]
             for other in bucket[1:]:
-                if uf.union(first, other):
-                    signal[first] = "hash"
-                    signal[other] = "hash"
+                if uf.union(first, other) is _MergeResult.MERGED:
+                    signal.setdefault(first, "hash")
+                    signal.setdefault(other, "hash")
 
     # --- signal 2: STL filename overlap ---
     # Drop generic filenames (shared by many models) so common part names like
@@ -230,7 +252,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
                     continue
                 inter = len(fa & fb)
                 if inter >= _FILENAME_MIN_SHARED and inter / len(fa | fb) >= _FILENAME_JACCARD:
-                    if uf.union(a, b):
+                    if uf.union(a, b) is _MergeResult.MERGED:
                         signal.setdefault(a, "filename")
                         signal.setdefault(b, "filename")
 
@@ -247,7 +269,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         if len(bucket) >= 2:
             first = bucket[0]
             for other in bucket[1:]:
-                if uf.union(first, other):
+                if uf.union(first, other) is _MergeResult.MERGED:
                     signal.setdefault(first, "name")
                     signal.setdefault(other, "name")
 

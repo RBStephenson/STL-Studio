@@ -204,6 +204,77 @@ class TestHashSignal:
         assert _groups(db, creator) == []
 
 
+class TestSignalAttribution:
+    """A signal earns the group's reason/confidence only if it actually merged
+    two components (STUDIO-242). Re-observing an already-connected pair, or
+    being turned away at a hierarchy boundary, credits nothing."""
+
+    def test_shared_hash_does_not_steal_credit_from_hierarchy(self, db):
+        # Hierarchy runs first and forms the cluster; the hash pass then sees the
+        # same pair already connected, so it must not restate reason/confidence.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Supported Files")
+        b = make_model(db, creator, name="Alternate Cut")
+        a.character = b.character = "Ada Wong"
+        db.flush()
+        _stl(db, a, "body.stl", file_hash="shared-mesh")
+        _stl(db, b, "body.stl", file_hash="shared-mesh")
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+        assert groups[0].reason == "same product hierarchy"
+        assert groups[0].confidence == 0.85
+
+    def test_hierarchy_rejected_hash_edge_credits_nothing(self, db):
+        # a+b are a legitimate hierarchy cluster. c shares a mesh with a but sits
+        # behind a conflicting envelope: it stays out, and its rejected edge must
+        # not relabel the a+b group as hash-derived.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Supported Files")
+        b = make_model(db, creator, name="Alternate Cut")
+        c = make_model(db, creator, name="Presupported")
+        a.character = b.character = "Ada Wong"
+        c.character = "Leon Kennedy"
+        db.flush()
+        _stl(db, a, "body.stl", file_hash="shared-mesh")
+        _stl(db, c, "body.stl", file_hash="shared-mesh")
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+        assert groups[0].reason == "same product hierarchy"
+        assert groups[0].confidence == 0.85
+        db.refresh(c)
+        assert c.variant_group_id is None
+
+    def test_weaker_signals_do_not_restate_a_hash_formed_cluster(self, db):
+        # Hash merges the pair; the filename and name passes both re-observe it
+        # already connected. Hash keeps the attribution.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin Archer")
+        b = make_model(db, creator, name="Goblin Scout")
+        db.flush()
+        for fn in ("body.stl", "head.stl", "base.stl"):
+            _stl(db, a, fn, file_hash=f"h-{fn}")
+            _stl(db, b, fn, file_hash=f"h-{fn}")
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+        assert groups[0].reason == "shared mesh files"
+        assert groups[0].confidence == 0.9
+
+
 class TestManualLock:
     def test_manual_group_preserved_and_members_not_reassigned(self, db):
         creator = make_creator(db)
