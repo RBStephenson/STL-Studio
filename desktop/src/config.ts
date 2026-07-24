@@ -32,8 +32,16 @@ export function isBackendRetryUrl(url: string): boolean {
 export const HEALTH_POLL_INTERVAL_MS = 250;
 export const HEALTH_POLL_TIMEOUT_MS = 90_000;
 
-/** Grace period between SIGTERM and the SIGKILL fallback on POSIX (ms). */
+/** Grace period between SIGTERM and the SIGKILL fallback on POSIX (ms), and
+ *  the ceiling on the Windows taskkill wait (killTreeWindows in runtime.ts). */
 export const SHUTDOWN_GRACE_MS = 5_000;
+
+/** Belt-and-braces ceiling on the whole before-quit shutdown sequence (ms).
+ *  killTree already caps at SHUTDOWN_GRACE_MS; this is a wider backstop so
+ *  quit still proceeds even if something else in stopOwnedSidecar hangs
+ *  (STUDIO-340). reapStale cleans up a surviving backend on next launch, so
+ *  quitting without a confirmed kill is an accepted fallback, not data loss. */
+export const QUIT_TIMEOUT_MS = 10_000;
 
 /** Crash-loop guard for post-boot backend restarts (STUDIO-338). A backend that
  *  dies immediately on every launch must not produce an endless offer-restart
