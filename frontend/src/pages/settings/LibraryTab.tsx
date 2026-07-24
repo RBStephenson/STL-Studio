@@ -409,6 +409,24 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
         <label className="flex items-start gap-3 cursor-pointer select-none mb-4">
           <input
             type="checkbox"
+            checked={settings.variant_sidebar_enabled}
+            onChange={() => update({ variant_sidebar_enabled: !settings.variant_sidebar_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-text-primary-alt2">Open variant groups in a side panel</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              Off by default. Clicking a grouped model in the Library opens its
+              variants in a panel beside the grid instead of leaving the page.
+              The full Variant Group page is still one click away, and
+              Ctrl-clicking a card opens it directly.
+            </p>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-3 cursor-pointer select-none mb-4">
+          <input
+            type="checkbox"
             checked={settings.reorganize_enabled}
             onChange={() => update({ reorganize_enabled: !settings.reorganize_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
             className="mt-0.5 accent-indigo-500"

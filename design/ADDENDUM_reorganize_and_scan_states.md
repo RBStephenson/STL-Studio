@@ -141,12 +141,40 @@ thousands of entries).
 **Change:** clicking a card badged "N variants" on the Library grid no longer
 navigates away. Instead a docked right-side panel (in-flow flex child, width
 animates 0→380px, not an overlay) slides open showing that group's variants
-as a 2-column thumbnail grid, with a close (×) button and an "Open full view"
-link to the existing Variant Group screen for full editing. State:
-`variantSidebarGroupName` (null = closed); `openVariantSidebar(name)` /
-`closeVariantSidebar()`. Real implementation should fetch the group's
-variant list by id when opened rather than using the mock's static 6-name
-list.
+as **list rows** (56px thumbnail left, variant name + file-size/type on the
+right, REP badge on the thumbnail, overflow-menu affordance), with a close
+(×) button and an "Open full view" link to the existing Variant Group screen
+for full editing.
+
+**As built (STUDIO-350)** — where the implementation deliberately diverges
+from this mock:
+
+- **State lives in the URL, not the component.** `/?group=<variant_group_id>`,
+  so browser Back closes the panel, the view is deep-linkable, and a reload
+  restores it. The mock's `variantSidebarGroupName` local state would have
+  broken all three — and the desktop shell wires mouse Back/Forward buttons
+  to browser history, so Back-to-dismiss is a reflex users will have.
+- **Keyed by `variant_group_id`, not name.** Group labels are neither unique
+  nor stable; `modelLinkTo` already appends `?gid=` for exactly this reason.
+  Cards from before durable groups carry no id, so they keep navigating to
+  the full page rather than opening the panel.
+- **Rows show tags, not file size/type.** `GET /models/variants` returns
+  neither a size nor an STL count (`size_bytes` lives on the per-file type,
+  not the model), so the mock's "4.2 MB · STL" is not obtainable without a
+  backend aggregate. Rows show the model's tags instead, styled exactly as
+  the Library card styles them, with a `+N` overflow.
+- **The panel is resizable**, 300px to `min(720px, 45% of window)`, persisted
+  in `localStorage`. The upper bound is not arbitrary: the model grid's
+  Tailwind breakpoints measure the viewport, so an unbounded panel starves
+  the grid into 100px cards. Row thumbnails, chip count and title size step
+  up with the panel's own width.
+- **Content states** the mock does not define: loading skeleton, error with
+  retry, and empty.
+- **The per-row overflow (⋯) affordance is not implemented** — the mock shows
+  the control but defines no menu, and a control that does nothing is worse
+  than none. Pending a decision on its contents.
+- Behind `variant_sidebar_enabled`, default off. With the flag off the
+  Library behaves exactly as before.
 
 ## 7. Library Tools moved from Creators to Library toolbar
 

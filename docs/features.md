@@ -85,6 +85,30 @@ Click it to open the group and see each variant individually.
 
 This keeps the grid tidy when a creator ships many cuts/versions of one model.
 
+### Open a group in a side panel (opt-in)
+
+By default, clicking a group card leaves the Library and opens the full Variant
+Group screen. Turn on **Open variant groups in a side panel** (Settings →
+Library) and it instead opens a panel beside the grid listing each variant with
+its thumbnail and tags, so you can look inside a group without losing your
+place, your filters, or your scroll position.
+
+- **Open full view** at the bottom of the panel goes to the Variant Group screen
+  for renaming, re-ordering, merging and splitting — the panel is for looking,
+  not editing.
+- **Ctrl-click** (or middle-click) a group card to go straight to the full page,
+  bypassing the panel.
+- Close it with the **×**, the **Escape** key, or the browser **Back** button.
+  The open group is part of the address, so the panel survives a reload and the
+  link can be shared.
+- **Drag the panel's left edge** to resize it; rows show larger thumbnails and
+  more tags as it widens. Double-click the edge to reset. The width is
+  remembered per machine. The handle is keyboard-operable: focus it and use the
+  arrow keys, or Home/End for the extremes.
+
+Off by default. Models grouped before variant groups became first-class carry no
+group id, so those cards continue to open the full page.
+
 ### Group variants by character folder (opt-in)
 
 If your library is laid out as `{creator}/{character}/…` — every variant of a
