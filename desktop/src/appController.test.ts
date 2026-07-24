@@ -4,12 +4,29 @@ import type { AppControllerDeps, BrowserWindowLike, MessageBoxOptions, MessageBo
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
 import type { UpdaterAdapter } from "./updater";
 
-function fakeWin(): BrowserWindowLike & { loadURL: ReturnType<typeof vi.fn>; loadFile: ReturnType<typeof vi.fn> } {
+type FakeWin = BrowserWindowLike & {
+  loadURL: ReturnType<typeof vi.fn>;
+  loadFile: ReturnType<typeof vi.fn>;
+  /** Simulate Electron tearing the window down: every subsequent access throws,
+   *  which is what a real destroyed BrowserWindow does. */
+  destroy(): void;
+};
+
+function fakeWin(): FakeWin {
+  let destroyed = false;
+  const ifAlive = <T>(value: T): T => {
+    if (destroyed) throw new Error("Object has been destroyed");
+    return value;
+  };
   return {
-    loadURL: vi.fn().mockResolvedValue(undefined),
-    loadFile: vi.fn().mockResolvedValue(undefined),
+    loadURL: vi.fn(async () => ifAlive(undefined)),
+    loadFile: vi.fn(async () => ifAlive(undefined)),
     webContents: { navigationHistory: { clear: vi.fn() } },
     setProgressBar: vi.fn(),
+    isDestroyed: () => destroyed,
+    destroy: () => {
+      destroyed = true;
+    },
   };
 }
 
@@ -188,6 +205,74 @@ describe("bootBackendAndLoad", () => {
 
     expect(win.loadURL).not.toHaveBeenCalled();
     expect(deps.showErrorBox).not.toHaveBeenCalled();
+  });
+
+  it("bails quietly when the user closes the window mid-boot (STUDIO-337)", async () => {
+    let spawned!: () => void;
+    const hasSpawned = new Promise<void>((resolve) => {
+      spawned = resolve;
+    });
+    let releaseProbe!: () => void;
+    const probeGate = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    const { controller, deps } = harness({
+      createSidecarDeps: () => fakeSidecarDeps({
+        spawn: (): SidecarProcess => {
+          spawned();
+          return { pid: 4242, on: vi.fn() };
+        },
+        probe: async () => {
+          await probeGate;
+          return true;
+        },
+      }),
+    });
+    const win = fakeWin();
+
+    const booting = controller.bootBackendAndLoad(win);
+    await hasSpawned;
+    // Closing the window destroys it well before `window-all-closed` gets around
+    // to quitting, so `stopRequested` is still false here — this is the gap the
+    // STUDIO-336 guard alone does not cover.
+    win.destroy();
+    releaseProbe();
+
+    await expect(booting).resolves.toBeUndefined();
+
+    // The backend started fine; the user just left. Neither dialog is warranted.
+    expect(deps.showErrorBox).not.toHaveBeenCalled();
+    expect(deps.loadPlaceholderPage).not.toHaveBeenCalled();
+  });
+
+  it("does not escape when the window dies between the health check and loadURL", async () => {
+    const { controller, deps } = harness();
+    const win = fakeWin();
+    // Destroyed after the boot is underway: loadURL itself throws, which used to
+    // land in the catch and report a startup failure that never happened.
+    win.loadURL.mockImplementation(async () => {
+      win.destroy();
+      throw new Error("Object has been destroyed");
+    });
+
+    await expect(controller.bootBackendAndLoad(win)).resolves.toBeUndefined();
+
+    expect(deps.showErrorBox).not.toHaveBeenCalled();
+    expect(deps.loadPlaceholderPage).not.toHaveBeenCalled();
+  });
+
+  it("does not escape when the recovery page also fails to load", async () => {
+    const { controller, deps } = harness({
+      createSidecarDeps: () => fakeSidecarDeps({ probe: async () => false }),
+      loadPlaceholderPage: vi.fn().mockRejectedValue(new Error("no renderer")),
+    });
+    const win = fakeWin();
+
+    // A genuine startup failure whose fallback UI also fails must still settle,
+    // or the rejection surfaces as a second "internal error" dialog.
+    await expect(controller.bootBackendAndLoad(win)).resolves.toBeUndefined();
+
+    expect(deps.showErrorBox).toHaveBeenCalledOnce();
   });
 
   it("still boots normally after a stop (regenerate-key flow clears the stop flag)", async () => {

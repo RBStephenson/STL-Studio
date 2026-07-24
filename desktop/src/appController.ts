@@ -21,6 +21,10 @@ export interface BrowserWindowLike {
   loadFile(path: string): Promise<void>;
   webContents: { navigationHistory: { clear(): void } };
   setProgressBar(value: number): void;
+  /** True once Electron has torn the window down. Every boot step that touches
+   *  the window must check this first — a destroyed window throws synchronously
+   *  on any access (STUDIO-337). */
+  isDestroyed(): boolean;
 }
 
 export interface MessageBoxResult {
@@ -201,6 +205,10 @@ export function createAppController<Win extends BrowserWindowLike>(
     deps.log("[startup] backend-boot-begin");
     backendBooting = true;
     stopRequested = false;
+    // Either the app is quitting or the user closed the window: the boot has
+    // nowhere to land, so bail without alarming anyone. Both are ordinary user
+    // actions, not startup failures (STUDIO-336, STUDIO-337).
+    const shouldAbandon = (): boolean => stopRequested || win.isDestroyed();
     sidecarDeps = deps.createSidecarDeps();
     const exePath = deps.resolveBackendExePath();
     const secretKey = deps.getOrCreateSecretKey(deps.userDataDir);
@@ -221,10 +229,10 @@ export function createAppController<Win extends BrowserWindowLike>(
           sidecar = proc;
         },
       });
-      // A quit arriving during the health poll already terminated this process;
-      // there's nothing left to point the window at.
-      if (stopRequested) {
-        deps.log("[startup] backend-boot-abandoned (stop requested)");
+      // A quit arriving during the health poll already terminated this process,
+      // and a closed window has nothing to point at either way.
+      if (shouldAbandon()) {
+        deps.log("[startup] backend-boot-abandoned before load");
         return;
       }
       const backendUrl = deps.backendBaseUrl(result.port);
@@ -243,18 +251,28 @@ export function createAppController<Win extends BrowserWindowLike>(
       if (err instanceof SidecarStartError) {
         sidecar = null;
       }
-      // We killed the backend ourselves (quit / key regenerate) — the resulting
-      // health-poll failure is expected, not something to alarm the user about.
-      if (stopRequested) {
-        deps.log(`[startup] backend-boot-abandoned (stop requested): ${String(err)}`);
+      // Either we killed the backend ourselves (quit / key regenerate) or the
+      // user closed the window mid-boot — in both cases `err` is a symptom of
+      // that, not a startup failure, and there is no window left to show it in.
+      if (shouldAbandon()) {
+        deps.log(`[startup] backend-boot-abandoned: ${String(err)}`);
         return;
       }
-      const message =
-        err instanceof SidecarStartError
-          ? err.message
-          : `Unexpected error starting the backend: ${String(err)}`;
-      deps.showErrorBox("STL Studio — backend failed to start", message);
-      await deps.loadPlaceholderPage(win);
+      const failedToStart = err instanceof SidecarStartError;
+      deps.showErrorBox(
+        failedToStart
+          ? "STL Studio — backend failed to start"
+          : "STL Studio — could not open the app",
+        failedToStart ? err.message : `Unexpected error starting the backend: ${String(err)}`,
+      );
+      // Last-resort UI. If this fails too there is nothing further to try, and
+      // letting it reject would escape the catch and surface as an "internal
+      // error" dialog on top of the one we just showed.
+      try {
+        await deps.loadPlaceholderPage(win);
+      } catch (fallbackErr) {
+        deps.log(`[startup] could not show the recovery page: ${String(fallbackErr)}`);
+      }
     } finally {
       backendBooting = false;
     }
