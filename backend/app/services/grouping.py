@@ -17,8 +17,18 @@ A signal is credited in a group's `reason`/`confidence` only when its evidence
 edge actually connected two previously separate components (STUDIO-242). A
 signal that merely re-observes an already-connected pair corroborates the
 cluster but did not form it, so it takes no attribution; a pair rejected at a
-hierarchy boundary takes none either. `_strongest_signal` then picks the
-highest-precedence signal among those that did the connecting.
+hierarchy boundary takes none either.
+
+Signals are typed (`SignalKind`) and every signal's precedence, confidence and
+user-facing reason live in one table, `SIGNAL_POLICY` (STUDIO-243). Merging
+edges are recorded as `Evidence` in an `EvidenceLedger`, which names the model
+pair each edge describes and answers `strongest_for(members)` — the
+highest-precedence signal credited to a cluster. Adding a signal means adding a
+`SignalKind` plus its policy entry; a missing entry fails at import.
+
+Note the hierarchy signal plays two distinct roles that stay separate: it is
+positive evidence recorded in the ledger, and (independently) `product_key`
+seeds the union-find's anti-merge boundaries, which no ledger entry can relax.
 
 The engine derives auto groups from scratch. By default it does not read the
 model's current `character` assignment; the hierarchy feature flag deliberately
@@ -32,6 +42,7 @@ proposals.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from enum import Enum
 
 from sqlalchemy import func
@@ -82,8 +93,62 @@ _FILENAME_MIN_SHARED = 2
 # so a pathological creator can't stall a scan. Hash + name signals still apply.
 _FILENAME_PASS_MODEL_CAP = 400
 
-_CONFIDENCE = {"override": 0.95, "hash": 0.9, "hierarchy": 0.85, "filename": 0.7, "name": 0.6}
 _HIERARCHY_SETTING = "hierarchy_variant_grouping_enabled"
+
+
+class SignalKind(Enum):
+    """The kinds of positive evidence that can merge two models (STUDIO-243)."""
+
+    HASH = "hash"
+    HIERARCHY = "hierarchy"
+    FILENAME = "filename"
+    NAME = "name"
+
+
+@dataclass(frozen=True)
+class SignalPolicy:
+    """Everything a signal contributes to a proposal, in one place.
+
+    `precedence` orders signals strongest-first (lower wins) when a cluster was
+    formed by more than one kind. `reason_template` is formatted with the
+    cluster's label, so a signal whose reason varies with the label needs no
+    special case at the call site.
+    """
+
+    precedence: int
+    confidence: float
+    reason_template: str
+
+
+SIGNAL_POLICY: dict[SignalKind, SignalPolicy] = {
+    SignalKind.HASH: SignalPolicy(0, 0.9, "shared mesh files"),
+    SignalKind.HIERARCHY: SignalPolicy(1, 0.85, "same product hierarchy"),
+    SignalKind.FILENAME: SignalPolicy(2, 0.7, "shared STL file names"),
+    SignalKind.NAME: SignalPolicy(3, 0.6, "name: {label}"),
+}
+
+
+def assert_policies_complete(policies: dict[SignalKind, SignalPolicy]) -> None:
+    """Raise if any `SignalKind` lacks a policy.
+
+    A new signal with no policy would otherwise surface as a KeyError deep in
+    proposal materialisation, or worse as a silently missing reason. This runs at
+    import so any test run catches it.
+    """
+    missing = sorted(k.name for k in SignalKind if k not in policies)
+    if missing:
+        raise RuntimeError(f"SIGNAL_POLICY is missing entries for: {', '.join(missing)}")
+
+
+assert_policies_complete(SIGNAL_POLICY)
+
+
+def policy_for(kind: SignalKind) -> SignalPolicy:
+    """Look up a signal's policy, failing loudly on an unregistered kind."""
+    try:
+        return SIGNAL_POLICY[kind]
+    except KeyError as exc:
+        raise ValueError(f"no SignalPolicy registered for {kind!r}") from exc
 
 
 class _MergeResult(Enum):
@@ -98,6 +163,60 @@ class _MergeResult(Enum):
     MERGED = "merged"
     ALREADY_CONNECTED = "already_connected"
     REJECTED_HIERARCHY = "rejected_hierarchy"
+
+
+@dataclass(frozen=True)
+class Evidence:
+    """One signal edge that actually merged two components (STUDIO-242/243).
+
+    `a` and `b` are the model ids whose relationship this evidence describes, so
+    a proposal's provenance can be traced back to specific pairs rather than a
+    bare per-model string.
+    """
+
+    kind: SignalKind
+    a: int
+    b: int
+
+
+class EvidenceLedger:
+    """Collects merging evidence and answers which signal formed a cluster.
+
+    Credit is first-wins per model: a model is attributed to the first signal
+    whose edge pulled it into its component, matching the attribution rule from
+    STUDIO-242. `strongest_for` deliberately reads that per-model credit rather
+    than the raw edge list — an edge joining two components whose members were
+    all already credited adds no new attribution, and reading edges directly
+    would change which reason a group reports.
+    """
+
+    def __init__(self) -> None:
+        self._edges: list[Evidence] = []
+        self._credit: dict[int, SignalKind] = {}
+
+    def record(self, kind: SignalKind, a: int, b: int) -> None:
+        """Record an edge that merged two components under `kind`."""
+        self._edges.append(Evidence(kind=kind, a=a, b=b))
+        self._credit.setdefault(a, kind)
+        self._credit.setdefault(b, kind)
+
+    @property
+    def edges(self) -> tuple[Evidence, ...]:
+        return tuple(self._edges)
+
+    def credit_for(self, model_id: int) -> SignalKind | None:
+        return self._credit.get(model_id)
+
+    def strongest_for(self, members: list[int]) -> SignalKind:
+        """The highest-precedence signal credited to any member.
+
+        Falls back to NAME for a cluster with no credited member — the weakest
+        signal is the honest default, and it is what the pre-typed code reported.
+        """
+        credited = [k for k in (self._credit.get(m) for m in members) if k is not None]
+        if not credited:
+            return SignalKind.NAME
+        return min(credited, key=lambda k: policy_for(k).precedence)
 
 
 class _UnionFind:
@@ -197,7 +316,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     } if hierarchy_enabled else {}
     boundaries = {mid: contexts[mid].product_key for mid in ids} if hierarchy_enabled else None
     uf = _UnionFind(ids, boundaries)
-    signal: dict[int, str] = {}  # model_id -> strongest signal that merged it
+    ledger = EvidenceLedger()
 
     # --- hierarchy signal: same scanner-derived character envelope ---
     # It is both positive evidence and a hard boundary: later weak/content
@@ -212,8 +331,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
                 first = bucket[0]
                 for other in bucket[1:]:
                     if uf.union(first, other) is _MergeResult.MERGED:
-                        signal.setdefault(first, "hierarchy")
-                        signal.setdefault(other, "hierarchy")
+                        ledger.record(SignalKind.HIERARCHY, first, other)
 
     # --- signal 1: file_hash overlap (strongest content signal) ---
     hash_index: dict[str, list[int]] = defaultdict(list)
@@ -225,8 +343,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
             first = bucket[0]
             for other in bucket[1:]:
                 if uf.union(first, other) is _MergeResult.MERGED:
-                    signal.setdefault(first, "hash")
-                    signal.setdefault(other, "hash")
+                    ledger.record(SignalKind.HASH, first, other)
 
     # --- signal 2: STL filename overlap ---
     # Drop generic filenames (shared by many models) so common part names like
@@ -253,8 +370,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
                 inter = len(fa & fb)
                 if inter >= _FILENAME_MIN_SHARED and inter / len(fa | fb) >= _FILENAME_JACCARD:
                     if uf.union(a, b) is _MergeResult.MERGED:
-                        signal.setdefault(a, "filename")
-                        signal.setdefault(b, "filename")
+                        ledger.record(SignalKind.FILENAME, a, b)
 
     # --- signal 3: name key (baseline) ---
     key_index: dict[str, list[int]] = defaultdict(list)
@@ -270,8 +386,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
             first = bucket[0]
             for other in bucket[1:]:
                 if uf.union(first, other) is _MergeResult.MERGED:
-                    signal.setdefault(first, "name")
-                    signal.setdefault(other, "name")
+                    ledger.record(SignalKind.NAME, first, other)
 
     # --- materialise clusters ---
     clusters: dict[int, list[int]] = defaultdict(list)
@@ -292,7 +407,8 @@ def regroup_creator(db: Session, creator_id: int) -> None:
             for mid in members:
                 by_id[mid].variant_group_id = None
             continue
-        strongest = _strongest_signal(members, signal)
+        strongest = ledger.strongest_for(members)
+        policy = policy_for(strongest)
         label = _label_for(members, keys, by_id, contexts)
         rep = next((m for m in members if by_id[m].is_group_rep), members[0])
         group = VariantGroup(
@@ -300,8 +416,8 @@ def regroup_creator(db: Session, creator_id: int) -> None:
             label=label,
             rep_model_id=rep,
             source="auto",
-            reason=_reason_for(strongest, members, keys, label),
-            confidence=_CONFIDENCE[strongest],
+            reason=policy.reason_template.format(label=label),
+            confidence=policy.confidence,
         )
         db.add(group)
         db.flush()
@@ -371,14 +487,6 @@ def _creator_name(db: Session, creator_id: int) -> str | None:
     return c.name if c else None
 
 
-def _strongest_signal(members: list[int], signal: dict[int, str]) -> str:
-    present = {signal.get(m) for m in members} - {None}
-    for s in ("hash", "hierarchy", "filename", "name"):
-        if s in present:
-            return s
-    return "name"
-
-
 def _label_for(
     members: list[int],
     keys: dict[int, str],
@@ -393,13 +501,3 @@ def _label_for(
     if member_keys:
         return Counter(member_keys).most_common(1)[0][0]
     return by_id[members[0]].name
-
-
-def _reason_for(signal: str, members: list[int], keys: dict[int, str], label: str) -> str:
-    if signal == "hash":
-        return "shared mesh files"
-    if signal == "filename":
-        return "shared STL file names"
-    if signal == "hierarchy":
-        return "same product hierarchy"
-    return f"name: {label}"
