@@ -136,6 +136,27 @@ thousands of entries).
   explicit — rebuilding should reset to tab "All", page 1, and whatever page
   size was last selected.
 
+## 8. Library screen: variant group side panel
+
+**Change:** clicking a card badged "N variants" on the Library grid no longer
+navigates away. Instead a docked right-side panel (in-flow flex child, width
+animates 0→380px, not an overlay) slides open showing that group's variants
+as a 2-column thumbnail grid, with a close (×) button and an "Open full view"
+link to the existing Variant Group screen for full editing. State:
+`variantSidebarGroupName` (null = closed); `openVariantSidebar(name)` /
+`closeVariantSidebar()`. Real implementation should fetch the group's
+variant list by id when opened rather than using the mock's static 6-name
+list.
+
+## 7. Library Tools moved from Creators to Library toolbar
+
+**Change:** the "Library Tools" dropdown (Reorganize Library, Rescan All
+Folders) previously lived in the Creators tab toolbar. It's library-wide,
+not creator-specific, so it now lives in the main **Library** screen's
+toolbar (the id="1b" wireframe section), next to the content-state switcher.
+Same `toggleLibraryTools`/`libraryToolsOpen`/`goReorganize` state and markup,
+just relocated. No longer present in Creators.
+
 ## 5b. Toast on scan completion
 
 Added a lightweight toast (bottom-center, auto-dismiss ~3s, `#15161b` panel,

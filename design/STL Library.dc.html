@@ -1456,27 +1456,6 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
           Refresh enrich
         </button>
-        <div style="position:relative;">
-          <button onClick="{{ toggleLibraryTools }}" style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; background:#181a20; border:1px solid #1c1e24; color:#c3c5cc; font-size:13px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-            Library Tools
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          <sc-if value="{{ libraryToolsOpen }}" hint-placeholder-val="{{ false }}">
-          <div style="position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:220px; background:#15161b; border:1px solid #23252d; border-radius:10px; box-shadow:0 12px 30px -8px rgba(0,0,0,.6); padding:6px; display:flex; flex-direction:column;">
-            <sc-if value="{{ reorganizeEnabled }}" hint-placeholder-val="{{ true }}">
-            <button onClick="{{ goReorganize }}" style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:7px; background:none; border:none; color:#dcdde2; font-size:13px; text-align:left; cursor:pointer;" style-hover="background:#1e2028;">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/></svg>
-              Reorganize Library
-            </button>
-            </sc-if>
-            <button style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:7px; background:none; border:none; color:#dcdde2; font-size:13px; text-align:left; cursor:pointer;" style-hover="background:#1e2028;">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-              Rescan All Folders
-            </button>
-          </div>
-          </sc-if>
-        </div>
         <div style="display:flex; border-radius:8px; overflow:hidden; border:1px solid #1c1e24;">
           <span style="padding:8px 13px; font-size:12.5px; background:#4f46e5; color:#fff;">A–Z</span>
           <span style="padding:8px 13px; font-size:12.5px; background:#181a20; color:#6b7080;">Most models</span>
@@ -2670,6 +2649,27 @@
             <button onClick="{{ o.onClick }}" style="padding:9px 13px; font-size:12px; border:none; cursor:pointer; background:{{ o.bg }}; color:{{ o.color }};">{{ o.label }}</button>
           </sc-for>
         </div>
+        <div style="position:relative;">
+          <button onClick="{{ toggleLibraryTools }}" style="display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; background:#181a20; border:1px solid #1c1e24; color:#c3c5cc; font-size:13px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            Library Tools
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <sc-if value="{{ libraryToolsOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:220px; background:#15161b; border:1px solid #23252d; border-radius:10px; box-shadow:0 12px 30px -8px rgba(0,0,0,.6); padding:6px; display:flex; flex-direction:column;">
+            <sc-if value="{{ reorganizeEnabled }}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{ goReorganize }}" style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:7px; background:none; border:none; color:#dcdde2; font-size:13px; text-align:left; cursor:pointer;" style-hover="background:#1e2028;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/></svg>
+              Reorganize Library
+            </button>
+            </sc-if>
+            <button style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:7px; background:none; border:none; color:#dcdde2; font-size:13px; text-align:left; cursor:pointer;" style-hover="background:#1e2028;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              Rescan All Folders
+            </button>
+          </div>
+          </sc-if>
+        </div>
         <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#6b7080;">
           Sort
           <select style="background:#181a20; border:1px solid #202329; border-radius:8px; padding:7px 10px; font-size:13px; color:#dcdde2;">
@@ -2689,7 +2689,7 @@
             <button title="Drag onto another card to group as variants" style="position:absolute; bottom:8px; left:8px; z-index:20; padding:5px; border-radius:7px; background:rgba(0,0,0,.6); border:none; color:#c3c5cc; cursor:grab; display:flex; opacity:0; transition:opacity .15s;" class="stl-grip">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
             </button>
-            <div style="aspect-ratio:1; background:linear-gradient(135deg,#1c1e26,#15161b); position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+            <div style="aspect-ratio:1; background:linear-gradient(135deg,#1c1e26,#15161b); position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden; cursor:{{ c.cursor }};" onClick="{{ c.onCardClick }}">
               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#26282f" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
               <sc-if value="{{ c.badge }}" hint-placeholder-val="{{ true }}">
                 <span style="position:absolute; top:8px; left:8px; background:rgba(79,70,229,.92); color:#fff; font-size:10px; font-weight:600; padding:3px 7px; border-radius:6px; display:flex; align-items:center; gap:3px;">{{ c.badge }}</span>
@@ -2761,6 +2761,42 @@
       </div>
       </sc-if>
     </div>
+
+    <aside style="width:{{ variantSidebarWidth }}; flex-shrink:0; background:#0e0f13; border-left:1px solid #18191f; overflow:hidden; transition:width .2s ease; display:flex; flex-direction:column;">
+      <sc-if value="{{ variantSidebarOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="width:380px; display:flex; flex-direction:column; height:100%;">
+        <div style="display:flex; align-items:center; gap:10px; padding:20px 20px 16px; border-bottom:1px solid #17181d;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <div style="flex:1; min-width:0;">
+            <p style="margin:0; font-size:15px; font-weight:700; color:#f4f4f6; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ variantSidebarGroupName }}</p>
+            <p style="margin:2px 0 0; font-size:12px; color:#5c6070;">6 variants</p>
+          </div>
+          <button onClick="{{ closeVariantSidebar }}" title="Close" style="flex-shrink:0; padding:6px; border-radius:7px; background:#181a20; border:1px solid #1a1b21; color:#8b8f9c; cursor:pointer;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div style="flex:1; overflow-y:auto; padding:16px 20px; display:grid; grid-template-columns:repeat(2,1fr); gap:12px; align-content:start;">
+          <sc-for list="{{ variantSidebarModels }}" as="v" hint-placeholder-count="6">
+            <div style="display:flex; flex-direction:column; gap:5px;">
+              <div style="aspect-ratio:1; background:linear-gradient(135deg,#1c1e26,#15161b); border:1px solid #1a1b21; border-radius:11px; position:relative; display:flex; align-items:center; justify-content:center;">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#26282f" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                <sc-if value="{{ v.isRep }}" hint-placeholder-val="{{ false }}">
+                  <span style="position:absolute; top:6px; right:6px; background:rgba(79,70,229,.9); color:#fff; font-size:8.5px; font-weight:700; padding:2px 5px; border-radius:5px;">REP</span>
+                </sc-if>
+              </div>
+              <p style="margin:0; font-size:12px; color:#c3c5cc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ v.variant }}</p>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding:14px 20px; border-top:1px solid #17181d;">
+          <a href="#" style="display:flex; align-items:center; justify-content:center; gap:6px; padding:9px 0; border-radius:8px; background:#181a20; border:1px solid #1c1e24; color:#c3c5cc; font-size:12.5px; text-decoration:none;">
+            Open full view
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </a>
+        </div>
+      </div>
+      </sc-if>
+    </aside>
   </div>
 </section>
 </div>
@@ -2806,11 +2842,25 @@ class Component extends DCLogic {
     const names = ["Winged Guardian", "Skull Lantern", "Forest Sprite", "Armored Knight", "Ancient Golem", "Mystic Owl", "Dragon Bust", "War Chief", "Crystal Sentinel", "Ranger Elf", "Necro Priest", "Storm Titan"];
     const cardCreators = ["Loot Studios", "Titan Forge", "Hero Forge", "Artisan Guild", "Dark Anvil", "Nomad Sculpts"];
     const sites = ["MyMiniFactory", "Thingiverse", "Printables", "Cults3D"];
-    const cards = names.map((n, i) => ({
+    const variantGroupCoreNames = ["Winged Guardian", "Skull Lantern", "Ancient Golem", "War Chief", "Storm Titan"];
+    const variantSidebarGroupName = this.state.variantSidebarGroupName || null;
+    const variantSidebarOpen = !!variantSidebarGroupName;
+    const openVariantSidebar = (name) => this.setState({ variantSidebarGroupName: name });
+    const closeVariantSidebar = () => this.setState({ variantSidebarGroupName: null });
+    const variantSidebarVariantNames = ["Base", "Flying pose", "Alt weapon", "Cracked base", "No base", "Bust only"];
+    const variantSidebarModels = variantSidebarOpen ? variantSidebarVariantNames.map((v, i) => ({ variant: v, isRep: i === 0 })) : [];
+    const variantSidebarWidth = variantSidebarOpen ? "380px" : "0px";
+    const cardsRaw = names.map((n, i) => ({
       name: n,
       creator: cardCreators[i % cardCreators.length],
       site: sites[i % sites.length],
       badge: i % 3 === 0 ? (i % 6 === 0 ? "3 variants" : "New") : null,
+    }));
+    const cards = cardsRaw.map(c => ({
+      ...c,
+      hasVariants: !!(c.badge && c.badge.includes("variant")),
+      onCardClick: (c.badge && c.badge.includes("variant")) ? () => openVariantSidebar(c.name) : undefined,
+      cursor: (c.badge && c.badge.includes("variant")) ? "pointer" : "default",
     }));
     const creatorNames = ["Loot Studios", "Titan Forge", "Hero Forge", "Artisan Guild", "Dark Anvil", "Nomad Sculpts", "Abe3D", "Ravenholm Minis", "Ironclad Casting", "Grymlok Works", "Sable & Stone", "Wyrmwood Prints", "Cast Iron Creations", "Ninth Age Studio", "Pale Moon Miniatures"];
     const toastMsg = this.state.toastMsg || "";
@@ -3249,6 +3299,7 @@ class Component extends DCLogic {
       queueIsContent, queueIsEmpty, queueIsLoading, queueSkeleton, queueStateOptions,
       importIsIdle, importIsRunning, importIsDone, importIsError, importPhaseOptions,
       variantGroupCards, paints, tagRows, reorgTabs, reorgEntries, helpTopics, guides,
+      variantSidebarOpen, variantSidebarGroupName, closeVariantSidebar, variantSidebarModels, variantSidebarWidth,
       reorgRangeLabel, reorgPageItems, reorgPrevPage, reorgNextPage, reorgPrevDisabled, reorgNextDisabled, reorgTotalPages, reorgPrevOpacity, reorgNextOpacity, reorgPageSizeOptions,
       variantGroupIsContent, variantGroupIsLoading, variantGroupIsEmpty, variantGroupStateOptions, variantGroupSkeleton,
       deleteAllArmed, deleteAllTypedValue, deleteAllNotReady, deleteAllClick, deleteAllCancel,
