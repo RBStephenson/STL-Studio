@@ -32,8 +32,43 @@ describe("persistent desktop diagnostics", () => {
   it("persists the enabled choice across restarts", () => {
     const dir = mkdtempSync(join(tmpdir(), "stl-marker-"));
     persistDiagnosticsChoice(dir, true);
-    expect(diagnosticsWereEnabled(dir)).toBe(true);
+    expect(diagnosticsWereEnabled(dir, {})).toBe(true);
     persistDiagnosticsChoice(dir, false);
-    expect(diagnosticsWereEnabled(dir)).toBe(false);
+    expect(diagnosticsWereEnabled(dir, {})).toBe(false);
+  });
+
+  describe("diagnosticsWereEnabled env-var bypass (STUDIO-352)", () => {
+    it("is true from the env var alone, with no marker file", () => {
+      const dir = mkdtempSync(join(tmpdir(), "stl-marker-"));
+      expect(diagnosticsWereEnabled(dir, { STL_STUDIO_DIAGNOSTICS: "1" })).toBe(true);
+    });
+
+    it("treats an explicit \"0\" as not set", () => {
+      const dir = mkdtempSync(join(tmpdir(), "stl-marker-"));
+      expect(diagnosticsWereEnabled(dir, { STL_STUDIO_DIAGNOSTICS: "0" })).toBe(false);
+    });
+
+    it("is true from the marker file alone, with no env var", () => {
+      const dir = mkdtempSync(join(tmpdir(), "stl-marker-"));
+      persistDiagnosticsChoice(dir, true);
+      expect(diagnosticsWereEnabled(dir, {})).toBe(true);
+    });
+
+    it("is false when neither is set", () => {
+      const dir = mkdtempSync(join(tmpdir(), "stl-marker-"));
+      expect(diagnosticsWereEnabled(dir, {})).toBe(false);
+    });
+
+    it("defaults to reading process.env when no env is passed", () => {
+      const dir = mkdtempSync(join(tmpdir(), "stl-marker-"));
+      const original = process.env.STL_STUDIO_DIAGNOSTICS;
+      process.env.STL_STUDIO_DIAGNOSTICS = "1";
+      try {
+        expect(diagnosticsWereEnabled(dir)).toBe(true);
+      } finally {
+        if (original === undefined) delete process.env.STL_STUDIO_DIAGNOSTICS;
+        else process.env.STL_STUDIO_DIAGNOSTICS = original;
+      }
+    });
   });
 });

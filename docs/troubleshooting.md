@@ -252,3 +252,32 @@ file that is the host's `./data/logs` directory. For a live terminal stream, use
 `docker compose logs backend`. Each process keeps a 2 MiB active log and three
 rotated backups. Disabling the feature stops new persistent writes but does not
 delete existing diagnostic files.
+
+### When the app won't start at all
+
+The Settings toggle above needs a working window to reach — no help if STL
+Studio never gets that far (see
+[the app does nothing for a while after an update](#the-app-does-nothing-for-a-while-after-an-update)
+for the common cause). Two ways around that, both effective before any window
+exists:
+
+**Environment variable.** Set `STL_STUDIO_DIAGNOSTICS=1` before launching STL
+Studio and it logs from the very first startup checkpoint, with no Settings
+step required:
+
+```powershell
+$env:STL_STUDIO_DIAGNOSTICS = "1"
+& "$env:LOCALAPPDATA\Programs\STL Studio\STL Studio.exe"
+```
+
+**Marker file.** The Settings toggle just writes an empty file named
+`persistent-diagnostics.enabled` in the app's userData folder — creating it by
+hand has the same effect on the next launch. The folder name has changed
+across versions, so check both:
+
+- `%APPDATA%\STL Studio\`
+- `%APPDATA%\stl-studio-desktop\`
+
+Whichever one exists on your machine is the right one; `desktop.log` and its
+rotated backups (`desktop.log.1`–`.3`) land in a `logs` subfolder there once
+diagnostics are on.

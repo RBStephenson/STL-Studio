@@ -49,7 +49,18 @@ export class PersistentLogger {
   }
 }
 
-export function diagnosticsWereEnabled(userDataDir: string): boolean {
+/** Env var name checked alongside the marker file (STUDIO-352): the marker is
+ *  only ever written by the Settings-page IPC handler, which needs a working
+ *  renderer — unreachable exactly when a startup failure is what you'd want
+ *  logs for. Matches the existing STL_STUDIO_USER_DATA_DIR precedent. */
+export const DIAGNOSTICS_ENV_VAR = "STL_STUDIO_DIAGNOSTICS";
+
+export function diagnosticsWereEnabled(
+  userDataDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const envValue = env[DIAGNOSTICS_ENV_VAR];
+  if (envValue && envValue !== "0") return true;
   return existsSync(join(userDataDir, DIAGNOSTICS_MARKER));
 }
 

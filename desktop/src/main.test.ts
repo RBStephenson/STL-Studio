@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const showErrorBox = vi.fn();
 const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
@@ -99,12 +99,26 @@ vi.mock("./appController", () => ({
   }),
 }));
 
+// Real PersistentLogger does a real mkdirSync — stub the class only, keep
+// diagnosticsWereEnabled real so its env-var/marker-file logic is exercised
+// as main.ts actually calls it (STUDIO-352 coverage is in
+// persistentLogger.test.ts; this file only proves main.ts's wiring).
+const persistentLoggerCtor = vi.fn().mockImplementation(() => ({ write: vi.fn() }));
+vi.mock("./persistentLogger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./persistentLogger")>();
+  return { ...actual, PersistentLogger: persistentLoggerCtor };
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   whenReadyCallbacks.length = 0;
   FakeBrowserWindow.instances.length = 0;
   FakeBrowserWindow.focused = null;
   capturedDeps = undefined;
+});
+
+afterEach(() => {
+  delete process.env.STL_STUDIO_DIAGNOSTICS;
 });
 
 async function loadMain() {
@@ -151,6 +165,17 @@ describe("main.ts wiring", () => {
     await activate?.();
     expect(FakeBrowserWindow.instances).toHaveLength(1);
     expect(bootBackendAndLoad).toHaveBeenCalledTimes(2);
+  });
+
+  it("constructs a persistent logger when STL_STUDIO_DIAGNOSTICS is set, with no marker file (STUDIO-352)", async () => {
+    process.env.STL_STUDIO_DIAGNOSTICS = "1";
+    await loadMain();
+    expect(persistentLoggerCtor).toHaveBeenCalledWith(join("/userdata", "logs"));
+  });
+
+  it("does not construct a persistent logger when neither the env var nor a marker file is set", async () => {
+    await loadMain();
+    expect(persistentLoggerCtor).not.toHaveBeenCalled();
   });
 
   it("quits normally on window-all-closed outside macOS", async () => {
