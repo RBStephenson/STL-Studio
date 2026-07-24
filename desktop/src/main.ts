@@ -16,7 +16,7 @@ import { Menu, app, BrowserWindow, dialog, ipcMain, screen, shell } from "electr
 import { autoUpdater } from "electron-updater";
 
 import { createAppController } from "./appController";
-import { LOCKFILE_NAME, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
+import { LOCKFILE_NAME, QUIT_TIMEOUT_MS, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
 import { patchConsoleForDiagnostics, registerDiagnosticsIpcHandlers } from "./diagnostics";
 import {
   buildApplicationMenuTemplate,
@@ -300,7 +300,22 @@ if (!gotLock) {
     if (quitting) return;
     quitting = true;
     event.preventDefault();
-    await appController.stopOwnedSidecar();
+    // Belt-and-braces: killTree already caps itself at SHUTDOWN_GRACE_MS, but
+    // this outer race means quit still proceeds even if something else in
+    // stopOwnedSidecar hangs. Without it, quitting is already true, so a wedge
+    // here would mean the only way out is Task Manager (STUDIO-340).
+    await Promise.race([
+      appController.stopOwnedSidecar(),
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          console.error(
+            `[shutdown] stopOwnedSidecar did not complete within ${QUIT_TIMEOUT_MS}ms; quitting anyway (STUDIO-340)`,
+          );
+          resolve();
+        }, QUIT_TIMEOUT_MS);
+        timer.unref?.();
+      }),
+    ]);
     app.quit();
   });
 }

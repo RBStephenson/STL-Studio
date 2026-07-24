@@ -176,6 +176,35 @@ describe("main.ts wiring", () => {
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
   });
 
+  it("before-quit still quits if stopOwnedSidecar never resolves (STUDIO-340)", async () => {
+    vi.useFakeTimers();
+    try {
+      stopOwnedSidecar.mockReturnValueOnce(new Promise(() => {}));
+      await loadMain();
+      const { app } = await import("electron");
+      const handler = (app.on as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([event]) => event === "before-quit",
+      )?.[1] as (e: { preventDefault: () => void }) => Promise<void>;
+      const event = { preventDefault: vi.fn() };
+
+      const settled = handler(event);
+      let done = false;
+      void settled.then(() => {
+        done = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(done).toBe(false);
+      expect(app.quit).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await settled;
+      expect(app.quit).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("wires the application menu's regenerate-key action to the focused window", async () => {
     await loadMain();
     const template = buildFromTemplate.mock.calls[0][0];

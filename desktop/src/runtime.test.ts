@@ -4,9 +4,64 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { findFreePort, runtimeDeps } from "./runtime";
+import { findFreePort, killTreeWindows, runtimeDeps } from "./runtime";
+
+describe("killTreeWindows (STUDIO-340)", () => {
+  it("resolves once taskkill's callback fires, without logging a timeout", async () => {
+    const log = vi.fn();
+    const execFileFn = vi.fn((_file, _args, _options, callback: (error: Error | null) => void) => {
+      callback(null);
+    });
+
+    await killTreeWindows(123, execFileFn, 5_000, log);
+
+    expect(execFileFn).toHaveBeenCalledWith(
+      "taskkill",
+      ["/pid", "123", "/T", "/F"],
+      { timeout: 5_000 },
+      expect.any(Function),
+    );
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("still settles and logs if execFile's own timeout reports an error", async () => {
+    const log = vi.fn();
+    const execFileFn = vi.fn((_file, _args, _options, callback: (error: Error | null) => void) => {
+      callback(new Error("taskkill ETIMEDOUT"));
+    });
+
+    await killTreeWindows(123, execFileFn, 5_000, log);
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("ETIMEDOUT"));
+  });
+
+  it("still settles via the backstop timer if execFile never calls back at all", async () => {
+    vi.useFakeTimers();
+    try {
+      const log = vi.fn();
+      // Simulates a wedged native call that ignores its own timeout option —
+      // the exact failure mode a hard lock (Task Manager only) came from.
+      const execFileFn = vi.fn(() => undefined);
+
+      const settled = killTreeWindows(123, execFileFn, 5_000, log);
+      let resolved = false;
+      void settled.then(() => {
+        resolved = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(resolved).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(resolved).toBe(true);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("did not confirm within 5000ms"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("findFreePort", () => {
   it("returns a usable TCP port that can actually be bound", async () => {

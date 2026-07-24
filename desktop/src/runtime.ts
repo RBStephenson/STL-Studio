@@ -51,19 +51,60 @@ async function probe(url: string): Promise<boolean> {
   }
 }
 
-/** Terminate a whole process tree by pid.
+/** Minimal slice of `child_process.execFile` this module depends on, so tests
+ *  can inject a fake without a real process. */
+type ExecFileFn = (
+  file: string,
+  args: string[],
+  options: { timeout: number },
+  callback: (error: Error | null) => void,
+) => unknown;
+
+/** Terminate a Windows process tree via `taskkill /pid <pid> /T /F`. A
+ *  PyInstaller one-file exe spawns a child bootloader that runs the real
+ *  uvicorn server, so killing only the parent pid would orphan it — `/T`
+ *  kills the tree, `/F` forces it.
  *
- * Windows: `taskkill /pid <pid> /T /F`. A PyInstaller one-file exe spawns a
- * child bootloader that runs the real uvicorn server, so killing only the parent
- * pid would orphan it — `/T` kills the tree, `/F` forces it.
- *
- * POSIX: SIGTERM for a graceful stop, then a SIGKILL fallback after a grace
- * window if the process is still alive. */
+ * Two independent defenses against a wedged `taskkill` blocking quit forever
+ * (STUDIO-340): `execFile`'s own `timeout` option (primary — Node kills the
+ * child and still invokes the callback), and an unref'd `setTimeout` that
+ * resolves regardless (backstop, in case `execFile`'s timeout itself never
+ * fires — the case a test can actually exercise with a fake that never calls
+ * back). Either path logs so a hung kill shows up in diagnostics instead of
+ * silently taking the full grace window every time. */
+export function killTreeWindows(
+  pid: number,
+  execFileFn: ExecFileFn = execFile as unknown as ExecFileFn,
+  timeoutMs: number = SHUTDOWN_GRACE_MS,
+  log: (message: string) => void = () => {},
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const settle = (): void => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const backstop = setTimeout(() => {
+      log(`taskkill for pid ${pid} did not confirm within ${timeoutMs}ms; giving up (STUDIO-340)`);
+      settle();
+    }, timeoutMs);
+    backstop.unref?.();
+    execFileFn("taskkill", ["/pid", String(pid), "/T", "/F"], { timeout: timeoutMs }, (error) => {
+      clearTimeout(backstop);
+      if (error) {
+        log(`taskkill for pid ${pid} failed or timed out: ${error.message}`);
+      }
+      settle();
+    });
+  });
+}
+
 function killTree(pid: number): Promise<void> {
   if (process.platform === "win32") {
-    return new Promise<void>((resolve) => {
-      execFile("taskkill", ["/pid", String(pid), "/T", "/F"], () => resolve());
-    });
+    return killTreeWindows(pid, execFile as unknown as ExecFileFn, SHUTDOWN_GRACE_MS, (message) =>
+      console.error(`[sidecar] ${message}`),
+    );
   }
   return new Promise<void>((resolve) => {
     try {
