@@ -5,6 +5,12 @@
       "package": "react-router",
       "reason": "RSC Mode CSRF Bypass. STL Studio's frontend is a plain Vite SPA with client-side routing only — no React Server Components, no SSR, no framework mode — so this advisory's attack surface does not exist here. No forward-fixed release exists yet; downgrading to the last version below the vulnerable range (7.11.0) was tested and rejected — it reintroduces 14 more severe, applicable advisories (open-redirect XSS, stored XSS, an RCE via deserialization, CSRF, multiple DoS vectors) that the current version already fixes.",
       "ticket": "STUDIO-355"
+    },
+    {
+      "url": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+      "package": "brace-expansion",
+      "reason": "DoS via unbounded expansion length (OOM crash). The advisory range is <=5.0.7, which semver-matches the 1.x and 2.x release lines as well as 5.x. Every remaining match is a build-time transitive dependency of electron-builder in the desktop workspace — @electron/asar, dir-compare and glob via minimatch@3 (brace-expansion 1.1.16), @electron/universal via minimatch@9 and filelist/jake/ejs via minimatch@5 (brace-expansion 2.1.2). Nothing in that chain ships to users or expands attacker-supplied glob patterns; it only runs while packaging on CI. No forward fix exists for those lines: 1.1.16 and 2.1.2 are the newest releases on them, so only 5.0.8 carries the patch. Forcing them to 5.0.8 would jump four majors inside a tree that pins the old minimatch API and risks breaking the Windows NSIS build. The genuinely fixable copies were bumped instead: frontend's eslint->minimatch@10 chain and desktop's top-level minimatch@10 chain both resolve to 5.0.8 (the latter via a scoped `minimatch@^10` override). Revisit when electron-builder updates its nested minimatch versions.",
+      "ticket": "STUDIO-356"
     }
   ]
 }
