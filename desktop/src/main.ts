@@ -23,7 +23,7 @@ import {
   buildContextMenuTemplate,
 } from "./menu";
 import { findFreePort, runtimeDeps } from "./runtime";
-import { getOrCreateSecretKey, regenerateSecretKey } from "./secretKey";
+import { getOrCreateSecretKey, markSecretKeyRevealed, regenerateSecretKey } from "./secretKey";
 import { applyUserDataOverride } from "./userDataOverride";
 import { readWindowState } from "./windowState";
 import {
@@ -102,6 +102,7 @@ const appController = createAppController<BrowserWindow>({
   backendBaseUrl: (port) => baseUrl(port),
   getOrCreateSecretKey: (dir) => getOrCreateSecretKey(dir),
   regenerateSecretKeyFile: (dir) => regenerateSecretKey(dir),
+  markSecretKeyRevealed: (dir) => markSecretKeyRevealed(dir),
   autoUpdaterAdapter: autoUpdater,
   setUpdateFeedUrl: (url) => autoUpdater.setFeedURL({ provider: "generic", url }),
   fetchJson: async (url) => {
