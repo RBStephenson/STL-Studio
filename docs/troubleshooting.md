@@ -1,6 +1,7 @@
 # Troubleshooting & FAQ
 
 - [Windows blocked the installer (SmartScreen)](#windows-blocked-the-installer-smartscreen)
+- [The app does nothing for a while after an update](#the-app-does-nothing-for-a-while-after-an-update)
 - [I added models to a creator but they don't show up](#i-added-models-to-a-creator-but-they-dont-show-up)
 - [A model has the wrong thumbnail](#a-model-has-the-wrong-thumbnail)
 - [A model has no thumbnail at all](#a-model-has-no-thumbnail-at-all)
@@ -56,6 +57,24 @@ positive on a released binary is worth knowing about.
 Signed installers are planned but are not part of the current release scope
 (see [Release scope](support-policy.md#release-scope)). Until then, the
 verification steps above are the reliable way to confirm you have the real file.
+
+## The app does nothing for a while after an update
+
+**This is expected, and it's only a first-launch cost.** After the installer
+runs (auto-update or manual), antivirus software scans the newly-installed
+files the first time you launch that version — STL Studio itself does not
+control when this happens or how long it takes. On some machines this can look
+like the window never appears, or appears but stays blank for up to a minute.
+
+This is a one-time cost per version, not per launch: your antivirus caches its
+verdict on the installed files, so subsequent launches of the same version
+start normally. If it happens on every launch, that points to something else —
+see [Application crashes and recovery](#application-crashes-and-recovery).
+
+If this is disruptive, add an exclusion for STL Studio's install directory
+(default `%LOCALAPPDATA%\Programs\STL Studio`) in your antivirus settings so
+the scan happens once, in the background, rather than blocking the first
+launch.
 
 ## I added models to a creator but they don't show up
 

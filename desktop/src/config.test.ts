@@ -1,8 +1,24 @@
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import { isBackendRetryUrl, resolveBackendExe } from "./config";
 
 const exeName = process.platform === "win32" ? "stl-studio.exe" : "stl-studio";
+
+/** Temporarily overrides process.platform for a resolveBackendExe() call —
+ *  the dev path shape branches on it (STUDIO-351: Windows one-dir vs
+ *  everywhere-else one-file), so both branches need direct coverage
+ *  regardless of which OS actually runs the test. */
+function withPlatform(platform: NodeJS.Platform, fn: () => void): void {
+  const original = process.platform;
+  Object.defineProperty(process, "platform", { value: platform });
+  try {
+    fn();
+  } finally {
+    Object.defineProperty(process, "platform", { value: original });
+  }
+}
 
 describe("backend retry URL", () => {
   it("accepts only the internal retry navigation", () => {
@@ -56,5 +72,38 @@ describe("resolveBackendExe", () => {
     });
     expect(path).toContain("dist-standalone");
     expect(path.endsWith(exeName)).toBe(true);
+  });
+
+  it("nests the dev exe under stl-studio/ on Windows (one-dir, STUDIO-351)", () => {
+    withPlatform("win32", () => {
+      const path = resolveBackendExe({
+        packaged: false,
+        resourcesPath: "/app/resources",
+        repoRoot: "/repo",
+      });
+      expect(path).toBe(join("/repo", "dist-standalone", "stl-studio", "stl-studio.exe"));
+    });
+  });
+
+  it("keeps the dev exe flat (one-file) on non-Windows platforms", () => {
+    withPlatform("linux", () => {
+      const path = resolveBackendExe({
+        packaged: false,
+        resourcesPath: "/app/resources",
+        repoRoot: "/repo",
+      });
+      expect(path).toBe(join("/repo", "dist-standalone", "stl-studio"));
+    });
+  });
+
+  it("resolves the packaged path from the resources root regardless of platform", () => {
+    withPlatform("win32", () => {
+      const path = resolveBackendExe({
+        packaged: true,
+        resourcesPath: "/app/resources",
+        repoRoot: "/repo",
+      });
+      expect(path).toBe(join("/app/resources", "stl-studio.exe"));
+    });
   });
 });
