@@ -8,7 +8,7 @@ type ProcessFailureSource = {
 export type FailureUi = {
   log(message: string, error?: unknown): void;
   showRendererFailure(detail: string): Promise<"reload" | "quit">;
-  showMainFailure(detail: string): void;
+  showMainFailure(detail: string): Promise<void>;
   quit(): void;
 };
 
@@ -23,15 +23,31 @@ export function failureDetail(value: unknown): string {
 }
 
 export function registerProcessFailureHandlers(source: ProcessFailureSource, ui: FailureUi): void {
+  // Mirrors registerRendererFailureHandler's recoveryVisible guard: a repeating
+  // failure (interval, retry loop, stream error handler) must not stack modal
+  // dialogs faster than the user can dismiss them (STUDIO-339). Logging stays
+  // unthrottled — only the dialog is suppressed while one is already showing.
+  let showingMainFailure = false;
+  function report(logMessage: string, value: unknown): void {
+    const detail = failureDetail(value);
+    ui.log(logMessage, value);
+    if (showingMainFailure) return;
+    showingMainFailure = true;
+    // catch + finally, not just then: a rejected showMainFailure (dialog API
+    // itself throwing) must still clear the guard, or every subsequent
+    // failure goes dialog-less — and the rejection must not escape as an
+    // unhandled promise rejection back into this same handler.
+    void ui.showMainFailure(detail)
+      .catch(() => {})
+      .finally(() => {
+        showingMainFailure = false;
+      });
+  }
   source.on("uncaughtException", (error) => {
-    const detail = failureDetail(error);
-    ui.log("Uncaught Electron main-process exception", error);
-    ui.showMainFailure(detail);
+    report("Uncaught Electron main-process exception", error);
   });
   source.on("unhandledRejection", (reason) => {
-    const detail = failureDetail(reason);
-    ui.log("Unhandled Electron main-process promise rejection", reason);
-    ui.showMainFailure(detail);
+    report("Unhandled Electron main-process promise rejection", reason);
   });
 }
 
