@@ -10,6 +10,7 @@ import { gridKeyboardCoordinates } from "../utils/gridKeyboardCoordinates";
 import { api, Model, LibrarySort, ModelList } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { queryKeys } from "../hooks/queries/keys";
+import VariantSidebar, { PANEL_DEFAULT_WIDTH, clampPanelWidth } from "./library/VariantSidebar";
 import { useLibraryModels, useCreators, useModelStats, useAllTags } from "../hooks/queries/models";
 import { useCollections } from "../hooks/queries/collections";
 import { useScanRootCount, useUnavailableRoots } from "../hooks/queries/scan";
@@ -40,6 +41,8 @@ const LIBRARY_QUERY_KEY = "library_query";
 // each render (which would churn ModelCard memoization).
 const EMPTY_GUIDE_IDS: Set<number> = new Set();
 
+const VARIANT_PANEL_WIDTH_KEY = "variant_panel_width";
+
 export default function Library() {
   const filters = useLibraryFilters();
   const {
@@ -54,9 +57,59 @@ export default function Library() {
   const { toast } = useToast();
 
   const queryClient = useQueryClient();
+
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const [selection, setSelection] = useState<Set<number>>(new Set());
   const { settings } = useAppSettings();
+
+  // Variant-group side panel (STUDIO-350). The open group lives in the URL, not
+  // component state, so Back closes the panel, deep links work, and a reload
+  // restores it. Other Library params (filters, page) must survive the update.
+  const variantSidebarEnabled = settings.variant_sidebar_enabled;
+  const openGroupId = Number(searchParams.get("group")) || null;
+  const [openGroupCard, setOpenGroupCard] = useState<Model | null>(null);
+
+  // Panel width is a UI preference, not catalog state, so it lives in
+  // localStorage rather than app settings — it should follow the machine, not
+  // sync to every client. Clamped on read: a stored width from a wider monitor
+  // must not starve the grid on a smaller one.
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const stored = Number(localStorage.getItem(VARIANT_PANEL_WIDTH_KEY));
+    return clampPanelWidth(stored || PANEL_DEFAULT_WIDTH, window.innerWidth);
+  });
+  const changePanelWidth = useCallback((next: number) => {
+    setPanelWidth(next);
+    try {
+      localStorage.setItem(VARIANT_PANEL_WIDTH_KEY, String(next));
+    } catch {
+      // Private-mode / quota failures must not break resizing.
+    }
+  }, []);
+
+  const closeVariantSidebar = useCallback(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("group");
+      return next;
+    }, { replace: false });
+    setOpenGroupCard(null);
+  }, [setSearchParams]);
+
+  // Returning true tells ModelCard we consumed the click. Only multi-variant
+  // cards that carry a durable group id qualify: legacy character-only groups
+  // have no id to fetch by, so they keep navigating to the full page.
+  const openVariantSidebar = useCallback((model: Model): boolean => {
+    if (!variantSidebarEnabled) return false;
+    const groupId = model.variant_group_id;
+    if (!groupId || (model.variant_count ?? 1) <= 1) return false;
+    setOpenGroupCard(model);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("group", String(groupId));
+      return next;
+    }, { replace: false });
+    return true;
+  }, [variantSidebarEnabled, setSearchParams]);
   const pageSize = settings.library_page_size;
 
   const scrollRestoredRef = useRef(false);
@@ -535,6 +588,8 @@ export default function Library() {
           onDragCancel={() => setDraggingId(null)}
           draggingModel={draggingModel}
           dragCount={dragCount}
+          onOpenGroup={openVariantSidebar}
+          variantPanelOpen={variantSidebarEnabled && openGroupId !== null}
         />
 
         {selection.size > 0 && (
@@ -553,6 +608,22 @@ export default function Library() {
           <PaginationBar page={page} totalPages={totalPages} onPage={setPage} />
         )}
       </div>
+
+      {variantSidebarEnabled && openGroupId !== null && (
+        <VariantSidebar
+          key={openGroupId}
+          groupId={openGroupId}
+          fallbackLabel={openGroupCard?.variant_group?.label
+            || openGroupCard?.character
+            || openGroupCard?.title
+            || openGroupCard?.name
+            || "Variant group"}
+          fullViewTo={openGroupCard ? modelLinkTo(openGroupCard) : "/"}
+          onClose={closeVariantSidebar}
+          width={panelWidth}
+          onWidthChange={changePanelWidth}
+        />
+      )}
 
       {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} showDragGroup={dndEnabled} />}
 

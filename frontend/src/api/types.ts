@@ -298,6 +298,7 @@ export interface AppSettings {
   // Use scan hierarchy as a constrained signal for automatic variant groups.
   // Off by default; manual groups and explicit exclusions remain authoritative.
   hierarchy_variant_grouping_enabled: boolean;
+  variant_sidebar_enabled: boolean;
   system_info_enabled: boolean;
   persistent_diagnostics_enabled: boolean;
   storage_recovery_enabled: boolean;

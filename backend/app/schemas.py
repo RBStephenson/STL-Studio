@@ -590,6 +590,9 @@ class AppSettingsRead(BaseModel):
     # Improve scanner-owned auto groups using the hierarchy-derived character
     # envelope. Manual groups and no_group decisions remain authoritative.
     hierarchy_variant_grouping_enabled: bool = False
+    # Open a variant group in a docked Library side panel instead of navigating
+    # to the Variant Group page. Default off; toggled from the Library tab.
+    variant_sidebar_enabled: bool = False
     # Read-only About & System Info diagnostics. Default off and server-gated.
     system_info_enabled: bool = False
     # Bounded sanitized log files and self-service support downloads.
@@ -647,6 +650,7 @@ class AppSettingsUpdate(BaseModel):
     reorganize_package_mode_enabled: Optional[bool] = None
     reorganize_ai_suggestions_enabled: Optional[bool] = None
     hierarchy_variant_grouping_enabled: Optional[bool] = None
+    variant_sidebar_enabled: Optional[bool] = None
     system_info_enabled: Optional[bool] = None
     persistent_diagnostics_enabled: Optional[bool] = None
     storage_recovery_enabled: Optional[bool] = None
