@@ -37,6 +37,15 @@ Local web app for cataloguing, browsing, and managing an STL file library.
    The Electron app opens in its own desktop window. On Linux, mark the binary
    executable, run it, and open `http://localhost:8484` in your browser.
 
+   > **Windows will warn you the first time.** STL Studio is not yet
+   > code-signed, so SmartScreen shows *"Windows protected your PC"* with an
+   > unknown publisher. Choose **More info → Run anyway**. This is expected for
+   > every release today — see
+   > [Windows blocked the installer](docs/troubleshooting.md#windows-blocked-the-installer-smartscreen)
+   > for the full walkthrough, and
+   > [Verifying your download](docs/getting-started.md#verifying-your-download)
+   > if you want to confirm the file is genuine before running it.
+
 3. Go to **Settings** and add the folder paths where your STL files live.
 
 4. Click **Scan Library** — models appear within a few minutes.

@@ -1,5 +1,6 @@
 # Troubleshooting & FAQ
 
+- [Windows blocked the installer (SmartScreen)](#windows-blocked-the-installer-smartscreen)
 - [I added models to a creator but they don't show up](#i-added-models-to-a-creator-but-they-dont-show-up)
 - [A model has the wrong thumbnail](#a-model-has-the-wrong-thumbnail)
 - [A model has no thumbnail at all](#a-model-has-no-thumbnail-at-all)
@@ -17,6 +18,43 @@
 - [Accessing support logs](#accessing-support-logs)
 
 ---
+
+## Windows blocked the installer (SmartScreen)
+
+**This is expected.** STL Studio is not code-signed yet, so Windows has no
+publisher identity to check the installer against. It is not a malware
+detection, and it happens on every current release.
+
+**"Windows protected your PC" (blue dialog):** click **More info**, then
+**Run anyway**.
+
+**No "More info" link, or the button only says "Don't run":** Windows is
+treating the file as blocked rather than merely unrecognized. Clear the
+mark-of-the-web that your browser attached when it downloaded the file:
+
+1. Right-click `STL-Studio-Setup-<version>.exe` → **Properties**.
+2. On the **General** tab, tick **Unblock** at the bottom.
+3. **Apply**, then run the installer again.
+
+**Your browser refused to finish the download**, or removed the file after it
+completed: this is browser-level reputation filtering, separate from
+SmartScreen. In Chrome or Edge, open the downloads list and choose **Keep** on
+the blocked entry. Corporate-managed machines may block unsigned installers by
+policy — in that case the download cannot be recovered locally and needs your IT
+administrator.
+
+**Microsoft Defender quarantined the file:** that is a different message
+("Threat found" / "Virus detected"), not SmartScreen. STL Studio's installer
+should not trigger it. Before overriding anything, verify the download is
+genuine using the checksum and build attestation steps in
+[Verifying your download](getting-started.md#verifying-your-download). If
+verification passes and Defender still objects, please
+[open an issue](https://github.com/RBStephenson/STL-Studio/issues) — a false
+positive on a released binary is worth knowing about.
+
+Signed installers are planned but are not part of the current release scope
+(see [Release scope](support-policy.md#release-scope)). Until then, the
+verification steps above are the reliable way to confirm you have the real file.
 
 ## I added models to a creator but they don't show up
 

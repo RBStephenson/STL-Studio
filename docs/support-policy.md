@@ -63,5 +63,16 @@ not want disclosed.
 ## Release scope
 
 Code signing is not part of the current qualification scope. Until signed
-installers are published, Windows SmartScreen may require **More info → Run
-anyway** for a downloaded installer.
+installers are published, Windows SmartScreen blocks the downloaded installer on
+first run and requires **More info → Run anyway**. This affects every current
+release and is not a malware detection.
+
+Because the installer is unsigned, every versioned release publishes a
+`SHA256SUMS` manifest and GitHub build-provenance attestations so the download
+can be verified independently — see
+[Verifying your download](getting-started.md#verifying-your-download). The
+rolling `Main Build` prerelease carries neither.
+
+For the full walkthrough, including the mark-of-the-web **Unblock** case and
+browser-level download blocking, see
+[Windows blocked the installer](troubleshooting.md#windows-blocked-the-installer-smartscreen).
