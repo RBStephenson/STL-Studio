@@ -168,6 +168,30 @@ describe("startSidecar", () => {
     expect(onSpawn.mock.calls[0][0]).toMatchObject({ pid: 4242 });
   });
 
+  it("reports every exit through onExit, with the process that exited (STUDIO-338)", async () => {
+    const exits: Array<{ pid: number | undefined; code: number | null }> = [];
+    let exitListener: ((code: number | null) => void) | undefined;
+    const proc = {
+      pid: 4242,
+      on: (event: string, listener: (code: number | null) => void) => {
+        if (event === "exit") exitListener = listener;
+      },
+    } as unknown as SidecarProcess;
+    const { deps } = makeDeps({ probe: vi.fn().mockResolvedValue(true), spawn: () => proc });
+
+    await startSidecar(deps, {
+      exePath: "/backend.exe",
+      args: [],
+      port: 8484,
+      onExit: (p, code) => exits.push({ pid: p.pid, code }),
+    });
+
+    // startSidecar deliberately does not judge which exits are expected — the
+    // caller owns that, because only it knows the surrounding lifecycle state.
+    exitListener?.(1);
+    expect(exits).toEqual([{ pid: 4242, code: 1 }]);
+  });
+
   it("reaps an orphan before spawning a fresh backend", async () => {
     const lock: LockRecord = { pid: 111, port: 8484 };
     // First probe (reap check) true = orphan is ours; subsequent probes (health)
