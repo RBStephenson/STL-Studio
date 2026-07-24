@@ -113,6 +113,9 @@ const appController = createAppController<BrowserWindow>({
   showMessageBox: (win, opts) => (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)),
   showKeyRevealWindow: (key) => showKeyRevealWindow(key),
   loadPlaceholderPage: (win) => win.loadFile(PLACEHOLDER_HTML),
+  loadSplashPage: (win) => win.loadFile(SPLASH_HTML),
+  quitApp: () => app.quit(),
+  now: () => Date.now(),
   log: (message) => console.log(message),
 });
 

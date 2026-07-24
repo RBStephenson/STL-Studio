@@ -32,6 +32,13 @@ export const HEALTH_POLL_TIMEOUT_MS = 30_000;
 /** Grace period between SIGTERM and the SIGKILL fallback on POSIX (ms). */
 export const SHUTDOWN_GRACE_MS = 5_000;
 
+/** Crash-loop guard for post-boot backend restarts (STUDIO-338). A backend that
+ *  dies immediately on every launch must not produce an endless offer-restart
+ *  dialog: once this many restarts have been attempted inside the window below,
+ *  stop offering and fall back to the recovery page. */
+export const MAX_SIDECAR_RESTARTS = 3;
+export const SIDECAR_RESTART_WINDOW_MS = 120_000;
+
 /** Lockfile (PID + port of the spawned backend) lives in the Electron userData
  *  dir; the absolute path is resolved at runtime from `app.getPath('userData')`. */
 export const LOCKFILE_NAME = "sidecar.lock.json";
