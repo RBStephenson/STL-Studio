@@ -103,7 +103,9 @@ vi.mock("./appController", () => ({
 // diagnosticsWereEnabled real so its env-var/marker-file logic is exercised
 // as main.ts actually calls it (STUDIO-352 coverage is in
 // persistentLogger.test.ts; this file only proves main.ts's wiring).
-const persistentLoggerCtor = vi.fn().mockImplementation(() => ({ write: vi.fn() }));
+const persistentLoggerCtor = vi.fn().mockImplementation(function PersistentLoggerStub() {
+  return { write: vi.fn(), flush: vi.fn().mockResolvedValue(undefined) };
+});
 vi.mock("./persistentLogger", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./persistentLogger")>();
   return { ...actual, PersistentLogger: persistentLoggerCtor };
@@ -228,6 +230,20 @@ describe("main.ts wiring", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("flushes the persistent logger before quitting when one exists (STUDIO-342)", async () => {
+    process.env.STL_STUDIO_DIAGNOSTICS = "1";
+    await loadMain();
+    const { app } = await import("electron");
+    const logger = persistentLoggerCtor.mock.results[0].value as { flush: ReturnType<typeof vi.fn> };
+    const handler = (app.on as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([event]) => event === "before-quit",
+    )?.[1] as (e: { preventDefault: () => void }) => Promise<void>;
+
+    await handler({ preventDefault: vi.fn() });
+
+    expect(logger.flush).toHaveBeenCalled();
   });
 
   it("wires the application menu's regenerate-key action to the focused window", async () => {

@@ -300,6 +300,9 @@ if (!gotLock) {
     if (quitting) return;
     quitting = true;
     event.preventDefault();
+    // Buffered log lines (STUDIO-342) must land before exit, or the last
+    // moments before a crash/quit — often the most useful part — are lost.
+    await persistentLogger?.flush();
     // Belt-and-braces: killTree already caps itself at SHUTDOWN_GRACE_MS, but
     // this outer race means quit still proceeds even if something else in
     // stopOwnedSidecar hangs. Without it, quitting is already true, so a wedge
