@@ -7,6 +7,7 @@
  * test with fully injected boundaries — no real Electron runtime, filesystem,
  * or network required to exercise the boot/failure/update-init branches.
  */
+import { MAX_SIDECAR_RESTARTS, SIDECAR_RESTART_WINDOW_MS } from "./config";
 import { readAutoUpdateEnabled, readAllowPrereleaseUpdates, createUpdateController } from "./updater";
 import type { UpdateController, UpdaterAdapter, UpdateUi } from "./updater";
 import { readUpdateSmokeConfig } from "./updateSmoke";
@@ -64,6 +65,13 @@ export interface AppControllerDeps<Win extends BrowserWindowLike = BrowserWindow
   showMessageBox: (win: Win | undefined, opts: MessageBoxOptions) => Promise<MessageBoxResult>;
   showKeyRevealWindow: (key: string) => void;
   loadPlaceholderPage: (win: Win) => Promise<void>;
+  /** Show the branded splash again, used while a crashed backend restarts so the
+   *  dead page isn't left on screen for the length of a boot (STUDIO-338). */
+  loadSplashPage: (win: Win) => Promise<void>;
+  /** Quit the application — the "Quit" answer to the crash-recovery prompt. */
+  quitApp: () => void;
+  /** Wall clock, injected so the crash-loop window is testable without timers. */
+  now: () => number;
 
   log: (message: string) => void;
 }
@@ -98,14 +106,112 @@ export function createAppController<Win extends BrowserWindowLike>(
   // and skips the startup-error dialog. Cleared at the top of every boot so
   // stop-then-boot flows (regenerateEncryptionKey) still work.
   let stopRequested = false;
+  // The window the last boot targeted. Crash recovery happens outside any call
+  // to bootBackendAndLoad, so it has no other way to reach the window.
+  let lastWindow: Win | null = null;
+  // One crash prompt at a time — a backend that dies repeatedly must not stack
+  // dialogs (mirrors registerRendererFailureHandler's recoveryVisible).
+  let recoveryVisible = false;
+  // Timestamps of restarts we've attempted, pruned to the crash-loop window.
+  let restartAttempts: number[] = [];
 
   async function stopOwnedSidecar(): Promise<void> {
     stopRequested = true;
     if (!sidecar || !sidecarDeps) return;
     const proc = sidecar;
     const d = sidecarDeps;
+    // Release ownership BEFORE killing. onSidecarExit treats an exit as a crash
+    // only for the process we still own, so this line is what tells it a
+    // deliberate stop is not a crash. Killing first would report a phantom
+    // crash on every quit and key regeneration (STUDIO-338).
     sidecar = null;
     await stopSidecar(d, proc);
+  }
+
+  /** True once the backend has been restarted too many times in quick
+   *  succession — at that point restarting again just repeats the crash. */
+  function inCrashLoop(): boolean {
+    const cutoff = deps.now() - SIDECAR_RESTART_WINDOW_MS;
+    restartAttempts = restartAttempts.filter((at) => at > cutoff);
+    return restartAttempts.length >= MAX_SIDECAR_RESTARTS;
+  }
+
+  /** Best-effort recovery UI: the window may die at any point here, and a
+   *  failure to render the fallback must never escape as an unhandled
+   *  rejection (see STUDIO-337). */
+  async function showRecoveryPage(win: Win): Promise<void> {
+    try {
+      await deps.loadPlaceholderPage(win);
+    } catch (error) {
+      deps.log(`[backend] could not show the recovery page: ${String(error)}`);
+    }
+  }
+
+  /**
+   * The backend died on its own after a successful boot. Offer a restart, or
+   * quit — anything is better than leaving the renderer pointed at a port that
+   * no longer answers, which is what happened before STUDIO-338.
+   */
+  async function handleUnexpectedExit(code: number | null): Promise<void> {
+    const win = lastWindow;
+    if (!win || win.isDestroyed() || recoveryVisible) return;
+    recoveryVisible = true;
+    try {
+      deps.log(`[backend] exited unexpectedly with code ${code}`);
+      if (inCrashLoop()) {
+        deps.showErrorBox(
+          "STL Studio — the backend keeps stopping",
+          "The STL Studio backend has stopped several times in a row, so it will not be "
+            + "restarted again automatically.\n\nYour saved catalog data is unchanged. Close and "
+            + "reopen STL Studio to try again; if it keeps happening, enable support logs and "
+            + "report the issue.",
+        );
+        await showRecoveryPage(win);
+        return;
+      }
+      const { response } = await deps.showMessageBox(win, {
+        type: "error",
+        buttons: ["Restart backend", "Quit"],
+        defaultId: 0,
+        cancelId: 1,
+        title: "STL Studio backend stopped",
+        message: "The STL Studio backend stopped unexpectedly",
+        detail:
+          "Your saved catalog data is unchanged. Restart the backend to carry on working — "
+          + "anything you had not yet saved may need to be entered again.",
+      });
+      if (response !== 0) {
+        deps.quitApp();
+        return;
+      }
+      restartAttempts.push(deps.now());
+      if (win.isDestroyed()) return;
+      try {
+        await deps.loadSplashPage(win);
+      } catch (error) {
+        // Cosmetic only — the boot below is what matters.
+        deps.log(`[backend] could not show the splash while restarting: ${String(error)}`);
+      }
+      await bootBackendAndLoad(win);
+    } finally {
+      recoveryVisible = false;
+    }
+  }
+
+  /** Decides whether an exit was ours to expect. The sidecar module reports
+   *  every exit; only this closure knows the surrounding lifecycle state. */
+  function onSidecarExit(proc: SidecarProcess, code: number | null): void {
+    // Died before it ever became healthy: the health poll owns that failure and
+    // already surfaces it, so handling it here too would double-report.
+    if (backendBooting) return;
+    // Only the process we currently own counts. This covers two cases at once:
+    // a process superseded by a later boot (its exit listener still fires when
+    // we kill it during a restart), and a stop we asked for — stopOwnedSidecar
+    // clears `sidecar` before killing, so a deliberate stop lands here with
+    // nothing owned.
+    if (proc !== sidecar) return;
+    sidecar = null;
+    void handleUnexpectedExit(code);
   }
 
   async function initializeUpdater(win: Win, backendUrl: string): Promise<void> {
@@ -205,6 +311,7 @@ export function createAppController<Win extends BrowserWindowLike>(
     deps.log("[startup] backend-boot-begin");
     backendBooting = true;
     stopRequested = false;
+    lastWindow = win;
     // Either the app is quitting or the user closed the window: the boot has
     // nowhere to land, so bail without alarming anyone. Both are ordinary user
     // actions, not startup failures (STUDIO-336, STUDIO-337).
@@ -228,6 +335,7 @@ export function createAppController<Win extends BrowserWindowLike>(
         onSpawn: (proc) => {
           sidecar = proc;
         },
+        onExit: onSidecarExit,
       });
       // A quit arriving during the health poll already terminated this process,
       // and a closed window has nothing to point at either way.

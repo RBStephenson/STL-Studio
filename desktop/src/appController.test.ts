@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { MAX_SIDECAR_RESTARTS, SIDECAR_RESTART_WINDOW_MS } from "./config";
 import { createAppController } from "./appController";
 import type { AppControllerDeps, BrowserWindowLike, MessageBoxOptions, MessageBoxResult } from "./appController";
 import type { SidecarDeps, SidecarProcess } from "./sidecar";
@@ -71,6 +72,7 @@ function fakeUpdaterAdapter(): UpdaterAdapter & { listeners: Map<string, Listene
 }
 
 function harness(overrides: Partial<AppControllerDeps<BrowserWindowLike>> = {}) {
+  let clock = 0;
   const showMessageBox = vi.fn<
     (win: BrowserWindowLike | undefined, opts: MessageBoxOptions) => Promise<MessageBoxResult>
   >().mockResolvedValue({ response: 0 });
@@ -94,11 +96,45 @@ function harness(overrides: Partial<AppControllerDeps<BrowserWindowLike>> = {}) 
     showMessageBox,
     showKeyRevealWindow: vi.fn(),
     loadPlaceholderPage: vi.fn().mockResolvedValue(undefined),
+    loadSplashPage: vi.fn().mockResolvedValue(undefined),
+    quitApp: vi.fn(),
+    now: () => clock,
     log: vi.fn(),
     ...overrides,
   };
   const controller = createAppController(deps);
-  return { controller, deps, showMessageBox };
+  return { controller, deps, showMessageBox, advanceClock: (ms: number) => { clock += ms; } };
+}
+
+/** Spawns processes whose "exit" event the test can fire on demand, driving the
+ *  real startSidecar → opts.onExit path rather than reaching into the
+ *  controller. Each spawn is recorded so the identity check (current process vs
+ *  one superseded by a later boot) can be exercised. */
+const FIRST_FAKE_PID = 4242;
+
+function crashableSidecar() {
+  const spawned: Array<{ fireExit: (code?: number | null) => void }> = [];
+  const createSidecarDeps = (): SidecarDeps => fakeSidecarDeps({
+    spawn: (): SidecarProcess => {
+      let exitListener: ((code: number | null) => void) | undefined;
+      const index = spawned.length;
+      spawned.push({ fireExit: (code = 1) => exitListener?.(code) });
+      return {
+        pid: FIRST_FAKE_PID + index,
+        on: (event: string, listener: (code: number | null) => void) => {
+          if (event === "exit") exitListener = listener;
+        },
+      } as unknown as SidecarProcess;
+    },
+    // Killing a real process makes it exit, and Node emits "exit" while the
+    // kill is still being awaited. Modelling that is what lets these tests
+    // catch an ownership-release that happens too late — see the comment on
+    // `sidecar = null` in stopOwnedSidecar.
+    killTree: async (pid: number) => {
+      spawned[pid - FIRST_FAKE_PID]?.fireExit(0);
+    },
+  });
+  return { createSidecarDeps, spawned };
 }
 
 describe("bootBackendAndLoad", () => {
@@ -285,6 +321,193 @@ describe("bootBackendAndLoad", () => {
 
     expect(win.loadURL).toHaveBeenNthCalledWith(2, "http://127.0.0.1:5555");
     expect(deps.showErrorBox).not.toHaveBeenCalled();
+  });
+
+  it("offers a restart when the backend dies after a successful boot (STUDIO-338)", async () => {
+    const sidecar = crashableSidecar();
+    const { controller, deps, showMessageBox } = harness({
+      createSidecarDeps: sidecar.createSidecarDeps,
+    });
+    const win = fakeWin();
+    await controller.bootBackendAndLoad(win);
+    win.loadURL.mockClear();
+    showMessageBox.mockResolvedValue({ response: 0 }); // "Restart backend"
+
+    sidecar.spawned[0].fireExit(1);
+    await vi.waitFor(() => expect(win.loadURL).toHaveBeenCalled());
+
+    const [, opts] = showMessageBox.mock.calls[0];
+    expect(opts.buttons).toEqual(["Restart backend", "Quit"]);
+    // The splash covers the dead page while the replacement backend boots.
+    expect(deps.loadSplashPage).toHaveBeenCalledWith(win);
+    expect(win.loadURL).toHaveBeenCalledWith("http://127.0.0.1:5555");
+    expect(deps.quitApp).not.toHaveBeenCalled();
+  });
+
+  it("quits instead of restarting when the user declines", async () => {
+    const sidecar = crashableSidecar();
+    const { controller, deps, showMessageBox } = harness({
+      createSidecarDeps: sidecar.createSidecarDeps,
+    });
+    const win = fakeWin();
+    await controller.bootBackendAndLoad(win);
+    showMessageBox.mockResolvedValue({ response: 1 }); // "Quit"
+
+    sidecar.spawned[0].fireExit(1);
+    await vi.waitFor(() => expect(deps.quitApp).toHaveBeenCalledOnce());
+
+    expect(deps.loadSplashPage).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when the exit was one we asked for (quit / regenerate key)", async () => {
+    const sidecar = crashableSidecar();
+    const { controller, showMessageBox } = harness({
+      createSidecarDeps: sidecar.createSidecarDeps,
+    });
+    const win = fakeWin();
+    await controller.bootBackendAndLoad(win);
+    showMessageBox.mockClear();
+
+    await controller.stopOwnedSidecar();
+    sidecar.spawned[0].fireExit(0);
+    await Promise.resolve();
+
+    expect(showMessageBox).not.toHaveBeenCalled();
+  });
+
+  it("ignores a superseded process exiting after a restart", async () => {
+    const sidecar = crashableSidecar();
+    const { controller, showMessageBox } = harness({
+      createSidecarDeps: sidecar.createSidecarDeps,
+    });
+    const win = fakeWin();
+    await controller.bootBackendAndLoad(win);
+    showMessageBox.mockResolvedValue({ response: 0 });
+
+    sidecar.spawned[0].fireExit(1);
+    await vi.waitFor(() => expect(sidecar.spawned).toHaveLength(2));
+    showMessageBox.mockClear();
+
+    // The first process's listener fires late — we already killed and replaced
+    // it, so this must not be reported as a fresh crash.
+    sidecar.spawned[0].fireExit(1);
+    await Promise.resolve();
+
+    expect(showMessageBox).not.toHaveBeenCalled();
+  });
+
+  it("does not report a crash for a backend that dies before it is ever healthy", async () => {
+    // The health poll owns a boot-time death and already surfaces it. Reporting
+    // it here too would give the user two dialogs for one failure.
+    const sidecar = crashableSidecar();
+    let releaseProbe!: () => void;
+    const probeGate = new Promise<void>((resolve) => { releaseProbe = resolve; });
+    const { controller, deps, showMessageBox } = harness({
+      createSidecarDeps: () => ({
+        ...sidecar.createSidecarDeps(),
+        probe: async () => { await probeGate; return false; },
+      }),
+    });
+    const win = fakeWin();
+
+    const booting = controller.bootBackendAndLoad(win);
+    await vi.waitFor(() => expect(sidecar.spawned).toHaveLength(1));
+    // Die mid-boot, while the health poll is still in flight.
+    sidecar.spawned[0].fireExit(1);
+    releaseProbe();
+    await booting;
+
+    expect(showMessageBox).not.toHaveBeenCalled();
+    expect(deps.showErrorBox).toHaveBeenCalledWith(
+      "STL Studio — backend failed to start",
+      expect.stringContaining("did not become healthy"),
+    );
+  });
+
+  it("stops offering restarts once the backend is in a crash loop", async () => {
+    const sidecar = crashableSidecar();
+    const { controller, deps, showMessageBox } = harness({
+      createSidecarDeps: sidecar.createSidecarDeps,
+    });
+    const win = fakeWin();
+    await controller.bootBackendAndLoad(win);
+    showMessageBox.mockResolvedValue({ response: 0 });
+
+    // Three restarts are allowed; the fourth crash inside the window gives up.
+    for (let attempt = 1; attempt <= MAX_SIDECAR_RESTARTS; attempt += 1) {
+      sidecar.spawned[attempt - 1].fireExit(1);
+      await vi.waitFor(() => expect(sidecar.spawned).toHaveLength(attempt + 1));
+    }
+    showMessageBox.mockClear();
+
+    sidecar.spawned[MAX_SIDECAR_RESTARTS].fireExit(1);
+    await vi.waitFor(() => expect(deps.showErrorBox).toHaveBeenCalled());
+
+    expect(showMessageBox).not.toHaveBeenCalled();
+    expect(deps.showErrorBox).toHaveBeenCalledWith(
+      "STL Studio — the backend keeps stopping",
+      expect.stringContaining("catalog data is unchanged"),
+    );
+    expect(deps.loadPlaceholderPage).toHaveBeenCalledWith(win);
+  });
+
+  it("allows restarts again once the crash-loop window has passed", async () => {
+    const sidecar = crashableSidecar();
+    const { controller, deps, showMessageBox, advanceClock } = harness({
+      createSidecarDeps: sidecar.createSidecarDeps,
+    });
+    const win = fakeWin();
+    await controller.bootBackendAndLoad(win);
+    showMessageBox.mockResolvedValue({ response: 0 });
+
+    for (let attempt = 1; attempt <= MAX_SIDECAR_RESTARTS; attempt += 1) {
+      sidecar.spawned[attempt - 1].fireExit(1);
+      await vi.waitFor(() => expect(sidecar.spawned).toHaveLength(attempt + 1));
+    }
+    advanceClock(SIDECAR_RESTART_WINDOW_MS + 1);
+    showMessageBox.mockClear();
+
+    sidecar.spawned[MAX_SIDECAR_RESTARTS].fireExit(1);
+    await vi.waitFor(() => expect(showMessageBox).toHaveBeenCalled());
+
+    // A crash long after the earlier run is a fresh incident, not a loop.
+    expect(deps.showErrorBox).not.toHaveBeenCalled();
+  });
+
+  it("does not stack dialogs when the backend dies repeatedly", async () => {
+    const sidecar = crashableSidecar();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const showMessageBox = vi.fn(async () => { await gate; return { response: 1 }; });
+    const { controller } = harness({
+      createSidecarDeps: sidecar.createSidecarDeps,
+      showMessageBox,
+    });
+    const win = fakeWin();
+    await controller.bootBackendAndLoad(win);
+
+    sidecar.spawned[0].fireExit(1);
+    sidecar.spawned[0].fireExit(1);
+    await Promise.resolve();
+
+    expect(showMessageBox).toHaveBeenCalledOnce();
+    release();
+  });
+
+  it("says nothing when the window is already gone", async () => {
+    const sidecar = crashableSidecar();
+    const { controller, showMessageBox } = harness({
+      createSidecarDeps: sidecar.createSidecarDeps,
+    });
+    const win = fakeWin();
+    await controller.bootBackendAndLoad(win);
+    showMessageBox.mockClear();
+
+    win.destroy();
+    sidecar.spawned[0].fireExit(1);
+    await Promise.resolve();
+
+    expect(showMessageBox).not.toHaveBeenCalled();
   });
 
   it("reveals the key window when the secret key is newly generated", async () => {
