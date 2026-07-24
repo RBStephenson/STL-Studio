@@ -87,8 +87,9 @@ function harness(overrides: Partial<AppControllerDeps<BrowserWindowLike>> = {}) 
     createSidecarDeps: () => fakeSidecarDeps(),
     findFreePort: vi.fn().mockResolvedValue(5555),
     backendBaseUrl: (port) => `http://127.0.0.1:${port}`,
-    getOrCreateSecretKey: vi.fn().mockReturnValue({ key: "secret-key", isNew: false }),
+    getOrCreateSecretKey: vi.fn().mockReturnValue({ key: "secret-key", needsReveal: false }),
     regenerateSecretKeyFile: vi.fn().mockReturnValue("new-secret-key"),
+    markSecretKeyRevealed: vi.fn(),
     autoUpdaterAdapter: fakeUpdaterAdapter(),
     setUpdateFeedUrl: vi.fn(),
     fetchJson: vi.fn().mockResolvedValue({ auto_update_enabled: true }),
@@ -510,15 +511,26 @@ describe("bootBackendAndLoad", () => {
     expect(showMessageBox).not.toHaveBeenCalled();
   });
 
-  it("reveals the key window when the secret key is newly generated", async () => {
+  it("reveals the key window when the secret key still owes a reveal", async () => {
     const { controller, deps } = harness({
-      getOrCreateSecretKey: vi.fn().mockReturnValue({ key: "fresh-key", isNew: true }),
+      getOrCreateSecretKey: vi.fn().mockReturnValue({ key: "fresh-key", needsReveal: true }),
     });
     const win = fakeWin();
 
     await controller.bootBackendAndLoad(win);
 
     expect(deps.showKeyRevealWindow).toHaveBeenCalledWith("fresh-key");
+  });
+
+  it("records the reveal so a later boot doesn't owe it again (STUDIO-347)", async () => {
+    const { controller, deps } = harness({
+      getOrCreateSecretKey: vi.fn().mockReturnValue({ key: "fresh-key", needsReveal: true }),
+    });
+    const win = fakeWin();
+
+    await controller.bootBackendAndLoad(win);
+
+    expect(deps.markSecretKeyRevealed).toHaveBeenCalledWith("/userdata");
   });
 
   it("does not reveal the key window on a normal boot with an existing key", async () => {
@@ -528,6 +540,21 @@ describe("bootBackendAndLoad", () => {
     await controller.bootBackendAndLoad(win);
 
     expect(deps.showKeyRevealWindow).not.toHaveBeenCalled();
+    expect(deps.markSecretKeyRevealed).not.toHaveBeenCalled();
+  });
+
+  it("does not record a reveal when a first boot dies before reaching it (STUDIO-347)", async () => {
+    const { controller, deps } = harness({
+      getOrCreateSecretKey: vi.fn().mockReturnValue({ key: "fresh-key", needsReveal: true }),
+      // Backend never becomes healthy, so the boot throws before the reveal.
+      createSidecarDeps: () => fakeSidecarDeps({ probe: async () => false }),
+    });
+    const win = fakeWin();
+
+    await controller.bootBackendAndLoad(win);
+
+    expect(deps.showKeyRevealWindow).not.toHaveBeenCalled();
+    expect(deps.markSecretKeyRevealed).not.toHaveBeenCalled();
   });
 
   it("reveals the key window when forceReveal is set even with an existing key", async () => {
@@ -537,6 +564,7 @@ describe("bootBackendAndLoad", () => {
     await controller.bootBackendAndLoad(win, { forceReveal: true });
 
     expect(deps.showKeyRevealWindow).toHaveBeenCalledWith("secret-key");
+    expect(deps.markSecretKeyRevealed).toHaveBeenCalledWith("/userdata");
   });
 
   it("ignores a concurrent boot call while one is already in flight", async () => {

@@ -21,6 +21,13 @@ export const SECRET_KEY_FILE = "secret-key.json";
 
 interface SecretKeyRecord {
   key: string;
+  /** Whether the one-time reveal window has been shown for this key.
+   *
+   *  Absent on records written before STUDIO-347. A missing field means
+   *  "legacy, assume already revealed" — treating it as pending would fire a
+   *  surprise key window at every existing user on their next launch. Only an
+   *  explicit `false` marks a reveal as still owed. */
+  revealed?: boolean;
 }
 
 export function secretKeyPath(userDataDir: string): string {
@@ -35,7 +42,7 @@ export function generateKey(): string {
     .replace(/\//g, "_");
 }
 
-function readKeyFile(path: string): string | null {
+function readKeyFile(path: string): SecretKeyRecord | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
     if (
@@ -43,7 +50,8 @@ function readKeyFile(path: string): string | null {
       && parsed !== null
       && typeof (parsed as Partial<SecretKeyRecord>).key === "string"
     ) {
-      return (parsed as SecretKeyRecord).key;
+      const record = parsed as SecretKeyRecord;
+      return { key: record.key, revealed: record.revealed };
     }
     return null;
   } catch {
@@ -51,15 +59,24 @@ function readKeyFile(path: string): string | null {
   }
 }
 
-function writeKeyFile(path: string, key: string): void {
-  writeFileSync(path, `${JSON.stringify({ key } satisfies SecretKeyRecord, null, 2)}\n`, "utf8");
+function writeKeyFile(path: string, key: string, revealed: boolean): void {
+  writeFileSync(
+    path,
+    `${JSON.stringify({ key, revealed } satisfies SecretKeyRecord, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 export interface ResolvedSecretKey {
   key: string;
-  /** True only the first time this key was generated — callers use this to
-   *  decide whether to show the one-time reveal window. */
-  isNew: boolean;
+  /** Whether the one-time reveal window still owes the user a showing.
+   *
+   *  Driven by the persisted `revealed` bit rather than "did this call
+   *  generate the key" — a boot that writes the key but never reaches the
+   *  reveal (quit during the health poll, backend never becoming healthy)
+   *  used to leave the key persisted and permanently unrevealed
+   *  (STUDIO-347). */
+  needsReveal: boolean;
 }
 
 /** Load the persisted key, or generate and persist a new one if none exists. */
@@ -68,14 +85,29 @@ export function getOrCreateSecretKey(userDataDir: string): ResolvedSecretKey {
   if (existsSync(path)) {
     const existing = readKeyFile(path);
     if (existing) {
-      return { key: existing, isNew: false };
+      // Missing `revealed` means a pre-STUDIO-347 record: assume revealed.
+      return { key: existing.key, needsReveal: existing.revealed === false };
     }
     // File exists but is unreadable/corrupt — fall through and regenerate
     // rather than leave the app unable to encrypt anything.
   }
   const key = generateKey();
-  writeKeyFile(path, key);
-  return { key, isNew: true };
+  writeKeyFile(path, key, false);
+  return { key, needsReveal: true };
+}
+
+/** Record that the reveal window has been shown, so a later boot doesn't
+ *  show it again. Best-effort: failing to persist this must not break a boot
+ *  that has otherwise succeeded — the cost is at worst a repeated reveal. */
+export function markSecretKeyRevealed(userDataDir: string): void {
+  const path = secretKeyPath(userDataDir);
+  const existing = readKeyFile(path);
+  if (!existing) return;
+  try {
+    writeKeyFile(path, existing.key, true);
+  } catch {
+    // Losing the marker only risks showing the reveal again; never fatal.
+  }
 }
 
 /** Overwrite with a freshly generated key. Callers must warn the user this
@@ -84,6 +116,8 @@ export function getOrCreateSecretKey(userDataDir: string): ResolvedSecretKey {
  *  secrets.py caches its Fernet instance for the life of the process. */
 export function regenerateSecretKey(userDataDir: string): string {
   const key = generateKey();
-  writeKeyFile(secretKeyPath(userDataDir), key);
+  // Written unrevealed: the rotation flow reveals it immediately via
+  // forceReveal, and if that boot dies first the new key is still owed.
+  writeKeyFile(secretKeyPath(userDataDir), key, false);
   return key;
 }

@@ -315,7 +315,7 @@ describe("main.ts wiring", () => {
       resolveBackendExePath: () => string;
       createSidecarDeps: () => { log: (m: string) => void };
       backendBaseUrl: (port: number) => string;
-      getOrCreateSecretKey: (dir: string) => { key: string; isNew: boolean };
+      getOrCreateSecretKey: (dir: string) => { key: string; needsReveal: boolean };
       regenerateSecretKeyFile: (dir: string) => string;
       setUpdateFeedUrl: (url: string) => void;
       fetchJson: (url: string) => Promise<unknown>;

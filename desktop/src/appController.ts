@@ -56,6 +56,9 @@ export interface AppControllerDeps<Win extends BrowserWindowLike = BrowserWindow
   backendBaseUrl: (port: number) => string;
   getOrCreateSecretKey: (userDataDir: string) => ResolvedSecretKey;
   regenerateSecretKeyFile: (userDataDir: string) => string;
+  /** Persist that the reveal window has been shown, so a boot that dies
+   *  before the reveal doesn't lose it forever (STUDIO-347). */
+  markSecretKeyRevealed: (userDataDir: string) => void;
 
   autoUpdaterAdapter: UpdaterAdapter;
   setUpdateFeedUrl: (url: string) => void;
@@ -349,8 +352,9 @@ export function createAppController<Win extends BrowserWindowLike>(
       await win.loadURL(backendUrl);
       win.webContents.navigationHistory.clear();
       await initializeUpdater(win, backendUrl);
-      if (secretKey.isNew || opts.forceReveal) {
+      if (secretKey.needsReveal || opts.forceReveal) {
         deps.showKeyRevealWindow(secretKey.key);
+        deps.markSecretKeyRevealed(deps.userDataDir);
       }
     } catch (err) {
       // startSidecar kills the process tree itself when the health poll times
