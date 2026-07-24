@@ -110,6 +110,8 @@ function harness(overrides: Partial<AppControllerDeps<BrowserWindowLike>> = {}) 
  *  real startSidecar → opts.onExit path rather than reaching into the
  *  controller. Each spawn is recorded so the identity check (current process vs
  *  one superseded by a later boot) can be exercised. */
+const FIRST_FAKE_PID = 4242;
+
 function crashableSidecar() {
   const spawned: Array<{ fireExit: (code?: number | null) => void }> = [];
   const createSidecarDeps = (): SidecarDeps => fakeSidecarDeps({
@@ -118,11 +120,18 @@ function crashableSidecar() {
       const index = spawned.length;
       spawned.push({ fireExit: (code = 1) => exitListener?.(code) });
       return {
-        pid: 4242 + index,
+        pid: FIRST_FAKE_PID + index,
         on: (event: string, listener: (code: number | null) => void) => {
           if (event === "exit") exitListener = listener;
         },
       } as unknown as SidecarProcess;
+    },
+    // Killing a real process makes it exit, and Node emits "exit" while the
+    // kill is still being awaited. Modelling that is what lets these tests
+    // catch an ownership-release that happens too late — see the comment on
+    // `sidecar = null` in stopOwnedSidecar.
+    killTree: async (pid: number) => {
+      spawned[pid - FIRST_FAKE_PID]?.fireExit(0);
     },
   });
   return { createSidecarDeps, spawned };

@@ -120,6 +120,10 @@ export function createAppController<Win extends BrowserWindowLike>(
     if (!sidecar || !sidecarDeps) return;
     const proc = sidecar;
     const d = sidecarDeps;
+    // Release ownership BEFORE killing. onSidecarExit treats an exit as a crash
+    // only for the process we still own, so this line is what tells it a
+    // deliberate stop is not a crash. Killing first would report a phantom
+    // crash on every quit and key regeneration (STUDIO-338).
     sidecar = null;
     await stopSidecar(d, proc);
   }
@@ -197,16 +201,14 @@ export function createAppController<Win extends BrowserWindowLike>(
   /** Decides whether an exit was ours to expect. The sidecar module reports
    *  every exit; only this closure knows the surrounding lifecycle state. */
   function onSidecarExit(proc: SidecarProcess, code: number | null): void {
-    // Belt and braces: an exit we asked for is already covered by the identity
-    // check below, because stopOwnedSidecar clears `sidecar` before killing.
-    // Kept so a future reordering there can't silently turn a deliberate stop
-    // into a crash report.
-    if (stopRequested) return;
     // Died before it ever became healthy: the health poll owns that failure and
     // already surfaces it, so handling it here too would double-report.
     if (backendBooting) return;
-    // A process superseded by a later boot; its exit listener still fires when
-    // we kill it during a restart. Only the process we currently own counts.
+    // Only the process we currently own counts. This covers two cases at once:
+    // a process superseded by a later boot (its exit listener still fires when
+    // we kill it during a restart), and a stop we asked for — stopOwnedSidecar
+    // clears `sidecar` before killing, so a deliberate stop lands here with
+    // nothing owned.
     if (proc !== sidecar) return;
     sidecar = null;
     void handleUnexpectedExit(code);
