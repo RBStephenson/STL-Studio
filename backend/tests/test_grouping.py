@@ -1,7 +1,10 @@
 """Variant-grouping proposal engine (#615). Exercises the blended signals
 (file_hash / filename / name) and the manual-group lock."""
+import pytest
+
 from app.models import AppSetting, VariantGroup
 from app.services import grouping
+from app.services.grouping import EvidenceLedger, SignalKind
 from tests.conftest import make_creator, make_model, make_stl_file
 
 
@@ -25,6 +28,108 @@ def _run(db, creator):
 def _enable_hierarchy(db):
     db.merge(AppSetting(key="hierarchy_variant_grouping_enabled", value=True))
     db.flush()
+
+
+class TestSignalPolicy:
+    """Precedence, confidence and reason live in one table (STUDIO-243)."""
+
+    def test_every_signal_kind_has_a_policy(self):
+        assert set(grouping.SIGNAL_POLICY) == set(SignalKind)
+
+    def test_precedence_orders_signals_strongest_first(self):
+        order = sorted(SignalKind, key=lambda k: grouping.policy_for(k).precedence)
+        assert order == [
+            SignalKind.HASH,
+            SignalKind.HIERARCHY,
+            SignalKind.FILENAME,
+            SignalKind.NAME,
+        ]
+
+    def test_precedence_values_are_distinct(self):
+        precedences = [grouping.policy_for(k).precedence for k in SignalKind]
+        assert len(set(precedences)) == len(precedences)
+
+    @pytest.mark.parametrize(
+        ("kind", "confidence"),
+        [
+            (SignalKind.HASH, 0.9),
+            (SignalKind.HIERARCHY, 0.85),
+            (SignalKind.FILENAME, 0.7),
+            (SignalKind.NAME, 0.6),
+        ],
+    )
+    def test_confidence_values_are_stable(self, kind, confidence):
+        assert grouping.policy_for(kind).confidence == confidence
+
+    @pytest.mark.parametrize(
+        ("kind", "reason"),
+        [
+            (SignalKind.HASH, "shared mesh files"),
+            (SignalKind.HIERARCHY, "same product hierarchy"),
+            (SignalKind.FILENAME, "shared STL file names"),
+            (SignalKind.NAME, "name: Goblin"),
+        ],
+    )
+    def test_reason_templates_render_the_documented_text(self, kind, reason):
+        rendered = grouping.policy_for(kind).reason_template.format(label="Goblin")
+        assert rendered == reason
+
+    def test_unregistered_kind_fails_loudly(self):
+        with pytest.raises(ValueError, match="no SignalPolicy registered"):
+            grouping.policy_for("hash")  # a bare string is not a SignalKind
+
+    def test_shipped_policy_table_passes_its_own_completeness_check(self):
+        grouping.assert_policies_complete(grouping.SIGNAL_POLICY)
+
+    def test_a_signal_without_a_policy_fails_at_import(self):
+        # Mirrors the import-time guard: dropping any kind must raise, naming it.
+        incomplete = {
+            k: v for k, v in grouping.SIGNAL_POLICY.items() if k is not SignalKind.NAME
+        }
+        with pytest.raises(RuntimeError, match="missing entries for: NAME"):
+            grouping.assert_policies_complete(incomplete)
+
+
+class TestEvidenceLedger:
+    """Evidence names the pair it describes, and credit is first-wins."""
+
+    def test_records_the_model_pair_for_each_edge(self):
+        ledger = EvidenceLedger()
+        ledger.record(SignalKind.HASH, 1, 2)
+
+        assert [(e.kind, e.a, e.b) for e in ledger.edges] == [(SignalKind.HASH, 1, 2)]
+
+    def test_first_signal_to_reach_a_model_keeps_the_credit(self):
+        ledger = EvidenceLedger()
+        ledger.record(SignalKind.HIERARCHY, 1, 2)
+        ledger.record(SignalKind.HASH, 2, 3)
+
+        assert ledger.credit_for(1) is SignalKind.HIERARCHY
+        assert ledger.credit_for(2) is SignalKind.HIERARCHY
+        assert ledger.credit_for(3) is SignalKind.HASH
+
+    def test_strongest_for_picks_the_highest_precedence_credit(self):
+        ledger = EvidenceLedger()
+        ledger.record(SignalKind.NAME, 1, 2)
+        ledger.record(SignalKind.HASH, 2, 3)
+
+        assert ledger.strongest_for([1, 2, 3]) is SignalKind.HASH
+
+    def test_joining_two_already_credited_components_adds_no_attribution(self):
+        # The edge that bridges them is real, but every endpoint already has a
+        # credit, so the bridging kind must not become the group's reason.
+        ledger = EvidenceLedger()
+        ledger.record(SignalKind.HIERARCHY, 1, 2)
+        ledger.record(SignalKind.FILENAME, 3, 4)
+        ledger.record(SignalKind.HASH, 1, 3)
+
+        assert ledger.strongest_for([1, 2, 3, 4]) is SignalKind.HIERARCHY
+
+    def test_uncredited_cluster_falls_back_to_name(self):
+        assert EvidenceLedger().strongest_for([1, 2]) is SignalKind.NAME
+
+    def test_credit_for_unknown_model_is_none(self):
+        assert EvidenceLedger().credit_for(99) is None
 
 
 class TestHierarchySignal:
