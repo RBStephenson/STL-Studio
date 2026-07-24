@@ -55,6 +55,13 @@ If the button says **Don't run** with no **More info** link, or Windows reports
 the file as blocked rather than unrecognized, see
 [Windows blocked the installer](troubleshooting.md#windows-blocked-the-installer-smartscreen).
 
+**After the installer finishes, the first launch of a new version may be
+slower than usual** — your antivirus software scans the newly-installed files
+before the app window appears. This happens once per version, not on every
+launch, and is separate from the SmartScreen prompt above. See
+[The app does nothing for a while after an update](troubleshooting.md#the-app-does-nothing-for-a-while-after-an-update)
+if it's taking longer than you'd like, including how to add an exclusion.
+
 ### Verifying your download
 
 Because the installer is unsigned, you may want to confirm the file is exactly

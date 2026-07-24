@@ -43,11 +43,13 @@ files:
   # Splash art (resources/splash.png) + app icon, referenced at runtime.
   - resources/**/*
 
-# The PyInstaller backend, copied verbatim into the packaged app's resources/
-# dir (process.resourcesPath). resolveBackendExe() reads it there when packaged.
+# The PyInstaller backend (one-dir, STUDIO-351): stl-studio.exe plus its
+# _internal/ dependency payload, copied verbatim into the packaged app's
+# resources/ dir (process.resourcesPath). resolveBackendExe() reads the exe
+# there when packaged; _internal/ must sit alongside it.
 extraResources:
-  - from: ../dist-standalone/stl-studio.exe
-    to: stl-studio.exe
+  - from: ../dist-standalone/stl-studio
+    to: .
 
 win:
   target: nsis

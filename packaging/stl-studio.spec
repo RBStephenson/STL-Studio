@@ -8,13 +8,27 @@
 # The frontend must be built first:
 #   cd frontend && npm run build
 #
-# Output: dist/stl-studio  (or dist/stl-studio.exe on Windows)
+# Output:
+#   Windows: dist/stl-studio/stl-studio.exe (+ dist/stl-studio/_internal/) — one-dir.
+#   Linux:   dist/stl-studio — one-file.
+#
+# Windows is one-dir (STUDIO-351): the exe is always wrapped in the NSIS
+# installer (desktop/electron-builder.yml), never distributed standalone, so
+# one-file's only benefit (a single portable binary) buys nothing there while
+# costing an extract-to-%TEMP% on every launch — slow and a textbook AV
+# heuristic trigger. Linux ships the loose binary directly
+# (docs/getting-started.md), so it stays one-file. Branching on sys.platform
+# is safe because Windows and Linux are always built on separate native CI
+# runners (.github/workflows/build.yml matrix) — never cross-compiled.
 
+import sys
 from pathlib import Path
 
 ROOT = Path(".").resolve()
 BACKEND = ROOT / "backend"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
+
+ONEDIR = sys.platform == "win32"
 
 block_cipher = None
 
@@ -100,10 +114,11 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    [] if ONEDIR else a.binaries,
+    [] if ONEDIR else a.zipfiles,
+    [] if ONEDIR else a.datas,
     [],
+    exclude_binaries=ONEDIR,
     name="stl-studio",
     debug=False,
     bootloader_ignore_signals=False,
@@ -118,3 +133,17 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+if ONEDIR:
+    # Payload lands beside the exe in dist/stl-studio/ instead of extracting
+    # to %TEMP% on every launch — AV scans it once, at install time.
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name="stl-studio",
+    )
