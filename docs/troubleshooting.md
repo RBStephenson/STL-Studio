@@ -15,6 +15,7 @@
 - [How do I back up or move my library?](#how-do-i-back-up-or-move-my-library)
 - [A collection shows 0 models after I added some](#a-collection-shows-0-models-after-i-added-some)
 - [Application crashes and recovery](#application-crashes-and-recovery)
+- ["The STL Studio backend stopped unexpectedly"](#the-stl-studio-backend-stopped-unexpectedly)
 - [Accessing support logs](#accessing-support-logs)
 
 ---
@@ -200,6 +201,26 @@ The installed desktop app also detects an unexpected renderer-process exit and o
 window or quit. An internal Electron main-process error is shown in an error dialog instead of being
 silently ignored. After reopening the app, use **Help → About & support → Copy diagnostics** when
 reporting a repeatable failure.
+
+## "The STL Studio backend stopped unexpectedly"
+
+The desktop app runs its backend as a separate process. If that process stops on its own after the
+app has started — an out-of-memory condition during a very large scan, an antivirus quarantine, or a
+crash — the app now notices and offers **Restart backend** or **Quit**.
+
+**Your saved catalog data is unchanged.** The database is written as work completes, so models
+already scanned stay scanned. Anything you had typed but not yet saved may need re-entering, and a
+scan or import that was mid-run stops where it was; start it again after the restart.
+
+Choosing **Restart backend** shows the loading screen while a fresh backend starts, then returns you
+to the app. If the backend stops several times in quick succession the app stops offering to restart
+it and shows the recovery page instead, rather than looping the same prompt — at that point close and
+reopen STL Studio.
+
+If this happens repeatedly, enable **Persistent support logs** under **Settings → Preferences**,
+reproduce it, then attach the logs to an issue (see
+[Accessing support logs](#accessing-support-logs)). The backend's own output is captured there and is
+usually what identifies the cause.
 
 ## Accessing support logs
 
