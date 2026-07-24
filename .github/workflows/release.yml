@@ -103,7 +103,14 @@ jobs:
             *-*) prerelease_flag="--prerelease" ;;
           esac
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --draft $prerelease_flag --generate-notes --title "$tag"
+            # The installer is unsigned (STUDIO-99), so the release body leads
+            # with the SmartScreen walkthrough and the checksum/attestation
+            # verification steps — this page is where users actually download
+            # from. GitHub prepends --notes-file content to the notes that
+            # --generate-notes produces, so the changelog still follows.
+            gh release create "$tag" --draft $prerelease_flag \
+              --notes-file .github/release-preamble.md \
+              --generate-notes --title "$tag"
           else
             echo "Release $tag already exists — leaving as-is."
           fi

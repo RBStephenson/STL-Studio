@@ -2,8 +2,14 @@
 #
 # Produces a Windows NSIS installer that bundles the Electron shell plus the
 # PyInstaller backend as an extraResources sidecar. v1 scope is Windows only;
-# GitHub Releases supplies the electron-updater feed and SignPath will provide
-# the production signing identity before 1.0.
+# GitHub Releases supplies the electron-updater feed.
+#
+# The installer ships UNSIGNED (STUDIO-99). SignPath's free OSS programme
+# declined the application pending greater project adoption, and no paid
+# certificate has been acquired, so signing is out of scope for v1.0 rather
+# than merely pending. CI packs with CSC_IDENTITY_AUTO_DISCOVERY=false to keep
+# a bare runner from failing the pack; users are guided through the resulting
+# SmartScreen prompt in docs/troubleshooting.md.
 #
 # The backend exe must be built first (pyinstaller packaging/stl-studio.spec
 # --distpath dist-standalone) — CI chains this in Phase 4 (STUDIO-74).

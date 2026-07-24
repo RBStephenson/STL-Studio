@@ -33,8 +33,60 @@ the rolling `Main Build` prerelease on the same Releases page.
 
 **Windows:** run the installer, then launch **STL Studio** from the Start menu.
 It opens a real desktop window (no terminal, no console) — the Electron shell
-starts the local server for you and shows the app. It's unsigned for now, so
-Windows SmartScreen may warn on first run: **More info → Run anyway**.
+starts the local server for you and shows the app.
+
+STL Studio is **not code-signed yet**, so Windows SmartScreen blocks the
+installer on first run. This is expected for every current release, not a sign
+that anything is wrong with your download:
+
+1. Double-click `STL-Studio-Setup-<version>.exe`.
+2. A blue dialog appears: **"Windows protected your PC"**, with
+   *Publisher: Unknown publisher*.
+3. Click **More info** — the dialog expands to show the filename.
+4. Click **Run anyway**.
+
+The warning appears because the installer carries no code-signing certificate,
+so SmartScreen has no publisher identity and no download reputation to check it
+against. It is not a malware detection. A signing certificate is planned but is
+not part of the current release — see
+[Release scope](support-policy.md#release-scope).
+
+If the button says **Don't run** with no **More info** link, or Windows reports
+the file as blocked rather than unrecognized, see
+[Windows blocked the installer](troubleshooting.md#windows-blocked-the-installer-smartscreen).
+
+### Verifying your download
+
+Because the installer is unsigned, you may want to confirm the file is exactly
+what CI published before running it. Every **versioned release** ships two
+independent ways to check.
+
+**Checksum.** Each release includes a `SHA256SUMS` asset. Compare it against
+your download in PowerShell:
+
+```powershell
+Get-FileHash .\STL-Studio-Setup-<version>.exe -Algorithm SHA256
+```
+
+The printed hash should match the corresponding line in `SHA256SUMS`.
+
+**Build provenance.** Releases are published with GitHub build attestations,
+which prove the binary was produced by this repository's workflow rather than
+rebuilt or modified by someone else. With the
+[GitHub CLI](https://cli.github.com/) installed:
+
+```powershell
+gh attestation verify .\STL-Studio-Setup-<version>.exe --repo RBStephenson/STL-Studio
+```
+
+A successful check reports the workflow and commit the installer was built
+from. This is a stronger guarantee than a checksum alone, because it ties the
+file to its build rather than to a hash published on the same page.
+
+> **Rolling builds are not attested.** The `Main Build` prerelease is produced
+> by a different workflow path and does **not** carry attestations or a
+> `SHA256SUMS` manifest. Use a versioned release if you want to verify your
+> download.
 
 **Linux:** run the binary from a terminal. It serves the app headlessly at
 **http://localhost:8484** — open that URL in your browser. Pass `--open-browser`

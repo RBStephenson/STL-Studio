@@ -346,7 +346,7 @@ NSIS-installed Electron application, alongside a large batch of features and
 security/correctness fixes accumulated since v0.17.0. Effectively a public beta of
 the desktop build, it shipped **unsigned** (SmartScreen warns on first run) and
 without auto-update. Auto-update followed in the later v0.20 release line; signing
-remains deferred while the SignPath application is pending.
+is still deferred — see [Code signing](#code-signing) below.
 
 **Desktop app — [#528](https://github.com/RBStephenson/STL-Studio/issues/528)**
 
@@ -389,9 +389,24 @@ these gates.
 | [STUDIO-215](https://rbrentstephenson.atlassian.net/browse/STUDIO-215) | Hold the release candidate through a normal-usage soak. |
 | [STUDIO-216](https://rbrentstephenson.atlassian.net/browse/STUDIO-216) | Publish stability-focused v1.0 release notes. |
 
-**Code signing is deferred.** [STUDIO-99](https://rbrentstephenson.atlassian.net/browse/STUDIO-99)
-remains tracked while the SignPath application is pending, but signing-certificate
-acquisition and signed-installer verification are not v1.0 release gates.
+### Code signing
+
+**Code signing is deferred and is not a v1.0 release gate.**
+[STUDIO-99](https://rbrentstephenson.atlassian.net/browse/STUDIO-99) remains
+tracked, but signing-certificate acquisition and signed-installer verification
+are out of scope for v1.0.
+
+SignPath's free open-source certificate programme **declined** the application:
+it requires a level of project adoption STL Studio has not reached yet.
+Reapplying is possible as usage grows. Paid alternatives — including Azure
+Trusted Signing — have not been pursued.
+
+Until an installer is signed, Windows SmartScreen warns on first run for every
+release. That path is documented as a supported one rather than treated as a
+defect: see [Windows blocked the installer](docs/troubleshooting.md#windows-blocked-the-installer-smartscreen)
+for the walkthrough and [Verifying your download](docs/getting-started.md#verifying-your-download)
+for the `SHA256SUMS` and build-provenance checks that let users confirm a
+download is genuine without a publisher signature.
 
 ---
 
