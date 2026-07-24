@@ -1,0 +1,10 @@
+{
+  "allowed_advisories": [
+    {
+      "url": "https://github.com/advisories/GHSA-qwww-vcr4-c8h2",
+      "package": "react-router",
+      "reason": "RSC Mode CSRF Bypass. STL Studio's frontend is a plain Vite SPA with client-side routing only — no React Server Components, no SSR, no framework mode — so this advisory's attack surface does not exist here. No forward-fixed release exists yet; downgrading to the last version below the vulnerable range (7.11.0) was tested and rejected — it reintroduces 14 more severe, applicable advisories (open-redirect XSS, stored XSS, an RCE via deserialization, CSRF, multiple DoS vectors) that the current version already fixes.",
+      "ticket": "STUDIO-355"
+    }
+  ]
+}

@@ -81,7 +81,15 @@ jobs:
             --node dependency-audit/frontend/licenses.json
       - name: Audit frontend vulnerabilities
         working-directory: frontend
-        run: npm audit --audit-level=high --json > ../dependency-audit/frontend/vulnerabilities.json
+        # Always succeeds here — the allowlist gate below is the real pass/fail
+        # check, so a reviewed, justified advisory (STUDIO-355) doesn't block
+        # CI while any other high-severity finding still does.
+        run: npm audit --audit-level=high --json > ../dependency-audit/frontend/vulnerabilities.json || true
+      - name: Enforce npm audit allowlist (frontend)
+        run: |
+          python scripts/check_npm_audit.py \
+            --allowlist scripts/npm_audit_allowlist.json \
+            --report dependency-audit/frontend/vulnerabilities.json
       - name: Upload frontend dependency inventory
         if: always()
         uses: actions/upload-artifact@v7
@@ -118,7 +126,14 @@ jobs:
             --node dependency-audit/desktop/licenses.json
       - name: Audit desktop vulnerabilities
         working-directory: desktop
-        run: npm audit --audit-level=high --json > ../dependency-audit/desktop/vulnerabilities.json
+        # See the matching frontend step: the allowlist gate below is the
+        # real pass/fail check (STUDIO-355).
+        run: npm audit --audit-level=high --json > ../dependency-audit/desktop/vulnerabilities.json || true
+      - name: Enforce npm audit allowlist (desktop)
+        run: |
+          python scripts/check_npm_audit.py \
+            --allowlist scripts/npm_audit_allowlist.json \
+            --report dependency-audit/desktop/vulnerabilities.json
       - name: Upload desktop dependency inventory
         if: always()
         uses: actions/upload-artifact@v7
