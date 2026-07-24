@@ -135,11 +135,18 @@ const failureUi: FailureUi = {
     });
     return response === 0 ? "reload" : "quit";
   },
-  showMainFailure(detail) {
-    dialog.showErrorBox(
-      "STL Studio encountered an internal error",
-      `${detail}\n\nClose and reopen STL Studio if the application no longer responds.`,
-    );
+  async showMainFailure(detail) {
+    // showMessageBox (not showErrorBox) because the dedupe guard in
+    // registerProcessFailureHandlers needs a promise that resolves on
+    // dismissal (STUDIO-339) — showErrorBox is fire-and-forget and void.
+    await dialog.showMessageBox({
+      type: "error",
+      buttons: ["OK"],
+      defaultId: 0,
+      title: "STL Studio encountered an internal error",
+      message: "STL Studio encountered an internal error",
+      detail: `${detail}\n\nClose and reopen STL Studio if the application no longer responds.`,
+    });
   },
   quit() {
     app.quit();
