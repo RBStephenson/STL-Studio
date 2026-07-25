@@ -58,6 +58,13 @@ ordering cannot decide which merge wins at a boundary, and label ties break
 alphabetically rather than by insertion. Logically identical libraries therefore
 produce identical groups, whatever order their rows were inserted or returned in.
 
+Eligibility is pure too (STUDIO-241): `select_eligible` decides from
+`CandidateModel` projections which models automatic grouping may touch —
+rejecting excluded models, manual-group members, `no_group` pins and `off`
+subtrees — and returns the `off_subtree` set separately, because those are the
+only ineligible models that may still carry stale automatic membership for the
+persistence layer to clear.
+
 Per-subtree `auto`/`off` strategy is not this module's policy: it lives in
 `grouping_strategy`, which the API layer shares rather than reaching into private
 helpers here (STUDIO-240). That module also owns the path-comparison rules this
@@ -75,9 +82,9 @@ proposals.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -584,6 +591,99 @@ def propose_groups(
     return proposals
 
 
+@dataclass(frozen=True)
+class CandidateModel:
+    """The fields eligibility needs from a model, and nothing more (STUDIO-241).
+
+    A projection rather than an ORM row, so the policy below is testable without
+    a database or persisted groups.
+    """
+
+    id: int
+    folder_path: str
+    excluded: bool
+    no_group: bool
+    variant_group_id: int | None
+
+
+class IneligibilityReason(StrEnum):
+    """Why a model was kept out of automatic grouping.
+
+    Reported in the order the rules are evaluated: a model that trips several
+    reports the first. All four have the same effect — no proposal may contain
+    the model — so precedence affects diagnostics, never behaviour.
+    """
+
+    EXCLUDED = "excluded"
+    MANUAL_GROUP = "manual_group"
+    NO_GROUP = "no_group"
+    OFF_SUBTREE = "off_subtree"
+
+
+@dataclass(frozen=True)
+class EligibilityDecision:
+    """Who may be grouped, plus what orchestration still has to write.
+
+    `off_subtree` is separate from the rest of `reasons` because it is the one
+    ineligibility that needs a database write: those models may still carry stale
+    automatic membership from a previous run, which the persistence layer clears.
+    The other three were never eligible to begin with.
+    """
+
+    eligible: tuple[int, ...]
+    off_subtree: tuple[int, ...]
+    reasons: Mapping[int, IneligibilityReason]
+
+
+def select_eligible(
+    models: Iterable[CandidateModel],
+    manual_group_ids: Container[int],
+    strategies: Sequence[tuple[str, str]],
+) -> EligibilityDecision:
+    """Decide which models automatic grouping may touch (STUDIO-241).
+
+    Four rules, in evaluation order:
+
+    * `excluded` — the model is meant to be invisible. Production also filters
+      these out in SQL so they are never loaded; the rule is repeated here so it
+      is expressed in policy and testable without a database, not because the
+      query is unreliable.
+    * a member of one of this creator's `manual_group_ids` — the user curated it,
+      so neither re-propose it nor disturb its group.
+    * `no_group` — an explicit, sticky "keep me out of any group" decision
+      (#678 Phase 5). It outranks every signal because such a model never becomes
+      a candidate, so no evidence can reach it.
+    * a model under an `off` subtree (#618) stays standalone. With no strategies
+      configured at all this rule cannot fire, matching the previous fast path.
+
+    Side-effect free: nothing here mutates a model or touches the session.
+    """
+    eligible: list[int] = []
+    off_subtree: list[int] = []
+    reasons: dict[int, IneligibilityReason] = {}
+
+    for model in models:
+        if model.excluded:
+            reasons[model.id] = IneligibilityReason.EXCLUDED
+        elif model.variant_group_id in manual_group_ids:
+            reasons[model.id] = IneligibilityReason.MANUAL_GROUP
+        elif model.no_group:
+            reasons[model.id] = IneligibilityReason.NO_GROUP
+        elif strategies and (
+            resolve_subtree_strategy(model.folder_path, strategies) is SubtreeStrategy.OFF
+        ):
+            reasons[model.id] = IneligibilityReason.OFF_SUBTREE
+            off_subtree.append(model.id)
+        else:
+            eligible.append(model.id)
+
+    return EligibilityDecision(
+        eligible=tuple(eligible),
+        off_subtree=tuple(off_subtree),
+        reasons=reasons,
+    )
+
+
 def _hierarchy_enabled(db: Session) -> bool:
     row = db.get(AppSetting, _HIERARCHY_SETTING)
     return row is not None and row.value is True
@@ -597,37 +697,40 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         .all()
     )
 
-    # Models already curated into a manual group are off-limits: don't re-propose
-    # them and don't disturb their group.
     manual_group_ids = {
         g.id for g in db.query(VariantGroup).filter(
             VariantGroup.creator_id == creator_id, VariantGroup.source == "manual"
         )
     }
-    # Model.no_group is an explicit "ungroup this, sticky across rescans"
-    # decision (#678 Phase 5) — always off-limits.
-    candidates = [
-        m for m in models
-        if m.variant_group_id not in manual_group_ids and not m.no_group
-    ]
-
-    # Per-subtree strategy (#618): models under an "off" subtree are never
-    # auto-grouped — each stays standalone. The nearest-ancestor strategy wins,
-    # defaulting to "auto".
     strategies = db.query(GroupingStrategy.path, GroupingStrategy.strategy).all()
-    if strategies:
-        off_ids = {
-            m.id
-            for m in candidates
-            if resolve_subtree_strategy(m.folder_path, strategies) is SubtreeStrategy.OFF
-        }
-        off_models = [m for m in candidates if m.id in off_ids]
-        candidates = [m for m in candidates if m.id not in off_ids]
-        for m in off_models:
-            if m.variant_group_id not in manual_group_ids:
-                m.variant_group_id = None
-    else:
-        off_models = []
+
+    # --- eligibility (pure) ---
+    by_id = {m.id: m for m in models}
+    decision = select_eligible(
+        (
+            CandidateModel(
+                id=m.id,
+                folder_path=m.folder_path,
+                excluded=m.excluded,
+                no_group=m.no_group,
+                variant_group_id=m.variant_group_id,
+            )
+            for m in models
+        ),
+        manual_group_ids,
+        strategies,
+    )
+    candidates = [by_id[mid] for mid in decision.eligible]
+
+    # Models under an "off" subtree may still carry automatic membership from a
+    # previous run; clearing that is orchestration's job, not the policy's.
+    # The manual-group check is belt-and-braces: `select_eligible` reports a
+    # curated model as MANUAL_GROUP and keeps it out of `off_subtree` entirely,
+    # so this can only matter if that precedence ever changes.
+    off_models = [by_id[mid] for mid in decision.off_subtree]
+    for m in off_models:
+        if m.variant_group_id not in manual_group_ids:
+            m.variant_group_id = None
 
     if not candidates and not off_models:
         _drop_auto_groups(db, creator_id)
@@ -647,7 +750,6 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         if file_hash:
             hashes[model_id].add(file_hash)
 
-    by_id = {m.id: m for m in candidates}
     # `ids` is the single ordering authority for the whole pipeline (STUDIO-248):
     # every stage below iterates it, so one stable order makes evidence, clusters,
     # proposals and persistence all reproducible.
