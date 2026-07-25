@@ -58,6 +58,11 @@ ordering cannot decide which merge wins at a boundary, and label ties break
 alphabetically rather than by insertion. Logically identical libraries therefore
 produce identical groups, whatever order their rows were inserted or returned in.
 
+Per-subtree `auto`/`off` strategy is not this module's policy: it lives in
+`grouping_strategy`, which the API layer shares rather than reaching into private
+helpers here (STUDIO-240). That module also owns the path-comparison rules this
+engine uses for ancestor matching and for its candidate sort key.
+
 The engine derives auto groups from scratch. By default it does not read the
 model's current `character` assignment; the hierarchy feature flag deliberately
 adds that scanner-owned context as a constrained signal. It writes
@@ -79,30 +84,13 @@ from sqlalchemy.orm import Session
 
 from app.models import AppSetting, Model, STLFile, VariantGroup, GroupingStrategy
 from app.services import name_parser
+from app.services.grouping_strategy import (
+    SubtreeStrategy,
+    normalize_path,
+    resolve_subtree_strategy,
+)
 from app.services.product_context import ProductContext, resolve_product_context
 
-
-def _norm(path: str) -> str:
-    """Normalise a folder path for ancestor comparison (separators + trailing /)."""
-    return path.replace("\\", "/").rstrip("/")
-
-
-def _resolve_strategy(model_path: str, strategies: list[tuple[str, str]]) -> str:
-    """Nearest-ancestor strategy for a model folder, defaulting to "auto".
-
-    `strategies` is a list of (normalised_path, strategy); the longest path that is
-    the model's folder or an ancestor of it wins. Two ancestors of equal length
-    are ordered by path so the winner can't depend on the row order the strategy
-    query happened to return (STUDIO-248)."""
-    mp = _norm(model_path)
-    best_rank: tuple[int, str] | None = None
-    best = "auto"
-    for spath, strat in strategies:
-        if mp == spath or mp.startswith(spath + "/"):
-            rank = (len(spath), spath)
-            if best_rank is None or rank > best_rank:
-                best_rank, best = rank, strat
-    return best
 
 # A file_hash shared by more than this many models is treated as a ubiquitous
 # part (a common base, a shared support raft) and ignored for grouping — it would
@@ -276,7 +264,7 @@ def order_candidates(
     identical input. `id` is only a last-resort tiebreak.
     """
     return sorted(
-        ids, key=lambda mid: (_norm(folder_paths[mid]), names[mid], mid)
+        ids, key=lambda mid: (normalize_path(folder_paths[mid]), names[mid], mid)
     )
 
 
@@ -626,9 +614,13 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     # Per-subtree strategy (#618): models under an "off" subtree are never
     # auto-grouped — each stays standalone. The nearest-ancestor strategy wins,
     # defaulting to "auto".
-    strategies = [(_norm(p), s) for (p, s) in db.query(GroupingStrategy.path, GroupingStrategy.strategy)]
+    strategies = db.query(GroupingStrategy.path, GroupingStrategy.strategy).all()
     if strategies:
-        off_ids = {m.id for m in candidates if _resolve_strategy(m.folder_path, strategies) == "off"}
+        off_ids = {
+            m.id
+            for m in candidates
+            if resolve_subtree_strategy(m.folder_path, strategies) is SubtreeStrategy.OFF
+        }
         off_models = [m for m in candidates if m.id in off_ids]
         candidates = [m for m in candidates if m.id not in off_ids]
         for m in off_models:
