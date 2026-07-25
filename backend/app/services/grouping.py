@@ -38,6 +38,13 @@ labelling also depends on; `_apply_evidence` offers the proposed edges to the
 union-find in caller-chosen order. `regroup_creator` keeps only the database
 orchestration: eligibility, evidence inputs, clustering and persistence.
 
+Clustering and proposal building are pure too (STUDIO-246): `build_clusters`
+turns merged components into member lists, and `propose_groups` returns typed
+`GroupProposal` values carrying members, label, representative, signal, reason
+and confidence. It creates no rows and mutates no model, so the whole pipeline
+reads evidence → clusters → proposals → persistence, with `regroup_creator`
+owning only the last step.
+
 Signal ORDER remains load-bearing: an earlier merge can make a later edge
 redundant or push it across a boundary, so the sequence
 hierarchy → hash → filename → name must be preserved.
@@ -418,6 +425,127 @@ class _UnionFind:
         return _MergeResult.MERGED
 
 
+@dataclass(frozen=True)
+class CandidateFacts:
+    """Per-model facts the proposal stage needs, free of ORM objects (STUDIO-246).
+
+    `names` and `keys` cover every eligible candidate; `contexts` is populated
+    only when hierarchy grouping is enabled. `explicit_reps` holds the models a
+    user has pinned as their group's representative, which outranks any
+    positional default.
+    """
+
+    names: Mapping[int, str]
+    keys: Mapping[int, str]
+    contexts: Mapping[int, ProductContext]
+    explicit_reps: frozenset[int]
+
+
+@dataclass(frozen=True)
+class GroupProposal:
+    """A variant group the engine wants to exist, with its full provenance.
+
+    Purely computed — proposing one creates no `VariantGroup` row and touches no
+    model. Persisting it is the caller's job.
+    """
+
+    members: tuple[int, ...]
+    label: str
+    rep_model_id: int
+    signal: SignalKind
+    reason: str
+    confidence: float
+
+
+def build_clusters(ids: Sequence[int], uf: _UnionFind) -> list[list[int]]:
+    """Group model ids by their union-find component.
+
+    Clusters come back in the order their roots are first met walking `ids`, and
+    members in `ids` order — the order proposals, and therefore persisted groups,
+    are created in. STUDIO-248 owns making `ids` itself deterministic.
+    """
+    clusters: dict[int, list[int]] = defaultdict(list)
+    for mid in ids:
+        clusters[uf.find(mid)].append(mid)
+    return list(clusters.values())
+
+
+def _has_product_identity(members: Sequence[int], facts: CandidateFacts) -> bool:
+    """True if any member is a real product rather than a structural folder.
+
+    A cluster whose every member is a structural/junk folder ("supported",
+    "unsupported", "STL") has no product identity. Those only ever cluster by
+    filename or hash, and grouping them under a junk label is what produced the
+    duplicate "supported" groups in #639.
+    """
+    return any(
+        facts.keys.get(mid) and not name_parser.is_structural_folder(facts.names[mid])
+        for mid in members
+    )
+
+
+def select_label(members: Sequence[int], facts: CandidateFacts) -> str:
+    """Label a cluster: hierarchy label, else most common name key, else a name.
+
+    Preference order is unchanged from the original `_label_for`. Ties fall to
+    `Counter.most_common` insertion order; STUDIO-248 owns making that stable.
+    """
+    hierarchy_labels = [
+        facts.contexts[mid].display_label
+        for mid in members
+        if mid in facts.contexts and facts.contexts[mid].display_label
+    ]
+    if hierarchy_labels:
+        return Counter(hierarchy_labels).most_common(1)[0][0]
+    member_keys = [facts.keys[mid] for mid in members if mid in facts.keys]
+    if member_keys:
+        return Counter(member_keys).most_common(1)[0][0]
+    return facts.names[members[0]]
+
+
+def select_representative(members: Sequence[int], facts: CandidateFacts) -> int:
+    """The cluster's representative: a user-pinned member, else the first.
+
+    An explicit `is_group_rep` choice always wins over the positional default.
+    """
+    return next((mid for mid in members if mid in facts.explicit_reps), members[0])
+
+
+def propose_groups(
+    ids: Sequence[int],
+    uf: _UnionFind,
+    ledger: EvidenceLedger,
+    facts: CandidateFacts,
+) -> list[GroupProposal]:
+    """Turn merged components into typed proposals (STUDIO-246).
+
+    Side-effect free: no `VariantGroup` row is created and no model is mutated.
+    Singletons and clusters with no product identity yield no proposal, so any
+    model absent from the returned members belongs to no auto group.
+
+    Each proposal's reason and confidence come from the strongest signal that
+    actually merged its members, via the `SIGNAL_POLICY` table.
+    """
+    proposals: list[GroupProposal] = []
+    for members in build_clusters(ids, uf):
+        if len(members) < 2 or not _has_product_identity(members, facts):
+            continue
+        signal = ledger.strongest_for(members)
+        policy = policy_for(signal)
+        label = select_label(members, facts)
+        proposals.append(
+            GroupProposal(
+                members=tuple(members),
+                label=label,
+                rep_model_id=select_representative(members, facts),
+                signal=signal,
+                reason=policy.reason_template.format(label=label),
+                confidence=policy.confidence,
+            )
+        )
+    return proposals
+
+
 def _hierarchy_enabled(db: Session) -> bool:
     row = db.get(AppSetting, _HIERARCHY_SETTING)
     return row is not None and row.value is True
@@ -506,47 +634,48 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     _apply_evidence(uf, ledger, filename_evidence(ids, filenames))
 
     # --- signal 3: name key (baseline) ---
-    # `keys` outlives this pass: cluster labelling and the structural-only
-    # rejection below both read it.
+    # `names` and `keys` outlive this pass: cluster labelling and the
+    # structural-only rejection below both read them.
     by_id = {m.id: m for m in candidates}
-    keys = name_keys(ids, {mid: by_id[mid].name for mid in ids}, creator_name)
+    names = {mid: by_id[mid].name for mid in ids}
+    keys = name_keys(ids, names, creator_name)
     _apply_evidence(uf, ledger, name_evidence(ids, keys))
 
-    # --- materialise clusters ---
-    clusters: dict[int, list[int]] = defaultdict(list)
-    for mid in ids:
-        clusters[uf.find(mid)].append(mid)
+    # --- propose groups (pure) ---
+    facts = CandidateFacts(
+        names=names,
+        keys=keys,
+        contexts=contexts,
+        explicit_reps=frozenset(mid for mid in ids if by_id[mid].is_group_rep),
+    )
+    proposals = propose_groups(ids, uf, ledger, facts)
 
+    # --- persist ---
     _drop_auto_groups(db, creator_id, manual_group_ids)
 
-    for members in clusters.values():
-        # Don't group a cluster with no real product identity — i.e. every member
-        # is a structural/junk folder ("supported", "unsupported", "STL"). These
-        # only ever clustered by filename/hash; grouping + labeling them with a
-        # junk name produces the duplicate "supported" groups (#639).
-        if len(members) < 2 or not any(
-            keys.get(mid) and not name_parser.is_structural_folder(by_id[mid].name)
-            for mid in members
-        ):
-            for mid in members:
-                by_id[mid].variant_group_id = None
-            continue
-        strongest = ledger.strongest_for(members)
-        policy = policy_for(strongest)
-        label = _label_for(members, keys, by_id, contexts)
-        rep = next((m for m in members if by_id[m].is_group_rep), members[0])
+    grouped: set[int] = set()
+    for proposal in proposals:
         group = VariantGroup(
             creator_id=creator_id,
-            label=label,
-            rep_model_id=rep,
+            label=proposal.label,
+            rep_model_id=proposal.rep_model_id,
             source="auto",
-            reason=policy.reason_template.format(label=label),
-            confidence=policy.confidence,
+            reason=proposal.reason,
+            confidence=proposal.confidence,
         )
         db.add(group)
         db.flush()
-        for mid in members:
+        for mid in proposal.members:
             by_id[mid].variant_group_id = group.id
+            grouped.add(mid)
+
+    # Anything the engine declined to group belongs to no auto group. This is
+    # normally already true — _drop_auto_groups cleared the creator's auto
+    # members, and manual members were never candidates — but stating it keeps
+    # the invariant local rather than inherited.
+    for mid in ids:
+        if mid not in grouped:
+            by_id[mid].variant_group_id = None
 
     db.flush()
 
@@ -609,19 +738,3 @@ def _creator_name(db: Session, creator_id: int) -> str | None:
     from app.models import Creator
     c = db.get(Creator, creator_id)
     return c.name if c else None
-
-
-def _label_for(
-    members: list[int],
-    keys: dict[int, str],
-    by_id: dict[int, Model],
-    contexts: dict[int, ProductContext],
-) -> str:
-    """Most common name key wins; else the first member's name."""
-    hierarchy_labels = [contexts[m].display_label for m in members if m in contexts and contexts[m].display_label]
-    if hierarchy_labels:
-        return Counter(hierarchy_labels).most_common(1)[0][0]
-    member_keys = [keys[m] for m in members if m in keys]
-    if member_keys:
-        return Counter(member_keys).most_common(1)[0][0]
-    return by_id[members[0]].name

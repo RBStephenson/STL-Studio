@@ -379,6 +379,187 @@ class TestNameEvidence:
         assert len(grouping.name_evidence(ids, keys)) == len(ids) - 1
 
 
+def _facts(names, keys=None, contexts=None, explicit_reps=()):
+    """CandidateFacts with sensible defaults; keys default to the names."""
+    return grouping.CandidateFacts(
+        names=names,
+        keys=keys if keys is not None else dict(names),
+        contexts=contexts or {},
+        explicit_reps=frozenset(explicit_reps),
+    )
+
+
+def _merged(ids, edges, boundaries=None):
+    """Run edges through a union-find + ledger, returning both."""
+    uf = grouping._UnionFind(list(ids), boundaries)
+    ledger = EvidenceLedger()
+    grouping._apply_evidence(uf, ledger, edges)
+    return uf, ledger
+
+
+class TestBuildClusters:
+    """Component extraction and the transitive boundary guarantee (STUDIO-246)."""
+
+    def test_unmerged_models_are_singleton_clusters(self):
+        uf, _ = _merged([1, 2], [])
+
+        assert grouping.build_clusters([1, 2], uf) == [[1], [2]]
+
+    def test_merged_models_share_a_cluster(self):
+        uf, _ = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        assert grouping.build_clusters([1, 2], uf) == [[1, 2]]
+
+    def test_members_follow_ids_order(self):
+        uf, _ = _merged([3, 1, 2], [grouping.Evidence(SignalKind.HASH, 1, 3)])
+
+        assert grouping.build_clusters([3, 1, 2], uf) == [[3, 1], [2]]
+
+    def test_conflicting_hierarchy_survives_transitive_edges(self):
+        # 2 is unkeyed, so hash edges 1-2 then 2-3 would chain Ada to Leon
+        # without the boundary constraint.
+        contexts = {1: _ctx("ada wong"), 2: _ctx(None), 3: _ctx("leon kennedy")}
+        edges = [
+            grouping.Evidence(SignalKind.HASH, 1, 2),
+            grouping.Evidence(SignalKind.HASH, 2, 3),
+        ]
+        uf, _ = _merged([1, 2, 3], edges, grouping.product_boundaries(contexts))
+
+        clusters = grouping.build_clusters([1, 2, 3], uf)
+
+        assert [1, 2] in clusters
+        assert [3] in clusters
+
+
+class TestSelectLabel:
+    """Label preference order, unchanged from the original helper (STUDIO-246)."""
+
+    def test_hierarchy_display_label_wins(self):
+        facts = _facts(
+            {1: "Supported Files", 2: "Alternate Cut"},
+            keys={1: "supported", 2: "alternate"},
+            contexts={1: _ctx("ada wong", "Ada Wong"), 2: _ctx("ada wong", "Ada Wong")},
+        )
+
+        assert grouping.select_label([1, 2], facts) == "Ada Wong"
+
+    def test_most_common_name_key_wins_without_hierarchy(self):
+        facts = _facts(
+            {1: "Goblin A", 2: "Goblin B", 3: "Orc C"},
+            keys={1: "Goblin", 2: "Goblin", 3: "Orc"},
+        )
+
+        assert grouping.select_label([1, 2, 3], facts) == "Goblin"
+
+    def test_falls_back_to_the_first_members_name(self):
+        facts = _facts({1: "Mystery Sculpt", 2: "Other"}, keys={})
+
+        assert grouping.select_label([1, 2], facts) == "Mystery Sculpt"
+
+
+class TestSelectRepresentative:
+    """User-pinned representatives outrank the positional default."""
+
+    def test_explicit_representative_is_preferred(self):
+        facts = _facts({1: "A", 2: "B", 3: "C"}, explicit_reps={3})
+
+        assert grouping.select_representative([1, 2, 3], facts) == 3
+
+    def test_first_member_is_the_default(self):
+        facts = _facts({1: "A", 2: "B"})
+
+        assert grouping.select_representative([1, 2], facts) == 1
+
+    def test_first_explicit_member_wins_when_several_are_pinned(self):
+        facts = _facts({1: "A", 2: "B", 3: "C"}, explicit_reps={2, 3})
+
+        assert grouping.select_representative([1, 2, 3], facts) == 2
+
+
+class TestProposeGroups:
+    """Typed proposals, computed without a database (STUDIO-246)."""
+
+    def test_singleton_clusters_produce_no_proposal(self):
+        uf, ledger = _merged([1], [])
+
+        assert grouping.propose_groups([1], uf, ledger, _facts({1: "Goblin"})) == []
+
+    def test_structural_only_cluster_produces_no_proposal(self):
+        # Both members are junk folders, so the cluster has no product identity
+        # even though a hash merged it (#639).
+        names = {1: "Supported", 2: "STL"}
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        assert grouping.propose_groups([1, 2], uf, ledger, _facts(names)) == []
+
+    def test_one_real_product_is_enough_to_propose(self):
+        names = {1: "Supported", 2: "Goblin King"}
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        proposals = grouping.propose_groups([1, 2], uf, ledger, _facts(names))
+
+        assert len(proposals) == 1
+        assert proposals[0].members == (1, 2)
+
+    def test_keyless_members_cannot_supply_product_identity(self):
+        names = {1: "Goblin King", 2: "Goblin Scout"}
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        proposals = grouping.propose_groups([1, 2], uf, ledger, _facts(names, keys={}))
+
+        assert proposals == []
+
+    def test_proposal_carries_the_merging_signals_reason_and_confidence(self):
+        names = {1: "Goblin A", 2: "Goblin B"}
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        proposal = grouping.propose_groups([1, 2], uf, ledger, _facts(names))[0]
+
+        assert proposal.signal is SignalKind.HASH
+        assert proposal.reason == "shared mesh files"
+        assert proposal.confidence == 0.9
+
+    def test_name_formed_proposal_renders_its_label_into_the_reason(self):
+        facts = _facts({1: "Goblin A", 2: "Goblin B"}, keys={1: "Goblin", 2: "Goblin"})
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.NAME, 1, 2)])
+
+        proposal = grouping.propose_groups([1, 2], uf, ledger, facts)[0]
+
+        assert proposal.label == "Goblin"
+        assert proposal.reason == "name: Goblin"
+        assert proposal.confidence == 0.6
+
+    def test_explicit_representative_reaches_the_proposal(self):
+        facts = _facts({1: "Goblin A", 2: "Goblin B"}, explicit_reps={2})
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        assert grouping.propose_groups([1, 2], uf, ledger, facts)[0].rep_model_id == 2
+
+    def test_proposals_follow_cluster_order(self):
+        names = {1: "Goblin A", 2: "Goblin B", 3: "Orc A", 4: "Orc B"}
+        edges = [
+            grouping.Evidence(SignalKind.HASH, 3, 4),
+            grouping.Evidence(SignalKind.HASH, 1, 2),
+        ]
+        uf, ledger = _merged([1, 2, 3, 4], edges)
+
+        proposals = grouping.propose_groups([1, 2, 3, 4], uf, ledger, _facts(names))
+
+        # Cluster order follows `ids`, not the order edges were applied.
+        assert [p.members for p in proposals] == [(1, 2), (3, 4)]
+
+    def test_proposing_mutates_nothing_and_creates_no_rows(self):
+        names = {1: "Goblin A", 2: "Goblin B"}
+        facts = _facts(names)
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        grouping.propose_groups([1, 2], uf, ledger, facts)
+
+        # Facts are frozen and the ledger still holds only what merged.
+        assert facts.names == names
+        assert [(e.a, e.b) for e in ledger.edges] == [(1, 2)]
+
+
 class TestHierarchySignal:
     def test_same_character_envelope_groups_different_names(self, db):
         creator = make_creator(db)
