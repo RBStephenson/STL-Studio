@@ -924,6 +924,16 @@ export interface ScanStatus {
   models_found: number | null;
   files_found: number | null;
   cancelled: boolean;
+  /** Roots that were missing or empty (detached mount); pruning was skipped beneath them. */
+  offline_roots?: string[];
+  /**
+   * Entries the scan could not read. Non-zero means the run saw an incomplete view
+   * of the disk — model counts are a floor, and prunes that assume a complete walk
+   * were skipped.
+   */
+  read_failures?: number;
+  /** Capped sample of unreadable paths, for diagnostics. */
+  read_failure_samples?: string[];
 }
 
 export interface Collection {

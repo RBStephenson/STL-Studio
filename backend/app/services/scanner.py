@@ -28,6 +28,7 @@ import re
 import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime
 from pathlib import Path
 from sqlalchemy.orm import Session
@@ -71,6 +72,35 @@ NESTED_VARIANT_BOUNDARY = re.compile(
     r"^(?:alt(?:ernate|ernative)?|variant)(?:[\s_-].*)?$|^v\d+(?:\.\d+)?$",
     re.I,
 )
+# How many read-failure paths a scan reports back through its status payload. The
+# count is exact; the sample is capped so a systematically unreadable library
+# (e.g. every path past MAX_PATH) can't grow the status response without bound.
+READ_FAILURE_SAMPLE_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class ReadFailure:
+    """One filesystem entry the scanner could not stat while classifying a folder.
+
+    Defined up here rather than beside :func:`_list_dir` because
+    ``_walk_for_models`` annotates a parameter with it, and annotations are
+    evaluated at def time.
+    """
+    path: str
+    error: str
+
+
+@dataclass(frozen=True)
+class DirListing:
+    """A folder's immediate children, split by kind, plus any per-entry failures.
+
+    ``dirs``/``files`` are unsorted and unfiltered (hidden entries included) —
+    call sites apply their own ordering and hidden-filtering so this stays a
+    faithful listing rather than a policy decision.
+    """
+    dirs: list[Path] = dataclass_field(default_factory=list)
+    files: list[Path] = dataclass_field(default_factory=list)
+    failures: list[ReadFailure] = dataclass_field(default_factory=list)
 
 # The "one scan at a time" gate is the app-wide library write lock
 # (services/write_lock.py), so a scan and a reorganize apply/undo are mutually
@@ -131,6 +161,11 @@ def get_status() -> dict:
         # before the job reaches its terminal CANCELLED state during teardown.
         "cancelled": payload["state"] == JobState.CANCELLED.value or prog.get("cancelled", False),
         "offline_roots": prog.get("offline_roots", []),
+        # Entries the walk could not stat (STUDIO-358). Non-zero means this run saw
+        # an incomplete view of the disk, so its model count is a floor, not a
+        # total — and the prunes that depend on a complete walk were skipped.
+        "read_failures": prog.get("read_failures", 0),
+        "read_failure_samples": prog.get("read_failure_samples", []),
     }
 
 
@@ -204,7 +239,8 @@ def _full_scan(job: JobHandle, db: Session | None = None):
     # launcher); released in the finally below.
     global _active
     _active = job
-    job.update(message="starting", models_found=0, files_found=0, cancelled=False, offline_roots=[])
+    job.update(message="starting", models_found=0, files_found=0, cancelled=False, offline_roots=[],
+               read_failures=0, read_failure_samples=[])
     try:
         _db = db or SessionLocal()
         own_db = db is None
@@ -739,7 +775,8 @@ def _creator_scan(job: JobHandle, creator_id: int):
     # Assumes the write lock is already held; released in the finally below.
     global _active
     _active = job
-    job.update(message="starting", models_found=0, files_found=0, cancelled=False)
+    job.update(message="starting", models_found=0, files_found=0, cancelled=False,
+               read_failures=0, read_failure_samples=[])
     try:
         db = SessionLocal()
         try:
@@ -778,6 +815,7 @@ def _creator_scan(job: JobHandle, creator_id: int):
                 db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
             db.commit()
 
+            walk_failures: list[ReadFailure] = []
             for creator_dir, layout_tags, grp_by_char in dirs:
                 if _cancelled():
                     job.update(state=JobState.CANCELLED, message="cancelled", cancelled=True)
@@ -793,10 +831,20 @@ def _creator_scan(job: JobHandle, creator_id: int):
                     last_scanned=None,  # full reindex of this creator
                     layout_tags=layout_tags,
                     group_by_character=grp_by_char,
+                    read_failures=walk_failures,
                 )
+            _report_read_failures(walk_failures)
 
             if not _cancelled():
-                removed = _prune_phantoms(db, creator_id=creator_id)
+                # This path wiped the creator's STL rows above and rebuilt them from
+                # disk, so a short listing can leave a real model looking phantom.
+                # Skip the phantom prune rather than delete on an incomplete view.
+                if walk_failures:
+                    logger.warning(
+                        f"Creator rescan hit {len(walk_failures)} unreadable entries — "
+                        "phantom prune skipped to avoid removing live models"
+                    )
+                removed = 0 if walk_failures else _prune_phantoms(db, creator_id=creator_id)
                 # Match the full-scan path: creator rescans refresh only
                 # machine-owned groups after the filesystem walk. The grouping
                 # service keeps manual groups and explicit no_group decisions
@@ -882,6 +930,7 @@ def split_pack(model_id: int) -> dict:
                 break
 
             before = db.query(func.count(Model.id)).filter(Model.creator_id == creator_id).scalar() or 0
+            walk_failures: list[ReadFailure] = []
             _walk_for_models(
                 folder=pack,
                 creator=creator,
@@ -891,7 +940,9 @@ def split_pack(model_id: int) -> dict:
                 stl_cache={},
                 last_scanned=None,
                 layout_tags=pack_layout_tags,
+                read_failures=walk_failures,
             )
+            _report_read_failures(walk_failures)
             db.commit()
             after = db.query(func.count(Model.id)).filter(Model.creator_id == creator_id).scalar() or 0
             created = max(0, after - before)
@@ -943,12 +994,17 @@ def _scan_root(root: ScanRoot, db: Session) -> set[int]:
     # by a lock; contention is negligible (only touched on the exception path).
     failed_creator_ids: set[int] = set()
     failed_lock = threading.Lock()
+    # Per-entry read failures across all workers. Aggregated under failed_lock and
+    # reported once after the pool joins — _report_read_failures does a
+    # read-modify-write on the progress payload and must not run in parallel.
+    root_read_failures: list[ReadFailure] = []
 
     def _scan_one(creator_dir: Path, layout_tags: list[str]):
         if _cancelled():
             return
         creator_id = creator_ids[str(creator_dir)]
         thread_db = SessionLocal()
+        walk_failures: list[ReadFailure] = []
         try:
             creator = thread_db.get(Creator, creator_id)
             _msg(f"scanning {creator_dir.name}")
@@ -962,7 +1018,20 @@ def _scan_root(root: ScanRoot, db: Session) -> set[int]:
                 last_scanned=root_last_scanned,
                 layout_tags=layout_tags,
                 group_by_character=root.group_by_character,
+                read_failures=walk_failures,
             )
+            if walk_failures:
+                # The walk finished, but on an incomplete view of the disk. Treat it
+                # like a failed walk for prune purposes: a folder whose listing was
+                # short may have classified differently (or not been reached at
+                # all), so its models must not be pruned as stale this run.
+                logger.warning(
+                    f"Creator '{creator_dir.name}' had {len(walk_failures)} unreadable "
+                    "entries — stale prune skipped for its models"
+                )
+                with failed_lock:
+                    failed_creator_ids.add(creator_id)
+                    root_read_failures.extend(walk_failures)
         except Exception:
             # Swallow so one bad creator doesn't abort the whole scan, but RECORD it:
             # a partially-walked creator's untouched models must not be pruned as
@@ -977,6 +1046,9 @@ def _scan_root(root: ScanRoot, db: Session) -> set[int]:
         futures = [executor.submit(_scan_one, d, tags) for d, tags in creator_entries]
         for future in as_completed(futures):
             future.result()  # propagate any unexpected exception to the outer handler
+
+    # Single-threaded again — safe to fold the workers' read failures into progress.
+    _report_read_failures(root_read_failures)
 
     # Propose durable variant groups (#615) once per *distinct* creator, AFTER the
     # parallel walk, on a single session. Running it inside the thread pool (once
@@ -1011,7 +1083,16 @@ def _walk_for_models(
     layout_tags: list[str] | None = None,
     is_inbox: bool = False,
     group_by_character: bool = False,
+    read_failures: list[ReadFailure] | None = None,
 ):
+    """Walk *folder*, indexing models and recursing per classification.
+
+    ``read_failures``, when supplied, accumulates every entry this walk could not
+    stat (see :func:`_list_dir`). Callers use a non-empty list as the signal to
+    shield the creator from the stale prune — an incomplete listing may have
+    changed which folders were classified as models, so anything not rediscovered
+    this run must not be assumed deleted (same protection as STUDIO-79).
+    """
     if not folder.is_dir():
         return
 
@@ -1033,18 +1114,24 @@ def _walk_for_models(
     # model. This is what makes an opt-in split durable across rescans.
     is_creator_root = folder == creator_boundary or str(folder) in _pack_overrides
 
-    child_dirs = [d for d in sorted(folder.iterdir()) if d.is_dir() and not _is_hidden(d.name)]
-    has_direct_stls = _has_stls(folder, recurse=False)
+    # One listing feeds all three classification inputs below. Previously each read
+    # the directory again with its own error handling — child_dirs and
+    # has_direct_stls let OSError propagate while the filename collection swallowed
+    # it into an empty list, so whichever raised first decided the outcome. A single
+    # read makes the failure handling consistent (and costs two fewer syscall
+    # round-trips per folder on a network mount).
+    listing = _list_dir(folder)
+    if read_failures is not None:
+        read_failures.extend(listing.failures)
+
+    child_dirs = [d for d in sorted(listing.dirs) if not _is_hidden(d.name)]
+    has_direct_stls = any(f.suffix.lower() in STL_EXTENSIONS for f in listing.files)
     any_child_stls = _any_child_has_stls_cached(child_dirs, stl_cache)
     has_any_stls = has_direct_stls or any_child_stls
 
-    # Collect file names for signal detection. iterdir()/is_file() only raise
-    # OSError (permissions, vanished mount) — narrow so a real bug isn't masked as
-    # an empty folder.
-    try:
-        filenames = [f.name for f in folder.iterdir() if f.is_file()]
-    except OSError:
-        filenames = []
+    # File names for signal detection. Hidden files are deliberately NOT filtered
+    # here — unchanged from the previous iterdir()-based collection.
+    filenames = [f.name for f in listing.files]
 
     # --- Step 1: name-based product detection (folder + files + parents) ---
     # Require the subtree to actually contain STLs. A folder whose *name* (or whose
@@ -1218,7 +1305,8 @@ def _walk_for_models(
                          character=child_character, parent_names=next_parents,
                          stl_cache=stl_cache, last_scanned=last_scanned,
                          layout_tags=layout_tags, is_inbox=is_inbox,
-                         group_by_character=group_by_character)
+                         group_by_character=group_by_character,
+                         read_failures=read_failures)
 
 
 def _index_model(
@@ -1538,6 +1626,64 @@ def _iter_files_recursive(folder: Path):
             yield from _iter_files_recursive(Path(entry.path))
         else:
             yield Path(entry.path)
+
+
+def _list_dir(folder: Path) -> DirListing:
+    """List a folder's immediate children, tolerating PER-ENTRY stat failures.
+
+    Two failure modes must be told apart, because they need opposite handling:
+
+    * The whole directory cannot be listed (permissions, vanished mount). The
+      OSError PROPAGATES — the creator walk catches it and shields that creator's
+      models from the stale prune (STUDIO-79). Swallowing it here would remove
+      that protection and let a transient mount drop prune a live library.
+    * A single entry cannot be stat'd while the directory itself lists fine. This
+      is the common Windows case: the directory path fits inside MAX_PATH but an
+      individual child's full path does not, so ``is_dir()`` raises for that entry
+      alone. It also covers broken symlinks and dehydrated cloud placeholders.
+      Aborting the whole folder over one bad entry would be worse than useless, so
+      the entry is skipped — but RECORDED, never silently dropped.
+
+    Recording matters because an incomplete listing is not inert: it feeds
+    ``name_parser.parse_folder()`` product detection, so a missing file can change
+    whether this folder becomes a model at all. Same reasoning as
+    :func:`_iter_files_recursive`, which avoids rglob for exactly this reason.
+    """
+    with os.scandir(folder) as it:
+        entries = list(it)
+
+    dirs: list[Path] = []
+    files: list[Path] = []
+    failures: list[ReadFailure] = []
+    for entry in entries:
+        try:
+            is_dir = entry.is_dir()
+        except OSError as e:
+            failures.append(ReadFailure(path=entry.path, error=str(e)))
+            continue
+        (dirs if is_dir else files).append(Path(entry.path))
+    return DirListing(dirs=dirs, files=files, failures=failures)
+
+
+def _report_read_failures(failures: list[ReadFailure]) -> None:
+    """Push per-entry read failures onto scan progress and the log.
+
+    Call from single-threaded code only: the bounded sample is a read-modify-write
+    on the progress payload, which the parallel creator workers must not race on.
+    ``_scan_root`` therefore aggregates its workers' failures under the existing
+    ``failed_lock`` and reports once, after the pool joins.
+    """
+    if not failures:
+        return
+    for f in failures:
+        logger.warning(f"Scan could not read entry (skipped, folder still indexed): {f.path} — {f.error}")
+    if _active is None:
+        return
+    _active.increment(read_failures=len(failures))
+    existing = _active.payload()["progress"].get("read_failure_samples", []) or []
+    room = READ_FAILURE_SAMPLE_LIMIT - len(existing)
+    if room > 0:
+        _active.update(read_failure_samples=existing + [f.path for f in failures[:room]])
 
 
 def _has_stls(folder: Path, recurse: bool = False) -> bool:
@@ -2059,7 +2205,8 @@ def _inbox_scan(
       individual un-enriched pack's own folder."""
     global _active
     _active = job
-    job.update(message="importing", models_found=0, files_found=0, cancelled=False)
+    job.update(message="importing", models_found=0, files_found=0, cancelled=False,
+               read_failures=0, read_failure_samples=[])
     try:
         own_db = db is None
         _db = db or SessionLocal()
@@ -2068,6 +2215,7 @@ def _inbox_scan(
             _load_pack_overrides(_db)
             _load_scan_rules(_db)
 
+            walk_failures: list[ReadFailure] = []
             if single_pack:
                 known_name = (creator_name or "").strip()
                 creator = resolve_creator(known_name if known_name else "_Inbox", _db)
@@ -2082,6 +2230,7 @@ def _inbox_scan(
                     stl_cache={},
                     last_scanned=None,
                     is_inbox=True,
+                    read_failures=walk_failures,
                 )
                 if not _cancelled():
                     _auto_link_sups_for_creator(_db, creator.id)
@@ -2129,10 +2278,22 @@ def _inbox_scan(
                         stl_cache={},
                         last_scanned=None,
                         is_inbox=True,
+                        read_failures=walk_failures,
                     )
 
+            _report_read_failures(walk_failures)
+
             if not _cancelled():
-                _prune_phantoms(_db)
+                # This prune is library-wide, not scoped to the imported folder, so
+                # an incomplete listing here could remove models the import never
+                # touched. Skip it rather than delete on a partial view of disk.
+                if walk_failures:
+                    logger.warning(
+                        f"Inbox import hit {len(walk_failures)} unreadable entries — "
+                        "phantom prune skipped to avoid removing live models"
+                    )
+                else:
+                    _prune_phantoms(_db)
                 prog = job.payload()["progress"]
                 job.update(
                     state=JobState.DONE,

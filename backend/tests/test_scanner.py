@@ -10,6 +10,8 @@ import re
 import threading
 from pathlib import Path
 
+import pytest
+
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Creator, Model, STLFile, VariantGroup
@@ -2358,3 +2360,261 @@ class TestIncrementalSkipBaseline:
 
         self._rewalk(db, creator, creator_dir, last_scanned=baseline)
         assert self._stl_count(db, creator) == 0, "unchanged folder must skip file indexing"
+
+
+# ---------------------------------------------------------------------------
+# Read-failure reporting (STUDIO-358)
+# ---------------------------------------------------------------------------
+
+class _RaisingEntry:
+    """A DirEntry stand-in whose is_dir() raises, as a too-long or broken path does."""
+
+    def __init__(self, path: str, error: OSError):
+        self.path = path
+        self.name = os.path.basename(path)
+        self._error = error
+
+    def is_dir(self):
+        raise self._error
+
+
+class _FakeScandir:
+    """Context-manager iterator matching os.scandir()'s protocol."""
+
+    def __init__(self, entries):
+        self._entries = entries
+
+    def __enter__(self):
+        return iter(self._entries)
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _inject_entry_failure(monkeypatch, target: Path, bad_name: str, error: OSError):
+    """Make one entry of *target* raise on is_dir(); every other folder reads normally."""
+    real_scandir = os.scandir
+
+    def fake_scandir(path):
+        if Path(path) == target:
+            entries = list(real_scandir(path))
+            entries.append(_RaisingEntry(str(target / bad_name), error))
+            return _FakeScandir(entries)
+        return real_scandir(path)
+
+    monkeypatch.setattr(scanner.os, "scandir", fake_scandir)
+
+
+class TestListDir:
+    def test_per_entry_failure_is_recorded_not_raised(self, tmp_path, monkeypatch):
+        _stl(tmp_path / "Good")
+        _inject_entry_failure(monkeypatch, tmp_path, "TooLong.stl", OSError(63, "File name too long"))
+
+        listing = scanner._list_dir(tmp_path)
+
+        assert [d.name for d in listing.dirs] == ["Good"]
+        assert len(listing.failures) == 1
+        assert listing.failures[0].path.endswith("TooLong.stl")
+        assert "too long" in listing.failures[0].error.lower()
+
+    def test_whole_directory_failure_propagates(self, tmp_path, monkeypatch):
+        """Must NOT be swallowed: the creator walk relies on this to shield its
+        models from the stale prune (STUDIO-79)."""
+        def boom(path):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(scanner.os, "scandir", boom)
+
+        with pytest.raises(PermissionError):
+            scanner._list_dir(tmp_path)
+
+    def test_readable_folder_reports_no_failures(self, tmp_path):
+        _stl(tmp_path / "Good")
+        (tmp_path / "notes.txt").write_text("x")
+
+        listing = scanner._list_dir(tmp_path)
+
+        assert listing.failures == []
+        assert [d.name for d in listing.dirs] == ["Good"]
+        assert [f.name for f in listing.files] == ["notes.txt"]
+
+    def test_empty_folder_is_not_a_failure(self, tmp_path):
+        listing = scanner._list_dir(tmp_path)
+        assert listing == scanner.DirListing(dirs=[], files=[], failures=[])
+
+
+class TestWalkReadFailures:
+    def test_walk_records_failure_and_still_indexes(self, db, tmp_path, monkeypatch):
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron")
+        creator = make_creator(db, "Creator")
+        _inject_entry_failure(
+            monkeypatch, creator_dir, "Deep.stl", OSError(63, "File name too long"),
+        )
+
+        failures: list[scanner.ReadFailure] = []
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=None, read_failures=failures,
+        )
+
+        assert len(failures) == 1, "the unreadable entry must be reported"
+        assert [_rel(m, creator_dir) for m in _models(db, creator)] == ["Auron"], \
+            "one bad entry must not abort indexing of the rest of the folder"
+
+    def test_clean_walk_records_nothing(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron")
+        creator = make_creator(db, "Creator")
+
+        failures: list[scanner.ReadFailure] = []
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=None, read_failures=failures,
+        )
+
+        assert failures == []
+
+    def test_empty_folder_classifies_as_before(self, db, tmp_path):
+        """A genuinely empty folder is not a model — unchanged by this ticket."""
+        creator_dir = tmp_path / "Creator"
+        (creator_dir / "Empty").mkdir(parents=True)
+        creator = make_creator(db, "Creator")
+
+        failures: list[scanner.ReadFailure] = []
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=None, read_failures=failures,
+        )
+
+        assert failures == []
+        assert _models(db, creator) == []
+
+
+class TestReadFailureReporting:
+    """_report_read_failures writes onto the active job's progress payload.
+
+    Asserted against the handle directly rather than get_status(), which reads the
+    shared runner registry — these tests exercise the writer, and the end-to-end
+    mapping through get_status() is covered by TestReadFailureStatus below.
+    """
+
+    def _job(self, monkeypatch):
+        job = JobHandle(key="scan", _lock=threading.Lock())
+        monkeypatch.setattr(scanner, "_active", job)
+        return job
+
+    def test_reports_count_and_samples(self, monkeypatch):
+        job = self._job(monkeypatch)
+
+        scanner._report_read_failures([
+            scanner.ReadFailure(path="/lib/a.stl", error="too long"),
+            scanner.ReadFailure(path="/lib/b.stl", error="too long"),
+        ])
+
+        prog = job.payload()["progress"]
+        assert prog["read_failures"] == 2
+        assert prog["read_failure_samples"] == ["/lib/a.stl", "/lib/b.stl"]
+
+    def test_sample_is_capped_but_count_is_exact(self, monkeypatch):
+        job = self._job(monkeypatch)
+        limit = scanner.READ_FAILURE_SAMPLE_LIMIT
+
+        scanner._report_read_failures([
+            scanner.ReadFailure(path=f"/lib/{i}.stl", error="too long")
+            for i in range(limit + 10)
+        ])
+
+        prog = job.payload()["progress"]
+        assert prog["read_failures"] == limit + 10, "count must not be capped"
+        assert len(prog["read_failure_samples"]) == limit
+
+    def test_repeated_reports_accumulate_without_exceeding_cap(self, monkeypatch):
+        job = self._job(monkeypatch)
+        limit = scanner.READ_FAILURE_SAMPLE_LIMIT
+
+        for _ in range(3):
+            scanner._report_read_failures([
+                scanner.ReadFailure(path=f"/lib/{i}.stl", error="too long")
+                for i in range(limit)
+            ])
+
+        prog = job.payload()["progress"]
+        assert prog["read_failures"] == limit * 3
+        assert len(prog["read_failure_samples"]) == limit
+
+    def test_nothing_reported_when_clean(self, monkeypatch):
+        job = self._job(monkeypatch)
+
+        scanner._report_read_failures([])
+
+        assert job.payload()["progress"] == {}
+
+
+class TestReadFailureStatus:
+    """_scan_root fans out to worker threads that open their own SessionLocal(),
+    so it must be pointed at the test engine — same idiom as the other tests that
+    exercise the real parallel walk."""
+
+    def _bind(self, db, monkeypatch):
+        monkeypatch.setattr(scanner, "SessionLocal", sessionmaker(bind=db.get_bind()))
+
+    def test_status_surfaces_read_failures_end_to_end(self, db, tmp_path, monkeypatch):
+        from app.models import ScanRoot
+
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron")
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        self._bind(db, monkeypatch)
+        _inject_entry_failure(
+            monkeypatch, creator_dir, "Deep.stl", OSError(63, "File name too long"),
+        )
+
+        scanner.scan_all_roots(db)
+
+        status = scanner.get_status()
+        assert status["read_failures"] >= 1
+        assert any(p.endswith("Deep.stl") for p in status["read_failure_samples"])
+
+    def test_status_reports_zero_on_a_clean_scan(self, db, tmp_path, monkeypatch):
+        from app.models import ScanRoot
+
+        _stl(tmp_path / "Creator" / "Auron")
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        self._bind(db, monkeypatch)
+
+        scanner.scan_all_roots(db)
+
+        status = scanner.get_status()
+        assert status["read_failures"] == 0
+        assert status["read_failure_samples"] == []
+
+
+class TestReadFailureProtectsPrune:
+    def test_creator_with_read_failure_is_shielded_from_stale_prune(
+        self, db, tmp_path, monkeypatch
+    ):
+        """A short listing may have changed classification, so anything not
+        rediscovered this run must not be assumed deleted (STUDIO-79 protection)."""
+        from app.models import ScanRoot
+
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron")
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        monkeypatch.setattr(scanner, "SessionLocal", sessionmaker(bind=db.get_bind()))
+        _inject_entry_failure(
+            monkeypatch, creator_dir, "Deep.stl", OSError(63, "File name too long"),
+        )
+
+        root = db.query(ScanRoot).first()
+        failed = scanner._scan_root(root, db)
+
+        creator = db.query(Creator).filter(Creator.name == "Creator").one()
+        assert creator.id in failed, \
+            "an unreadable entry must protect the creator's models from the stale prune"

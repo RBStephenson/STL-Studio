@@ -8,6 +8,7 @@
 - [Images in a hidden folder aren't picked up](#images-in-a-hidden-folder-arent-picked-up)
 - [When should I rescan vs. run a full scan?](#when-should-i-rescan-vs-run-a-full-scan)
 - [A whole creator is missing or shows only one model](#a-whole-creator-is-missing-or-shows-only-one-model)
+- [The scan reports files it couldn't read](#the-scan-reports-files-it-couldnt-read)
 - [Models are flagged "needs review"](#models-are-flagged-needs-review)
 - [The scan seems stuck or slow](#the-scan-seems-stuck-or-slow)
 - [Scale or type tags are wrong/missing](#scale-or-type-tags-are-wrongmissing)
@@ -132,6 +133,29 @@ If a creator that previously worked suddenly shows only a single model, run a
 full Scan Library — older versions of the app could mis-handle creators whose
 **name** contained a type word (like "Figures" or "Miniatures"); current versions
 fix this, and a rescan corrects the data.
+
+## The scan reports files it couldn't read
+
+Some folders can be listed while an individual file or sub-folder inside them
+can't be. The scan skips just that entry, keeps indexing the rest of the folder,
+and reports how many it hit — the scan status carries a `read_failures` count
+plus a capped sample of the paths (`read_failure_samples`).
+
+Common causes:
+
+- **Very long paths on Windows.** A path over ~260 characters can't be opened
+  unless long-path support is enabled. Deeply-nested packs are the usual
+  culprit. This is the most common reason the *same* library scanned from Docker
+  and from Windows ends up with different model counts.
+- **Cloud placeholder files** (OneDrive "online-only" items) that aren't
+  downloaded locally.
+- **Permissions**, or a broken symlink/shortcut.
+
+When a scan reports read failures, treat its model count as a **floor, not a
+total** — the run saw an incomplete view of the disk. The scanner deliberately
+**skips its cleanup passes** for anything affected, so nothing is deleted based
+on a partial listing. Fix the underlying cause and rescan; the counts settle
+once the scan can read everything.
 
 ## Models are flagged "needs review"
 
