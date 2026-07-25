@@ -703,6 +703,147 @@ class TestLabelTieResolution:
         assert grouping.select_label([2, 1], facts) == "Alpha Product"
 
 
+def _candidate(mid, folder_path=None, excluded=False, no_group=False, variant_group_id=None):
+    return grouping.CandidateModel(
+        id=mid,
+        folder_path=folder_path if folder_path is not None else f"/lib/c/model{mid}",
+        excluded=excluded,
+        no_group=no_group,
+        variant_group_id=variant_group_id,
+    )
+
+
+class TestSelectEligible:
+    """Candidate eligibility, decided without a database (STUDIO-241)."""
+
+    def test_a_plain_model_is_eligible(self):
+        decision = grouping.select_eligible([_candidate(1)], set(), [])
+
+        assert decision.eligible == (1,)
+        assert decision.off_subtree == ()
+        assert decision.reasons == {}
+
+    def test_excluded_models_are_ineligible(self):
+        decision = grouping.select_eligible([_candidate(1, excluded=True)], set(), [])
+
+        assert decision.eligible == ()
+        assert decision.reasons == {1: grouping.IneligibilityReason.EXCLUDED}
+
+    def test_manual_group_members_are_always_ineligible(self):
+        decision = grouping.select_eligible([_candidate(1, variant_group_id=42)], {42}, [])
+
+        assert decision.eligible == ()
+        assert decision.reasons == {1: grouping.IneligibilityReason.MANUAL_GROUP}
+
+    def test_membership_of_an_auto_group_does_not_block_eligibility(self):
+        # variant_group_id set, but not to a manual group — the engine rebuilds
+        # auto groups from scratch each run.
+        decision = grouping.select_eligible([_candidate(1, variant_group_id=7)], {42}, [])
+
+        assert decision.eligible == (1,)
+
+    def test_no_group_models_are_ineligible(self):
+        decision = grouping.select_eligible([_candidate(1, no_group=True)], set(), [])
+
+        assert decision.eligible == ()
+        assert decision.reasons == {1: grouping.IneligibilityReason.NO_GROUP}
+
+    def test_off_subtree_models_are_ineligible_and_reported_for_clearing(self):
+        models = [_candidate(1, folder_path="/lib/c/off/model")]
+
+        decision = grouping.select_eligible(models, set(), [("/lib/c/off", "off")])
+
+        assert decision.eligible == ()
+        assert decision.off_subtree == (1,)
+        assert decision.reasons == {1: grouping.IneligibilityReason.OFF_SUBTREE}
+
+    def test_auto_subtree_models_stay_eligible(self):
+        models = [_candidate(1, folder_path="/lib/c/on/model")]
+
+        decision = grouping.select_eligible(models, set(), [("/lib/c/off", "off")])
+
+        assert decision.eligible == (1,)
+
+    def test_nearer_auto_subtree_rescues_a_model_from_an_outer_off(self):
+        models = [_candidate(1, folder_path="/lib/c/off/keep/model")]
+        strategies = [("/lib/c/off", "off"), ("/lib/c/off/keep", "auto")]
+
+        assert grouping.select_eligible(models, set(), strategies).eligible == (1,)
+
+    def test_no_strategies_means_the_subtree_rule_cannot_fire(self):
+        models = [_candidate(1, folder_path="/lib/c/off/model")]
+
+        decision = grouping.select_eligible(models, set(), [])
+
+        assert decision.eligible == (1,)
+        assert decision.off_subtree == ()
+
+    def test_only_off_subtree_models_are_listed_for_clearing(self):
+        models = [
+            _candidate(1, no_group=True),
+            _candidate(2, excluded=True),
+            _candidate(3, folder_path="/lib/c/off/model", variant_group_id=9),
+        ]
+
+        decision = grouping.select_eligible(models, set(), [("/lib/c/off", "off")])
+
+        assert decision.off_subtree == (3,)
+
+    def test_eligible_order_follows_the_input(self):
+        decision = grouping.select_eligible([_candidate(3), _candidate(1)], set(), [])
+
+        assert decision.eligible == (3, 1)
+
+    def test_empty_input_yields_an_empty_decision(self):
+        decision = grouping.select_eligible([], set(), [])
+
+        assert decision.eligible == ()
+        assert decision.off_subtree == ()
+        assert decision.reasons == {}
+
+    def test_accepts_a_generator(self):
+        decision = grouping.select_eligible((c for c in [_candidate(1)]), set(), [])
+
+        assert decision.eligible == (1,)
+
+
+class TestEligibilityPrecedence:
+    """A model tripping several rules reports the first one evaluated."""
+
+    def test_excluded_outranks_everything(self):
+        model = _candidate(1, excluded=True, no_group=True, variant_group_id=42)
+
+        decision = grouping.select_eligible([model], {42}, [("/lib/c", "off")])
+
+        assert decision.reasons == {1: grouping.IneligibilityReason.EXCLUDED}
+
+    def test_manual_group_outranks_no_group(self):
+        model = _candidate(1, no_group=True, variant_group_id=42)
+
+        decision = grouping.select_eligible([model], {42}, [])
+
+        assert decision.reasons == {1: grouping.IneligibilityReason.MANUAL_GROUP}
+
+    def test_no_group_outranks_the_subtree_rule(self):
+        model = _candidate(1, folder_path="/lib/c/off/model", no_group=True)
+
+        decision = grouping.select_eligible([model], set(), [("/lib/c/off", "off")])
+
+        assert decision.reasons == {1: grouping.IneligibilityReason.NO_GROUP}
+        # Not queued for clearing: it was never an auto-group member to begin with.
+        assert decision.off_subtree == ()
+
+    def test_no_group_outranks_every_signal_by_never_becoming_a_candidate(self):
+        # Two models that a shared hash would otherwise merge; one is pinned
+        # no_group, so no evidence can ever reach it.
+        models = [_candidate(1), _candidate(2, no_group=True)]
+
+        decision = grouping.select_eligible(models, set(), [])
+
+        assert decision.eligible == (1,)
+        assert 2 not in decision.eligible
+
+
 class TestHierarchySignal:
     def test_same_character_envelope_groups_different_names(self, db):
         creator = make_creator(db)
@@ -1057,6 +1198,26 @@ class TestSubtreeStrategy:
 
         # The closer "auto" wins → they group despite the outer "off".
         assert len(_groups(db, creator)) == 1
+
+    def test_manual_membership_survives_an_off_subtree(self, db):
+        # An "off" subtree clears stale *automatic* membership, but a curated
+        # manual group is the user's decision and must be left alone (STUDIO-241).
+        from app.models import GroupingStrategy
+        creator = make_creator(db)
+        curated = make_model(db, creator, name="Curated Hero")
+        manual = VariantGroup(creator_id=creator.id, label="My Group", source="manual")
+        db.add(manual)
+        db.flush()
+        curated.variant_group_id = manual.id
+        parent = curated.folder_path.rsplit("/", 1)[0]
+        db.add(GroupingStrategy(path=parent, strategy="off"))
+        db.flush()
+
+        _run(db, creator)
+
+        db.refresh(curated)
+        assert curated.variant_group_id == manual.id
+        assert db.get(VariantGroup, manual.id) is not None
 
 
 class TestFilenameHardening:
