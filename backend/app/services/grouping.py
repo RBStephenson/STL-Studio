@@ -30,6 +30,15 @@ Note the hierarchy signal plays two distinct roles that stay separate: it is
 positive evidence recorded in the ledger, and (independently) `product_key`
 seeds the union-find's anti-merge boundaries, which no ledger entry can relax.
 
+Signal generation is being split from orchestration one signal at a time
+(STUDIO-244 onward). `hierarchy_evidence` and `hash_evidence` are pure functions
+over supplied candidate data, and `product_boundaries` builds the anti-merge
+constraints; `_apply_evidence` offers the proposed edges to the union-find in
+caller-chosen order. The filename and name passes are still inline pending
+STUDIO-245. Signal ORDER remains load-bearing: an earlier merge can make a later
+edge redundant or push it across a boundary, so the sequence
+hierarchy → hash → filename → name must be preserved.
+
 The engine derives auto groups from scratch. By default it does not read the
 model's current `character` assignment; the hierarchy feature flag deliberately
 adds that scanner-owned context as a constrained signal. It writes
@@ -42,6 +51,7 @@ proposals.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
@@ -167,11 +177,16 @@ class _MergeResult(Enum):
 
 @dataclass(frozen=True)
 class Evidence:
-    """One signal edge that actually merged two components (STUDIO-242/243).
+    """One signal's assertion that two models belong to the same product.
 
     `a` and `b` are the model ids whose relationship this evidence describes, so
     a proposal's provenance can be traced back to specific pairs rather than a
-    bare per-model string.
+    bare per-model string (STUDIO-243).
+
+    Evidence is *proposed* by the pure signal generators and only some of it ends
+    up forming clusters: an edge may find its endpoints already connected, or be
+    turned away at a product boundary. `EvidenceLedger` holds the subset that
+    actually merged, which is what earns attribution (STUDIO-242).
     """
 
     kind: SignalKind
@@ -217,6 +232,77 @@ class EvidenceLedger:
         if not credited:
             return SignalKind.NAME
         return min(credited, key=lambda k: policy_for(k).precedence)
+
+
+def _apply_evidence(
+    uf: _UnionFind, ledger: EvidenceLedger, evidence: Iterable[Evidence]
+) -> None:
+    """Offer proposed evidence to the union-find, crediting only real merges.
+
+    Order matters and is the caller's responsibility: whichever signal is offered
+    first wins the attribution, and an earlier merge can make a later edge
+    redundant or push it across a product boundary.
+    """
+    for edge in evidence:
+        if uf.union(edge.a, edge.b) is _MergeResult.MERGED:
+            ledger.record(edge.kind, edge.a, edge.b)
+
+
+def product_boundaries(contexts: Mapping[int, ProductContext]) -> dict[int, str | None]:
+    """Anti-merge constraints keyed by model id (STUDIO-244).
+
+    A model's `product_key` is a hard boundary, not just positive evidence: no
+    later signal may transitively connect two models carrying conflicting keys,
+    and a model with no key cannot be used as a bridge between two that do.
+    """
+    return {mid: context.product_key for mid, context in contexts.items()}
+
+
+def hierarchy_evidence(contexts: Mapping[int, ProductContext]) -> list[Evidence]:
+    """Propose HIERARCHY edges between models sharing a `product_key`.
+
+    Side-effect free: takes resolved contexts for the eligible candidates only,
+    so models excluded upstream (manual groups, `no_group`, "off" subtrees) can
+    never appear in the output.
+
+    Each key's bucket fans out from its first member, matching the shape the
+    union-find has always been offered. Bucket order follows `contexts`
+    iteration order; making that ordering deterministic is STUDIO-248's job, not
+    this function's, since changing it changes which merges win at boundaries.
+    """
+    index: dict[str, list[int]] = defaultdict(list)
+    for mid, context in contexts.items():
+        if context.product_key:
+            index[context.product_key].append(mid)
+    return [
+        Evidence(kind=SignalKind.HIERARCHY, a=bucket[0], b=other)
+        for bucket in index.values()
+        if len(bucket) >= 2
+        for other in bucket[1:]
+    ]
+
+
+def hash_evidence(ids: Sequence[int], hashes: Mapping[int, set[str]]) -> list[Evidence]:
+    """Propose HASH edges between models sharing a `file_hash`.
+
+    Side-effect free. Only models listed in `ids` are considered, so ineligible
+    candidates never enter. A hash shared by more than `_HASH_BUCKET_CAP` models
+    is a ubiquitous part (a common base, a shared support raft) and yields no
+    evidence — it would otherwise chain unrelated products together.
+
+    As with `hierarchy_evidence`, bucket order is inherited from `ids` and from
+    each model's hash-set iteration order; STUDIO-248 owns making that stable.
+    """
+    index: dict[str, list[int]] = defaultdict(list)
+    for mid in ids:
+        for file_hash in hashes.get(mid, ()):
+            index[file_hash].append(mid)
+    return [
+        Evidence(kind=SignalKind.HASH, a=bucket[0], b=other)
+        for bucket in index.values()
+        if 2 <= len(bucket) <= _HASH_BUCKET_CAP
+        for other in bucket[1:]
+    ]
 
 
 class _UnionFind:
@@ -314,36 +400,19 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         )
         for m in candidates
     } if hierarchy_enabled else {}
-    boundaries = {mid: contexts[mid].product_key for mid in ids} if hierarchy_enabled else None
+    boundaries = product_boundaries(contexts) if hierarchy_enabled else None
     uf = _UnionFind(ids, boundaries)
     ledger = EvidenceLedger()
 
     # --- hierarchy signal: same scanner-derived character envelope ---
-    # It is both positive evidence and a hard boundary: later weak/content
-    # signals cannot transitively bridge two conflicting product envelopes.
+    # It is both positive evidence and a hard boundary: the boundaries seeded
+    # above stop later weak/content signals transitively bridging two
+    # conflicting product envelopes.
     if hierarchy_enabled:
-        hierarchy_index: dict[str, list[int]] = defaultdict(list)
-        for mid, context in contexts.items():
-            if context.product_key:
-                hierarchy_index[context.product_key].append(mid)
-        for bucket in hierarchy_index.values():
-            if len(bucket) >= 2:
-                first = bucket[0]
-                for other in bucket[1:]:
-                    if uf.union(first, other) is _MergeResult.MERGED:
-                        ledger.record(SignalKind.HIERARCHY, first, other)
+        _apply_evidence(uf, ledger, hierarchy_evidence(contexts))
 
     # --- signal 1: file_hash overlap (strongest content signal) ---
-    hash_index: dict[str, list[int]] = defaultdict(list)
-    for mid in ids:
-        for h in hashes.get(mid, ()):
-            hash_index[h].append(mid)
-    for bucket in hash_index.values():
-        if 2 <= len(bucket) <= _HASH_BUCKET_CAP:
-            first = bucket[0]
-            for other in bucket[1:]:
-                if uf.union(first, other) is _MergeResult.MERGED:
-                    ledger.record(SignalKind.HASH, first, other)
+    _apply_evidence(uf, ledger, hash_evidence(ids, hashes))
 
     # --- signal 2: STL filename overlap ---
     # Drop generic filenames (shared by many models) so common part names like

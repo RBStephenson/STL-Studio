@@ -5,6 +5,7 @@ import pytest
 from app.models import AppSetting, VariantGroup
 from app.services import grouping
 from app.services.grouping import EvidenceLedger, SignalKind
+from app.services.product_context import ProductContext
 from tests.conftest import make_creator, make_model, make_stl_file
 
 
@@ -130,6 +131,114 @@ class TestEvidenceLedger:
 
     def test_credit_for_unknown_model_is_none(self):
         assert EvidenceLedger().credit_for(99) is None
+
+
+def _ctx(product_key, display_label=None):
+    return ProductContext(product_key=product_key, display_label=display_label)
+
+
+class TestProductBoundaries:
+    """Product keys are hard anti-merge constraints (STUDIO-244)."""
+
+    def test_maps_every_model_to_its_key(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx(None)}
+
+        assert grouping.product_boundaries(contexts) == {1: "ada wong", 2: None}
+
+    def test_conflicting_keys_cannot_merge(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx("leon kennedy")}
+        uf = grouping._UnionFind([1, 2], grouping.product_boundaries(contexts))
+
+        assert uf.union(1, 2) is grouping._MergeResult.REJECTED_HIERARCHY
+        assert uf.find(1) != uf.find(2)
+
+    def test_unkeyed_model_cannot_bridge_conflicting_keys(self):
+        # 2 carries no key, so it may join either side — but never both, or it
+        # would smuggle Ada and Leon into one cluster transitively.
+        contexts = {1: _ctx("ada wong"), 2: _ctx(None), 3: _ctx("leon kennedy")}
+        uf = grouping._UnionFind([1, 2, 3], grouping.product_boundaries(contexts))
+
+        assert uf.union(1, 2) is grouping._MergeResult.MERGED
+        assert uf.union(2, 3) is grouping._MergeResult.REJECTED_HIERARCHY
+        assert uf.find(1) != uf.find(3)
+
+
+class TestHierarchyEvidence:
+    """Pure HIERARCHY edge generation (STUDIO-244)."""
+
+    def test_matching_keys_produce_evidence(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx("ada wong")}
+
+        evidence = grouping.hierarchy_evidence(contexts)
+
+        assert [(e.kind, e.a, e.b) for e in evidence] == [(SignalKind.HIERARCHY, 1, 2)]
+
+    def test_differing_keys_produce_no_evidence(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx("leon kennedy")}
+
+        assert grouping.hierarchy_evidence(contexts) == []
+
+    def test_unkeyed_models_produce_no_evidence(self):
+        contexts = {1: _ctx(None), 2: _ctx(None)}
+
+        assert grouping.hierarchy_evidence(contexts) == []
+
+    def test_bucket_fans_out_from_its_first_member(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx("ada wong"), 3: _ctx("ada wong")}
+
+        evidence = grouping.hierarchy_evidence(contexts)
+
+        assert [(e.a, e.b) for e in evidence] == [(1, 2), (1, 3)]
+
+    def test_only_supplied_candidates_appear(self):
+        # Models filtered out upstream (manual groups, no_group, "off" subtrees)
+        # are absent from `contexts` and so can never be proposed.
+        contexts = {1: _ctx("ada wong"), 2: _ctx("ada wong")}
+
+        mentioned = {m for e in grouping.hierarchy_evidence(contexts) for m in (e.a, e.b)}
+
+        assert mentioned == {1, 2}
+
+
+class TestHashEvidence:
+    """Pure HASH edge generation (STUDIO-244)."""
+
+    def test_shared_hash_produces_evidence(self):
+        evidence = grouping.hash_evidence([1, 2], {1: {"deadbeef"}, 2: {"deadbeef"}})
+
+        assert [(e.kind, e.a, e.b) for e in evidence] == [(SignalKind.HASH, 1, 2)]
+
+    def test_distinct_hashes_produce_no_evidence(self):
+        assert grouping.hash_evidence([1, 2], {1: {"aaa"}, 2: {"bbb"}}) == []
+
+    def test_model_without_hashes_produces_no_evidence(self):
+        assert grouping.hash_evidence([1, 2], {1: {"aaa"}}) == []
+
+    def test_hash_at_the_bucket_cap_still_produces_evidence(self):
+        ids = list(range(1, grouping._HASH_BUCKET_CAP + 1))
+        hashes = {mid: {"commonbase"} for mid in ids}
+
+        evidence = grouping.hash_evidence(ids, hashes)
+
+        assert len(evidence) == len(ids) - 1
+
+    def test_hash_over_the_bucket_cap_produces_no_evidence(self):
+        # A ubiquitous part (shared base, support raft) must not chain unrelated
+        # products together.
+        ids = list(range(1, grouping._HASH_BUCKET_CAP + 2))
+        hashes = {mid: {"commonbase"} for mid in ids}
+
+        assert grouping.hash_evidence(ids, hashes) == []
+
+    def test_models_absent_from_ids_are_ignored(self):
+        # 3 shares the hash but was filtered out upstream, so it must not be
+        # proposed even though `hashes` still carries a row for it.
+        hashes = {1: {"deadbeef"}, 2: {"deadbeef"}, 3: {"deadbeef"}}
+
+        evidence = grouping.hash_evidence([1, 2], hashes)
+
+        mentioned = {m for e in evidence for m in (e.a, e.b)}
+        assert mentioned == {1, 2}
 
 
 class TestHierarchySignal:
