@@ -2618,3 +2618,131 @@ class TestReadFailureProtectsPrune:
         creator = db.query(Creator).filter(Creator.name == "Creator").one()
         assert creator.id in failed, \
             "an unreadable entry must protect the creator's models from the stale prune"
+
+
+# ---------------------------------------------------------------------------
+# Shared path-boundary migration (STUDIO-230)
+# ---------------------------------------------------------------------------
+
+class TestPruneBoundarySharedBehavior:
+    """All four prune helpers now share one root-membership implementation
+    (services/path_boundary.PathBoundary). These pin the boundary behaviors that
+    would fail SILENTLY if a call site were wired to the wrong method: a
+    prefix-sharing sibling being treated as a descendant, or an empty root list
+    being treated as "everything".
+
+    _prune_stale_models already had sibling coverage; this extends the same
+    assertion to the three helpers that previously carried their own copies.
+    """
+
+    def _model(self, db, creator, folder: Path, name: str, stale: bool = False):
+        from datetime import timedelta
+        ts = utcnow() - timedelta(hours=1) if stale else utcnow()
+        m = Model(name=name, folder_path=str(folder), creator_id=creator.id, updated_at=ts)
+        db.add(m)
+        db.commit()
+        return m
+
+    def test_stale_paths_ignores_prefix_sharing_sibling(self, db, tmp_path):
+        """A row under 'STLBackup' must not be pruned when only 'STL' is online —
+        an unanchored prefix match would delete a whole parallel library."""
+        scanned = tmp_path / "STL"
+        scanned.mkdir()
+        sibling = tmp_path / "STLBackup"
+        creator = make_creator(db, "Creator")
+        # Both folders are missing on disk; only the one under the online root
+        # is eligible. Keep one live row so the 50% cap isn't tripped.
+        (scanned / "live").mkdir()
+        self._model(db, creator, scanned / "live", "live")
+        self._model(db, creator, scanned / "gone", "gone")
+        self._model(db, creator, sibling / "gone", "in_sibling")
+
+        scanner._prune_stale_paths(db, [str(scanned)])
+
+        names = {m.name for m in db.query(Model).all()}
+        assert "gone" not in names, "missing folder under the online root should prune"
+        assert "in_sibling" in names, "prefix-sharing sibling must never match"
+
+    def test_stale_stl_files_ignores_prefix_sharing_sibling(self, db, tmp_path):
+        scanned = tmp_path / "STL"
+        sibling = tmp_path / "STLBackup"
+        live = scanned / "live"
+        live.mkdir(parents=True)
+        sib_dir = sibling / "m"
+        sib_dir.mkdir(parents=True)
+        creator = make_creator(db, "Creator")
+
+        m_in = self._model(db, creator, live, "in_root")
+        m_out = self._model(db, creator, sib_dir, "in_sibling")
+        db.add_all([
+            STLFile(model_id=m_in.id, filename="a.stl", path=str(live / "a.stl")),
+            STLFile(model_id=m_in.id, filename="b.stl", path=str(live / "b.stl")),
+            STLFile(model_id=m_out.id, filename="c.stl", path=str(sib_dir / "c.stl")),
+        ])
+        db.commit()
+        # Only b.stl exists on disk; a.stl and c.stl are stale rows.
+        (live / "b.stl").write_bytes(b"x")
+
+        scanner._prune_stale_stl_files(db, [str(scanned)])
+
+        remaining = {r.filename for r in db.query(STLFile).all()}
+        assert "a.stl" not in remaining, "missing file under the online root should prune"
+        assert "c.stl" in remaining, "row under a prefix-sharing sibling must not match"
+
+    def test_ignore_walkup_stops_at_the_scan_root(self, db, tmp_path, monkeypatch):
+        """The walk-up uses is_root() (exact), not contains() (exact-or-descendant).
+
+        With contains(), the very first iteration would match the model's own
+        folder — it IS under the root — ending the climb immediately and silently
+        disabling ignore rules for everything nested. Here the pattern only matches
+        an ANCESTOR, so it is reachable solely by a climb that does not stop early.
+        """
+        root = tmp_path / "STL"
+        creator_dir = root / "Creator"
+        _stl(creator_dir / "WIP" / "HalfDone" / "Deep")
+        _stl(creator_dir / "Knight")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+        assert len(_models(db, creator)) == 2
+
+        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(root)])
+
+        assert removed == 1, "a model nested below an ignored ancestor must be pruned"
+        assert not any("WIP" in m.folder_path for m in _models(db, creator))
+
+    def test_ignore_never_prunes_when_the_root_itself_matches(self, db, tmp_path, monkeypatch):
+        """The climb stops ON the root without testing it — ignoring a whole scan
+        root is not this feature's job, and doing so would wipe the library."""
+        root = tmp_path / "wip"          # the ROOT's own name matches the pattern
+        creator_dir = root / "Creator"
+        _stl(creator_dir / "Knight")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+        before = len(_models(db, creator))
+
+        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(root)])
+
+        assert removed == 0
+        assert len(_models(db, creator)) == before
+
+    def test_empty_root_list_prunes_nothing(self, db, tmp_path):
+        """'No roots' must never decay into 'everything'."""
+        creator = make_creator(db, "Creator")
+        self._model(db, creator, tmp_path / "gone", "gone", stale=True)
+
+        assert scanner._prune_stale_paths(db, []) == 0
+        assert scanner._prune_stale_stl_files(db, []) == 0
+        assert scanner._prune_stale_models(db, utcnow(), []) == 0
+        assert {m.name for m in db.query(Model).all()} == {"gone"}
+
+    def test_blank_root_entry_prunes_nothing(self, db, tmp_path):
+        """A blank root normalizes to '.', which as a boundary would match every
+        relative path. PathBoundary.from_paths drops it instead."""
+        creator = make_creator(db, "Creator")
+        self._model(db, creator, tmp_path / "gone", "gone", stale=True)
+
+        assert scanner._prune_stale_paths(db, [""]) == 0
+        assert scanner._prune_stale_models(db, utcnow(), [""]) == 0
+        assert {m.name for m in db.query(Model).all()} == {"gone"}
