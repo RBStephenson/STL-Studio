@@ -1,5 +1,7 @@
 """Variant-grouping proposal engine (#615). Exercises the blended signals
 (file_hash / filename / name) and the manual-group lock."""
+import itertools
+
 import pytest
 
 from app.models import AppSetting, VariantGroup
@@ -560,6 +562,168 @@ class TestProposeGroups:
         assert [(e.a, e.b) for e in ledger.edges] == [(1, 2)]
 
 
+class TestOrderCandidates:
+    """Candidate ordering is stable and independent of row ids (STUDIO-248)."""
+
+    def test_orders_by_folder_path(self):
+        paths = {1: "/lib/c/zeta", 2: "/lib/c/alpha", 3: "/lib/c/mid"}
+        names = {1: "Zeta", 2: "Alpha", 3: "Mid"}
+
+        assert grouping.order_candidates([1, 2, 3], paths, names) == [2, 3, 1]
+
+    def test_result_is_invariant_under_input_order(self):
+        paths = {1: "/lib/c/zeta", 2: "/lib/c/alpha", 3: "/lib/c/mid"}
+        names = {1: "Zeta", 2: "Alpha", 3: "Mid"}
+
+        outcomes = {
+            tuple(grouping.order_candidates(list(perm), paths, names))
+            for perm in itertools.permutations([1, 2, 3])
+        }
+
+        assert len(outcomes) == 1
+
+    def test_ordering_does_not_depend_on_id_assignment(self):
+        # The same library inserted in a different order gets different
+        # autoincrement ids; the resulting sequence of folder paths must match.
+        first = grouping.order_candidates(
+            [1, 2], {1: "/lib/c/alpha", 2: "/lib/c/beta"}, {1: "Alpha", 2: "Beta"}
+        )
+        second = grouping.order_candidates(
+            [7, 5], {7: "/lib/c/alpha", 5: "/lib/c/beta"}, {7: "Alpha", 5: "Beta"}
+        )
+
+        assert [("alpha" if m in (1, 7) else "beta") for m in first] == ["alpha", "beta"]
+        assert [("alpha" if m in (1, 7) else "beta") for m in second] == ["alpha", "beta"]
+
+    def test_separator_style_does_not_change_the_order(self):
+        paths = {1: "C:\\lib\\c\\beta", 2: "C:/lib/c/alpha"}
+        names = {1: "Beta", 2: "Alpha"}
+
+        assert grouping.order_candidates([1, 2], paths, names) == [2, 1]
+
+    def test_identical_paths_fall_back_to_name_then_id(self):
+        paths = {1: "/lib/c/dup", 2: "/lib/c/dup", 3: "/lib/c/dup"}
+        names = {1: "B", 2: "A", 3: "A"}
+
+        assert grouping.order_candidates([3, 1, 2], paths, names) == [2, 3, 1]
+
+
+class TestDeterministicProposals:
+    """Identical logical input yields identical proposals (STUDIO-248)."""
+
+    def _propose(self, ids, paths, names, hashes=None, keys=None, explicit_reps=()):
+        ordered = grouping.order_candidates(list(ids), paths, names)
+        uf = grouping._UnionFind(ordered)
+        ledger = EvidenceLedger()
+        grouping._apply_evidence(uf, ledger, grouping.hash_evidence(ordered, hashes or {}))
+        facts = _facts(names, keys=keys, explicit_reps=explicit_reps)
+        return grouping.propose_groups(ordered, uf, ledger, facts)
+
+    def test_every_permutation_produces_equal_proposals(self):
+        names = {1: "Goblin Archer", 2: "Goblin Scout", 3: "Goblin Guard"}
+        paths = {mid: f"/lib/c/{name}" for mid, name in names.items()}
+        # 1 bridges both hashes, so edge order decides who roots the component.
+        hashes = {1: {"h-a", "h-b"}, 2: {"h-a"}, 3: {"h-b"}}
+
+        outcomes = {
+            tuple(
+                (p.members, p.label, p.rep_model_id, p.signal, p.reason, p.confidence)
+                for p in self._propose(perm, paths, names, hashes)
+            )
+            for perm in itertools.permutations([1, 2, 3])
+        }
+
+        assert len(outcomes) == 1
+
+    def test_permuted_hash_iteration_cannot_change_proposals(self):
+        # Rebuilding the same hash sets in a different insertion order models a
+        # different PYTHONHASHSEED between processes.
+        names = {1: "Goblin Archer", 2: "Goblin Scout", 3: "Goblin Guard"}
+        paths = {mid: f"/lib/c/{name}" for mid, name in names.items()}
+
+        outcomes = set()
+        for order in itertools.permutations(["h-a", "h-b"]):
+            hashes = {1: set(order), 2: {"h-a"}, 3: {"h-b"}}
+            outcomes.add(
+                tuple((p.members, p.label) for p in self._propose([1, 2, 3], paths, names, hashes))
+            )
+
+        assert len(outcomes) == 1
+
+    def test_default_representative_is_stable_across_permutations(self):
+        names = {1: "Goblin Archer", 2: "Goblin Scout"}
+        paths = {1: "/lib/c/zzz-archer", 2: "/lib/c/aaa-scout"}
+        hashes = {1: {"h"}, 2: {"h"}}
+
+        reps = {
+            self._propose(perm, paths, names, hashes)[0].rep_model_id
+            for perm in itertools.permutations([1, 2])
+        }
+
+        # 2 sorts first by folder path, so it is the positional default either way.
+        assert reps == {2}
+
+    def test_explicit_representative_still_wins_over_the_stable_default(self):
+        names = {1: "Goblin Archer", 2: "Goblin Scout"}
+        paths = {1: "/lib/c/zzz-archer", 2: "/lib/c/aaa-scout"}
+        hashes = {1: {"h"}, 2: {"h"}}
+
+        reps = {
+            self._propose(perm, paths, names, hashes, explicit_reps={1})[0].rep_model_id
+            for perm in itertools.permutations([1, 2])
+        }
+
+        assert reps == {1}
+
+
+class TestLabelTieResolution:
+    """Label ties resolve predictably rather than by encounter order."""
+
+    def test_tied_name_keys_resolve_alphabetically(self):
+        facts = _facts({1: "A", 2: "B"}, keys={1: "Zebra", 2: "Apple"})
+
+        assert grouping.select_label([1, 2], facts) == "Apple"
+        assert grouping.select_label([2, 1], facts) == "Apple"
+
+    def test_a_clear_majority_still_beats_alphabetical_order(self):
+        facts = _facts(
+            {1: "A", 2: "B", 3: "C"},
+            keys={1: "Zebra", 2: "Zebra", 3: "Apple"},
+        )
+
+        assert grouping.select_label([1, 2, 3], facts) == "Zebra"
+
+    def test_tied_hierarchy_labels_resolve_alphabetically(self):
+        facts = _facts(
+            {1: "A", 2: "B"},
+            contexts={1: _ctx("k", "Zeta Product"), 2: _ctx("k", "Alpha Product")},
+        )
+
+        assert grouping.select_label([1, 2], facts) == "Alpha Product"
+        assert grouping.select_label([2, 1], facts) == "Alpha Product"
+
+
+class TestStrategyResolutionIsStable:
+    """Equal-length ancestor paths resolve by path, not query order."""
+
+    def test_equal_length_ancestors_resolve_by_path(self):
+        # Both are ancestors of the model and the same length; whichever the
+        # query returned first used to win.
+        forward = [("/lib/aaa", "off"), ("/lib/bbb", "auto")]
+        model = "/lib/bbb/model"
+
+        assert grouping._resolve_strategy(model, forward) == "auto"
+        assert grouping._resolve_strategy(model, list(reversed(forward))) == "auto"
+
+    def test_longest_ancestor_still_wins(self):
+        strategies = [("/lib", "off"), ("/lib/creator/sub", "auto")]
+
+        assert grouping._resolve_strategy("/lib/creator/sub/model", strategies) == "auto"
+
+    def test_unmatched_path_defaults_to_auto(self):
+        assert grouping._resolve_strategy("/other/model", [("/lib", "off")]) == "auto"
+
+
 class TestHierarchySignal:
     def test_same_character_envelope_groups_different_names(self, db):
         creator = make_creator(db)
@@ -1048,6 +1212,59 @@ class TestRep:
         _run(db, creator)
 
         assert _groups(db, creator)[0].rep_model_id == rep.id
+
+
+class TestRepeatedRegroupingIsStable:
+    """Regrouping the same library twice persists equivalent metadata (STUDIO-248)."""
+
+    def _snapshot(self, db, creator):
+        return sorted(
+            (
+                g.label,
+                g.reason,
+                g.confidence,
+                # Compare by folder path, not id: ids change as groups are
+                # dropped and recreated each run.
+                next(m.folder_path for m in g.models if m.id == g.rep_model_id),
+                tuple(sorted(m.folder_path for m in g.models)),
+            )
+            for g in _groups(db, creator)
+        )
+
+    def test_second_run_reproduces_the_first(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin Archer")
+        b = make_model(db, creator, name="Goblin Scout")
+        c = make_model(db, creator, name="Orc Brute")
+        d = make_model(db, creator, name="Orc Warlord")
+        db.flush()
+        for model, file_hash in ((a, "goblin"), (b, "goblin"), (c, "orc"), (d, "orc")):
+            _stl(db, model, "body.stl", file_hash=file_hash)
+            _stl(db, model, f"{model.name}.stl", file_hash=file_hash)
+        db.flush()
+
+        _run(db, creator)
+        first = self._snapshot(db, creator)
+        _run(db, creator)
+        second = self._snapshot(db, creator)
+
+        assert len(first) == 2
+        assert first == second
+
+    def test_repeat_run_is_stable_with_hierarchy_enabled(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Supported Files")
+        b = make_model(db, creator, name="Alternate Cut")
+        a.character = b.character = "Ada Wong"
+        _enable_hierarchy(db)
+        db.flush()
+
+        _run(db, creator)
+        first = self._snapshot(db, creator)
+        _run(db, creator)
+
+        assert first == self._snapshot(db, creator)
+        assert len(first) == 1
 
 
 class TestStructuralFolderNames:
