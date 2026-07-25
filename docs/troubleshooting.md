@@ -133,6 +133,29 @@ full Scan Library — older versions of the app could mis-handle creators whose
 **name** contained a type word (like "Figures" or "Miniatures"); current versions
 fix this, and a rescan corrects the data.
 
+## The scan reports files it couldn't read
+
+Some folders can be listed while an individual file or sub-folder inside them
+can't be. The scan skips just that entry, keeps indexing the rest of the folder,
+and reports how many it hit — the scan status carries a `read_failures` count
+plus a capped sample of the paths (`read_failure_samples`).
+
+Common causes:
+
+- **Very long paths on Windows.** A path over ~260 characters can't be opened
+  unless long-path support is enabled. Deeply-nested packs are the usual
+  culprit. This is the most common reason the *same* library scanned from Docker
+  and from Windows ends up with different model counts.
+- **Cloud placeholder files** (OneDrive "online-only" items) that aren't
+  downloaded locally.
+- **Permissions**, or a broken symlink/shortcut.
+
+When a scan reports read failures, treat its model count as a **floor, not a
+total** — the run saw an incomplete view of the disk. The scanner deliberately
+**skips its cleanup passes** for anything affected, so nothing is deleted based
+on a partial listing. Fix the underlying cause and rescan; the counts settle
+once the scan can read everything.
+
 ## Models are flagged "needs review"
 
 That's the scanner saying "I wasn't sure this folder is a real model." Work
