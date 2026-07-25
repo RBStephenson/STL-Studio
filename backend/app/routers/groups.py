@@ -14,7 +14,7 @@ from app.schemas import (
     GroupRepUpdate, GroupReorder, GroupMergeBody, GroupSplitBody, GroupPatchBody,
     VariantGroupRead, GroupingStrategyBody,
 )
-from app.services import scanner, grouping
+from app.services import scanner, grouping, grouping_strategy
 from app.utils import utcnow, like_escape
 
 
@@ -263,8 +263,11 @@ def patch_group(group_id: int, body: GroupPatchBody, db: Session = Depends(get_d
 @router.get("/grouping-strategy")
 def get_grouping_strategy(path: str = Query(...), db: Session = Depends(get_db)):
     """Effective grouping strategy for a folder path (nearest ancestor, default auto)."""
-    strategies = [(grouping._norm(p), s) for (p, s) in db.query(GroupingStrategy.path, GroupingStrategy.strategy)]
-    return {"path": path, "strategy": grouping._resolve_strategy(path, strategies)}
+    strategies = db.query(GroupingStrategy.path, GroupingStrategy.strategy).all()
+    return {
+        "path": path,
+        "strategy": grouping_strategy.resolve_subtree_strategy(path, strategies),
+    }
 
 
 @router.post("/grouping-strategy")
@@ -275,10 +278,12 @@ def set_grouping_strategy(body: GroupingStrategyBody, db: Session = Depends(get_
     409 while a scan is running."""
     if scanner.get_status()["running"]:
         raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
-    if body.strategy not in ("auto", "off"):
-        raise HTTPException(status_code=400, detail="strategy must be 'auto' or 'off'.")
+    try:
+        strategy = grouping_strategy.parse_strategy(body.strategy)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="strategy must be 'auto' or 'off'.") from None
 
-    if body.strategy == "off":
+    if strategy is grouping_strategy.SubtreeStrategy.OFF:
         stmt = (
             _sqlite_insert(GroupingStrategy)
             .values(path=body.path, strategy="off")

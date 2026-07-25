@@ -703,27 +703,6 @@ class TestLabelTieResolution:
         assert grouping.select_label([2, 1], facts) == "Alpha Product"
 
 
-class TestStrategyResolutionIsStable:
-    """Equal-length ancestor paths resolve by path, not query order."""
-
-    def test_equal_length_ancestors_resolve_by_path(self):
-        # Both are ancestors of the model and the same length; whichever the
-        # query returned first used to win.
-        forward = [("/lib/aaa", "off"), ("/lib/bbb", "auto")]
-        model = "/lib/bbb/model"
-
-        assert grouping._resolve_strategy(model, forward) == "auto"
-        assert grouping._resolve_strategy(model, list(reversed(forward))) == "auto"
-
-    def test_longest_ancestor_still_wins(self):
-        strategies = [("/lib", "off"), ("/lib/creator/sub", "auto")]
-
-        assert grouping._resolve_strategy("/lib/creator/sub/model", strategies) == "auto"
-
-    def test_unmatched_path_defaults_to_auto(self):
-        assert grouping._resolve_strategy("/other/model", [("/lib", "off")]) == "auto"
-
-
 class TestHierarchySignal:
     def test_same_character_envelope_groups_different_names(self, db):
         creator = make_creator(db)

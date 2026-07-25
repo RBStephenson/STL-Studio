@@ -1923,3 +1923,17 @@ class TestGroupingStrategy:
     def test_invalid_strategy_rejected(self, client, db):
         resp = client.post("/models/grouping-strategy", json={"path": "/x", "strategy": "bogus"})
         assert resp.status_code == 400
+
+    def test_sibling_prefix_subtree_does_not_inherit_strategy(self, client, db):
+        # STUDIO-240: "off" on /lib/STL must not leak to the sibling /lib/STLBackup.
+        from app.models import GroupingStrategy
+        db.add(GroupingStrategy(path="/lib/STL", strategy="off"))
+        commit_all(db)
+
+        inside = client.get("/models/grouping-strategy", params={"path": "/lib/STL/Model"}).json()
+        sibling = client.get(
+            "/models/grouping-strategy", params={"path": "/lib/STLBackup/Model"}
+        ).json()
+
+        assert inside["strategy"] == "off"
+        assert sibling["strategy"] == "auto"
