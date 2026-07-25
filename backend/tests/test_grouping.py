@@ -5,7 +5,7 @@ import itertools
 import pytest
 
 from app.models import AppSetting, VariantGroup
-from app.services import grouping, name_parser
+from app.services import grouping, grouping_policy, name_parser
 from app.services.grouping import EvidenceLedger, SignalKind
 from app.services.product_context import ProductContext
 from tests.conftest import make_creator, make_model, make_stl_file
@@ -149,19 +149,19 @@ class TestProductBoundaries:
 
     def test_conflicting_keys_cannot_merge(self):
         contexts = {1: _ctx("ada wong"), 2: _ctx("leon kennedy")}
-        uf = grouping._UnionFind([1, 2], grouping.product_boundaries(contexts))
+        uf = grouping_policy._UnionFind([1, 2], grouping.product_boundaries(contexts))
 
-        assert uf.union(1, 2) is grouping._MergeResult.REJECTED_HIERARCHY
+        assert uf.union(1, 2) is grouping_policy._MergeResult.REJECTED_HIERARCHY
         assert uf.find(1) != uf.find(2)
 
     def test_unkeyed_model_cannot_bridge_conflicting_keys(self):
         # 2 carries no key, so it may join either side — but never both, or it
         # would smuggle Ada and Leon into one cluster transitively.
         contexts = {1: _ctx("ada wong"), 2: _ctx(None), 3: _ctx("leon kennedy")}
-        uf = grouping._UnionFind([1, 2, 3], grouping.product_boundaries(contexts))
+        uf = grouping_policy._UnionFind([1, 2, 3], grouping.product_boundaries(contexts))
 
-        assert uf.union(1, 2) is grouping._MergeResult.MERGED
-        assert uf.union(2, 3) is grouping._MergeResult.REJECTED_HIERARCHY
+        assert uf.union(1, 2) is grouping_policy._MergeResult.MERGED
+        assert uf.union(2, 3) is grouping_policy._MergeResult.REJECTED_HIERARCHY
         assert uf.find(1) != uf.find(3)
 
 
@@ -217,7 +217,7 @@ class TestHashEvidence:
         assert grouping.hash_evidence([1, 2], {1: {"aaa"}}) == []
 
     def test_hash_at_the_bucket_cap_still_produces_evidence(self):
-        ids = list(range(1, grouping._HASH_BUCKET_CAP + 1))
+        ids = list(range(1, grouping_policy._HASH_BUCKET_CAP + 1))
         hashes = {mid: {"commonbase"} for mid in ids}
 
         evidence = grouping.hash_evidence(ids, hashes)
@@ -227,7 +227,7 @@ class TestHashEvidence:
     def test_hash_over_the_bucket_cap_produces_no_evidence(self):
         # A ubiquitous part (shared base, support raft) must not chain unrelated
         # products together.
-        ids = list(range(1, grouping._HASH_BUCKET_CAP + 2))
+        ids = list(range(1, grouping_policy._HASH_BUCKET_CAP + 2))
         hashes = {mid: {"commonbase"} for mid in ids}
 
         assert grouping.hash_evidence(ids, hashes) == []
@@ -257,7 +257,7 @@ class TestFilenameEvidence:
         # 3 shared of 5 union = 0.60, exactly _FILENAME_JACCARD.
         filenames = {1: {"a.stl", "b.stl", "c.stl", "d.stl"}, 2: {"a.stl", "b.stl", "c.stl", "e.stl"}}
 
-        assert grouping._FILENAME_JACCARD == 0.6
+        assert grouping_policy._FILENAME_JACCARD == 0.6
         assert len(grouping.filename_evidence([1, 2], filenames)) == 1
 
     def test_jaccard_just_below_the_threshold_produces_none(self):
@@ -269,7 +269,7 @@ class TestFilenameEvidence:
     def test_minimum_shared_count_is_enforced_at_the_boundary(self):
         filenames = {1: {"a.stl", "b.stl"}, 2: {"a.stl", "b.stl"}}
 
-        assert grouping._FILENAME_MIN_SHARED == 2
+        assert grouping_policy._FILENAME_MIN_SHARED == 2
         assert len(grouping.filename_evidence([1, 2], filenames)) == 1
 
     def test_one_shared_filename_is_never_enough(self):
@@ -279,7 +279,7 @@ class TestFilenameEvidence:
         assert grouping.filename_evidence([1, 2], filenames) == []
 
     def test_filename_at_the_bucket_cap_stays_distinctive(self):
-        cap = grouping._FILENAME_BUCKET_CAP
+        cap = grouping_policy._FILENAME_BUCKET_CAP
         ids = list(range(1, cap + 1))
         filenames = {mid: {"shared-a.stl", "shared-b.stl"} for mid in ids}
 
@@ -289,13 +289,13 @@ class TestFilenameEvidence:
     def test_generic_filenames_cannot_group_unrelated_products(self):
         # One name shared by cap+1 models is generic and dropped, leaving each
         # model with nothing distinctive to match on.
-        ids = list(range(1, grouping._FILENAME_BUCKET_CAP + 2))
+        ids = list(range(1, grouping_policy._FILENAME_BUCKET_CAP + 2))
         filenames = {mid: {"body.stl", f"unique-{mid}.stl"} for mid in ids}
 
         assert grouping.filename_evidence(ids, filenames) == []
 
     def test_large_creator_skips_filename_evidence_entirely(self):
-        cap = grouping._FILENAME_PASS_MODEL_CAP
+        cap = grouping_policy._FILENAME_PASS_MODEL_CAP
         ids = list(range(1, cap + 2))
         files = {"body.stl", "head.stl"}
         filenames = {mid: set(files) for mid in ids}
@@ -303,7 +303,7 @@ class TestFilenameEvidence:
         assert grouping.filename_evidence(ids, filenames) == []
 
     def test_creator_at_the_pass_cap_still_produces_filename_evidence(self):
-        ids = list(range(1, grouping._FILENAME_PASS_MODEL_CAP + 1))
+        ids = list(range(1, grouping_policy._FILENAME_PASS_MODEL_CAP + 1))
         # Pair up models so no filename exceeds the generic bucket cap.
         filenames = {
             mid: {f"pair{mid // 2}-a.stl", f"pair{mid // 2}-b.stl"} for mid in ids
@@ -375,7 +375,7 @@ class TestNameEvidence:
     def test_large_creators_still_get_name_evidence(self):
         # The pass cap suppresses only filename evidence; the name baseline must
         # keep working for creators of any size.
-        ids = list(range(1, grouping._FILENAME_PASS_MODEL_CAP + 2))
+        ids = list(range(1, grouping_policy._FILENAME_PASS_MODEL_CAP + 2))
         keys = {mid: "goblin" for mid in ids}
 
         assert len(grouping.name_evidence(ids, keys)) == len(ids) - 1
@@ -393,9 +393,9 @@ def _facts(names, keys=None, contexts=None, explicit_reps=()):
 
 def _merged(ids, edges, boundaries=None):
     """Run edges through a union-find + ledger, returning both."""
-    uf = grouping._UnionFind(list(ids), boundaries)
+    uf = grouping_policy._UnionFind(list(ids), boundaries)
     ledger = EvidenceLedger()
-    grouping._apply_evidence(uf, ledger, edges)
+    grouping_policy._apply_evidence(uf, ledger, edges)
     return uf, ledger
 
 
@@ -613,9 +613,9 @@ class TestDeterministicProposals:
 
     def _propose(self, ids, paths, names, hashes=None, keys=None, explicit_reps=()):
         ordered = grouping.order_candidates(list(ids), paths, names)
-        uf = grouping._UnionFind(ordered)
+        uf = grouping_policy._UnionFind(ordered)
         ledger = EvidenceLedger()
-        grouping._apply_evidence(uf, ledger, grouping.hash_evidence(ordered, hashes or {}))
+        grouping_policy._apply_evidence(uf, ledger, grouping.hash_evidence(ordered, hashes or {}))
         facts = _facts(names, keys=keys, explicit_reps=explicit_reps)
         return grouping.propose_groups(ordered, uf, ledger, facts)
 
@@ -1452,6 +1452,68 @@ class TestDropAutoGroupsProtectsManualGroups:
         db.flush()
 
         assert db.get(VariantGroup, other.id) is not None
+
+
+class TestMaterialisationOwnsPersistenceOnly:
+    """Transaction ownership stays with the caller (STUDIO-247)."""
+
+    def test_regroup_does_not_commit_so_the_caller_can_roll_back(self, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="Goblin Supported")
+        make_model(db, creator, name="Goblin Unsupported")
+        db.commit()  # baseline the caller could return to
+
+        grouping.regroup_creator(db, creator.id)
+        db.flush()
+        assert len(_groups(db, creator)) == 1, "groups should exist inside the transaction"
+
+        db.rollback()
+
+        # Nothing was committed underneath the caller.
+        assert _groups(db, creator) == []
+
+    def test_a_committed_regroup_survives(self, db):
+        # The mirror of the above: rollback undoing the work is the caller's
+        # choice, not the engine failing to persist.
+        creator = make_creator(db)
+        make_model(db, creator, name="Goblin Supported")
+        make_model(db, creator, name="Goblin Unsupported")
+        db.flush()
+
+        grouping.regroup_creator(db, creator.id)
+        db.commit()
+        db.expire_all()
+
+        assert len(_groups(db, creator)) == 1
+
+    def test_auto_groups_are_replaced_not_accumulated(self, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="Goblin Supported")
+        make_model(db, creator, name="Goblin Unsupported")
+        db.flush()
+
+        _run(db, creator)
+        assert len(_groups(db, creator)) == 1
+        _run(db, creator)
+
+        # Replaced, not accumulated: still exactly one live auto group, and no
+        # orphan left alongside it. Note ids are NOT expected to change — SQLite
+        # reuses a rowid freed by the delete, which is precisely the hazard
+        # STUDIO-301 had to guard when clearing member references first.
+        assert len(_groups(db, creator)) == 1
+        assert db.query(VariantGroup).filter_by(creator_id=creator.id).count() == 1
+
+    def test_materialising_no_proposals_leaves_no_auto_groups(self, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="Lonely Sculpt")
+        db.flush()
+
+        grouping.materialise_proposals(db, creator.id, [], {model.id: model}, [model.id])
+        db.flush()
+
+        assert _groups(db, creator) == []
+        db.refresh(model)
+        assert model.variant_group_id is None
 
 
 class TestRepeatedRegroupingIsStable:
