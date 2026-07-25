@@ -1367,24 +1367,51 @@ def _index_model(
         # in place so identity — and everything hanging off it — survives.
         # Only case-insensitive volumes can produce this miss, so skip the extra
         # query entirely on case-sensitive filesystems (Linux servers/CI), where
-        # a differently-cased path is a genuinely different folder. The SQL
-        # lower()-match keeps this to a single narrow query per new model instead
-        # of scanning every model for the creator; the _normpath guard on the
-        # result rejects any ASCII-lower() false positive.
+        # a differently-cased path is a genuinely different folder (STUDIO-226).
+        #
+        # The SQL match keeps this to a single narrow query per new model instead
+        # of scanning every model for the creator; the _normpath guard on each
+        # result is what actually decides identity, so the query only has to be
+        # loose enough not to miss a real match.
+        #
+        # Separators are folded on BOTH sides (STUDIO-365). _normpath() is
+        # normcase(normpath(...)), which on Windows folds case *and* rewrites '/'
+        # to '\'. A prefilter that folded case alone therefore could not see a row
+        # stored in forward-slash form — 'F:/lib/x' vs 'F:\lib\x' compare unequal
+        # under lower() — so the guard below never ran and a duplicate row was
+        # inserted for a folder already indexed. Such duplicates then survive every
+        # prune, because on a case-insensitive volume the forward-slash path still
+        # exists() and the row looks live.
+        #
+        # Still not folded here: '..' segments and repeated separators, which
+        # normpath() would collapse but this comparison will not. A row stored in
+        # such a form remains un-matchable; no writer is known to produce one.
         recased_from: str | None = None
         if model is None and _normpath("A") == _normpath("a"):
             target_norm = _normpath(folder_path)
             candidates = (
                 db.query(Model)
                 .filter(Model.creator_id == creator.id,
-                        func.lower(Model.folder_path) == folder_path.lower())
+                        func.lower(func.replace(Model.folder_path, "\\", "/"))
+                        == folder_path.lower().replace("\\", "/"))
                 .all()
             )
-            for candidate in candidates:
-                if candidate.folder_path and _normpath(candidate.folder_path) == target_norm:
-                    model = candidate
-                    recased_from = candidate.folder_path
-                    break
+            matches = [
+                c for c in candidates
+                if c.folder_path and _normpath(c.folder_path) == target_norm
+            ]
+            if len(matches) > 1:
+                # Pre-existing duplicates for one physical folder (the bug above,
+                # before it was fixed). Adopting one leaves the rest stale and
+                # unprunable; surface it rather than silently picking one.
+                logger.warning(
+                    f"{len(matches)} model rows resolve to the same folder "
+                    f"{folder_path!r}: ids={[m.id for m in matches]}. Adopting "
+                    f"id={matches[0].id}; the others need manual cleanup."
+                )
+            if matches:
+                model = matches[0]
+                recased_from = model.folder_path
 
         # User-excluded model: leave it hidden. Never re-index, re-tag, or reset
         # the flag, so a rescan never resurrects something the user removed.
@@ -1591,17 +1618,39 @@ def _normpath(p: str) -> str:
 
 
 def _recase_model_paths(db: Session, model: Model, old_folder_path: str, new_folder_path: str):
-    """Adopt a case-only folder rename on an existing model in place (STUDIO-78).
+    """Adopt a case- or separator-only folder rename on an existing model in place
+    (STUDIO-78, extended by STUDIO-365).
 
-    Updates the model's folder_path and re-cases the prefix of every child
-    STLFile.path so they line up with the new-cased folder on disk. The relative
-    suffix under the model folder is unchanged (only an ancestor's case differs),
-    so a straight prefix swap is exact and preserves STL-level metadata
-    (sup_of_id, part_name) that a delete-and-reindex would drop."""
+    Updates the model's folder_path and rewrites the prefix of every child
+    STLFile.path so they line up with the folder as the walk sees it. The relative
+    suffix under the model folder names the same files either way, so a prefix
+    swap preserves STL-level metadata (sup_of_id, part_name) that a
+    delete-and-reindex would drop.
+
+    Both the prefix test and the suffix are separator-folded. A plain
+    ``startswith`` missed a stored path that differed from the model folder only
+    by separator style, and even when it matched it left the OLD style in the
+    suffix — producing a mixed path like ``C:\\lib\\Model/part.stl`` that
+    ``_index_stl_files`` then failed to match, inserting a duplicate row and
+    stranding the original's metadata.
+
+    Only reached from the case-insensitive-volume fallback in ``_index_model``,
+    so folding separators is safe here: on a case-sensitive host a backslash is a
+    legal filename character and this code does not run.
+    """
     model.folder_path = new_folder_path
+    old_norm = _normpath(old_folder_path)
     for stl in db.query(STLFile).filter(STLFile.model_id == model.id).all():
-        if stl.path and stl.path.startswith(old_folder_path):
-            stl.path = new_folder_path + stl.path[len(old_folder_path):]
+        if not stl.path:
+            continue
+        # Compare normalized, but slice the RAW path so the file's own casing is
+        # preserved. normcase/normpath are length-preserving for these inputs
+        # (case fold and separator swap are both one-for-one), so the offset is
+        # valid on either form.
+        if not _normpath(stl.path).startswith(old_norm):
+            continue
+        suffix = stl.path[len(old_folder_path):]
+        stl.path = new_folder_path + suffix.replace("\\", os.sep).replace("/", os.sep)
 
 
 def _merge_auto_tags(detected: list[str], layout_tags: list[str] | None) -> list[str]:

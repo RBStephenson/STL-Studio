@@ -2857,3 +2857,128 @@ class TestSplitPackHonoursIgnoreRules:
         chars = {m.character for m in check.query(Model).filter(Model.creator_id == creator_id)}
         check.close()
         assert chars == {"Electro", "Sandman"}, "the ignored child must not be indexed"
+
+
+# ---------------------------------------------------------------------------
+# Separator-insensitive stored-path identity (STUDIO-365)
+# ---------------------------------------------------------------------------
+
+class TestSeparatorInsensitiveIdentity:
+    """A row stored with the other separator style must be matched, not duplicated.
+
+    The real `_normpath` is `normcase(normpath(...))`, which folds separators only
+    on Windows — so the whole code path is skipped on case-sensitive hosts and a
+    Linux-only CI run would report a green skip while the bug was live. These
+    tests therefore INJECT a Windows-like normalizer rather than skipping on
+    platform, so CI actually exercises the branch.
+    """
+
+    def _windows_like_normpath(self, monkeypatch):
+        monkeypatch.setattr(
+            scanner, "_normpath",
+            lambda p: os.path.normpath(p).replace("\\", "/").lower(),
+        )
+
+    def _index_one(self, db, creator, root):
+        _walk(db, creator, root)
+        models = _models(db, creator)
+        assert len(models) == 1
+        return models[0]
+
+    def test_stored_backslash_row_is_reused_not_duplicated(self, db, tmp_path, monkeypatch):
+        """The production shape: stored path in the other separator style AND a
+        different case. Before the fix the SQL prefilter folded case only, so this
+        row was invisible and a duplicate was inserted."""
+        self._windows_like_normpath(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "Creator" / "Auron"
+        _stl(leaf, name="auron.stl")
+        root = tmp_path / "Creator"
+
+        model = self._index_one(db, creator, root)
+        original_id = model.id
+        model.tags = ["favorite"]
+        model.notes = "hand-primed"
+        model.folder_path = str(leaf).replace("/", "\\").lower()
+        db.commit()
+
+        _walk(db, creator, root)
+
+        models = _models(db, creator)
+        assert len(models) == 1, "separator-only difference must not create a duplicate"
+        assert models[0].id == original_id, "the existing row is reused in place"
+        assert models[0].folder_path == str(leaf), "path adopted in the walked form"
+        assert models[0].tags == ["favorite"], "user metadata survives"
+        assert models[0].notes == "hand-primed"
+
+    def test_reverse_separator_direction_also_matches(self, db, tmp_path, monkeypatch):
+        self._windows_like_normpath(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "Creator" / "Auron"
+        _stl(leaf, name="auron.stl")
+        root = tmp_path / "Creator"
+
+        model = self._index_one(db, creator, root)
+        original_id = model.id
+        # Store a path whose separators are already folded the other way.
+        model.folder_path = str(leaf).replace("/", "\\")
+        db.commit()
+
+        _walk(db, creator, root)
+
+        models = _models(db, creator)
+        assert len(models) == 1
+        assert models[0].id == original_id
+
+    def test_stl_rows_are_recased_not_duplicated(self, db, tmp_path, monkeypatch):
+        self._windows_like_normpath(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "Creator" / "Auron"
+        _stl(leaf, name="auron.stl")
+        root = tmp_path / "Creator"
+
+        model = self._index_one(db, creator, root)
+        before = db.query(STLFile).filter(STLFile.model_id == model.id).count()
+        model.folder_path = str(leaf).replace("/", "\\").lower()
+        for stl in db.query(STLFile).filter(STLFile.model_id == model.id):
+            stl.path = stl.path.replace("/", "\\").lower()
+        db.commit()
+
+        _walk(db, creator, root)
+
+        model = _models(db, creator)[0]
+        after = db.query(STLFile).filter(STLFile.model_id == model.id).count()
+        assert after == before, "STL rows recased in place, not duplicated"
+
+    def test_pre_existing_duplicates_are_reported(self, db, tmp_path, monkeypatch, caplog):
+        """Rows already duplicated by the old bug: adopting one leaves the others
+        stale and unprunable, so the condition must be logged rather than silently
+        resolved."""
+        self._windows_like_normpath(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "Creator" / "Auron"
+        _stl(leaf, name="auron.stl")
+        root = tmp_path / "Creator"
+
+        model = self._index_one(db, creator, root)
+        model.folder_path = str(leaf).replace("/", "\\").lower()
+        db.add(Model(name="dupe", folder_path=str(leaf).upper(), creator_id=creator.id))
+        db.commit()
+
+        with caplog.at_level("WARNING"):
+            _walk(db, creator, root)
+
+        assert any("resolve to the same folder" in r.message for r in caplog.records), \
+            "duplicate rows for one folder must be surfaced"
+
+    def test_case_sensitive_host_keeps_distinct_folders_distinct(self, db, tmp_path, monkeypatch):
+        """With a case-SENSITIVE normalizer the fallback is skipped entirely, so
+        two genuinely different folders stay two models (STUDIO-226)."""
+        monkeypatch.setattr(scanner, "_normpath", lambda p: os.path.normpath(p))
+        creator = make_creator(db, "Creator")
+        _stl(tmp_path / "Creator" / "Auron", name="a.stl")
+        _stl(tmp_path / "Creator" / "auron", name="b.stl")
+
+        _walk(db, creator, tmp_path / "Creator")
+
+        assert len(_models(db, creator)) == 2, "case-distinct folders remain distinct"
