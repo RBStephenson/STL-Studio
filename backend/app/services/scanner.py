@@ -39,6 +39,7 @@ from app.database import SessionLocal
 from app.models import Creator, Model, STLFile, ScanRoot, ModelTag, CollectionModel, PackOverride
 from app.services.job_runner import JobHandle, JobState, runner
 from app.services import name_parser, layout, grouping
+from app.services.path_boundary import PathBoundary
 from app.services.scan_rules import (
     IgnoreMatcher, load_ignore_matcher, load_tag_rules, load_parts_names,
 )
@@ -406,16 +407,10 @@ def _prune_stale_paths(
 
     Returns the number of models pruned (for the scan completion summary, #223).
     """
-    if not available_root_paths:
+    online = PathBoundary.from_paths(available_root_paths)
+    if not online:
         return 0
     protected = protected_creator_ids or set()
-    roots_norm = [os.path.normcase(os.path.normpath(p)) for p in available_root_paths]
-
-    def _under_online_root(folder_path: str | None) -> bool:
-        if not folder_path:
-            return False
-        n = os.path.normcase(os.path.normpath(folder_path))
-        return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
     rows = (
         db.query(Model.id, Model.folder_path, Model.creator_id)
@@ -424,7 +419,7 @@ def _prune_stale_paths(
     )
     under = [
         r for r in rows
-        if r.creator_id not in protected and _under_online_root(r.folder_path)
+        if r.creator_id not in protected and online.contains(r.folder_path)
     ]
     total = len(under)
     stale_ids = [r.id for r in under if not Path(r.folder_path).exists()]
@@ -465,16 +460,10 @@ def _prune_stale_stl_files(
 
     Returns the number of STL rows pruned (for the scan completion summary).
     """
-    if not available_root_paths:
+    online = PathBoundary.from_paths(available_root_paths)
+    if not online:
         return 0
     protected = protected_creator_ids or set()
-    roots_norm = [os.path.normcase(os.path.normpath(p)) for p in available_root_paths]
-
-    def _under_online_root(folder_path: str | None) -> bool:
-        if not folder_path:
-            return False
-        n = os.path.normcase(os.path.normpath(folder_path))
-        return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
     models = (
         db.query(Model.id, Model.folder_path, Model.creator_id)
@@ -484,7 +473,7 @@ def _prune_stale_stl_files(
     model_ids = [
         m.id for m in models
         if m.creator_id not in protected
-        and _under_online_root(m.folder_path)
+        and online.contains(m.folder_path)
         and Path(m.folder_path).exists()
     ]
     if not model_ids:
@@ -526,9 +515,11 @@ def _prune_ignored(db: Session, root_paths: list[str]):
 
     Returns the number of models pruned (for the scan completion summary, #223).
     """
-    if not _ignore_matcher.patterns or not root_paths:
+    if not _ignore_matcher.patterns:
         return 0
-    roots_norm = {os.path.normcase(os.path.normpath(p)) for p in root_paths}
+    roots = PathBoundary.from_paths(root_paths)
+    if not roots:
+        return 0
 
     def _is_ignored(folder_path: str | None) -> bool:
         if not folder_path:
@@ -537,8 +528,14 @@ def _prune_ignored(db: Session, root_paths: list[str]):
         # Walk leaf → up, stopping when we step onto a scan root (don't test the
         # root itself — ignoring a whole root is not this feature's job) or run
         # out of parents.
+        #
+        # is_root(), NOT contains(): this is the stop condition for the climb, so
+        # it must match the root EXACTLY. contains() would also match every
+        # descendant, i.e. the model's own folder on the first iteration, ending
+        # the walk immediately and silently disabling ignore rules for anything
+        # nested below an ignored folder.
         while True:
-            if os.path.normcase(os.path.normpath(str(current))) in roots_norm:
+            if roots.is_root(current):
                 return False
             if _ignore_matcher.matches(current):
                 return True
@@ -577,11 +574,11 @@ def _prune_stale_models(
     longer a leaf. Safety cap: skip if >50% of models under the scanned roots
     would be pruned (suggests an indexing failure rather than legitimate pruning).
 
-    Root membership is matched on the normalised path with a separator boundary
-    (not a SQL LIKE prefix): folder paths and root names routinely contain '_' and
-    other LIKE metacharacters, and an unanchored prefix would also match sibling
-    roots ('D:/STL' vs 'D:/STLBackup'). os.path.normcase handles per-platform
-    separator + case folding (case-insensitive on Windows).
+    Root membership goes through services/path_boundary.PathBoundary rather than a
+    SQL LIKE prefix: folder paths and root names routinely contain '_' and other
+    LIKE metacharacters, and an unanchored prefix would also match sibling roots
+    ('D:/STL' vs 'D:/STLBackup'). The boundary anchors descendants on a separator
+    and folds case per host filesystem, which is why this stays in Python.
 
     User-EXCLUDED models are never pruned: the walk returns before bumping their
     updated_at (so it always predates scan_start), and deleting them would let a
@@ -594,22 +591,16 @@ def _prune_stale_models(
 
     Returns the number of models pruned (for the scan completion summary, #223).
     """
-    if not root_paths:
+    scanned = PathBoundary.from_paths(root_paths)
+    if not scanned:
         return 0
-    roots_norm = [os.path.normcase(os.path.normpath(p)) for p in root_paths]
     protected = protected_creator_ids or set()
-
-    def _under_root(folder_path: str | None) -> bool:
-        if not folder_path:
-            return False
-        n = os.path.normcase(os.path.normpath(folder_path))
-        return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
     # Fetch non-excluded candidates once (id + folder + timestamp + creator), then
     # derive both the under-root total and the stale subset in Python. Root
-    # membership still needs normpath comparison (see docstring re: LIKE
-    # metacharacters), so it can't move to SQL — but a single pass replaces the two
-    # overlapping full-table queries this ran before (#653).
+    # membership can't move to SQL (see docstring re: LIKE metacharacters), but a
+    # single pass replaces the two overlapping full-table queries this ran before
+    # (#653).
     rows = (
         db.query(Model.id, Model.folder_path, Model.updated_at, Model.creator_id)
         .filter(Model.excluded == False, Model.folder_path != None)  # noqa: E711, E712
@@ -617,7 +608,7 @@ def _prune_stale_models(
     )
     under = [
         r for r in rows
-        if _under_root(r.folder_path) and r.creator_id not in protected
+        if scanned.contains(r.folder_path) and r.creator_id not in protected
     ]
     total = len(under)
     stale_ids = [
@@ -1546,10 +1537,22 @@ def _index_model(
 # ---------------------------------------------------------------------------
 
 def _normpath(p: str) -> str:
-    """Normalize a filesystem path for identity comparison — case- and
+    """Normalize a filesystem path for MODEL IDENTITY comparison — case- and
     separator-folded on the current platform (case-insensitive on Windows).
-    Mirrors the normalization the prune paths already use so lookup and prune
-    agree on model identity (STUDIO-78)."""
+
+    Currently identical to services/path_boundary.normalize(), and deliberately
+    kept as a separate function rather than delegating to it. The two answer
+    different questions and are expected to diverge:
+
+    * ``path_boundary`` compares paths against roots on THIS host — a live
+      filesystem question, so host casing semantics are correct there permanently.
+    * This one decides whether a path is the same LIBRARY OBJECT as a stored row.
+      STUDIO-78 made it match the prune normalization so lookup and prune agree;
+      STUDIO-359 will make it canonical and host-INDEPENDENT so a database is
+      portable between the Docker and Windows deployments.
+
+    Collapsing them would make that change silently alter prune membership too.
+    """
     return os.path.normcase(os.path.normpath(p))
 
 
