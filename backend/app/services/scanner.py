@@ -134,16 +134,47 @@ def _bump(**deltas: int) -> None:
 
 def _cancelled() -> bool:
     return _active is not None and _active.cancelled
-# Folders the user has explicitly split into per-child models (see PackOverride).
-# Loaded from the DB at the start of every scan; the walk treats these as
-# boundaries. Module-level because only one scan runs at a time (held by the
-# library write lock) and threading it through every recursive call would be noisy.
-_pack_overrides: set[str] = set()
-# Configurable folder/file ignore patterns (#31). Loaded from app_settings at the
-# start of every scan; the walk skips any folder it matches. Module-level for the
-# same reason as the overrides above — one scan at a time, threading it through
-# every recursive call would be noise.
-_ignore_matcher: IgnoreMatcher = IgnoreMatcher(())
+@dataclass(frozen=True)
+class ScanRules:
+    """Immutable per-run rules the walk consults for every folder (STUDIO-231).
+
+    Previously two module-level mutable globals populated at scan start. That
+    worked only because one scan runs at a time (held by the library write lock),
+    and it hid a real dependency: nothing in the signature of ``_walk_for_models``
+    said its classification depended on process-wide state, and an entry point
+    that forgot to load them silently walked with whatever the previous operation
+    left behind.
+
+    Frozen, so the four parallel creator workers share read-only state by
+    construction rather than by convention.
+
+    * ``pack_overrides`` — folders the user has explicitly split into per-child
+      models (see PackOverride). The walk treats these as boundaries; this is what
+      makes an opt-in split durable across rescans.
+    * ``ignore`` — configurable folder/file ignore patterns (#31). The walk skips
+      any folder it matches.
+    """
+
+    pack_overrides: frozenset[str] = frozenset()
+    ignore: IgnoreMatcher = IgnoreMatcher(())
+
+    @classmethod
+    def load(cls, db: Session) -> "ScanRules":
+        """Read this run's rules from the database.
+
+        Also pushes the user's tag-inference rules and parts/structural folder
+        names into the name parser (#31). Those remain module-level state owned by
+        ``services/name_parser``, so this constructor is NOT free of side effects
+        despite returning a value — it both builds the scanner's rules and mutates
+        another module. Removing that half is tracked as STUDIO-363; it was left
+        out of STUDIO-231 to keep the scanner-global removal reviewable on its own.
+        """
+        name_parser.set_tag_rules([(r.pattern, r.tag) for r in load_tag_rules(db)])
+        name_parser.set_parts_names(load_parts_names(db))
+        return cls(
+            pack_overrides=frozenset(row[0] for row in db.query(PackOverride.path)),
+            ignore=load_ignore_matcher(db),
+        )
 
 
 def get_status() -> dict:
@@ -190,20 +221,6 @@ def _root_available(path: str) -> bool:
         return False
 
 
-def _load_pack_overrides(db: Session) -> None:
-    global _pack_overrides
-    _pack_overrides = {row[0] for row in db.query(PackOverride.path)}
-
-
-def _load_scan_rules(db: Session) -> None:
-    global _ignore_matcher
-    _ignore_matcher = load_ignore_matcher(db)
-    # Push user tag-inference rules + parts/structural names into the name
-    # parser for this run (#31).
-    name_parser.set_tag_rules([(r.pattern, r.tag) for r in load_tag_rules(db)])
-    name_parser.set_parts_names(load_parts_names(db))
-
-
 def request_cancel():
     """Cooperatively cancel the running scan. The walk polls _cancelled() at safe
     checkpoints; no-op if nothing is running."""
@@ -246,8 +263,7 @@ def _full_scan(job: JobHandle, db: Session | None = None):
         _db = db or SessionLocal()
         own_db = db is None
         try:
-            _load_pack_overrides(_db)
-            _load_scan_rules(_db)
+            rules = ScanRules.load(_db)
 
             # Clear needs_review for any model that already has indexed STL files —
             # those are confirmed real products that were over-eagerly flagged.
@@ -278,7 +294,7 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 if _cancelled():
                     job.update(state=JobState.CANCELLED, message="cancelled", cancelled=True)
                     break
-                root_failed = _scan_root(root, _db)
+                root_failed = _scan_root(root, _db, rules)
                 failed_creator_ids |= root_failed
                 # Only advance the baseline for a root that was ONLINE (missing or
                 # detached-mount-empty roots present as "no creators found", which
@@ -323,7 +339,7 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                     _db, available_paths, protected_creator_ids=failed_creator_ids,
                 )
                 # Drop models that a newly-added ignore pattern now covers (#31).
-                removed += _prune_ignored(_db, available_paths)
+                removed += _prune_ignored(_db, available_paths, rules.ignore)
                 # Slicer rows must go before the phantom prune so a model whose
                 # only "STL" was a slicer project is removed in the same scan.
                 _prune_slicer_files(_db)
@@ -499,7 +515,7 @@ def _prune_stale_stl_files(
     return len(stale_ids)
 
 
-def _prune_ignored(db: Session, root_paths: list[str]):
+def _prune_ignored(db: Session, root_paths: list[str], ignore: IgnoreMatcher):
     """Remove already-indexed models that now fall under a configured ignore
     pattern (#31).
 
@@ -515,7 +531,7 @@ def _prune_ignored(db: Session, root_paths: list[str]):
 
     Returns the number of models pruned (for the scan completion summary, #223).
     """
-    if not _ignore_matcher.patterns:
+    if not ignore.patterns:
         return 0
     roots = PathBoundary.from_paths(root_paths)
     if not roots:
@@ -537,7 +553,7 @@ def _prune_ignored(db: Session, root_paths: list[str]):
         while True:
             if roots.is_root(current):
                 return False
-            if _ignore_matcher.matches(current):
+            if ignore.matches(current):
                 return True
             parent = current.parent
             if parent == current:  # filesystem root, no scan-root match found
@@ -776,8 +792,7 @@ def _creator_scan(job: JobHandle, creator_id: int):
                 job.update(state=JobState.DONE, message="creator not found")
                 return
 
-            _load_pack_overrides(db)
-            _load_scan_rules(db)
+            rules = ScanRules.load(db)
 
             # Clear stale needs_review on this creator's already-indexed models.
             db.execute(_sqltext(
@@ -820,6 +835,7 @@ def _creator_scan(job: JobHandle, creator_id: int):
                     character=None,
                     stl_cache={},
                     last_scanned=None,  # full reindex of this creator
+                    rules=rules,
                     layout_tags=layout_tags,
                     group_by_character=grp_by_char,
                     read_failures=walk_failures,
@@ -895,11 +911,20 @@ def split_pack(model_id: int) -> dict:
                 return {"ok": False, "created": 0,
                         "message": "no child folders with STLs to split into"}
 
-            # Record the durable override (idempotent) and refresh the in-memory set.
+            # Record the durable override (idempotent), then build this operation's
+            # rules so the re-walk below sees it as a boundary.
+            #
+            # This now loads the FULL rule set, including ignore patterns. It
+            # previously loaded only the overrides, so the re-walk consulted
+            # whatever _ignore_matcher the module global happened to hold — the
+            # previous scan's patterns in a long-lived process, empty in a fresh
+            # one. That was leftover state, not a designed contract; a split now
+            # honours the user's ignore rules the same way every other entry point
+            # does, and does so deterministically (STUDIO-231).
             if not db.query(PackOverride).filter(PackOverride.path == str(pack)).first():
                 db.add(PackOverride(path=str(pack)))
                 db.commit()
-            _load_pack_overrides(db)
+            rules = ScanRules.load(db)
 
             # Drop the collapsed model (and its dependents) so the re-walk starts clean.
             _cascade_delete_models(db, [model_id])
@@ -930,6 +955,7 @@ def split_pack(model_id: int) -> dict:
                 character=None,
                 stl_cache={},
                 last_scanned=None,
+                rules=rules,
                 layout_tags=pack_layout_tags,
                 read_failures=walk_failures,
             )
@@ -949,7 +975,7 @@ def split_pack(model_id: int) -> dict:
         write_lock.release_scan()
 
 
-def _scan_root(root: ScanRoot, db: Session) -> set[int]:
+def _scan_root(root: ScanRoot, db: Session, rules: ScanRules) -> set[int]:
     """Walk a scan root's creators in parallel. Returns the set of creator ids whose
     walk did NOT complete cleanly (raised mid-walk). Those creators were only
     partially indexed, so their models must be protected from the "not visited this
@@ -1007,6 +1033,7 @@ def _scan_root(root: ScanRoot, db: Session) -> set[int]:
                 character=None,
                 stl_cache={},
                 last_scanned=root_last_scanned,
+                rules=rules,
                 layout_tags=layout_tags,
                 group_by_character=root.group_by_character,
                 read_failures=walk_failures,
@@ -1070,6 +1097,7 @@ def _walk_for_models(
     character: str | None,
     stl_cache: dict[str, bool],
     last_scanned: datetime | None,
+    rules: ScanRules,
     parent_names: list[str] | None = None,
     layout_tags: list[str] | None = None,
     is_inbox: bool = False,
@@ -1077,6 +1105,11 @@ def _walk_for_models(
     read_failures: list[ReadFailure] | None = None,
 ):
     """Walk *folder*, indexing models and recursing per classification.
+
+    ``rules`` carries this run's pack overrides and ignore patterns. Required
+    rather than defaulted: these decide whether a folder becomes a model at all,
+    so a caller that omitted them would silently walk with no pack splits and no
+    ignore rules — the exact failure the module globals used to allow (STUDIO-231).
 
     ``read_failures``, when supplied, accumulates every entry this walk could not
     stat (see :func:`_list_dir`). Callers use a non-empty list as the signal to
@@ -1092,7 +1125,7 @@ def _walk_for_models(
     # The creator boundary itself is never ignored — a pattern that happened to match
     # a creator folder would silently drop every model under it; ignore is for
     # sub-folders (WIP dumps, archives, slicer project dirs), not whole creators.
-    if folder != creator_boundary and _ignore_matcher.matches(folder):
+    if folder != creator_boundary and rules.ignore.matches(folder):
         return
 
     # The creator-boundary folder is never itself a model. Its name may contain a
@@ -1103,7 +1136,7 @@ def _walk_for_models(
     # A folder the user has explicitly split (a pack override) is treated the same
     # way: never a model itself, always recursed past, so each child becomes its own
     # model. This is what makes an opt-in split durable across rescans.
-    is_creator_root = folder == creator_boundary or str(folder) in _pack_overrides
+    is_creator_root = folder == creator_boundary or str(folder) in rules.pack_overrides
 
     # One listing feeds all three classification inputs below. Previously each read
     # the directory again with its own error handling — child_dirs and
@@ -1295,6 +1328,7 @@ def _walk_for_models(
         _walk_for_models(child, creator, db, creator_boundary,
                          character=child_character, parent_names=next_parents,
                          stl_cache=stl_cache, last_scanned=last_scanned,
+                         rules=rules,
                          layout_tags=layout_tags, is_inbox=is_inbox,
                          group_by_character=group_by_character,
                          read_failures=read_failures)
@@ -2215,8 +2249,7 @@ def _inbox_scan(
         _db = db or SessionLocal()
         try:
             inbox = Path(path)
-            _load_pack_overrides(_db)
-            _load_scan_rules(_db)
+            rules = ScanRules.load(_db)
 
             walk_failures: list[ReadFailure] = []
             if single_pack:
@@ -2232,6 +2265,7 @@ def _inbox_scan(
                     character=None,
                     stl_cache={},
                     last_scanned=None,
+                    rules=rules,
                     is_inbox=True,
                     read_failures=walk_failures,
                 )
@@ -2280,6 +2314,7 @@ def _inbox_scan(
                         character=None,
                         stl_cache={},
                         last_scanned=None,
+                        rules=rules,
                         is_inbox=True,
                         read_failures=walk_failures,
                     )

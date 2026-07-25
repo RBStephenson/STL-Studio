@@ -37,11 +37,21 @@ def _img(folder: Path, name: str = "render.png") -> None:
     (folder / name).write_bytes(b"\x89PNG\r\n")
 
 
-def _walk(db, creator: Creator, creator_dir: Path, group_by_character: bool = False) -> None:
+def _walk(
+    db,
+    creator: Creator,
+    creator_dir: Path,
+    group_by_character: bool = False,
+    rules: scanner.ScanRules | None = None,
+) -> None:
+    """Run the real walk. `rules` defaults to an empty rule set — no pack
+    overrides, no ignore patterns — which is what most tests want; pass an
+    explicit ScanRules to exercise either (STUDIO-231)."""
     scanner._walk_for_models(
         folder=creator_dir, creator=creator, db=db,
         creator_boundary=creator_dir, character=None,
         stl_cache={}, last_scanned=None,
+        rules=rules if rules is not None else scanner.ScanRules(),
         group_by_character=group_by_character,
     )
 
@@ -278,8 +288,8 @@ class TestIgnorePatterns:
         _stl(creator_dir / "WIP" / "HalfDone" / "STL")
         creator = make_creator(db, "Creator")
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
-        _walk(db, creator, creator_dir)
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        _walk(db, creator, creator_dir, rules=rules)
 
         paths = {_rel(m, creator_dir) for m in _models(db, creator)}
         assert any("Knight" in p for p in paths)
@@ -292,8 +302,8 @@ class TestIgnorePatterns:
         _stl(creator_dir / "Knight" / "STL")
         creator = make_creator(db, "Creator")
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("creator",)))
-        _walk(db, creator, creator_dir)
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("creator",)))
+        _walk(db, creator, creator_dir, rules=rules)
 
         assert any("Knight" in _rel(m, creator_dir) for m in _models(db, creator))
 
@@ -307,8 +317,8 @@ class TestIgnorePatterns:
         _walk(db, creator, creator_dir)
         assert len(_models(db, creator)) == 2  # nothing ignored on first walk
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
-        removed = scanner._prune_ignored(db, [str(tmp_path)])
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(tmp_path)], rules.ignore)
 
         assert removed == 1
         paths = {_rel(m, creator_dir) for m in _models(db, creator)}
@@ -326,8 +336,8 @@ class TestIgnorePatterns:
         _walk(db, creator, creator_dir)
         before = len(_models(db, creator))
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip*",)))
-        removed = scanner._prune_ignored(db, [str(tmp_path)])
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip*",)))
+        removed = scanner._prune_ignored(db, [str(tmp_path)], rules.ignore)
 
         assert removed == 0
         assert len(_models(db, creator)) == before
@@ -344,8 +354,8 @@ class TestIgnorePatterns:
         wip.excluded = True
         db.commit()
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
-        removed = scanner._prune_ignored(db, [str(tmp_path)])
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(tmp_path)], rules.ignore)
 
         assert removed == 0
         assert any("WIP" in m.folder_path for m in _models(db, creator))
@@ -526,7 +536,7 @@ class TestLayoutTags:
         scanner._walk_for_models(
             folder=creator_dir, creator=creator, db=db,
             creator_boundary=creator_dir, character=None,
-            stl_cache={}, last_scanned=None,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
             layout_tags=["Sci-Fi", "Mechs"],
         )
 
@@ -560,7 +570,7 @@ class TestLayoutTags:
         scanner._walk_for_models(
             folder=creator_dir, creator=creator, db=db,
             creator_boundary=creator_dir, character=None,
-            stl_cache={}, last_scanned=None,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
             layout_tags=["Sci-Fi"],
         )
 
@@ -744,8 +754,8 @@ class TestSplitPack:
             _stl(pack / char / "unsupported")
         creator = make_creator(db, "Creator")
 
-        monkeypatch.setattr(scanner, "_pack_overrides", {str(pack)})
-        _walk(db, creator, creator_dir)
+        rules = scanner.ScanRules(pack_overrides=frozenset({str(pack)}))
+        _walk(db, creator, creator_dir, rules=rules)
 
         models = _models(db, creator)
         assert {m.character for m in models} == {"Electro", "Sandman", "Spiderman"}
@@ -1446,7 +1456,11 @@ class TestScanAllRootsMountGate:
 
         def _cap(key):
             def _fn(_db, *args, **kwargs):
-                captured[key] = args[-1]
+                # Capture the root-paths list explicitly. The prunes take it at
+                # different positions and _prune_ignored now takes an ignore
+                # matcher after it, so a positional heuristic (args[-1]) grabs
+                # the wrong argument.
+                captured[key] = next(a for a in args if isinstance(a, list))
                 return 0
             return _fn
 
@@ -1526,7 +1540,7 @@ class TestScanRootLastScannedBaseline:
         db.add(root)
         db.commit()
         self._stub_prunes(monkeypatch)
-        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db: {999})  # simulate a failed creator
+        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db, _rules: {999})  # simulate a failed creator
 
         scanner.scan_all_roots(db)
         db.refresh(root)
@@ -1543,7 +1557,7 @@ class TestScanRootLastScannedBaseline:
         db.add(root)
         db.commit()
         self._stub_prunes(monkeypatch)
-        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db: set())
+        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db, _rules: set())
 
         before = utcnow()
         scanner.scan_all_roots(db)
@@ -1781,7 +1795,7 @@ class TestScanCompletionSummary:
         db.add(ScanRoot(path=str(tmp_path), enabled=True))
         db.commit()
 
-        def fake_scan_root(root, _db):
+        def fake_scan_root(root, _db, _rules):
             # Counters live on the active job handle now; _bump adds to the
             # zero-initialised progress the scan set at start.
             scanner._bump(models_found=models, files_found=files)
@@ -2182,8 +2196,7 @@ def test_creator_rescan_refreshes_automatic_groups(db, tmp_path, monkeypatch):
     calls: list[int] = []
 
     monkeypatch.setattr(scanner, "SessionLocal", Session)
-    monkeypatch.setattr(scanner, "_load_pack_overrides", lambda _db: None)
-    monkeypatch.setattr(scanner, "_load_scan_rules", lambda _db: None)
+    monkeypatch.setattr(scanner.ScanRules, "load", classmethod(lambda cls, _db: cls()))
     monkeypatch.setattr(scanner, "_creator_dirs_for", lambda _creator, _db: [(tmp_path, [], False)])
     monkeypatch.setattr(scanner, "_walk_for_models", lambda *args, **kwargs: None)
     monkeypatch.setattr(scanner, "_prune_phantoms", lambda _db, creator_id=None: 0)
@@ -2310,7 +2323,7 @@ class TestIncrementalSkipBaseline:
         scanner._walk_for_models(
             folder=creator_dir, creator=creator, db=db,
             creator_boundary=creator_dir, character=None,
-            stl_cache={}, last_scanned=last_scanned,
+            stl_cache={}, last_scanned=last_scanned, rules=scanner.ScanRules(),
         )
 
     def _stl_count(self, db, creator):
@@ -2456,7 +2469,8 @@ class TestWalkReadFailures:
         scanner._walk_for_models(
             folder=creator_dir, creator=creator, db=db,
             creator_boundary=creator_dir, character=None,
-            stl_cache={}, last_scanned=None, read_failures=failures,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
+            read_failures=failures,
         )
 
         assert len(failures) == 1, "the unreadable entry must be reported"
@@ -2472,7 +2486,8 @@ class TestWalkReadFailures:
         scanner._walk_for_models(
             folder=creator_dir, creator=creator, db=db,
             creator_boundary=creator_dir, character=None,
-            stl_cache={}, last_scanned=None, read_failures=failures,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
+            read_failures=failures,
         )
 
         assert failures == []
@@ -2487,7 +2502,8 @@ class TestWalkReadFailures:
         scanner._walk_for_models(
             folder=creator_dir, creator=creator, db=db,
             creator_boundary=creator_dir, character=None,
-            stl_cache={}, last_scanned=None, read_failures=failures,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
+            read_failures=failures,
         )
 
         assert failures == []
@@ -2613,7 +2629,7 @@ class TestReadFailureProtectsPrune:
         )
 
         root = db.query(ScanRoot).first()
-        failed = scanner._scan_root(root, db)
+        failed = scanner._scan_root(root, db, scanner.ScanRules())
 
         creator = db.query(Creator).filter(Creator.name == "Creator").one()
         assert creator.id in failed, \
@@ -2705,8 +2721,8 @@ class TestPruneBoundarySharedBehavior:
         _walk(db, creator, creator_dir)
         assert len(_models(db, creator)) == 2
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
-        removed = scanner._prune_ignored(db, [str(root)])
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(root)], rules.ignore)
 
         assert removed == 1, "a model nested below an ignored ancestor must be pruned"
         assert not any("WIP" in m.folder_path for m in _models(db, creator))
@@ -2721,8 +2737,8 @@ class TestPruneBoundarySharedBehavior:
         _walk(db, creator, creator_dir)
         before = len(_models(db, creator))
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
-        removed = scanner._prune_ignored(db, [str(root)])
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(root)], rules.ignore)
 
         assert removed == 0
         assert len(_models(db, creator)) == before
@@ -2746,3 +2762,98 @@ class TestPruneBoundarySharedBehavior:
         assert scanner._prune_stale_paths(db, [""]) == 0
         assert scanner._prune_stale_models(db, utcnow(), [""]) == 0
         assert {m.name for m in db.query(Model).all()} == {"gone"}
+
+
+# ---------------------------------------------------------------------------
+# Explicit scan-rules context (STUDIO-231)
+# ---------------------------------------------------------------------------
+
+class TestScanRules:
+    """The per-run rule context that replaced the _pack_overrides /
+    _ignore_matcher module globals."""
+
+    def test_defaults_are_inert(self):
+        """An empty context must mean 'no overrides, no ignore patterns' — the
+        state a fresh scan starts from."""
+        rules = scanner.ScanRules()
+        assert rules.pack_overrides == frozenset()
+        assert rules.ignore.patterns == ()
+
+    def test_is_immutable(self):
+        """Frozen so the four parallel creator workers share read-only state by
+        construction rather than by convention."""
+        rules = scanner.ScanRules()
+        with pytest.raises(Exception):
+            rules.pack_overrides = frozenset({"/x"})  # type: ignore[misc]
+
+    def test_load_reads_overrides_and_ignore_patterns(self, db):
+        from app.models import AppSetting, PackOverride
+        db.add(PackOverride(path="/lib/Creator/Pack"))
+        db.add(AppSetting(key="scan_ignore_patterns", value=["wip"]))
+        db.commit()
+
+        rules = scanner.ScanRules.load(db)
+
+        assert rules.pack_overrides == frozenset({"/lib/Creator/Pack"})
+        assert rules.ignore.patterns == ("wip",)
+
+    def test_load_on_an_empty_db_is_inert(self, db):
+        rules = scanner.ScanRules.load(db)
+        assert rules.pack_overrides == frozenset()
+        assert rules.ignore.patterns == ()
+
+    def test_walk_requires_rules(self, db, tmp_path):
+        """Required, not defaulted: omitting them would silently walk with no
+        pack splits and no ignore rules, which is what the globals allowed."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Knight")
+        creator = make_creator(db, "Creator")
+
+        with pytest.raises(TypeError):
+            scanner._walk_for_models(
+                folder=creator_dir, creator=creator, db=db,
+                creator_boundary=creator_dir, character=None,
+                stl_cache={}, last_scanned=None,
+            )
+
+
+class TestSplitPackHonoursIgnoreRules:
+    def test_split_pack_applies_configured_ignore_patterns(self, db, tmp_path, monkeypatch):
+        """split_pack now loads the FULL rule set (STUDIO-231).
+
+        It previously loaded only pack overrides, so the re-walk consulted
+        whatever _ignore_matcher the module global happened to hold — the last
+        scan's patterns in a long-lived process, empty in a fresh one. A split now
+        honours the user's ignore rules deterministically, like every other entry
+        point.
+        """
+        from sqlalchemy.orm import sessionmaker
+        from app.models import AppSetting
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Sinister Six"
+        for char in ("Electro", "Sandman"):
+            _stl(pack / char / "supported")
+        _stl(pack / "WIP" / "supported")   # covered by the ignore pattern below
+
+        setup = Session()
+        setup.add(AppSetting(key="scan_ignore_patterns", value=["wip"]))
+        creator = Creator(name="Creator")
+        setup.add(creator); setup.flush()
+        creator_id = creator.id
+        collapsed = Model(name="Sinister Six", folder_path=str(pack), creator_id=creator_id)
+        setup.add(collapsed); setup.flush()
+        collapsed_id = collapsed.id
+        setup.commit(); setup.close()
+
+        result = scanner.split_pack(collapsed_id)
+
+        assert result["ok"] is True
+        assert result["created"] == 2, "the ignored child must not become a model"
+        check = Session()
+        chars = {m.character for m in check.query(Model).filter(Model.creator_id == creator_id)}
+        check.close()
+        assert chars == {"Electro", "Sandman"}, "the ignored child must not be indexed"
