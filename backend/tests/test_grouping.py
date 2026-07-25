@@ -1214,6 +1214,106 @@ class TestRep:
         assert _groups(db, creator)[0].rep_model_id == rep.id
 
 
+class TestCreatorIsResolvedOnce:
+    """Creator identity is loaded once per run, not once per candidate (STUDIO-239).
+
+    The name-key pass used to call `_creator_name(db, creator_id)` inside its
+    per-model loop. A counting spy is cheap insurance against that returning.
+    """
+
+    def test_creator_name_is_resolved_at_most_once_per_regroup(self, db, monkeypatch):
+        creator = make_creator(db)
+        for name in ("Goblin Archer", "Goblin Scout", "Goblin Guard", "Orc Brute"):
+            make_model(db, creator, name=name)
+        db.flush()
+
+        calls = []
+        real = grouping._creator_name
+        monkeypatch.setattr(
+            grouping,
+            "_creator_name",
+            lambda session, cid: (calls.append(cid), real(session, cid))[1],
+        )
+
+        _run(db, creator)
+
+        assert calls == [creator.id]
+
+    def test_creator_name_lookup_scales_with_runs_not_models(self, db, monkeypatch):
+        creator = make_creator(db)
+        for i in range(12):
+            make_model(db, creator, name=f"Goblin {i}")
+        db.flush()
+
+        calls = []
+        real = grouping._creator_name
+        monkeypatch.setattr(
+            grouping,
+            "_creator_name",
+            lambda session, cid: (calls.append(cid), real(session, cid))[1],
+        )
+
+        _run(db, creator)
+        _run(db, creator)
+
+        assert len(calls) == 2
+
+
+class TestDropAutoGroupsProtectsManualGroups:
+    """The `source == "auto"` filter is what protects manual groups (STUDIO-239).
+
+    `_drop_auto_groups` no longer takes a manual-id set, so these pin that the
+    protection really comes from the query rather than a caller-supplied list.
+    """
+
+    def test_manual_group_and_members_survive_a_drop(self, db):
+        creator = make_creator(db)
+        kept = make_model(db, creator, name="Curated Hero")
+        manual = VariantGroup(creator_id=creator.id, label="My Group", source="manual")
+        db.add(manual)
+        db.flush()
+        kept.variant_group_id = manual.id
+        db.flush()
+
+        grouping._drop_auto_groups(db, creator.id)
+        db.flush()
+        db.expire_all()
+
+        assert db.get(VariantGroup, manual.id) is not None
+        db.refresh(kept)
+        assert kept.variant_group_id == manual.id
+
+    def test_auto_group_and_its_membership_are_cleared(self, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="Auto Hero")
+        auto = VariantGroup(creator_id=creator.id, label="Auto", source="auto")
+        db.add(auto)
+        db.flush()
+        auto_id = auto.id
+        model.variant_group_id = auto_id
+        db.flush()
+
+        grouping._drop_auto_groups(db, creator.id)
+        db.flush()
+        db.expire_all()
+
+        assert db.get(VariantGroup, auto_id) is None
+        db.refresh(model)
+        assert model.variant_group_id is None
+
+    def test_another_creators_auto_group_is_untouched(self, db):
+        mine = make_creator(db, name="Mine")
+        theirs = make_creator(db, name="Theirs")
+        other = VariantGroup(creator_id=theirs.id, label="Theirs", source="auto")
+        db.add(other)
+        db.flush()
+
+        grouping._drop_auto_groups(db, mine.id)
+        db.flush()
+
+        assert db.get(VariantGroup, other.id) is not None
+
+
 class TestRepeatedRegroupingIsStable:
     """Regrouping the same library twice persists equivalent metadata (STUDIO-248)."""
 
