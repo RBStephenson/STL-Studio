@@ -3,7 +3,7 @@
 import pytest
 
 from app.models import AppSetting, VariantGroup
-from app.services import grouping
+from app.services import grouping, name_parser
 from app.services.grouping import EvidenceLedger, SignalKind
 from app.services.product_context import ProductContext
 from tests.conftest import make_creator, make_model, make_stl_file
@@ -239,6 +239,144 @@ class TestHashEvidence:
 
         mentioned = {m for e in evidence for m in (e.a, e.b)}
         assert mentioned == {1, 2}
+
+
+class TestFilenameEvidence:
+    """Pure FILENAME edge generation and its three guards (STUDIO-245)."""
+
+    def test_identical_file_sets_produce_evidence(self):
+        files = {"body.stl", "head.stl", "base.stl"}
+
+        evidence = grouping.filename_evidence([1, 2], {1: set(files), 2: set(files)})
+
+        assert [(e.kind, e.a, e.b) for e in evidence] == [(SignalKind.FILENAME, 1, 2)]
+
+    def test_jaccard_exactly_at_the_threshold_produces_evidence(self):
+        # 3 shared of 5 union = 0.60, exactly _FILENAME_JACCARD.
+        filenames = {1: {"a.stl", "b.stl", "c.stl", "d.stl"}, 2: {"a.stl", "b.stl", "c.stl", "e.stl"}}
+
+        assert grouping._FILENAME_JACCARD == 0.6
+        assert len(grouping.filename_evidence([1, 2], filenames)) == 1
+
+    def test_jaccard_just_below_the_threshold_produces_none(self):
+        # 2 shared of 4 union = 0.50.
+        filenames = {1: {"a.stl", "b.stl", "c.stl"}, 2: {"a.stl", "b.stl", "d.stl"}}
+
+        assert grouping.filename_evidence([1, 2], filenames) == []
+
+    def test_minimum_shared_count_is_enforced_at_the_boundary(self):
+        filenames = {1: {"a.stl", "b.stl"}, 2: {"a.stl", "b.stl"}}
+
+        assert grouping._FILENAME_MIN_SHARED == 2
+        assert len(grouping.filename_evidence([1, 2], filenames)) == 1
+
+    def test_one_shared_filename_is_never_enough(self):
+        # Jaccard is a perfect 1.0, but a single shared name is not a product.
+        filenames = {1: {"body.stl"}, 2: {"body.stl"}}
+
+        assert grouping.filename_evidence([1, 2], filenames) == []
+
+    def test_filename_at_the_bucket_cap_stays_distinctive(self):
+        cap = grouping._FILENAME_BUCKET_CAP
+        ids = list(range(1, cap + 1))
+        filenames = {mid: {"shared-a.stl", "shared-b.stl"} for mid in ids}
+
+        # Every pair still overlaps: freq == cap is not yet generic.
+        assert grouping.filename_evidence(ids, filenames) != []
+
+    def test_generic_filenames_cannot_group_unrelated_products(self):
+        # One name shared by cap+1 models is generic and dropped, leaving each
+        # model with nothing distinctive to match on.
+        ids = list(range(1, grouping._FILENAME_BUCKET_CAP + 2))
+        filenames = {mid: {"body.stl", f"unique-{mid}.stl"} for mid in ids}
+
+        assert grouping.filename_evidence(ids, filenames) == []
+
+    def test_large_creator_skips_filename_evidence_entirely(self):
+        cap = grouping._FILENAME_PASS_MODEL_CAP
+        ids = list(range(1, cap + 2))
+        files = {"body.stl", "head.stl"}
+        filenames = {mid: set(files) for mid in ids}
+
+        assert grouping.filename_evidence(ids, filenames) == []
+
+    def test_creator_at_the_pass_cap_still_produces_filename_evidence(self):
+        ids = list(range(1, grouping._FILENAME_PASS_MODEL_CAP + 1))
+        # Pair up models so no filename exceeds the generic bucket cap.
+        filenames = {
+            mid: {f"pair{mid // 2}-a.stl", f"pair{mid // 2}-b.stl"} for mid in ids
+        }
+
+        assert grouping.filename_evidence(ids, filenames) != []
+
+    def test_models_absent_from_ids_are_ignored(self):
+        filenames = {1: {"a.stl", "b.stl"}, 2: {"a.stl", "b.stl"}, 3: {"a.stl", "b.stl"}}
+
+        evidence = grouping.filename_evidence([1, 2], filenames)
+
+        assert {m for e in evidence for m in (e.a, e.b)} == {1, 2}
+
+
+class TestNameKeys:
+    """Pure character-key resolution with supplied creator identity (STUDIO-245)."""
+
+    def test_strips_the_creator_name_from_the_key(self):
+        keys = grouping.name_keys(
+            [1, 2],
+            {1: "Goblin Supported", 2: "Goblin Unsupported"},
+            "Some Creator",
+        )
+
+        assert keys == {1: "Goblin", 2: "Goblin"}
+
+    def test_matches_name_parser_for_the_same_inputs(self):
+        names = {1: "Ada Wong Bust", 2: "Leon Kennedy"}
+
+        keys = grouping.name_keys([1, 2], names, "Creator")
+
+        assert keys == {
+            mid: name_parser.character_key(name, "Creator") for mid, name in names.items()
+        }
+
+    def test_models_without_a_key_are_omitted(self):
+        keys = grouping.name_keys([1], {1: ""}, "Creator")
+
+        assert keys == {}
+
+    def test_only_supplied_ids_are_resolved(self):
+        keys = grouping.name_keys([1], {1: "Goblin King", 2: "Goblin Queen"}, None)
+
+        assert set(keys) == {1}
+
+
+class TestNameEvidence:
+    """Pure NAME edge generation (STUDIO-245)."""
+
+    def test_shared_key_produces_evidence(self):
+        evidence = grouping.name_evidence([1, 2], {1: "goblin", 2: "goblin"})
+
+        assert [(e.kind, e.a, e.b) for e in evidence] == [(SignalKind.NAME, 1, 2)]
+
+    def test_distinct_keys_produce_no_evidence(self):
+        assert grouping.name_evidence([1, 2], {1: "goblin", 2: "dragon"}) == []
+
+    def test_keyless_models_produce_no_evidence(self):
+        assert grouping.name_evidence([1, 2], {}) == []
+
+    def test_bucket_fans_out_from_its_first_member(self):
+        keys = {1: "goblin", 2: "goblin", 3: "goblin"}
+
+        evidence = grouping.name_evidence([1, 2, 3], keys)
+
+        assert [(e.a, e.b) for e in evidence] == [(1, 2), (1, 3)]
+
+    def test_large_creators_still_get_name_evidence(self):
+        # The pass cap suppresses only filename evidence; the name baseline must
+        # keep working for creators of any size.
+        ids = list(range(1, grouping._FILENAME_PASS_MODEL_CAP + 2))
+        keys = {mid: "goblin" for mid in ids}
+
+        assert len(grouping.name_evidence(ids, keys)) == len(ids) - 1
 
 
 class TestHierarchySignal:
