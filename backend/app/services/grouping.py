@@ -30,13 +30,16 @@ Note the hierarchy signal plays two distinct roles that stay separate: it is
 positive evidence recorded in the ledger, and (independently) `product_key`
 seeds the union-find's anti-merge boundaries, which no ledger entry can relax.
 
-Signal generation is being split from orchestration one signal at a time
-(STUDIO-244 onward). `hierarchy_evidence` and `hash_evidence` are pure functions
-over supplied candidate data, and `product_boundaries` builds the anti-merge
-constraints; `_apply_evidence` offers the proposed edges to the union-find in
-caller-chosen order. The filename and name passes are still inline pending
-STUDIO-245. Signal ORDER remains load-bearing: an earlier merge can make a later
-edge redundant or push it across a boundary, so the sequence
+Signal generation is fully split from orchestration (STUDIO-244, STUDIO-245).
+`hierarchy_evidence`, `hash_evidence`, `filename_evidence` and `name_evidence`
+are pure functions over supplied candidate data, `product_boundaries` builds the
+anti-merge constraints, and `name_keys` resolves the character keys that
+labelling also depends on; `_apply_evidence` offers the proposed edges to the
+union-find in caller-chosen order. `regroup_creator` keeps only the database
+orchestration: eligibility, evidence inputs, clustering and persistence.
+
+Signal ORDER remains load-bearing: an earlier merge can make a later edge
+redundant or push it across a boundary, so the sequence
 hierarchy → hash → filename → name must be preserved.
 
 The engine derives auto groups from scratch. By default it does not read the
@@ -305,6 +308,91 @@ def hash_evidence(ids: Sequence[int], hashes: Mapping[int, set[str]]) -> list[Ev
     ]
 
 
+def filename_evidence(
+    ids: Sequence[int], filenames: Mapping[int, set[str]]
+) -> list[Evidence]:
+    """Propose FILENAME edges between models whose STL file names overlap.
+
+    Two folders holding substantially the same part names are the same part set
+    prepared differently (supported / unsupported / hollow…). Side-effect free;
+    only models listed in `ids` are considered.
+
+    Three guards are preserved verbatim from the inline pass:
+
+    * a creator with more than `_FILENAME_PASS_MODEL_CAP` models yields no
+      evidence at all, so the O(n^2) walk can't stall a scan. Only this signal
+      is skipped — the name baseline still applies.
+    * a filename shared by more than `_FILENAME_BUCKET_CAP` models is generic
+      (body.stl, base.stl, supports.stl…) and is dropped before comparison, so
+      common part names can't fake overlap between unrelated sculpts (#639).
+    * a pair needs at least `_FILENAME_MIN_SHARED` distinctive names in common
+      *and* a Jaccard similarity of at least `_FILENAME_JACCARD`; one shared
+      name is never enough on its own.
+    """
+    if len(ids) > _FILENAME_PASS_MODEL_CAP:
+        return []
+
+    frequency: dict[str, int] = defaultdict(int)
+    for mid in ids:
+        for filename in filenames.get(mid, ()):
+            frequency[filename] += 1
+    distinctive = {
+        mid: {fn for fn in filenames.get(mid, ()) if frequency[fn] <= _FILENAME_BUCKET_CAP}
+        for mid in ids
+    }
+
+    evidence: list[Evidence] = []
+    for i, a in enumerate(ids):
+        fa = distinctive.get(a)
+        if not fa:
+            continue
+        for b in ids[i + 1 :]:
+            fb = distinctive.get(b)
+            if not fb:
+                continue
+            shared = len(fa & fb)
+            if shared >= _FILENAME_MIN_SHARED and shared / len(fa | fb) >= _FILENAME_JACCARD:
+                evidence.append(Evidence(kind=SignalKind.FILENAME, a=a, b=b))
+    return evidence
+
+
+def name_keys(
+    ids: Sequence[int], names: Mapping[int, str], creator_name: str | None
+) -> dict[int, str]:
+    """Resolve each model's `character_key`, skipping models with no key.
+
+    Creator identity is supplied rather than queried, so this stays pure and the
+    caller resolves the creator once (STUDIO-245). The returned keys are reused
+    downstream for cluster labelling and the structural-only rejection, not just
+    for evidence.
+    """
+    keys: dict[int, str] = {}
+    for mid in ids:
+        key = name_parser.character_key(names[mid], creator_name)
+        if key:
+            keys[mid] = key
+    return keys
+
+
+def name_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evidence]:
+    """Propose NAME edges between models sharing a `character_key`.
+
+    The weakest signal and the baseline when no content signal exists.
+    Side-effect free; keyless models simply never appear in a bucket.
+    """
+    index: dict[str, list[int]] = defaultdict(list)
+    for mid in ids:
+        key = keys.get(mid)
+        if key:
+            index[key].append(mid)
+    return [
+        Evidence(kind=SignalKind.NAME, a=bucket[0], b=other)
+        for bucket in index.values()
+        if len(bucket) >= 2
+        for other in bucket[1:]
+    ]
+
+
 class _UnionFind:
     def __init__(self, ids: list[int], boundaries: dict[int, str | None] | None = None):
         self.parent = {i: i for i in ids}
@@ -415,47 +503,14 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     _apply_evidence(uf, ledger, hash_evidence(ids, hashes))
 
     # --- signal 2: STL filename overlap ---
-    # Drop generic filenames (shared by many models) so common part names like
-    # body/base/supports.stl don't fake overlap between unrelated sculpts (#639).
-    if len(ids) <= _FILENAME_PASS_MODEL_CAP:
-        fname_freq: dict[str, int] = defaultdict(int)
-        for mid in ids:
-            for fn in filenames.get(mid, ()):
-                fname_freq[fn] += 1
-        distinctive = {
-            mid: {fn for fn in filenames.get(mid, ()) if fname_freq[fn] <= _FILENAME_BUCKET_CAP}
-            for mid in ids
-        }
-        for i in range(len(ids)):
-            a = ids[i]
-            fa = distinctive.get(a)
-            if not fa:
-                continue
-            for j in range(i + 1, len(ids)):
-                b = ids[j]
-                fb = distinctive.get(b)
-                if not fb:
-                    continue
-                inter = len(fa & fb)
-                if inter >= _FILENAME_MIN_SHARED and inter / len(fa | fb) >= _FILENAME_JACCARD:
-                    if uf.union(a, b) is _MergeResult.MERGED:
-                        ledger.record(SignalKind.FILENAME, a, b)
+    _apply_evidence(uf, ledger, filename_evidence(ids, filenames))
 
     # --- signal 3: name key (baseline) ---
-    key_index: dict[str, list[int]] = defaultdict(list)
-    keys: dict[int, str] = {}
+    # `keys` outlives this pass: cluster labelling and the structural-only
+    # rejection below both read it.
     by_id = {m.id: m for m in candidates}
-    for mid in ids:
-        key = name_parser.character_key(by_id[mid].name, _creator_name(db, creator_id))
-        if key:
-            keys[mid] = key
-            key_index[key].append(mid)
-    for bucket in key_index.values():
-        if len(bucket) >= 2:
-            first = bucket[0]
-            for other in bucket[1:]:
-                if uf.union(first, other) is _MergeResult.MERGED:
-                    ledger.record(SignalKind.NAME, first, other)
+    keys = name_keys(ids, {mid: by_id[mid].name for mid in ids}, creator_name)
+    _apply_evidence(uf, ledger, name_evidence(ids, keys))
 
     # --- materialise clusters ---
     clusters: dict[int, list[int]] = defaultdict(list)
