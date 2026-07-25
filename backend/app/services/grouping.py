@@ -49,6 +49,15 @@ Signal ORDER remains load-bearing: an earlier merge can make a later edge
 redundant or push it across a boundary, so the sequence
 hierarchy → hash → filename → name must be preserved.
 
+Proposals are deterministic (STUDIO-248). `order_candidates` sorts candidates by
+`(folder_path, name, id)` and every later stage iterates that one list, so
+evidence buckets, clusters, cluster members and proposals all follow from it —
+never from a database plan. Two remaining encounter-order dependencies are also
+pinned: each model's hashes are visited sorted, so a `set[str]`'s PYTHONHASHSEED
+ordering cannot decide which merge wins at a boundary, and label ties break
+alphabetically rather than by insertion. Logically identical libraries therefore
+produce identical groups, whatever order their rows were inserted or returned in.
+
 The engine derives auto groups from scratch. By default it does not read the
 model's current `character` assignment; the hierarchy feature flag deliberately
 adds that scanner-owned context as a constrained signal. It writes
@@ -82,12 +91,17 @@ def _resolve_strategy(model_path: str, strategies: list[tuple[str, str]]) -> str
     """Nearest-ancestor strategy for a model folder, defaulting to "auto".
 
     `strategies` is a list of (normalised_path, strategy); the longest path that is
-    the model's folder or an ancestor of it wins."""
+    the model's folder or an ancestor of it wins. Two ancestors of equal length
+    are ordered by path so the winner can't depend on the row order the strategy
+    query happened to return (STUDIO-248)."""
     mp = _norm(model_path)
-    best_len, best = -1, "auto"
+    best_rank: tuple[int, str] | None = None
+    best = "auto"
     for spath, strat in strategies:
-        if (mp == spath or mp.startswith(spath + "/")) and len(spath) > best_len:
-            best_len, best = len(spath), strat
+        if mp == spath or mp.startswith(spath + "/"):
+            rank = (len(spath), spath)
+            if best_rank is None or rank > best_rank:
+                best_rank, best = rank, strat
     return best
 
 # A file_hash shared by more than this many models is treated as a ubiquitous
@@ -244,6 +258,28 @@ class EvidenceLedger:
         return min(credited, key=lambda k: policy_for(k).precedence)
 
 
+def order_candidates(
+    ids: Iterable[int],
+    folder_paths: Mapping[int, str],
+    names: Mapping[int, str],
+) -> list[int]:
+    """Put candidates in a stable, database-plan-independent order (STUDIO-248).
+
+    Every later stage iterates the returned list, so this one ordering decides
+    evidence bucket order, cluster order, cluster member order, and the
+    positional defaults for label and representative.
+
+    The key is `(folder_path, name, id)`. `folder_path` is unique per model and
+    identifies it independently of its row id, which matters because inserting
+    the same library in a different order assigns different autoincrement ids —
+    an id-based sort would then produce different proposals for logically
+    identical input. `id` is only a last-resort tiebreak.
+    """
+    return sorted(
+        ids, key=lambda mid: (_norm(folder_paths[mid]), names[mid], mid)
+    )
+
+
 def _apply_evidence(
     uf: _UnionFind, ledger: EvidenceLedger, evidence: Iterable[Evidence]
 ) -> None:
@@ -300,12 +336,15 @@ def hash_evidence(ids: Sequence[int], hashes: Mapping[int, set[str]]) -> list[Ev
     is a ubiquitous part (a common base, a shared support raft) and yields no
     evidence — it would otherwise chain unrelated products together.
 
-    As with `hierarchy_evidence`, bucket order is inherited from `ids` and from
-    each model's hash-set iteration order; STUDIO-248 owns making that stable.
+    Bucket order is fully determined by `ids`: each model's hashes are visited in
+    sorted order, so a `set[str]`'s iteration order — which varies with
+    PYTHONHASHSEED between processes — cannot leak into the order edges are
+    proposed, and therefore cannot change which merges win at a boundary
+    (STUDIO-248).
     """
     index: dict[str, list[int]] = defaultdict(list)
     for mid in ids:
-        for file_hash in hashes.get(mid, ()):
+        for file_hash in sorted(hashes.get(mid, ())):
             index[file_hash].append(mid)
     return [
         Evidence(kind=SignalKind.HASH, a=bucket[0], b=other)
@@ -462,7 +501,8 @@ def build_clusters(ids: Sequence[int], uf: _UnionFind) -> list[list[int]]:
 
     Clusters come back in the order their roots are first met walking `ids`, and
     members in `ids` order — the order proposals, and therefore persisted groups,
-    are created in. STUDIO-248 owns making `ids` itself deterministic.
+    are created in. With `ids` ordered by `order_candidates`, that whole chain is
+    reproducible.
     """
     clusters: dict[int, list[int]] = defaultdict(list)
     for mid in ids:
@@ -484,11 +524,21 @@ def _has_product_identity(members: Sequence[int], facts: CandidateFacts) -> bool
     )
 
 
+def _most_common(values: Sequence[str]) -> str:
+    """The most frequent value, breaking ties alphabetically (STUDIO-248).
+
+    `Counter.most_common` resolves ties by insertion order, which makes a label
+    depend on the order members happened to be visited in.
+    """
+    counts = Counter(values)
+    return min(counts, key=lambda value: (-counts[value], value))
+
+
 def select_label(members: Sequence[int], facts: CandidateFacts) -> str:
     """Label a cluster: hierarchy label, else most common name key, else a name.
 
-    Preference order is unchanged from the original `_label_for`. Ties fall to
-    `Counter.most_common` insertion order; STUDIO-248 owns making that stable.
+    Preference order is unchanged from the original `_label_for`; only tie
+    resolution is now defined (see `_most_common`).
     """
     hierarchy_labels = [
         facts.contexts[mid].display_label
@@ -496,10 +546,10 @@ def select_label(members: Sequence[int], facts: CandidateFacts) -> str:
         if mid in facts.contexts and facts.contexts[mid].display_label
     ]
     if hierarchy_labels:
-        return Counter(hierarchy_labels).most_common(1)[0][0]
+        return _most_common(hierarchy_labels)
     member_keys = [facts.keys[mid] for mid in members if mid in facts.keys]
     if member_keys:
-        return Counter(member_keys).most_common(1)[0][0]
+        return _most_common(member_keys)
     return facts.names[members[0]]
 
 
@@ -605,16 +655,24 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         if file_hash:
             hashes[model_id].add(file_hash)
 
-    ids = [m.id for m in candidates]
+    by_id = {m.id: m for m in candidates}
+    # `ids` is the single ordering authority for the whole pipeline (STUDIO-248):
+    # every stage below iterates it, so one stable order makes evidence, clusters,
+    # proposals and persistence all reproducible.
+    ids = order_candidates(
+        [m.id for m in candidates],
+        folder_paths={m.id: m.folder_path for m in candidates},
+        names={m.id: m.name for m in candidates},
+    )
     hierarchy_enabled = _hierarchy_enabled(db)
     creator_name = _creator_name(db, creator_id)
     contexts: dict[int, ProductContext] = {
-        m.id: resolve_product_context(
-            folder_path=m.folder_path,
-            character=m.character,
+        mid: resolve_product_context(
+            folder_path=by_id[mid].folder_path,
+            character=by_id[mid].character,
             creator_name=creator_name,
         )
-        for m in candidates
+        for mid in ids
     } if hierarchy_enabled else {}
     boundaries = product_boundaries(contexts) if hierarchy_enabled else None
     uf = _UnionFind(ids, boundaries)
@@ -636,7 +694,6 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     # --- signal 3: name key (baseline) ---
     # `names` and `keys` outlive this pass: cluster labelling and the
     # structural-only rejection below both read them.
-    by_id = {m.id: m for m in candidates}
     names = {mid: by_id[mid].name for mid in ids}
     keys = name_keys(ids, names, creator_name)
     _apply_evidence(uf, ledger, name_evidence(ids, keys))
