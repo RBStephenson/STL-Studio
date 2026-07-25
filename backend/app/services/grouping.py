@@ -638,7 +638,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         off_models = []
 
     if not candidates and not off_models:
-        _drop_auto_groups(db, creator_id, manual_group_ids)
+        _drop_auto_groups(db, creator_id)
         return
 
     stl_rows = (
@@ -708,7 +708,7 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     proposals = propose_groups(ids, uf, ledger, facts)
 
     # --- persist ---
-    _drop_auto_groups(db, creator_id, manual_group_ids)
+    _drop_auto_groups(db, creator_id)
 
     grouped: set[int] = set()
     for proposal in proposals:
@@ -774,8 +774,13 @@ def prune_empty_groups(db: Session) -> int:
     return len(empties)
 
 
-def _drop_auto_groups(db: Session, creator_id: int, manual_group_ids: set[int]) -> None:
-    """Clear variant_group_id off auto-grouped models and delete the auto groups."""
+def _drop_auto_groups(db: Session, creator_id: int) -> None:
+    """Clear variant_group_id off auto-grouped models and delete the auto groups.
+
+    Manual groups are protected by the `source == "auto"` filter below, not by any
+    caller-supplied id set: a manual group is never selected, so its members are
+    never cleared.
+    """
     auto_groups = (
         db.query(VariantGroup)
         .filter(VariantGroup.creator_id == creator_id, VariantGroup.source == "auto")
