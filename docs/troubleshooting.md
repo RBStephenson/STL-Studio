@@ -8,6 +8,7 @@
 - [Images in a hidden folder aren't picked up](#images-in-a-hidden-folder-arent-picked-up)
 - [When should I rescan vs. run a full scan?](#when-should-i-rescan-vs-run-a-full-scan)
 - [A whole creator is missing or shows only one model](#a-whole-creator-is-missing-or-shows-only-one-model)
+- [The scan reports files it couldn't read](#the-scan-reports-files-it-couldnt-read)
 - [Models are flagged "needs review"](#models-are-flagged-needs-review)
 - [The scan seems stuck or slow](#the-scan-seems-stuck-or-slow)
 - [Scale or type tags are wrong/missing](#scale-or-type-tags-are-wrongmissing)
