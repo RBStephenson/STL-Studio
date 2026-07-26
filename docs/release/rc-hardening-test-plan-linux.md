@@ -56,7 +56,7 @@ network rather than bound to loopback.
 
 Section 3.5 verifies the current (absent) state so it is measured rather than
 assumed. **Do not file this as a beta.8 regression** — it predates this build.
-It is worth its own ticket.
+Tracked as **STUDIO-370**.
 
 ---
 
@@ -364,7 +364,7 @@ crash recovery, single-instance lock.
 
 | Issue | Status |
 |---|---|
-| No CSP or security headers on the browser-served path | Pre-existing, **not** a beta.8 regression. STUDIO-258 covered Electron only. Deserves its own ticket — see the gap section above. |
+| No CSP or security headers on the browser-served path | Pre-existing, **not** a beta.8 regression. STUDIO-258 covered Electron only. Tracked as **STUDIO-370**; §3.5 records the before state. |
 | Pre-beta.8 reorganized rows may hold non-native paths | STUDIO-368. On Linux the canonical form already *is* native, so this is largely a Windows concern. |
 | No Electron desktop build for Linux | Deferred past v1.0. |
 | Unsigned artifacts | STUDIO-99 deferred. |
