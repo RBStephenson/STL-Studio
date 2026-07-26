@@ -167,31 +167,22 @@ class TestBulkDelete:
 # POST /import/download-images
 # ---------------------------------------------------------------------------
 
-class _FakeResponse:
-    def __init__(self, content=b"\x89PNG fake", content_type="image/png"):
-        self.content = content
-        self.headers = {"content-type": content_type}
-
-    def raise_for_status(self):
-        pass
+PNG_BYTES = bytes.fromhex("89504e470d0a1a0a") + b"fakepngdata"
 
 
-class _FakeAsyncClient:
-    """Stands in for httpx.AsyncClient — download-images now fetches
-    concurrently on a background job thread (STUDIO-XX), so the mock must be
-    an async context manager with an async .get()."""
+def _stub_fetch(monkeypatch, handler):
+    """Replace the shared hardened fetch used by download-images.
 
-    def __init__(self, *args, **kwargs):
-        pass
+    Since STUDIO-320 this path delegates to thumbnails.fetch_image_bytes, which
+    owns the SSRF guard, the redirect cap, the size cap, and magic-byte
+    validation — so the seam to stub is that function, not an httpx client.
+    """
+    import app.routers.imports as imports_module
 
-    async def __aenter__(self):
-        return self
+    async def fake(url, *, _follow_html=True):
+        return handler(url)
 
-    async def __aexit__(self, *args):
-        return False
-
-    async def get(self, url):
-        return _FakeResponse()
+    monkeypatch.setattr(imports_module, "fetch_image_bytes", fake)
 
 
 def _download_and_wait(client, pack_path, image_urls, expected_status=200):
@@ -225,10 +216,9 @@ class TestDownloadImages:
         monkeypatch.setattr(imports_module, "_bootstrap_roots", lambda: [])
 
     def test_downloads_into_pack_folder(self, client, db, tmp_path, monkeypatch):
-        """Images fetched from CDN URLs land in the pack folder. Mocks httpx so
-        no network is touched."""
-        import app.routers.imports as imports_module
-        monkeypatch.setattr(imports_module.httpx, "AsyncClient", _FakeAsyncClient)
+        """Images fetched from CDN URLs land in the pack folder. Stubs the
+        shared fetch so no network is touched."""
+        _stub_fetch(monkeypatch, lambda url: (".png", PNG_BYTES))
         _register_root(db, tmp_path)
         pack = tmp_path / "pack"
         pack.mkdir()
@@ -283,8 +273,7 @@ class TestDownloadImages:
         """Regression guard for the move from a sequential loop to
         asyncio.gather-based concurrency: every image is still accounted for
         exactly once, with no double-count or lost update under concurrency."""
-        import app.routers.imports as imports_module
-        monkeypatch.setattr(imports_module.httpx, "AsyncClient", _FakeAsyncClient)
+        _stub_fetch(monkeypatch, lambda url: (".png", PNG_BYTES))
         _register_root(db, tmp_path)
         pack = tmp_path / "pack"
         pack.mkdir()
@@ -294,3 +283,91 @@ class TestDownloadImages:
         assert status == 200, result
         assert result["downloaded"] == 10
         assert len(list(pack.glob("gallery_*.png"))) == 10
+
+
+class TestDownloadImagesHardening:
+    """STUDIO-320: this path used a bare httpx client with a content-type
+    blocklist. It now delegates to the shared hardened fetch, so the guarantees
+    are inherited rather than reimplemented — these tests pin the delegation
+    and the behaviour the job layer still owns."""
+
+    @pytest.fixture(autouse=True)
+    def _no_bootstrap_roots(self, monkeypatch):
+        import app.routers.imports as imports_module
+        monkeypatch.setattr(imports_module, "_bootstrap_roots", lambda: [])
+
+    def test_uses_the_ssrf_guarded_fetch_rather_than_a_bare_client(
+        self, client, db, tmp_path, monkeypatch,
+    ):
+        """The guard lives in fetch_image_bytes; if this path ever stops calling
+        it, the SSRF and size protections silently disappear."""
+        import app.routers.imports as imports_module
+        assert not hasattr(imports_module, "httpx"), (
+            "imports.py should no longer construct its own HTTP client"
+        )
+
+        seen = []
+
+        def handler(url):
+            seen.append(url)
+            return (".png", PNG_BYTES)
+
+        _stub_fetch(monkeypatch, handler)
+        _register_root(db, tmp_path)
+        pack = tmp_path / "pack"
+        pack.mkdir()
+
+        _download_and_wait(client, str(pack), ["https://cdn/a.png"])
+        assert seen == ["https://cdn/a.png"]
+
+    def test_a_rejected_image_is_skipped_without_failing_the_job(
+        self, client, db, tmp_path, monkeypatch,
+    ):
+        """A blocked URL or a non-image body must degrade to a missing gallery
+        image, not a failed import."""
+        from app.services.thumbnails import ThumbnailDownloadError
+
+        def handler(url):
+            if "bad" in url:
+                raise ThumbnailDownloadError("That URL isn't allowed.")
+            return (".png", PNG_BYTES)
+
+        _stub_fetch(monkeypatch, handler)
+        _register_root(db, tmp_path)
+        pack = tmp_path / "pack"
+        pack.mkdir()
+
+        status, result = _download_and_wait(
+            client, str(pack), ["https://cdn/bad.png", "https://cdn/good.png"],
+        )
+        assert status == 200, result
+        assert result["downloaded"] == 1
+        assert len(list(pack.glob("gallery_*"))) == 1
+
+    def test_extension_follows_the_sniffed_type_not_the_url(
+        self, client, db, tmp_path, monkeypatch,
+    ):
+        """The URL says .webp; the fetch reports PNG from the bytes. The stored
+        file is named for the bytes."""
+        _stub_fetch(monkeypatch, lambda url: (".png", PNG_BYTES))
+        _register_root(db, tmp_path)
+        pack = tmp_path / "pack"
+        pack.mkdir()
+
+        _download_and_wait(client, str(pack), ["https://cdn/render.webp"])
+        assert [p.suffix for p in pack.glob("gallery_*")] == [".png"]
+
+    def test_an_unexpected_extension_is_not_written(
+        self, client, db, tmp_path, monkeypatch,
+    ):
+        """Defence in depth: even if the fetch returned something outside
+        IMAGE_EXTS, it must not reach the pack folder."""
+        _stub_fetch(monkeypatch, lambda url: (".exe", b"MZ\x90\x00"))
+        _register_root(db, tmp_path)
+        pack = tmp_path / "pack"
+        pack.mkdir()
+
+        status, result = _download_and_wait(client, str(pack), ["https://cdn/x"])
+        assert status == 200, result
+        assert result["downloaded"] == 0
+        assert list(pack.iterdir()) == []

@@ -370,8 +370,12 @@ If the auto-chosen thumbnail is wrong (or missing), open a model and click
 **Change image** on the preview. The **Set Thumbnail** dialog offers:
 
 - **From Folder** — every image found in that model's own folder, to pick from.
-- **From URL** — paste any image URL; the image is downloaded and stored
-  locally, so it keeps working even when the site blocks hot-linking.
+- **From URL** — paste an image URL; the image is downloaded and stored
+  locally, so it keeps working even when the site blocks hot-linking. The
+  downloaded file must actually be a PNG, JPEG, WebP, or GIF (max 15 MB) —
+  this is checked against the file's own contents, not the address or what
+  the server claims to be sending, so a link that returns something else is
+  rejected rather than saved.
 - **Upload** — pick a PNG, JPEG, WebP, or GIF from your computer (max 15 MB);
   it's applied as the thumbnail immediately.
 - **Clear** — remove the thumbnail entirely.
@@ -576,7 +580,9 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
    (the store — `source_site` — is recorded too). Then click **Import**. That
    ingests just that pack's folder as inbox models, downloads any fetched
    gallery images into the pack folder (concurrently, so a slow/unreachable
-   image doesn't block the rest), applies the metadata, and immediately moves
+   image doesn't block the rest; anything that isn't a real PNG, JPEG, WebP,
+   or GIF is skipped and logged rather than saved), applies the metadata,
+   and immediately moves
    that pack into the destination library on disk (drift-checked, with undo)
    — no separate move step. The **inbox** flag clears as the pack lands, and a
    progress bar shows what's happening at each stage (downloading images,

@@ -91,13 +91,20 @@ class TestDownloadThumbnail:
             await download_thumbnail(1, "https://cdn.example.com/download")
 
     @pytest.mark.anyio
-    async def test_falls_back_to_url_extension(self, thumb_dir, monkeypatch):
-        """Some CDNs send a generic content type — trust the URL extension."""
+    async def test_generic_content_type_is_accepted_and_named_by_its_bytes(
+        self, thumb_dir, monkeypatch,
+    ):
+        """Generic content types stay accepted — CDNs send them constantly — but
+        the extension now comes from the body, not the URL suffix (STUDIO-320).
+
+        This case used to assert `.webp` purely because the URL said so, which
+        meant PNG bytes were stored under a WebP name.
+        """
         mock_http(monkeypatch, lambda req: httpx.Response(
             200, content=PNG_BYTES, headers={"content-type": "application/octet-stream"}))
 
         out = await download_thumbnail(1, "https://cdn.example.com/render.webp")
-        assert out.suffix == ".webp"
+        assert out.suffix == ".png"
 
     @pytest.mark.anyio
     async def test_rejects_non_http_scheme(self, thumb_dir):
@@ -692,3 +699,88 @@ class TestImageCacheControl:
         resp = client.get("/files/image", params={"path": str(img)})
         assert resp.status_code == 200
         assert resp.headers.get("cache-control") == "no-cache"
+
+
+# ---------------------------------------------------------------------------
+# Magic-byte validation (STUDIO-320)
+# ---------------------------------------------------------------------------
+
+GIF_BYTES = b"GIF89a" + b"fakegifdata"
+WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"fakewebpdata"
+
+
+class TestSniffImageExt:
+    """Content-type is the server's claim; these bytes are the file itself."""
+
+    @pytest.mark.parametrize("data,expected", [
+        (PNG_BYTES, ".png"),
+        (JPEG_BYTES, ".jpg"),
+        (GIF_BYTES, ".gif"),
+        (WEBP_BYTES, ".webp"),
+    ])
+    def test_recognises_supported_formats(self, data, expected):
+        assert thumbnails.sniff_image_ext(data) == expected
+
+    @pytest.mark.parametrize("data", [
+        b"<html><body>not an image</body></html>",
+        b"MZ\x90\x00",                      # a Windows executable
+        b"%PDF-1.7",
+        b"{\"error\": \"nope\"}",
+        b"",
+        b"RIFF\x00\x00\x00\x00WAVE",        # RIFF container, but not WebP
+    ])
+    def test_rejects_everything_else(self, data):
+        assert thumbnails.sniff_image_ext(data) is None
+
+
+class TestContentIsValidatedBeforeStoring:
+    @pytest.mark.anyio
+    async def test_declared_image_with_non_image_body_is_rejected(
+        self, thumb_dir, monkeypatch,
+    ):
+        """The core STUDIO-320 case: a truthful-looking content-type is not
+        enough, because only the body says what the file actually is."""
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=b"MZ\x90\x00 this is an executable",
+            headers={"content-type": "image/png"}))
+
+        with pytest.raises(ThumbnailDownloadError, match="supported image"):
+            await download_thumbnail(1, "https://cdn.example.com/render.png")
+
+    @pytest.mark.anyio
+    async def test_octet_stream_carrying_non_image_bytes_is_rejected(
+        self, thumb_dir, monkeypatch,
+    ):
+        """Before this change, octet-stream plus an unhelpful suffix stored
+        arbitrary bytes under `.jpg`."""
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=b"#!/bin/sh\nrm -rf /\n",
+            headers={"content-type": "application/octet-stream"}))
+
+        with pytest.raises(ThumbnailDownloadError):
+            await download_thumbnail(1, "https://cdn.example.com/render")
+
+    @pytest.mark.anyio
+    async def test_nothing_is_written_when_the_body_is_rejected(
+        self, thumb_dir, monkeypatch,
+    ):
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=b"<html>gotcha</html>",
+            headers={"content-type": "image/jpeg"}))
+
+        with pytest.raises(ThumbnailDownloadError):
+            await download_thumbnail(7, "https://cdn.example.com/render.jpg")
+        assert list(thumb_dir.glob("7.*")) == []
+
+    @pytest.mark.anyio
+    async def test_mislabelled_but_genuine_image_is_stored_by_its_real_type(
+        self, thumb_dir, monkeypatch,
+    ):
+        """A server claiming JPEG while sending PNG still yields a usable file,
+        named for what it really is."""
+        mock_http(monkeypatch, lambda req: httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/jpeg"}))
+
+        out = await download_thumbnail(1, "https://cdn.example.com/render.jpg")
+        assert out.suffix == ".png"
+        assert out.read_bytes() == PNG_BYTES

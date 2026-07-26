@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 
 from app.config import settings
 from app.services.path_guard import assert_within_roots
+from app.services.scrapers.base import MAX_REDIRECTS
 from app.services.url_guard import SSRFError, assert_public_url, guarded_async_client
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,38 @@ def _pick_extension(content_type: str, url: str) -> str:
     )
 
 
+# Leading bytes that identify each format we are willing to store. Content-type
+# is a claim by the remote server; this is the file itself (STUDIO-320).
+_MAGIC_PREFIXES: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
+)
+
+
+def sniff_image_ext(data: bytes) -> str | None:
+    """The extension implied by `data`'s magic bytes, or None if unrecognised.
+
+    A declared content-type only says what the server claims to be sending —
+    `application/octet-stream` is common on CDNs, and before STUDIO-320 that
+    claim plus an unhelpful URL suffix was enough to persist arbitrary bytes
+    under an image extension. Sniffing is what makes accepting a generic
+    content-type safe.
+
+    Deliberately a byte-prefix check rather than a Pillow open/verify: Pillow
+    is already a dependency, but decoding attacker-supplied images invites
+    decompression-bomb exposure and buys nothing we need here.
+    """
+    for prefix, ext in _MAGIC_PREFIXES:
+        if data.startswith(prefix):
+            return ext
+    # WebP is RIFF-framed: "RIFF" <4-byte size> "WEBP".
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
 def _extract_og_image(html: str, base_url: str) -> str | None:
     """Pull a page's preview-image URL from its social meta tags.
 
@@ -137,7 +170,8 @@ async def fetch_image_bytes(url: str, *, _follow_html: bool = True) -> tuple[str
     og_image_url: str | None = None
     try:
         async with guarded_async_client(
-            timeout=20, headers=_HEADERS, follow_redirects=True
+            timeout=20, headers=_HEADERS, follow_redirects=True,
+            max_redirects=MAX_REDIRECTS,
         ) as client:
             async with client.stream("GET", url) as resp:
                 if resp.status_code != 200:
@@ -162,11 +196,22 @@ async def fetch_image_bytes(url: str, *, _follow_html: bool = True) -> tuple[str
                             "preview image to use. Paste a direct image link instead."
                         )
                 else:
-                    ext = _pick_extension(content_type, str(resp.url))
+                    # Still runs first: it rejects non-image content types
+                    # outright, so an HTML error page never reaches the sniff.
+                    _pick_extension(content_type, str(resp.url))
                     data = await _read_capped(resp, MAX_BYTES, stop_at_limit=False)
                     if not data:
                         raise ThumbnailDownloadError("Server returned an empty response")
-                    return ext, data
+                    # The bytes decide the extension, not the server's claim
+                    # or the URL suffix (STUDIO-320).
+                    sniffed = sniff_image_ext(data)
+                    if sniffed is None:
+                        logger.warning(
+                            "Rejected %r: content-type %r but the body is not a "
+                            "recognised image", url, content_type or "unknown",
+                        )
+                        raise ThumbnailDownloadError("That file isn't a supported image.")
+                    return sniffed, data
     except ThumbnailDownloadError:
         raise
     except SSRFError as e:
