@@ -376,11 +376,63 @@ Same coverage as the desktop plan §3, minus anything Electron-owned:
 | 4.2 | Browse: search, filters, sort | ☐ |
 | 4.3 | Edit: rename, creator, tags, notes — persist across restart | ☐ |
 | 4.4 | Variant grouping: manual merge and split | ☐ |
+| 4.4b | **Manual groups survive a rescan** — see §4.4.1 below | ☐ |
 | 4.5 | Thumbnails, gallery images, 3D viewer | ☐ |
 | 4.6 | Backup and restore, including a large backup | ☐ |
 | 4.7 | Import: preview → apply → inbox clears | ☐ |
 | 4.8 | Painting guides render | ☐ |
 | 4.9 | Settings persist across container recreate | ☐ |
+
+### 4.4.1 Manual grouping decisions must survive a rescan
+
+`variant_groups.source` separates `auto` (scanner-proposed; a rescan may revise
+it) from `manual` (user-curated; a rescan must never touch it). `Model.no_group`
+records an explicit "leave this one alone" decision. Together these are what
+stop a rescan from destroying curation, and they are only exercised once
+curation exists.
+
+**A freshly-scanned instance has no manual groups at all, so this is invisible
+on a clean deployment** — it has to be set up deliberately.
+
+| # | Step | Expected | Pass |
+|---|---|---|---|
+| 4.4.1.1 | Manually merge two models into a group; note its members | Group created with `source = 'manual'` | ☐ |
+| 4.4.1.2 | Manually split a model out of an auto group | Reflected immediately | ☐ |
+| 4.4.1.3 | Mark a model as explicitly ungrouped (`no_group`) | Sticks | ☐ |
+| 4.4.1.4 | **Run a full rescan** | Manual group membership **unchanged**; `no_group` still set | ☐ |
+| 4.4.1.5 | Run a targeted creator rescan over the same creator | Same — unchanged | ☐ |
+| 4.4.1.6 | Add a new model to that creator's folder, rescan | New model may join an auto group; the manual group is still untouched | ☐ |
+
+```sql
+-- Before and after the rescan; the 'manual' lines must be identical.
+SELECT vg.source || ' :: ' || GROUP_CONCAT(x.p, ' | ')
+FROM (SELECT variant_group_id gid, LOWER(REPLACE(folder_path,'','/')) p
+      FROM models WHERE variant_group_id IS NOT NULL ORDER BY p) x
+JOIN variant_groups vg ON vg.id = x.gid
+GROUP BY x.gid;
+
+SELECT COUNT(*) FROM models WHERE no_group = 1;   -- must not drop
+```
+
+**Why this is worth the setup effort:** losing a manual group is silent. Nothing
+errors, the models are all still present, and the only symptom is curation
+quietly reverting to whatever the engine proposes. It would likely be noticed
+weeks later and be impossible to attribute.
+
+### 4.4.2 Cross-host grouping agreement (optional, informative)
+
+If a second instance of the same library exists, the same query above run on
+both and diffed shows how far the engine's proposals agree across hosts. Group
+determinism and signal ordering are load-bearing invariants of the grouping
+engine (STUDIO-238), and differing filesystem semantics between hosts is the
+most plausible way to break them.
+
+The informative number is how many `manual` groups on one host have an
+identical membership set to an `auto` group on the other — cases where the
+engine now derives what previously had to be curated by hand.
+
+This is evidence, not a pass/fail gate: a difference is worth investigating but
+is not automatically a defect.
 
 **Not applicable on Linux:** auto-update (`latest.yml` is for the Windows
 Electron updater), SmartScreen, installer/uninstaller, window state, sidecar
