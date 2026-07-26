@@ -214,6 +214,34 @@ A count mismatch with differing settings is not a finding. A count mismatch with
 identical settings is worth reporting, and worth reporting precisely — include
 both settings dumps.
 
+**Settings parity is necessary but not sufficient.** An established instance is
+an *accumulated* database written by many builds over time, including rows
+created before later fixes and settings existed, and possibly reshaped by
+reorganize runs. A fresh instance is what the *current* code produces from the
+*current* disk layout. Comparing the two compares code and history at once, and
+a difference cannot be attributed to either.
+
+Observed in practice on beta.8: two instances of one library agreed to within
+13 on the collapsed Library count while differing by 166 actual model rows —
+the collapsed view hid it because the instance with more models also had more
+groups, so collapsing removed more rows. Compare `COUNT(*) FROM models`, not
+the number the Library page shows.
+
+| # | Step | Pass |
+|---|---|---|
+| 1.5.4 | Compare raw `COUNT(*) FROM models`, not the collapsed Library count | ☐ |
+| 1.5.5 | Before attributing any difference to the platform, **run a full rescan on the established instance with the same build**, then re-diff | ☐ |
+| 1.5.6 | Diff the normalized path *sets*, not just counts — differences are usually boundary placement, not missing files | ☐ |
+
+```sql
+-- Normalized path set; run on both, sort, diff. Strip the host-specific
+-- library root prefix first so the two are comparable.
+SELECT LOWER(REPLACE(folder_path, '', '/')) FROM models ORDER BY 1;
+```
+
+Only a fresh-vs-fresh comparison isolates platform behaviour. Anything else is
+measuring history.
+
 ---
 
 ## 2. Priority — behaviour that only changes on Linux
