@@ -18,6 +18,7 @@ import { autoUpdater } from "electron-updater";
 import { createAppController } from "./appController";
 import { LOCKFILE_NAME, QUIT_TIMEOUT_MS, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
 import { registerCspHandler } from "./csp";
+import { routeNavigation, type NavigationHost } from "./externalNavigation";
 import { patchConsoleForDiagnostics, registerDiagnosticsIpcHandlers } from "./diagnostics";
 import {
   buildApplicationMenuTemplate,
@@ -155,6 +156,11 @@ const failureUi: FailureUi = {
   },
 };
 
+const navigationHost: NavigationHost = {
+  openExternal: (url) => shell.openExternal(url),
+  log: (message) => console.warn(message),
+};
+
 registerProcessFailureHandlers(process, failureUi);
 
 startupLog("main-loaded");
@@ -228,9 +234,23 @@ function createWindow(): BrowserWindow {
   registerRendererFailureHandler(win, failureUi);
 
   win.webContents.on("will-navigate", (event, url) => {
-    if (!isBackendRetryUrl(url)) return;
-    event.preventDefault();
-    void win.loadFile(SPLASH_HTML).then(() => appController.bootBackendAndLoad(win));
+    if (isBackendRetryUrl(url)) {
+      event.preventDefault();
+      void win.loadFile(SPLASH_HTML).then(() => appController.bootBackendAndLoad(win));
+      return;
+    }
+    // Anything that isn't our own origin leaves the window: external links go
+    // to the system browser, everything else is refused (STUDIO-259).
+    if (!routeNavigation(url, navigationHost)) {
+      event.preventDefault();
+    }
+  });
+
+  // `target="_blank"` / window.open would otherwise render a remote page in a
+  // chromeless Electron window with no address bar.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    routeNavigation(url, navigationHost);
+    return { action: "deny" };
   });
 
   // Right-click context menu: Back/Forward/Reload + clipboard when relevant.

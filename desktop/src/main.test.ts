@@ -10,6 +10,7 @@ const setApplicationMenu = vi.fn();
 const menuPopup = vi.fn();
 const buildFromTemplate = vi.fn().mockReturnValue({ popup: menuPopup });
 const openPath = vi.fn().mockResolvedValue("");
+const openExternal = vi.fn().mockResolvedValue(undefined);
 const requestSingleInstanceLock = vi.fn().mockReturnValue(true);
 const onHeadersReceived = vi.fn();
 const appOn = vi.fn();
@@ -24,6 +25,7 @@ class FakeWebContents extends EventEmitter {
     goForward: vi.fn(),
   };
   reload = vi.fn();
+  setWindowOpenHandler = vi.fn();
 }
 
 class FakeBrowserWindow extends EventEmitter {
@@ -81,7 +83,7 @@ vi.mock("electron", () => ({
   ipcMain: { handle: vi.fn() },
   screen: { getAllDisplays: vi.fn().mockReturnValue([]) },
   session: { defaultSession: { webRequest: { onHeadersReceived } } },
-  shell: { openPath },
+  shell: { openPath, openExternal },
 }));
 
 vi.mock("electron-updater", () => ({
@@ -299,12 +301,40 @@ describe("main.ts wiring", () => {
     expect(bootBackendAndLoad).toHaveBeenCalledTimes(2);
   });
 
-  it("ignores unrelated will-navigate URLs", async () => {
+  // Superseded by STUDIO-259: an external will-navigate used to be allowed to
+  // load in the app window. It is now diverted to the system browser.
+  it("diverts an external will-navigate to the system browser (STUDIO-259)", async () => {
     await loadMain();
     const win = FakeBrowserWindow.instances[0];
     const event = { preventDefault: vi.fn() };
     win.webContents.emit("will-navigate", event, "https://example.com");
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(openExternal).toHaveBeenCalledWith("https://example.com");
+  });
+
+  it("lets same-origin backend navigation proceed in the window (STUDIO-259)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const event = { preventDefault: vi.fn() };
+    win.webContents.emit("will-navigate", event, "http://127.0.0.1:5555/library");
     expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("denies window.open and routes an external target to the browser (STUDIO-259)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const handler = win.webContents.setWindowOpenHandler.mock.calls[0]?.[0];
+    expect(handler({ url: "https://www.patreon.com/x" })).toEqual({ action: "deny" });
+    expect(openExternal).toHaveBeenCalledWith("https://www.patreon.com/x");
+  });
+
+  it("never hands a non-https scheme to the shell (STUDIO-259)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const handler = win.webContents.setWindowOpenHandler.mock.calls[0]?.[0];
+    expect(handler({ url: "ms-msdt:/id PCWDiagnostic" })).toEqual({ action: "deny" });
+    expect(openExternal).not.toHaveBeenCalled();
   });
 
   it("schedules a window-state save on resize/move and flushes on close", async () => {
