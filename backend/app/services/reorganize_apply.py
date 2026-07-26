@@ -81,6 +81,48 @@ def _os_native(path: str) -> str:
     return str(Path(path))
 
 
+# The path flavour used to render stored paths. Separate from _os_native's
+# hard-wired Path so tests can assert Windows storage behaviour on Linux CI:
+# _canon's output already matches the native form on POSIX, so a test that
+# relies on the host would pass vacuously there (STUDIO-366, same trap as
+# STUDIO-365). Production never rebinds this.
+_STORE_PATH = Path
+
+
+def _native_store(path: str | None) -> str | None:
+    """Canonical '/'-internal path → the form written to the database.
+
+    The scanner stores paths as ``str(Path(...))`` — backslashes on Windows —
+    while reorganize builds every proposed path through :func:`_canon`, which
+    forces ``/``. Persisting the canonical form verbatim left the database
+    holding two conventions for equivalent paths, so ``folder_path == x``
+    lookups silently missed reorganized rows on Windows (STUDIO-366), and a
+    rescan inserted duplicates (STUDIO-365).
+
+    Applied at the persistence boundary only: _canon stays the internal
+    comparison and preview form, so proposals and previews are unchanged.
+    """
+    if not path:
+        return path
+    return str(_STORE_PATH(path))
+
+
+def _find_stl_by_path(db: Session, path: str) -> STLFile | None:
+    """Locate an STL row by path, tolerating either separator convention.
+
+    Undo logs record the canonical '/' form, but rows are stored natively
+    since STUDIO-366 — and logs written before that change point at rows
+    still holding the canonical form. Undo must resolve both, or it silently
+    skips the row and leaves the database describing the pre-undo layout
+    while the files have already moved back.
+    """
+    native = _native_store(path)
+    row = db.query(STLFile).filter(STLFile.path == native).first()
+    if row is None and native != path:
+        row = db.query(STLFile).filter(STLFile.path == path).first()
+    return row
+
+
 def _stat(path: str) -> tuple[int, int]:
     st = os.stat(path)
     return st.st_size, st.st_mtime_ns
@@ -477,7 +519,7 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
             continue
         model = db.get(Model, entry["model_id"])
         if model is not None:
-            model.folder_path = entry["proposed_dir"]
+            model.folder_path = _native_store(entry["proposed_dir"])
             model.is_inbox = False   # moved into the managed library
             model.updated_at = utcnow()
         for f in entry["files"]:
@@ -487,7 +529,7 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
                 continue
             stl = db.get(STLFile, f["stl_file_id"])
             if stl is not None:
-                stl.path = f["proposed_path"]
+                stl.path = _native_store(f["proposed_path"])
                 # Keep filename in sync with path's basename — normally a
                 # no-op (the proposed filename only ever changes directory
                 # segments), but slugify_filenames (#946) can rename the
@@ -504,13 +546,19 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
 
 
 def _replace_prefix(path: str | None, old: str, new: str) -> str | None:
+    """Rebase ``path`` from under ``old`` to under ``new``, in stored form.
+
+    Compares in canonical form (both inputs may use either separator) but
+    returns the host-native form, since every caller assigns the result to a
+    database column (STUDIO-366).
+    """
     if not path:
         return path
     canon = path.replace("\\", "/")
     if _key(canon) == _key(old):
-        return new
+        return _native_store(new)
     if _key(canon).startswith(_key(old) + "/"):
-        return new + canon[len(old):]
+        return _native_store(new + canon[len(old):])
     return path
 
 
@@ -549,7 +597,7 @@ def _repath_character_assets(db: Session, entry: dict) -> None:
         for move in moves:
             old, new = move["current_path"], move["proposed_path"]
             _repath_model_image(model, old, new)
-            model.other_files = [new if _key(path) == _key(old) else path
+            model.other_files = [_native_store(new) if _key(path) == _key(old) else path
                                  for path in (model.other_files or [])]
         model.image_manifest = None
         model.image_manifest_sig = None
@@ -562,6 +610,9 @@ def _repath_model_image(model: Model, old_path: str, new_path: str) -> None:
     reappear on the next rescan just because its old path no longer matches
     the moved file's new one)."""
     old_key = _key(old_path)
+    # Every assignment below lands in a database column, so normalise once
+    # here rather than at each of the four sites (STUDIO-366).
+    new_path = _native_store(new_path)
     if isinstance(model.image_paths, list):
         model.image_paths = [
             new_path if _key(p) == old_key else p
@@ -607,10 +658,14 @@ def _repath_overrides(db: Session, model_cls, pairs: list[tuple[str, str]]) -> N
         rk = _key(row.path or "")
         for old_key, old_dir, new_dir in keyed:
             if rk == old_key:
-                row.path = new_dir
+                row.path = _native_store(new_dir)
                 break
             if rk.startswith(old_key + "/"):
-                row.path = new_dir + row.path[len(old_dir):]
+                # Slice the raw stored value, not rk — rk is casefolded, and
+                # taking the suffix from it would lower-case the remainder.
+                # Length-based slicing is separator-agnostic: old_dir and
+                # row.path differ only in which separator char they use.
+                row.path = _native_store(new_dir + row.path[len(old_dir):])
                 break
 
 
@@ -821,7 +876,7 @@ def _repath_db_undo(
             )
             for model in query.all():
                 _repath_model_image(model, to, frm)
-                model.other_files = [frm if _key(path) == _key(to) else path
+                model.other_files = [_native_store(frm) if _key(path) == _key(to) else path
                                      for path in (model.other_files or [])]
                 model.image_manifest = None
                 model.image_manifest_sig = None
@@ -832,14 +887,14 @@ def _repath_db_undo(
                 _repath_model_image(model, to, frm)
             continue
 
-        stl = db.query(STLFile).filter(STLFile.path == to).first()
+        stl = _find_stl_by_path(db, to)
         if stl is None:
             continue
-        stl.path = frm
+        stl.path = _native_store(frm)
         stl.filename = os.path.basename(frm)
         model = db.get(Model, stl.model_id)
         if model is not None:
-            model.folder_path = _parent(frm)
+            model.folder_path = _native_store(_parent(frm))
             # If the original location is outside every scan root, this was an
             # inbox model — restore the flag so the model surfaces in inbox views.
             frm_dir = os.path.normpath(os.path.abspath(_os_native(_parent(frm))))
