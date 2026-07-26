@@ -214,6 +214,34 @@ A count mismatch with differing settings is not a finding. A count mismatch with
 identical settings is worth reporting, and worth reporting precisely — include
 both settings dumps.
 
+**Settings parity is necessary but not sufficient.** An established instance is
+an *accumulated* database written by many builds over time, including rows
+created before later fixes and settings existed, and possibly reshaped by
+reorganize runs. A fresh instance is what the *current* code produces from the
+*current* disk layout. Comparing the two compares code and history at once, and
+a difference cannot be attributed to either.
+
+Observed in practice on beta.8: two instances of one library agreed to within
+13 on the collapsed Library count while differing by 166 actual model rows —
+the collapsed view hid it because the instance with more models also had more
+groups, so collapsing removed more rows. Compare `COUNT(*) FROM models`, not
+the number the Library page shows.
+
+| # | Step | Pass |
+|---|---|---|
+| 1.5.4 | Compare raw `COUNT(*) FROM models`, not the collapsed Library count | ☐ |
+| 1.5.5 | Before attributing any difference to the platform, **run a full rescan on the established instance with the same build**, then re-diff | ☐ |
+| 1.5.6 | Diff the normalized path *sets*, not just counts — differences are usually boundary placement, not missing files | ☐ |
+
+```sql
+-- Normalized path set; run on both, sort, diff. Strip the host-specific
+-- library root prefix first so the two are comparable.
+SELECT LOWER(REPLACE(folder_path, '', '/')) FROM models ORDER BY 1;
+```
+
+Only a fresh-vs-fresh comparison isolates platform behaviour. Anything else is
+measuring history.
+
 ---
 
 ## 2. Priority — behaviour that only changes on Linux
@@ -376,11 +404,63 @@ Same coverage as the desktop plan §3, minus anything Electron-owned:
 | 4.2 | Browse: search, filters, sort | ☐ |
 | 4.3 | Edit: rename, creator, tags, notes — persist across restart | ☐ |
 | 4.4 | Variant grouping: manual merge and split | ☐ |
+| 4.4b | **Manual groups survive a rescan** — see §4.4.1 below | ☐ |
 | 4.5 | Thumbnails, gallery images, 3D viewer | ☐ |
 | 4.6 | Backup and restore, including a large backup | ☐ |
 | 4.7 | Import: preview → apply → inbox clears | ☐ |
 | 4.8 | Painting guides render | ☐ |
 | 4.9 | Settings persist across container recreate | ☐ |
+
+### 4.4.1 Manual grouping decisions must survive a rescan
+
+`variant_groups.source` separates `auto` (scanner-proposed; a rescan may revise
+it) from `manual` (user-curated; a rescan must never touch it). `Model.no_group`
+records an explicit "leave this one alone" decision. Together these are what
+stop a rescan from destroying curation, and they are only exercised once
+curation exists.
+
+**A freshly-scanned instance has no manual groups at all, so this is invisible
+on a clean deployment** — it has to be set up deliberately.
+
+| # | Step | Expected | Pass |
+|---|---|---|---|
+| 4.4.1.1 | Manually merge two models into a group; note its members | Group created with `source = 'manual'` | ☐ |
+| 4.4.1.2 | Manually split a model out of an auto group | Reflected immediately | ☐ |
+| 4.4.1.3 | Mark a model as explicitly ungrouped (`no_group`) | Sticks | ☐ |
+| 4.4.1.4 | **Run a full rescan** | Manual group membership **unchanged**; `no_group` still set | ☐ |
+| 4.4.1.5 | Run a targeted creator rescan over the same creator | Same — unchanged | ☐ |
+| 4.4.1.6 | Add a new model to that creator's folder, rescan | New model may join an auto group; the manual group is still untouched | ☐ |
+
+```sql
+-- Before and after the rescan; the 'manual' lines must be identical.
+SELECT vg.source || ' :: ' || GROUP_CONCAT(x.p, ' | ')
+FROM (SELECT variant_group_id gid, LOWER(REPLACE(folder_path,'','/')) p
+      FROM models WHERE variant_group_id IS NOT NULL ORDER BY p) x
+JOIN variant_groups vg ON vg.id = x.gid
+GROUP BY x.gid;
+
+SELECT COUNT(*) FROM models WHERE no_group = 1;   -- must not drop
+```
+
+**Why this is worth the setup effort:** losing a manual group is silent. Nothing
+errors, the models are all still present, and the only symptom is curation
+quietly reverting to whatever the engine proposes. It would likely be noticed
+weeks later and be impossible to attribute.
+
+### 4.4.2 Cross-host grouping agreement (optional, informative)
+
+If a second instance of the same library exists, the same query above run on
+both and diffed shows how far the engine's proposals agree across hosts. Group
+determinism and signal ordering are load-bearing invariants of the grouping
+engine (STUDIO-238), and differing filesystem semantics between hosts is the
+most plausible way to break them.
+
+The informative number is how many `manual` groups on one host have an
+identical membership set to an `auto` group on the other — cases where the
+engine now derives what previously had to be curated by hand.
+
+This is evidence, not a pass/fail gate: a difference is worth investigating but
+is not automatically a defect.
 
 **Not applicable on Linux:** auto-update (`latest.yml` is for the Windows
 Electron updater), SmartScreen, installer/uninstaller, window state, sidecar
