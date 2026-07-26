@@ -11,6 +11,7 @@ const menuPopup = vi.fn();
 const buildFromTemplate = vi.fn().mockReturnValue({ popup: menuPopup });
 const openPath = vi.fn().mockResolvedValue("");
 const requestSingleInstanceLock = vi.fn().mockReturnValue(true);
+const onHeadersReceived = vi.fn();
 const appOn = vi.fn();
 const whenReadyCallbacks: Array<() => Promise<void>> = [];
 
@@ -79,6 +80,7 @@ vi.mock("electron", () => ({
   dialog: { showErrorBox, showMessageBox },
   ipcMain: { handle: vi.fn() },
   screen: { getAllDisplays: vi.fn().mockReturnValue([]) },
+  session: { defaultSession: { webRequest: { onHeadersReceived } } },
   shell: { openPath },
 }));
 
@@ -137,6 +139,13 @@ describe("main.ts wiring", () => {
     expect(FakeBrowserWindow.instances).toHaveLength(1);
     expect(bootBackendAndLoad).toHaveBeenCalledWith(FakeBrowserWindow.instances[0]);
     expect(setApplicationMenu).toHaveBeenCalled();
+  });
+
+  it("enforces CSP on the default session before any window exists (STUDIO-258)", async () => {
+    await loadMain();
+    expect(onHeadersReceived).toHaveBeenCalledOnce();
+    const order = onHeadersReceived.mock.invocationCallOrder[0] ?? Infinity;
+    expect(order).toBeLessThan(bootBackendAndLoad.mock.invocationCallOrder[0] ?? -Infinity);
   });
 
   it("quits immediately when the single-instance lock is denied", async () => {
