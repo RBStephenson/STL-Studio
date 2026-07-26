@@ -109,13 +109,41 @@ anyone on the LAN can drive it. That binding is deliberate in
 
 ### 1.2 Standalone binary
 
+`stl-studio-linux` is a first-class delivery path, not a debugging aid: it is
+the whole application in one file, serving both the API and the bundled SPA
+(`packaging/standalone.py` mounts `frontend/dist` at `/`). It is also the same
+PyInstaller artifact the Windows Electron build wraps as its sidecar, so its
+frozen-import graph is shared — a missing hidden import breaks both.
+
+Unlike the container, it stores data under the XDG location rather than `/data`:
+`$XDG_DATA_HOME`, falling back to `~/.local/share` (`standalone.py:48`). It
+prints the resolved path on startup.
+
 | # | Step | Expected | Pass |
 |---|---|---|---|
-| 1.2.1 | `chmod +x stl-studio-linux && ./stl-studio-linux --port 8484` | Starts, serves UI and `/api` | ☐ |
+| 1.2.1 | `chmod +x stl-studio-linux && ./stl-studio-linux --port 8484` | Starts; prints the serving URL and the data directory | ☐ |
 | 1.2.2 | `curl -fsS localhost:8484/api/health` | 2xx | ☐ |
-| 1.2.3 | Exercise the painting/colour-match feature | No frozen-import crash — this is the import graph STUDIO-100/102 covered | ☐ |
-| 1.2.4 | SIGTERM the process | Clean exit, no orphan children | ☐ |
-| 1.2.5 | Run as a non-root user against a library it owns | No permission errors | ☐ |
+| 1.2.3 | Browse to `http://localhost:8484` | **The SPA loads from the binary itself** — no separate frontend needed | ☐ |
+| 1.2.4 | Exercise the painting/colour-match feature | No frozen-import crash — this is the import graph STUDIO-100 broke and STUDIO-102's CI smoke covers | ☐ |
+| 1.2.5 | Confirm the data directory it reported | Under `~/.local/share`, **not** `/data`; created if absent | ☐ |
+| 1.2.6 | `XDG_DATA_HOME=/tmp/stl-test ./stl-studio-linux --port 8484` | Honours the override; DB lands there | ☐ |
+| 1.2.7 | `ss -tlnp \| grep 8484` | Bound to **loopback**, not `0.0.0.0` — the API is unauthenticated | ☐ |
+| 1.2.8 | SIGTERM the process | Clean exit, no orphan children | ☐ |
+| 1.2.9 | Run as a non-root user against a library it owns | No permission errors; nothing requires root | ☐ |
+| 1.2.10 | Run it on a machine that also has the Docker stack | Two **separate** libraries (XDG vs `./data`) — confirm this is understood, not a bug report | ☐ |
+| 1.2.11 | Second instance on the same port | Fails clearly rather than half-starting | ☐ |
+
+**1.2.4 is the one with history.** STUDIO-100 shipped an unbootable installer
+because CI built the frozen exe but never launched it (`No module named
+'unittest'`). STUDIO-102 added `scripts/smoke_boot.py` to both CI matrix legs,
+so the Linux binary is now boot-smoked automatically — but the smoke only polls
+`/api/health`. A feature whose imports are lazy (the painting/colour-match path
+pulls in skimage/scipy/numpy) can still be broken in a binary that boots fine.
+Exercise it in the UI.
+
+**1.2.10 is a support trap more than a defect.** Someone running both the
+container and the binary on one machine gets two independent databases and will
+report "my library disappeared."
 
 ### 1.3 Reverse proxy and TRUSTED_HOSTS
 
