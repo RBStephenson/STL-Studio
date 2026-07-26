@@ -12,11 +12,12 @@
  */
 import { join } from "node:path";
 
-import { Menu, app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
+import { Menu, app, BrowserWindow, dialog, ipcMain, screen, session, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 
 import { createAppController } from "./appController";
 import { LOCKFILE_NAME, QUIT_TIMEOUT_MS, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
+import { registerCspHandler } from "./csp";
 import { patchConsoleForDiagnostics, registerDiagnosticsIpcHandlers } from "./diagnostics";
 import {
   buildApplicationMenuTemplate,
@@ -275,6 +276,8 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     startupLog(`ready userData=${app.getPath("userData")}`);
+    // Before any window exists, so no response can reach a renderer unpoliced.
+    registerCspHandler(session.defaultSession);
     installApplicationMenu();
     mainWindow = createWindow();
     startupLog("window-created");
