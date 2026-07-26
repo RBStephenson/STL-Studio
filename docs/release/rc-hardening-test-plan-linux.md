@@ -151,6 +151,41 @@ exist on Windows:
 - A symlinked model folder, and a symlink pointing outside the scan root
 - A path component with a leading dot
 
+### 1.5 If you are testing from scratch — read this first
+
+A clean Docker deployment is the best way to run this plan: it exercises the
+cold-start path, mount configuration, and `TRUSTED_HOSTS` for real, and it is
+the only honest way to test Section 2.1, because an existing database already
+contains creators.
+
+**But a fresh database is not a fresh copy of your Windows instance.** Scan
+behaviour is driven by settings stored in the database, not by code alone —
+notably `scan_parts_names` and `scan_tag_rules`. A new deployment starts with
+defaults, so it can legitimately index a *different number of models* from the
+same files.
+
+This has already burned one investigation: a Docker instance showed an 83-model
+gap against Windows and looked like a scanner defect. It was a reset database
+that had lost its scan settings. Five code hypotheses were measured before the
+cause turned out to be configuration drift.
+
+So, if you compare a from-scratch Linux instance against a Windows one:
+
+| # | Step | Pass |
+|---|---|---|
+| 1.5.1 | Before comparing anything, diff `app_settings` between the two instances | ☐ |
+| 1.5.2 | Confirm `scan_parts_names` and `scan_tag_rules` match | ☐ |
+| 1.5.3 | Only then treat a count difference as a possible defect | ☐ |
+
+```sql
+-- Run on BOTH instances and diff the output.
+SELECT key, value FROM app_settings ORDER BY key;
+```
+
+A count mismatch with differing settings is not a finding. A count mismatch with
+identical settings is worth reporting, and worth reporting precisely — include
+both settings dumps.
+
 ---
 
 ## 2. Priority — behaviour that only changes on Linux
@@ -356,3 +391,5 @@ Capture the same detail as the desktop plan, plus:
 - `docker compose logs backend --tail=200` for backend issues
 - Whether it reproduces with the library on a plain local ext4 path — this
   separates real defects from mount-specific behaviour
+- For any count comparison against another instance: **both** `app_settings`
+  dumps (see §1.5). Without them the comparison is not interpretable.
