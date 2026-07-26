@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Creator, Model, STLFile, VariantGroup
@@ -1652,6 +1653,79 @@ class TestResolveCreator:
         created = scanner.resolve_creator("Brand New", db)
         assert created.id is not None
         assert scanner.resolve_creator("brand new", db).id == created.id
+
+
+# ---------------------------------------------------------------------------
+# _get_or_create_creator case handling (STUDIO-298)
+# ---------------------------------------------------------------------------
+
+class TestGetOrCreateCreatorCaseInsensitive:
+    """Folder-derived creator lookup must dedup on case like resolve_creator.
+
+    The reported failure: a creator stored by the scraper as "Abe3d" plus an
+    on-disk folder "abe3d" made every scan insert a second Creator row, which
+    prune_empty_creators then cleaned up after the fact.
+    """
+
+    def test_reuses_a_creator_stored_with_different_casing(self, db):
+        existing = make_creator(db, name="Abe3d")
+        assert scanner._get_or_create_creator("abe3d", db).id == existing.id
+
+    def test_repeated_scans_do_not_fork_a_duplicate_row(self, db):
+        make_creator(db, name="Abe3d")
+        for spelling in ("abe3d", "ABE3D", "Abe3D"):
+            scanner._get_or_create_creator(spelling, db)
+        db.flush()
+        assert db.query(Creator).filter(func.lower(Creator.name) == "abe3d").count() == 1
+
+    def test_creates_with_the_folder_casing_when_no_match_exists(self, db):
+        created = scanner._get_or_create_creator("BrandNewCreator", db)
+        assert created.name == "BrandNewCreator"
+
+    def test_case_variant_adoption_is_logged(self, db, caplog):
+        """On Linux this can merge two genuinely distinct artists, so it must
+        leave a trace even though it is harmless in the common case."""
+        make_creator(db, name="Abe3d")
+        with caplog.at_level("WARNING"):
+            scanner._get_or_create_creator("ABE3D", db)
+        assert any("differs only by case" in r.getMessage() for r in caplog.records)
+
+    def test_an_exact_match_logs_nothing(self, db, caplog):
+        make_creator(db, name="Abe3d")
+        with caplog.at_level("WARNING"):
+            scanner._get_or_create_creator("Abe3d", db)
+        assert not caplog.records
+
+    def test_creating_a_new_creator_logs_nothing(self, db, caplog):
+        with caplog.at_level("WARNING"):
+            scanner._get_or_create_creator("Totally New", db)
+        assert not caplog.records
+
+    def test_wildcard_characters_in_folder_names_are_literal(self, db):
+        # Inherited from resolve_creator's lowered-equality rule (#217): a
+        # folder named "My_Studio" must not adopt an existing "MyXStudio".
+        decoy = make_creator(db, name="MyXStudio")
+        assert scanner._get_or_create_creator("My_Studio", db).id != decoy.id
+
+    def test_a_full_scan_indexes_case_variant_folders_under_one_creator(self, db, tmp_path):
+        """End-to-end: two case-distinct creator folders, one Creator row.
+
+        Chosen over host-sensitive folder identity deliberately — see the
+        STUDIO-298 decision recorded on the ticket. Each model still keeps its
+        own folder_path, so no model is lost by sharing a creator.
+        """
+        root = tmp_path / "library"
+        _stl(root / "Abe3d" / "model-a", name="a.stl")
+        _stl(root / "abe3d" / "model-b", name="b.stl")
+
+        first = scanner._get_or_create_creator("Abe3d", db)
+        second = scanner._get_or_create_creator("abe3d", db)
+        db.flush()
+
+        assert first.id == second.id
+        _walk(db, first, root / "Abe3d")
+        _walk(db, second, root / "abe3d")
+        assert len(_models(db, first)) == 2, "both folders' models land on one creator"
 
 
 # ---------------------------------------------------------------------------

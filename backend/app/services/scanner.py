@@ -642,8 +642,7 @@ def _prune_stale_models(
 
 
 def prune_empty_creators(db: Session):
-    """Delete Creator rows that have no models — left behind by the scraper
-    creating duplicate creators with different casing, by stale-path pruning,
+    """Delete Creator rows that have no models — left behind by stale-path pruning,
     or by a caller reassigning every one of a creator's models elsewhere
     (single-pack import's placeholder creator — named after the pack folder,
     e.g. "Ignisaurus Clan ..." — orphaned the moment the user sets the real
@@ -2110,11 +2109,35 @@ def _index_stl_files(
 
 
 def _get_or_create_creator(name: str, db: Session) -> Creator:
-    creator = db.query(Creator).filter(Creator.name == name).first()
-    if not creator:
-        creator = Creator(name=name)
-        db.add(creator)
-        db.flush()
+    """Get-or-create for a creator named after an on-disk folder.
+
+    Delegates to resolve_creator so folder-derived names use the same
+    case-insensitive dedup rule as scraped and user-entered ones. Before
+    STUDIO-298 this matched exact case only, so a creator already stored
+    with different casing than the folder — a scraped "Abe3d" alongside a
+    folder "abe3d" — made every scan insert a second Creator row.
+
+    Deliberately case-insensitive on every platform, including
+    case-sensitive filesystems where "Abe3D/" and "abe3d/" can coexist:
+    two spellings of one creator are one creator, and each model still
+    records its own folder_path. Note this is the opposite of the model
+    -folder identity rule, which is host-sensitive by design (_normpath).
+
+    The Linux case-variant adoption is logged: it is harmless when the two
+    spellings are one artist (the common case, and unavoidable on Windows
+    and macOS where the filesystem itself folds case), but it would merge
+    two genuinely different artists onto one creator. That is recoverable
+    by renaming a folder and rescanning, and no model is lost either way,
+    but it should not happen without a trace.
+    """
+    creator = resolve_creator(name, db)
+    if creator.name != name.strip():
+        logger.warning(
+            "Folder %r indexed under existing creator %r (differs only by case or "
+            "surrounding whitespace). Rename the folder and rescan if these are "
+            "meant to be separate creators.",
+            name, creator.name,
+        )
     return creator
 
 
