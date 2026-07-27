@@ -8,6 +8,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 import { isRecentlyAdded } from "../utils/recentlyAdded";
 import { modelLinkTo } from "../utils/modelLink";
+import { tagClass, visibleTags } from "../utils/modelTags";
 import QuickAssignPopover from "./QuickAssignPopover";
 import StarRating from "./StarRating";
 import { invalidateModelViews } from "../hooks/queries/invalidation";
@@ -33,6 +34,10 @@ interface Props {
   allTagSuggestions?: { tag: string; count: number }[];
   /** Keyboard-navigation focus (#169): draws a focus ring and scrolls into view. */
   focused?: boolean;
+  /** Variant-group side panel (STUDIO-350). Return true to consume the click —
+   *  the card stays a <Link> so Enter still activates it and ctrl/middle-click
+   *  still opens the full group page, but a plain click opens the panel. */
+  onOpenGroup?: (model: Model) => boolean;
 }
 
 const SITE_LABELS: Record<string, string> = {
@@ -45,13 +50,6 @@ const SITE_LABELS: Record<string, string> = {
   gumroad: "Gumroad",
   patreon: "Patreon",
   other: "Other",
-};
-
-const TAG_COLORS: Record<string, string> = {
-  "pre-supported": "bg-emerald-900 text-emerald-300",
-  "bust":          "bg-blue-900 text-blue-300",
-  "statue":        "bg-purple-900 text-purple-300",
-  "figure":        "bg-indigo-900 text-indigo-300",
 };
 
 // Scanner-detected variant attributes (#609). Support status is the most useful
@@ -74,7 +72,7 @@ const SUPPORT_STATUS_LABEL: Record<string, string> = {
 // `model` refs survive, callbacks are useCallback'd, `allTagSuggestions` is stable
 // state — so the default shallow compare re-renders only the card whose
 // `selected`/`focused` actually changed (#382).
-function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false, allTagSuggestions = [], focused = false }: Props) {
+function ModelCard({ model, selected = false, onSelect, backTo, onMutate, excludedView = false, onRemoved, hasGuide = false, allTagSuggestions = [], focused = false, onOpenGroup }: Props) {
   const storageRecoverySignal = useStorageRecoverySignal();
   const [cardImageFailed, setCardImageFailed] = useState(false);
   const location = useLocation();
@@ -311,17 +309,20 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
   const displayName = isGroup
     ? (hasExplicitGroupLabel ? localGroupLabel : (localTitle || localGroupLabel))
     : (localTitle || model.name);
-  const removedAuto = new Set(model.removed_auto_tags ?? []);
-  const visibleAutoTags = (model.auto_tags ?? []).filter((t) => !removedAuto.has(t));
-  const allTagsDisplay = [...visibleAutoTags, ...localTags];
-  const uniqueTags = [...new Set(allTagsDisplay)];
+  const uniqueTags = visibleTags(model, localTags);
 
   // Scanner-detected variant attributes (#609): support status leads (printing-
   // relevant), then cut/slicer/version as neutral chips.
   const attrs = model.parsed_attributes ?? {};
   const secondaryAttrs = [attrs.cut_status, attrs.slicer, attrs.version].filter(Boolean) as string[];
 
-  const handleCardClick = () => {
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Let the browser handle "open in a new tab/window" untouched.
+    const wantsNewTab = e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1;
+    if (!wantsNewTab && onOpenGroup?.(model)) {
+      e.preventDefault();
+      return;
+    }
     sessionStorage.setItem("library_scroll", String(window.scrollY));
   };
 
@@ -569,9 +570,7 @@ function ModelCard({ model, selected = false, onSelect, backTo, onMutate, exclud
             {uniqueTags.slice(0, 4).map((tag) => (
               <span
                 key={tag}
-                className={`text-xs px-1.5 py-0.5 rounded ${
-                  TAG_COLORS[tag] ?? "bg-panel-secondary text-text-secondary"
-                }`}
+                className={`text-xs px-1.5 py-0.5 rounded ${tagClass(tag)}`}
               >
                 {tag}
               </span>

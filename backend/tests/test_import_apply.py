@@ -38,6 +38,17 @@ def _apply_and_wait(client, source, expected_status=200):
     return r.status_code, status["result"]
 
 
+def _slashes(path: str | None) -> str:
+    """Compare stored paths by structure, not separator convention.
+
+    Apply writes host-native paths (STUDIO-366), so segment assertions like
+    ``"/inbox/" in folder_path`` are separator-dependent and would only hold
+    on POSIX. Normalising the *actual* value keeps these tests about which
+    folders a model landed in, which is what they are really checking.
+    """
+    return (path or "").replace("\\", "/")
+
+
 def _library(db, path, name="lib", primary=False):
     lib = ScanRoot(path=str(path).replace("\\", "/"), enabled=True, layout="{creator}/{character}/{title}",
                    name=name, is_writable=True)
@@ -135,7 +146,7 @@ class TestImportApplyMove:
         assert body["moved_models"] == 1
         db.refresh(m)
         assert m.is_inbox is False
-        assert m.folder_path.startswith(str(lib.path).replace("\\", "/"))
+        assert _slashes(m.folder_path).startswith(str(lib.path).replace("\\", "/"))
         assert not os.path.exists(str(f))
 
     def test_single_pack_apply_removes_untracked_leftovers_from_pack_root(
@@ -382,8 +393,8 @@ class TestImportApplySlugify:
         assert status == 200, body
         assert body["moved_models"] == 1
         db.refresh(m)
-        assert "/inbox/" in m.folder_path
-        assert "/_Inbox/" not in m.folder_path
+        assert "/inbox/" in _slashes(m.folder_path)
+        assert "/_Inbox/" not in _slashes(m.folder_path)
 
     def test_inbox_sentinel_creator_name_kept_as_authored_when_setting_off(
         self, client, db, tmp_path, write_mode,
@@ -401,7 +412,7 @@ class TestImportApplySlugify:
         assert status == 200, body
         assert body["moved_models"] == 1
         db.refresh(m)
-        assert "/_Inbox/" in m.folder_path
+        assert "/_Inbox/" in _slashes(m.folder_path)
 
     def test_collision_retry_keeps_same_slugify_value_as_initial_build(
         self, client, db, tmp_path, write_mode,
@@ -432,9 +443,9 @@ class TestImportApplySlugify:
         db.refresh(m)
         # Landed at a suffixed but still-slugified destination — the retry
         # didn't flip back to as-authored casing mid-request.
-        assert m.folder_path != str(dest_dir).replace("\\", "/")
-        assert "/abethreed/" in m.folder_path
-        assert "/AbeThreeD/" not in m.folder_path
+        assert _slashes(m.folder_path) != str(dest_dir).replace("\\", "/")
+        assert "/abethreed/" in _slashes(m.folder_path)
+        assert "/AbeThreeD/" not in _slashes(m.folder_path)
         # The image followed to the same (slugified, suffixed) folder.
         assert len(m.image_paths) == 1
         assert m.image_paths[0].startswith(m.folder_path)
@@ -467,7 +478,7 @@ class TestImportApplySlugifyFilenames:
         db.refresh(m)
         stl = db.query(STLFile).filter(STLFile.model_id == m.id).first()
         assert stl.filename == "cold-giant-last-time-hollowed.stl"
-        assert stl.path.endswith("/cold-giant-last-time-hollowed.stl")
+        assert _slashes(stl.path).endswith("/cold-giant-last-time-hollowed.stl")
 
     def test_filename_kept_as_authored_when_setting_off(self, db, client, tmp_path, write_mode):
         self._set(db, False)
@@ -638,7 +649,7 @@ class TestImportApplyCollisionRetry:
         db.refresh(m)
         assert m.is_inbox is False
         # Landed at a disambiguated destination rather than failing outright.
-        assert m.folder_path != str(dest_dir).replace("\\", "/")
+        assert _slashes(m.folder_path) != str(dest_dir).replace("\\", "/")
         assert not os.path.exists(str(f))
 
 
@@ -702,7 +713,7 @@ class TestImportApplyCleansUpNonStlFiles:
         assert body["moved_models"] == 1
 
         db.refresh(m)
-        assert m.folder_path != str(dest_dir).replace("\\", "/")
+        assert _slashes(m.folder_path) != str(dest_dir).replace("\\", "/")
         assert len(m.image_paths) == 1
         moved_img = m.image_paths[0]
         # The image must be at the model's REAL (suffixed) folder, not the

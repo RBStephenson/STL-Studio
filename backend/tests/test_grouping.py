@@ -1,7 +1,13 @@
 """Variant-grouping proposal engine (#615). Exercises the blended signals
 (file_hash / filename / name) and the manual-group lock."""
+import itertools
+
+import pytest
+
 from app.models import AppSetting, VariantGroup
-from app.services import grouping
+from app.services import grouping, grouping_policy, name_parser
+from app.services.grouping import EvidenceLedger, SignalKind
+from app.services.product_context import ProductContext
 from tests.conftest import make_creator, make_model, make_stl_file
 
 
@@ -25,6 +31,817 @@ def _run(db, creator):
 def _enable_hierarchy(db):
     db.merge(AppSetting(key="hierarchy_variant_grouping_enabled", value=True))
     db.flush()
+
+
+class TestSignalPolicy:
+    """Precedence, confidence and reason live in one table (STUDIO-243)."""
+
+    def test_every_signal_kind_has_a_policy(self):
+        assert set(grouping.SIGNAL_POLICY) == set(SignalKind)
+
+    def test_precedence_orders_signals_strongest_first(self):
+        order = sorted(SignalKind, key=lambda k: grouping.policy_for(k).precedence)
+        assert order == [
+            SignalKind.HASH,
+            SignalKind.HIERARCHY,
+            SignalKind.FILENAME,
+            SignalKind.NAME,
+        ]
+
+    def test_precedence_values_are_distinct(self):
+        precedences = [grouping.policy_for(k).precedence for k in SignalKind]
+        assert len(set(precedences)) == len(precedences)
+
+    @pytest.mark.parametrize(
+        ("kind", "confidence"),
+        [
+            (SignalKind.HASH, 0.9),
+            (SignalKind.HIERARCHY, 0.85),
+            (SignalKind.FILENAME, 0.7),
+            (SignalKind.NAME, 0.6),
+        ],
+    )
+    def test_confidence_values_are_stable(self, kind, confidence):
+        assert grouping.policy_for(kind).confidence == confidence
+
+    @pytest.mark.parametrize(
+        ("kind", "reason"),
+        [
+            (SignalKind.HASH, "shared mesh files"),
+            (SignalKind.HIERARCHY, "same product hierarchy"),
+            (SignalKind.FILENAME, "shared STL file names"),
+            (SignalKind.NAME, "name: Goblin"),
+        ],
+    )
+    def test_reason_templates_render_the_documented_text(self, kind, reason):
+        rendered = grouping.policy_for(kind).reason_template.format(label="Goblin")
+        assert rendered == reason
+
+    def test_unregistered_kind_fails_loudly(self):
+        with pytest.raises(ValueError, match="no SignalPolicy registered"):
+            grouping.policy_for("hash")  # a bare string is not a SignalKind
+
+    def test_shipped_policy_table_passes_its_own_completeness_check(self):
+        grouping.assert_policies_complete(grouping.SIGNAL_POLICY)
+
+    def test_a_signal_without_a_policy_fails_at_import(self):
+        # Mirrors the import-time guard: dropping any kind must raise, naming it.
+        incomplete = {
+            k: v for k, v in grouping.SIGNAL_POLICY.items() if k is not SignalKind.NAME
+        }
+        with pytest.raises(RuntimeError, match="missing entries for: NAME"):
+            grouping.assert_policies_complete(incomplete)
+
+
+class TestEvidenceLedger:
+    """Evidence names the pair it describes, and credit is first-wins."""
+
+    def test_records_the_model_pair_for_each_edge(self):
+        ledger = EvidenceLedger()
+        ledger.record(SignalKind.HASH, 1, 2)
+
+        assert [(e.kind, e.a, e.b) for e in ledger.edges] == [(SignalKind.HASH, 1, 2)]
+
+    def test_first_signal_to_reach_a_model_keeps_the_credit(self):
+        ledger = EvidenceLedger()
+        ledger.record(SignalKind.HIERARCHY, 1, 2)
+        ledger.record(SignalKind.HASH, 2, 3)
+
+        assert ledger.credit_for(1) is SignalKind.HIERARCHY
+        assert ledger.credit_for(2) is SignalKind.HIERARCHY
+        assert ledger.credit_for(3) is SignalKind.HASH
+
+    def test_strongest_for_picks_the_highest_precedence_credit(self):
+        ledger = EvidenceLedger()
+        ledger.record(SignalKind.NAME, 1, 2)
+        ledger.record(SignalKind.HASH, 2, 3)
+
+        assert ledger.strongest_for([1, 2, 3]) is SignalKind.HASH
+
+    def test_joining_two_already_credited_components_adds_no_attribution(self):
+        # The edge that bridges them is real, but every endpoint already has a
+        # credit, so the bridging kind must not become the group's reason.
+        ledger = EvidenceLedger()
+        ledger.record(SignalKind.HIERARCHY, 1, 2)
+        ledger.record(SignalKind.FILENAME, 3, 4)
+        ledger.record(SignalKind.HASH, 1, 3)
+
+        assert ledger.strongest_for([1, 2, 3, 4]) is SignalKind.HIERARCHY
+
+    def test_uncredited_cluster_falls_back_to_name(self):
+        assert EvidenceLedger().strongest_for([1, 2]) is SignalKind.NAME
+
+    def test_credit_for_unknown_model_is_none(self):
+        assert EvidenceLedger().credit_for(99) is None
+
+
+def _ctx(product_key, display_label=None):
+    return ProductContext(product_key=product_key, display_label=display_label)
+
+
+class TestProductBoundaries:
+    """Product keys are hard anti-merge constraints (STUDIO-244)."""
+
+    def test_maps_every_model_to_its_key(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx(None)}
+
+        assert grouping.product_boundaries(contexts) == {1: "ada wong", 2: None}
+
+    def test_conflicting_keys_cannot_merge(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx("leon kennedy")}
+        uf = grouping_policy._UnionFind([1, 2], grouping.product_boundaries(contexts))
+
+        assert uf.union(1, 2) is grouping_policy._MergeResult.REJECTED_HIERARCHY
+        assert uf.find(1) != uf.find(2)
+
+    def test_unkeyed_model_cannot_bridge_conflicting_keys(self):
+        # 2 carries no key, so it may join either side — but never both, or it
+        # would smuggle Ada and Leon into one cluster transitively.
+        contexts = {1: _ctx("ada wong"), 2: _ctx(None), 3: _ctx("leon kennedy")}
+        uf = grouping_policy._UnionFind([1, 2, 3], grouping.product_boundaries(contexts))
+
+        assert uf.union(1, 2) is grouping_policy._MergeResult.MERGED
+        assert uf.union(2, 3) is grouping_policy._MergeResult.REJECTED_HIERARCHY
+        assert uf.find(1) != uf.find(3)
+
+
+class TestHierarchyEvidence:
+    """Pure HIERARCHY edge generation (STUDIO-244)."""
+
+    def test_matching_keys_produce_evidence(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx("ada wong")}
+
+        evidence = grouping.hierarchy_evidence(contexts)
+
+        assert [(e.kind, e.a, e.b) for e in evidence] == [(SignalKind.HIERARCHY, 1, 2)]
+
+    def test_differing_keys_produce_no_evidence(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx("leon kennedy")}
+
+        assert grouping.hierarchy_evidence(contexts) == []
+
+    def test_unkeyed_models_produce_no_evidence(self):
+        contexts = {1: _ctx(None), 2: _ctx(None)}
+
+        assert grouping.hierarchy_evidence(contexts) == []
+
+    def test_bucket_fans_out_from_its_first_member(self):
+        contexts = {1: _ctx("ada wong"), 2: _ctx("ada wong"), 3: _ctx("ada wong")}
+
+        evidence = grouping.hierarchy_evidence(contexts)
+
+        assert [(e.a, e.b) for e in evidence] == [(1, 2), (1, 3)]
+
+    def test_only_supplied_candidates_appear(self):
+        # Models filtered out upstream (manual groups, no_group, "off" subtrees)
+        # are absent from `contexts` and so can never be proposed.
+        contexts = {1: _ctx("ada wong"), 2: _ctx("ada wong")}
+
+        mentioned = {m for e in grouping.hierarchy_evidence(contexts) for m in (e.a, e.b)}
+
+        assert mentioned == {1, 2}
+
+
+class TestHashEvidence:
+    """Pure HASH edge generation (STUDIO-244)."""
+
+    def test_shared_hash_produces_evidence(self):
+        evidence = grouping.hash_evidence([1, 2], {1: {"deadbeef"}, 2: {"deadbeef"}})
+
+        assert [(e.kind, e.a, e.b) for e in evidence] == [(SignalKind.HASH, 1, 2)]
+
+    def test_distinct_hashes_produce_no_evidence(self):
+        assert grouping.hash_evidence([1, 2], {1: {"aaa"}, 2: {"bbb"}}) == []
+
+    def test_model_without_hashes_produces_no_evidence(self):
+        assert grouping.hash_evidence([1, 2], {1: {"aaa"}}) == []
+
+    def test_hash_at_the_bucket_cap_still_produces_evidence(self):
+        ids = list(range(1, grouping_policy._HASH_BUCKET_CAP + 1))
+        hashes = {mid: {"commonbase"} for mid in ids}
+
+        evidence = grouping.hash_evidence(ids, hashes)
+
+        assert len(evidence) == len(ids) - 1
+
+    def test_hash_over_the_bucket_cap_produces_no_evidence(self):
+        # A ubiquitous part (shared base, support raft) must not chain unrelated
+        # products together.
+        ids = list(range(1, grouping_policy._HASH_BUCKET_CAP + 2))
+        hashes = {mid: {"commonbase"} for mid in ids}
+
+        assert grouping.hash_evidence(ids, hashes) == []
+
+    def test_models_absent_from_ids_are_ignored(self):
+        # 3 shares the hash but was filtered out upstream, so it must not be
+        # proposed even though `hashes` still carries a row for it.
+        hashes = {1: {"deadbeef"}, 2: {"deadbeef"}, 3: {"deadbeef"}}
+
+        evidence = grouping.hash_evidence([1, 2], hashes)
+
+        mentioned = {m for e in evidence for m in (e.a, e.b)}
+        assert mentioned == {1, 2}
+
+
+class TestFilenameEvidence:
+    """Pure FILENAME edge generation and its three guards (STUDIO-245)."""
+
+    def test_identical_file_sets_produce_evidence(self):
+        files = {"body.stl", "head.stl", "base.stl"}
+
+        evidence = grouping.filename_evidence([1, 2], {1: set(files), 2: set(files)})
+
+        assert [(e.kind, e.a, e.b) for e in evidence] == [(SignalKind.FILENAME, 1, 2)]
+
+    def test_jaccard_exactly_at_the_threshold_produces_evidence(self):
+        # 3 shared of 5 union = 0.60, exactly _FILENAME_JACCARD.
+        filenames = {1: {"a.stl", "b.stl", "c.stl", "d.stl"}, 2: {"a.stl", "b.stl", "c.stl", "e.stl"}}
+
+        assert grouping_policy._FILENAME_JACCARD == 0.6
+        assert len(grouping.filename_evidence([1, 2], filenames)) == 1
+
+    def test_jaccard_just_below_the_threshold_produces_none(self):
+        # 2 shared of 4 union = 0.50.
+        filenames = {1: {"a.stl", "b.stl", "c.stl"}, 2: {"a.stl", "b.stl", "d.stl"}}
+
+        assert grouping.filename_evidence([1, 2], filenames) == []
+
+    def test_minimum_shared_count_is_enforced_at_the_boundary(self):
+        filenames = {1: {"a.stl", "b.stl"}, 2: {"a.stl", "b.stl"}}
+
+        assert grouping_policy._FILENAME_MIN_SHARED == 2
+        assert len(grouping.filename_evidence([1, 2], filenames)) == 1
+
+    def test_one_shared_filename_is_never_enough(self):
+        # Jaccard is a perfect 1.0, but a single shared name is not a product.
+        filenames = {1: {"body.stl"}, 2: {"body.stl"}}
+
+        assert grouping.filename_evidence([1, 2], filenames) == []
+
+    def test_filename_at_the_bucket_cap_stays_distinctive(self):
+        cap = grouping_policy._FILENAME_BUCKET_CAP
+        ids = list(range(1, cap + 1))
+        filenames = {mid: {"shared-a.stl", "shared-b.stl"} for mid in ids}
+
+        # Every pair still overlaps: freq == cap is not yet generic.
+        assert grouping.filename_evidence(ids, filenames) != []
+
+    def test_generic_filenames_cannot_group_unrelated_products(self):
+        # One name shared by cap+1 models is generic and dropped, leaving each
+        # model with nothing distinctive to match on.
+        ids = list(range(1, grouping_policy._FILENAME_BUCKET_CAP + 2))
+        filenames = {mid: {"body.stl", f"unique-{mid}.stl"} for mid in ids}
+
+        assert grouping.filename_evidence(ids, filenames) == []
+
+    def test_large_creator_skips_filename_evidence_entirely(self):
+        cap = grouping_policy._FILENAME_PASS_MODEL_CAP
+        ids = list(range(1, cap + 2))
+        files = {"body.stl", "head.stl"}
+        filenames = {mid: set(files) for mid in ids}
+
+        assert grouping.filename_evidence(ids, filenames) == []
+
+    def test_creator_at_the_pass_cap_still_produces_filename_evidence(self):
+        ids = list(range(1, grouping_policy._FILENAME_PASS_MODEL_CAP + 1))
+        # Pair up models so no filename exceeds the generic bucket cap.
+        filenames = {
+            mid: {f"pair{mid // 2}-a.stl", f"pair{mid // 2}-b.stl"} for mid in ids
+        }
+
+        assert grouping.filename_evidence(ids, filenames) != []
+
+    def test_models_absent_from_ids_are_ignored(self):
+        filenames = {1: {"a.stl", "b.stl"}, 2: {"a.stl", "b.stl"}, 3: {"a.stl", "b.stl"}}
+
+        evidence = grouping.filename_evidence([1, 2], filenames)
+
+        assert {m for e in evidence for m in (e.a, e.b)} == {1, 2}
+
+
+class TestNameKeys:
+    """Pure character-key resolution with supplied creator identity (STUDIO-245)."""
+
+    def test_strips_the_creator_name_from_the_key(self):
+        keys = grouping.name_keys(
+            [1, 2],
+            {1: "Goblin Supported", 2: "Goblin Unsupported"},
+            "Some Creator",
+        )
+
+        assert keys == {1: "Goblin", 2: "Goblin"}
+
+    def test_matches_name_parser_for_the_same_inputs(self):
+        names = {1: "Ada Wong Bust", 2: "Leon Kennedy"}
+
+        keys = grouping.name_keys([1, 2], names, "Creator")
+
+        assert keys == {
+            mid: name_parser.character_key(name, "Creator") for mid, name in names.items()
+        }
+
+    def test_models_without_a_key_are_omitted(self):
+        keys = grouping.name_keys([1], {1: ""}, "Creator")
+
+        assert keys == {}
+
+    def test_only_supplied_ids_are_resolved(self):
+        keys = grouping.name_keys([1], {1: "Goblin King", 2: "Goblin Queen"}, None)
+
+        assert set(keys) == {1}
+
+
+class TestNameEvidence:
+    """Pure NAME edge generation (STUDIO-245)."""
+
+    def test_shared_key_produces_evidence(self):
+        evidence = grouping.name_evidence([1, 2], {1: "goblin", 2: "goblin"})
+
+        assert [(e.kind, e.a, e.b) for e in evidence] == [(SignalKind.NAME, 1, 2)]
+
+    def test_distinct_keys_produce_no_evidence(self):
+        assert grouping.name_evidence([1, 2], {1: "goblin", 2: "dragon"}) == []
+
+    def test_keyless_models_produce_no_evidence(self):
+        assert grouping.name_evidence([1, 2], {}) == []
+
+    def test_bucket_fans_out_from_its_first_member(self):
+        keys = {1: "goblin", 2: "goblin", 3: "goblin"}
+
+        evidence = grouping.name_evidence([1, 2, 3], keys)
+
+        assert [(e.a, e.b) for e in evidence] == [(1, 2), (1, 3)]
+
+    def test_large_creators_still_get_name_evidence(self):
+        # The pass cap suppresses only filename evidence; the name baseline must
+        # keep working for creators of any size.
+        ids = list(range(1, grouping_policy._FILENAME_PASS_MODEL_CAP + 2))
+        keys = {mid: "goblin" for mid in ids}
+
+        assert len(grouping.name_evidence(ids, keys)) == len(ids) - 1
+
+
+def _facts(names, keys=None, contexts=None, explicit_reps=()):
+    """CandidateFacts with sensible defaults; keys default to the names."""
+    return grouping.CandidateFacts(
+        names=names,
+        keys=keys if keys is not None else dict(names),
+        contexts=contexts or {},
+        explicit_reps=frozenset(explicit_reps),
+    )
+
+
+def _merged(ids, edges, boundaries=None):
+    """Run edges through a union-find + ledger, returning both."""
+    uf = grouping_policy._UnionFind(list(ids), boundaries)
+    ledger = EvidenceLedger()
+    grouping_policy._apply_evidence(uf, ledger, edges)
+    return uf, ledger
+
+
+class TestBuildClusters:
+    """Component extraction and the transitive boundary guarantee (STUDIO-246)."""
+
+    def test_unmerged_models_are_singleton_clusters(self):
+        uf, _ = _merged([1, 2], [])
+
+        assert grouping.build_clusters([1, 2], uf) == [[1], [2]]
+
+    def test_merged_models_share_a_cluster(self):
+        uf, _ = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        assert grouping.build_clusters([1, 2], uf) == [[1, 2]]
+
+    def test_members_follow_ids_order(self):
+        uf, _ = _merged([3, 1, 2], [grouping.Evidence(SignalKind.HASH, 1, 3)])
+
+        assert grouping.build_clusters([3, 1, 2], uf) == [[3, 1], [2]]
+
+    def test_conflicting_hierarchy_survives_transitive_edges(self):
+        # 2 is unkeyed, so hash edges 1-2 then 2-3 would chain Ada to Leon
+        # without the boundary constraint.
+        contexts = {1: _ctx("ada wong"), 2: _ctx(None), 3: _ctx("leon kennedy")}
+        edges = [
+            grouping.Evidence(SignalKind.HASH, 1, 2),
+            grouping.Evidence(SignalKind.HASH, 2, 3),
+        ]
+        uf, _ = _merged([1, 2, 3], edges, grouping.product_boundaries(contexts))
+
+        clusters = grouping.build_clusters([1, 2, 3], uf)
+
+        assert [1, 2] in clusters
+        assert [3] in clusters
+
+
+class TestSelectLabel:
+    """Label preference order, unchanged from the original helper (STUDIO-246)."""
+
+    def test_hierarchy_display_label_wins(self):
+        facts = _facts(
+            {1: "Supported Files", 2: "Alternate Cut"},
+            keys={1: "supported", 2: "alternate"},
+            contexts={1: _ctx("ada wong", "Ada Wong"), 2: _ctx("ada wong", "Ada Wong")},
+        )
+
+        assert grouping.select_label([1, 2], facts) == "Ada Wong"
+
+    def test_most_common_name_key_wins_without_hierarchy(self):
+        facts = _facts(
+            {1: "Goblin A", 2: "Goblin B", 3: "Orc C"},
+            keys={1: "Goblin", 2: "Goblin", 3: "Orc"},
+        )
+
+        assert grouping.select_label([1, 2, 3], facts) == "Goblin"
+
+    def test_falls_back_to_the_first_members_name(self):
+        facts = _facts({1: "Mystery Sculpt", 2: "Other"}, keys={})
+
+        assert grouping.select_label([1, 2], facts) == "Mystery Sculpt"
+
+
+class TestSelectRepresentative:
+    """User-pinned representatives outrank the positional default."""
+
+    def test_explicit_representative_is_preferred(self):
+        facts = _facts({1: "A", 2: "B", 3: "C"}, explicit_reps={3})
+
+        assert grouping.select_representative([1, 2, 3], facts) == 3
+
+    def test_first_member_is_the_default(self):
+        facts = _facts({1: "A", 2: "B"})
+
+        assert grouping.select_representative([1, 2], facts) == 1
+
+    def test_first_explicit_member_wins_when_several_are_pinned(self):
+        facts = _facts({1: "A", 2: "B", 3: "C"}, explicit_reps={2, 3})
+
+        assert grouping.select_representative([1, 2, 3], facts) == 2
+
+
+class TestProposeGroups:
+    """Typed proposals, computed without a database (STUDIO-246)."""
+
+    def test_singleton_clusters_produce_no_proposal(self):
+        uf, ledger = _merged([1], [])
+
+        assert grouping.propose_groups([1], uf, ledger, _facts({1: "Goblin"})) == []
+
+    def test_structural_only_cluster_produces_no_proposal(self):
+        # Both members are junk folders, so the cluster has no product identity
+        # even though a hash merged it (#639).
+        names = {1: "Supported", 2: "STL"}
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        assert grouping.propose_groups([1, 2], uf, ledger, _facts(names)) == []
+
+    def test_one_real_product_is_enough_to_propose(self):
+        names = {1: "Supported", 2: "Goblin King"}
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        proposals = grouping.propose_groups([1, 2], uf, ledger, _facts(names))
+
+        assert len(proposals) == 1
+        assert proposals[0].members == (1, 2)
+
+    def test_keyless_members_cannot_supply_product_identity(self):
+        names = {1: "Goblin King", 2: "Goblin Scout"}
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        proposals = grouping.propose_groups([1, 2], uf, ledger, _facts(names, keys={}))
+
+        assert proposals == []
+
+    def test_proposal_carries_the_merging_signals_reason_and_confidence(self):
+        names = {1: "Goblin A", 2: "Goblin B"}
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        proposal = grouping.propose_groups([1, 2], uf, ledger, _facts(names))[0]
+
+        assert proposal.signal is SignalKind.HASH
+        assert proposal.reason == "shared mesh files"
+        assert proposal.confidence == 0.9
+
+    def test_name_formed_proposal_renders_its_label_into_the_reason(self):
+        facts = _facts({1: "Goblin A", 2: "Goblin B"}, keys={1: "Goblin", 2: "Goblin"})
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.NAME, 1, 2)])
+
+        proposal = grouping.propose_groups([1, 2], uf, ledger, facts)[0]
+
+        assert proposal.label == "Goblin"
+        assert proposal.reason == "name: Goblin"
+        assert proposal.confidence == 0.6
+
+    def test_explicit_representative_reaches_the_proposal(self):
+        facts = _facts({1: "Goblin A", 2: "Goblin B"}, explicit_reps={2})
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        assert grouping.propose_groups([1, 2], uf, ledger, facts)[0].rep_model_id == 2
+
+    def test_proposals_follow_cluster_order(self):
+        names = {1: "Goblin A", 2: "Goblin B", 3: "Orc A", 4: "Orc B"}
+        edges = [
+            grouping.Evidence(SignalKind.HASH, 3, 4),
+            grouping.Evidence(SignalKind.HASH, 1, 2),
+        ]
+        uf, ledger = _merged([1, 2, 3, 4], edges)
+
+        proposals = grouping.propose_groups([1, 2, 3, 4], uf, ledger, _facts(names))
+
+        # Cluster order follows `ids`, not the order edges were applied.
+        assert [p.members for p in proposals] == [(1, 2), (3, 4)]
+
+    def test_proposing_mutates_nothing_and_creates_no_rows(self):
+        names = {1: "Goblin A", 2: "Goblin B"}
+        facts = _facts(names)
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        grouping.propose_groups([1, 2], uf, ledger, facts)
+
+        # Facts are frozen and the ledger still holds only what merged.
+        assert facts.names == names
+        assert [(e.a, e.b) for e in ledger.edges] == [(1, 2)]
+
+
+class TestOrderCandidates:
+    """Candidate ordering is stable and independent of row ids (STUDIO-248)."""
+
+    def test_orders_by_folder_path(self):
+        paths = {1: "/lib/c/zeta", 2: "/lib/c/alpha", 3: "/lib/c/mid"}
+        names = {1: "Zeta", 2: "Alpha", 3: "Mid"}
+
+        assert grouping.order_candidates([1, 2, 3], paths, names) == [2, 3, 1]
+
+    def test_result_is_invariant_under_input_order(self):
+        paths = {1: "/lib/c/zeta", 2: "/lib/c/alpha", 3: "/lib/c/mid"}
+        names = {1: "Zeta", 2: "Alpha", 3: "Mid"}
+
+        outcomes = {
+            tuple(grouping.order_candidates(list(perm), paths, names))
+            for perm in itertools.permutations([1, 2, 3])
+        }
+
+        assert len(outcomes) == 1
+
+    def test_ordering_does_not_depend_on_id_assignment(self):
+        # The same library inserted in a different order gets different
+        # autoincrement ids; the resulting sequence of folder paths must match.
+        first = grouping.order_candidates(
+            [1, 2], {1: "/lib/c/alpha", 2: "/lib/c/beta"}, {1: "Alpha", 2: "Beta"}
+        )
+        second = grouping.order_candidates(
+            [7, 5], {7: "/lib/c/alpha", 5: "/lib/c/beta"}, {7: "Alpha", 5: "Beta"}
+        )
+
+        assert [("alpha" if m in (1, 7) else "beta") for m in first] == ["alpha", "beta"]
+        assert [("alpha" if m in (1, 7) else "beta") for m in second] == ["alpha", "beta"]
+
+    def test_separator_style_does_not_change_the_order(self):
+        paths = {1: "C:\\lib\\c\\beta", 2: "C:/lib/c/alpha"}
+        names = {1: "Beta", 2: "Alpha"}
+
+        assert grouping.order_candidates([1, 2], paths, names) == [2, 1]
+
+    def test_identical_paths_fall_back_to_name_then_id(self):
+        paths = {1: "/lib/c/dup", 2: "/lib/c/dup", 3: "/lib/c/dup"}
+        names = {1: "B", 2: "A", 3: "A"}
+
+        assert grouping.order_candidates([3, 1, 2], paths, names) == [2, 3, 1]
+
+
+class TestDeterministicProposals:
+    """Identical logical input yields identical proposals (STUDIO-248)."""
+
+    def _propose(self, ids, paths, names, hashes=None, keys=None, explicit_reps=()):
+        ordered = grouping.order_candidates(list(ids), paths, names)
+        uf = grouping_policy._UnionFind(ordered)
+        ledger = EvidenceLedger()
+        grouping_policy._apply_evidence(uf, ledger, grouping.hash_evidence(ordered, hashes or {}))
+        facts = _facts(names, keys=keys, explicit_reps=explicit_reps)
+        return grouping.propose_groups(ordered, uf, ledger, facts)
+
+    def test_every_permutation_produces_equal_proposals(self):
+        names = {1: "Goblin Archer", 2: "Goblin Scout", 3: "Goblin Guard"}
+        paths = {mid: f"/lib/c/{name}" for mid, name in names.items()}
+        # 1 bridges both hashes, so edge order decides who roots the component.
+        hashes = {1: {"h-a", "h-b"}, 2: {"h-a"}, 3: {"h-b"}}
+
+        outcomes = {
+            tuple(
+                (p.members, p.label, p.rep_model_id, p.signal, p.reason, p.confidence)
+                for p in self._propose(perm, paths, names, hashes)
+            )
+            for perm in itertools.permutations([1, 2, 3])
+        }
+
+        assert len(outcomes) == 1
+
+    def test_permuted_hash_iteration_cannot_change_proposals(self):
+        # Rebuilding the same hash sets in a different insertion order models a
+        # different PYTHONHASHSEED between processes.
+        names = {1: "Goblin Archer", 2: "Goblin Scout", 3: "Goblin Guard"}
+        paths = {mid: f"/lib/c/{name}" for mid, name in names.items()}
+
+        outcomes = set()
+        for order in itertools.permutations(["h-a", "h-b"]):
+            hashes = {1: set(order), 2: {"h-a"}, 3: {"h-b"}}
+            outcomes.add(
+                tuple((p.members, p.label) for p in self._propose([1, 2, 3], paths, names, hashes))
+            )
+
+        assert len(outcomes) == 1
+
+    def test_default_representative_is_stable_across_permutations(self):
+        names = {1: "Goblin Archer", 2: "Goblin Scout"}
+        paths = {1: "/lib/c/zzz-archer", 2: "/lib/c/aaa-scout"}
+        hashes = {1: {"h"}, 2: {"h"}}
+
+        reps = {
+            self._propose(perm, paths, names, hashes)[0].rep_model_id
+            for perm in itertools.permutations([1, 2])
+        }
+
+        # 2 sorts first by folder path, so it is the positional default either way.
+        assert reps == {2}
+
+    def test_explicit_representative_still_wins_over_the_stable_default(self):
+        names = {1: "Goblin Archer", 2: "Goblin Scout"}
+        paths = {1: "/lib/c/zzz-archer", 2: "/lib/c/aaa-scout"}
+        hashes = {1: {"h"}, 2: {"h"}}
+
+        reps = {
+            self._propose(perm, paths, names, hashes, explicit_reps={1})[0].rep_model_id
+            for perm in itertools.permutations([1, 2])
+        }
+
+        assert reps == {1}
+
+
+class TestLabelTieResolution:
+    """Label ties resolve predictably rather than by encounter order."""
+
+    def test_tied_name_keys_resolve_alphabetically(self):
+        facts = _facts({1: "A", 2: "B"}, keys={1: "Zebra", 2: "Apple"})
+
+        assert grouping.select_label([1, 2], facts) == "Apple"
+        assert grouping.select_label([2, 1], facts) == "Apple"
+
+    def test_a_clear_majority_still_beats_alphabetical_order(self):
+        facts = _facts(
+            {1: "A", 2: "B", 3: "C"},
+            keys={1: "Zebra", 2: "Zebra", 3: "Apple"},
+        )
+
+        assert grouping.select_label([1, 2, 3], facts) == "Zebra"
+
+    def test_tied_hierarchy_labels_resolve_alphabetically(self):
+        facts = _facts(
+            {1: "A", 2: "B"},
+            contexts={1: _ctx("k", "Zeta Product"), 2: _ctx("k", "Alpha Product")},
+        )
+
+        assert grouping.select_label([1, 2], facts) == "Alpha Product"
+        assert grouping.select_label([2, 1], facts) == "Alpha Product"
+
+
+def _candidate(mid, folder_path=None, excluded=False, no_group=False, variant_group_id=None):
+    return grouping.CandidateModel(
+        id=mid,
+        folder_path=folder_path if folder_path is not None else f"/lib/c/model{mid}",
+        excluded=excluded,
+        no_group=no_group,
+        variant_group_id=variant_group_id,
+    )
+
+
+class TestSelectEligible:
+    """Candidate eligibility, decided without a database (STUDIO-241)."""
+
+    def test_a_plain_model_is_eligible(self):
+        decision = grouping.select_eligible([_candidate(1)], set(), [])
+
+        assert decision.eligible == (1,)
+        assert decision.off_subtree == ()
+        assert decision.reasons == {}
+
+    def test_excluded_models_are_ineligible(self):
+        decision = grouping.select_eligible([_candidate(1, excluded=True)], set(), [])
+
+        assert decision.eligible == ()
+        assert decision.reasons == {1: grouping.IneligibilityReason.EXCLUDED}
+
+    def test_manual_group_members_are_always_ineligible(self):
+        decision = grouping.select_eligible([_candidate(1, variant_group_id=42)], {42}, [])
+
+        assert decision.eligible == ()
+        assert decision.reasons == {1: grouping.IneligibilityReason.MANUAL_GROUP}
+
+    def test_membership_of_an_auto_group_does_not_block_eligibility(self):
+        # variant_group_id set, but not to a manual group — the engine rebuilds
+        # auto groups from scratch each run.
+        decision = grouping.select_eligible([_candidate(1, variant_group_id=7)], {42}, [])
+
+        assert decision.eligible == (1,)
+
+    def test_no_group_models_are_ineligible(self):
+        decision = grouping.select_eligible([_candidate(1, no_group=True)], set(), [])
+
+        assert decision.eligible == ()
+        assert decision.reasons == {1: grouping.IneligibilityReason.NO_GROUP}
+
+    def test_off_subtree_models_are_ineligible_and_reported_for_clearing(self):
+        models = [_candidate(1, folder_path="/lib/c/off/model")]
+
+        decision = grouping.select_eligible(models, set(), [("/lib/c/off", "off")])
+
+        assert decision.eligible == ()
+        assert decision.off_subtree == (1,)
+        assert decision.reasons == {1: grouping.IneligibilityReason.OFF_SUBTREE}
+
+    def test_auto_subtree_models_stay_eligible(self):
+        models = [_candidate(1, folder_path="/lib/c/on/model")]
+
+        decision = grouping.select_eligible(models, set(), [("/lib/c/off", "off")])
+
+        assert decision.eligible == (1,)
+
+    def test_nearer_auto_subtree_rescues_a_model_from_an_outer_off(self):
+        models = [_candidate(1, folder_path="/lib/c/off/keep/model")]
+        strategies = [("/lib/c/off", "off"), ("/lib/c/off/keep", "auto")]
+
+        assert grouping.select_eligible(models, set(), strategies).eligible == (1,)
+
+    def test_no_strategies_means_the_subtree_rule_cannot_fire(self):
+        models = [_candidate(1, folder_path="/lib/c/off/model")]
+
+        decision = grouping.select_eligible(models, set(), [])
+
+        assert decision.eligible == (1,)
+        assert decision.off_subtree == ()
+
+    def test_only_off_subtree_models_are_listed_for_clearing(self):
+        models = [
+            _candidate(1, no_group=True),
+            _candidate(2, excluded=True),
+            _candidate(3, folder_path="/lib/c/off/model", variant_group_id=9),
+        ]
+
+        decision = grouping.select_eligible(models, set(), [("/lib/c/off", "off")])
+
+        assert decision.off_subtree == (3,)
+
+    def test_eligible_order_follows_the_input(self):
+        decision = grouping.select_eligible([_candidate(3), _candidate(1)], set(), [])
+
+        assert decision.eligible == (3, 1)
+
+    def test_empty_input_yields_an_empty_decision(self):
+        decision = grouping.select_eligible([], set(), [])
+
+        assert decision.eligible == ()
+        assert decision.off_subtree == ()
+        assert decision.reasons == {}
+
+    def test_accepts_a_generator(self):
+        decision = grouping.select_eligible((c for c in [_candidate(1)]), set(), [])
+
+        assert decision.eligible == (1,)
+
+
+class TestEligibilityPrecedence:
+    """A model tripping several rules reports the first one evaluated."""
+
+    def test_excluded_outranks_everything(self):
+        model = _candidate(1, excluded=True, no_group=True, variant_group_id=42)
+
+        decision = grouping.select_eligible([model], {42}, [("/lib/c", "off")])
+
+        assert decision.reasons == {1: grouping.IneligibilityReason.EXCLUDED}
+
+    def test_manual_group_outranks_no_group(self):
+        model = _candidate(1, no_group=True, variant_group_id=42)
+
+        decision = grouping.select_eligible([model], {42}, [])
+
+        assert decision.reasons == {1: grouping.IneligibilityReason.MANUAL_GROUP}
+
+    def test_no_group_outranks_the_subtree_rule(self):
+        model = _candidate(1, folder_path="/lib/c/off/model", no_group=True)
+
+        decision = grouping.select_eligible([model], set(), [("/lib/c/off", "off")])
+
+        assert decision.reasons == {1: grouping.IneligibilityReason.NO_GROUP}
+        # Not queued for clearing: it was never an auto-group member to begin with.
+        assert decision.off_subtree == ()
+
+    def test_no_group_outranks_every_signal_by_never_becoming_a_candidate(self):
+        # Two models that a shared hash would otherwise merge; one is pinned
+        # no_group, so no evidence can ever reach it.
+        models = [_candidate(1), _candidate(2, no_group=True)]
+
+        decision = grouping.select_eligible(models, set(), [])
+
+        assert decision.eligible == (1,)
+        assert 2 not in decision.eligible
 
 
 class TestHierarchySignal:
@@ -204,6 +1021,77 @@ class TestHashSignal:
         assert _groups(db, creator) == []
 
 
+class TestSignalAttribution:
+    """A signal earns the group's reason/confidence only if it actually merged
+    two components (STUDIO-242). Re-observing an already-connected pair, or
+    being turned away at a hierarchy boundary, credits nothing."""
+
+    def test_shared_hash_does_not_steal_credit_from_hierarchy(self, db):
+        # Hierarchy runs first and forms the cluster; the hash pass then sees the
+        # same pair already connected, so it must not restate reason/confidence.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Supported Files")
+        b = make_model(db, creator, name="Alternate Cut")
+        a.character = b.character = "Ada Wong"
+        db.flush()
+        _stl(db, a, "body.stl", file_hash="shared-mesh")
+        _stl(db, b, "body.stl", file_hash="shared-mesh")
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+        assert groups[0].reason == "same product hierarchy"
+        assert groups[0].confidence == 0.85
+
+    def test_hierarchy_rejected_hash_edge_credits_nothing(self, db):
+        # a+b are a legitimate hierarchy cluster. c shares a mesh with a but sits
+        # behind a conflicting envelope: it stays out, and its rejected edge must
+        # not relabel the a+b group as hash-derived.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Supported Files")
+        b = make_model(db, creator, name="Alternate Cut")
+        c = make_model(db, creator, name="Presupported")
+        a.character = b.character = "Ada Wong"
+        c.character = "Leon Kennedy"
+        db.flush()
+        _stl(db, a, "body.stl", file_hash="shared-mesh")
+        _stl(db, c, "body.stl", file_hash="shared-mesh")
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+        assert groups[0].reason == "same product hierarchy"
+        assert groups[0].confidence == 0.85
+        db.refresh(c)
+        assert c.variant_group_id is None
+
+    def test_weaker_signals_do_not_restate_a_hash_formed_cluster(self, db):
+        # Hash merges the pair; the filename and name passes both re-observe it
+        # already connected. Hash keeps the attribution.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin Archer")
+        b = make_model(db, creator, name="Goblin Scout")
+        db.flush()
+        for fn in ("body.stl", "head.stl", "base.stl"):
+            _stl(db, a, fn, file_hash=f"h-{fn}")
+            _stl(db, b, fn, file_hash=f"h-{fn}")
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+        assert groups[0].reason == "shared mesh files"
+        assert groups[0].confidence == 0.9
+
+
 class TestManualLock:
     def test_manual_group_preserved_and_members_not_reassigned(self, db):
         creator = make_creator(db)
@@ -310,6 +1198,26 @@ class TestSubtreeStrategy:
 
         # The closer "auto" wins → they group despite the outer "off".
         assert len(_groups(db, creator)) == 1
+
+    def test_manual_membership_survives_an_off_subtree(self, db):
+        # An "off" subtree clears stale *automatic* membership, but a curated
+        # manual group is the user's decision and must be left alone (STUDIO-241).
+        from app.models import GroupingStrategy
+        creator = make_creator(db)
+        curated = make_model(db, creator, name="Curated Hero")
+        manual = VariantGroup(creator_id=creator.id, label="My Group", source="manual")
+        db.add(manual)
+        db.flush()
+        curated.variant_group_id = manual.id
+        parent = curated.folder_path.rsplit("/", 1)[0]
+        db.add(GroupingStrategy(path=parent, strategy="off"))
+        db.flush()
+
+        _run(db, creator)
+
+        db.refresh(curated)
+        assert curated.variant_group_id == manual.id
+        assert db.get(VariantGroup, manual.id) is not None
 
 
 class TestFilenameHardening:
@@ -444,6 +1352,221 @@ class TestRep:
         _run(db, creator)
 
         assert _groups(db, creator)[0].rep_model_id == rep.id
+
+
+class TestCreatorIsResolvedOnce:
+    """Creator identity is loaded once per run, not once per candidate (STUDIO-239).
+
+    The name-key pass used to call `_creator_name(db, creator_id)` inside its
+    per-model loop. A counting spy is cheap insurance against that returning.
+    """
+
+    def test_creator_name_is_resolved_at_most_once_per_regroup(self, db, monkeypatch):
+        creator = make_creator(db)
+        for name in ("Goblin Archer", "Goblin Scout", "Goblin Guard", "Orc Brute"):
+            make_model(db, creator, name=name)
+        db.flush()
+
+        calls = []
+        real = grouping._creator_name
+        monkeypatch.setattr(
+            grouping,
+            "_creator_name",
+            lambda session, cid: (calls.append(cid), real(session, cid))[1],
+        )
+
+        _run(db, creator)
+
+        assert calls == [creator.id]
+
+    def test_creator_name_lookup_scales_with_runs_not_models(self, db, monkeypatch):
+        creator = make_creator(db)
+        for i in range(12):
+            make_model(db, creator, name=f"Goblin {i}")
+        db.flush()
+
+        calls = []
+        real = grouping._creator_name
+        monkeypatch.setattr(
+            grouping,
+            "_creator_name",
+            lambda session, cid: (calls.append(cid), real(session, cid))[1],
+        )
+
+        _run(db, creator)
+        _run(db, creator)
+
+        assert len(calls) == 2
+
+
+class TestDropAutoGroupsProtectsManualGroups:
+    """The `source == "auto"` filter is what protects manual groups (STUDIO-239).
+
+    `_drop_auto_groups` no longer takes a manual-id set, so these pin that the
+    protection really comes from the query rather than a caller-supplied list.
+    """
+
+    def test_manual_group_and_members_survive_a_drop(self, db):
+        creator = make_creator(db)
+        kept = make_model(db, creator, name="Curated Hero")
+        manual = VariantGroup(creator_id=creator.id, label="My Group", source="manual")
+        db.add(manual)
+        db.flush()
+        kept.variant_group_id = manual.id
+        db.flush()
+
+        grouping._drop_auto_groups(db, creator.id)
+        db.flush()
+        db.expire_all()
+
+        assert db.get(VariantGroup, manual.id) is not None
+        db.refresh(kept)
+        assert kept.variant_group_id == manual.id
+
+    def test_auto_group_and_its_membership_are_cleared(self, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="Auto Hero")
+        auto = VariantGroup(creator_id=creator.id, label="Auto", source="auto")
+        db.add(auto)
+        db.flush()
+        auto_id = auto.id
+        model.variant_group_id = auto_id
+        db.flush()
+
+        grouping._drop_auto_groups(db, creator.id)
+        db.flush()
+        db.expire_all()
+
+        assert db.get(VariantGroup, auto_id) is None
+        db.refresh(model)
+        assert model.variant_group_id is None
+
+    def test_another_creators_auto_group_is_untouched(self, db):
+        mine = make_creator(db, name="Mine")
+        theirs = make_creator(db, name="Theirs")
+        other = VariantGroup(creator_id=theirs.id, label="Theirs", source="auto")
+        db.add(other)
+        db.flush()
+
+        grouping._drop_auto_groups(db, mine.id)
+        db.flush()
+
+        assert db.get(VariantGroup, other.id) is not None
+
+
+class TestMaterialisationOwnsPersistenceOnly:
+    """Transaction ownership stays with the caller (STUDIO-247)."""
+
+    def test_regroup_does_not_commit_so_the_caller_can_roll_back(self, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="Goblin Supported")
+        make_model(db, creator, name="Goblin Unsupported")
+        db.commit()  # baseline the caller could return to
+
+        grouping.regroup_creator(db, creator.id)
+        db.flush()
+        assert len(_groups(db, creator)) == 1, "groups should exist inside the transaction"
+
+        db.rollback()
+
+        # Nothing was committed underneath the caller.
+        assert _groups(db, creator) == []
+
+    def test_a_committed_regroup_survives(self, db):
+        # The mirror of the above: rollback undoing the work is the caller's
+        # choice, not the engine failing to persist.
+        creator = make_creator(db)
+        make_model(db, creator, name="Goblin Supported")
+        make_model(db, creator, name="Goblin Unsupported")
+        db.flush()
+
+        grouping.regroup_creator(db, creator.id)
+        db.commit()
+        db.expire_all()
+
+        assert len(_groups(db, creator)) == 1
+
+    def test_auto_groups_are_replaced_not_accumulated(self, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="Goblin Supported")
+        make_model(db, creator, name="Goblin Unsupported")
+        db.flush()
+
+        _run(db, creator)
+        assert len(_groups(db, creator)) == 1
+        _run(db, creator)
+
+        # Replaced, not accumulated: still exactly one live auto group, and no
+        # orphan left alongside it. Note ids are NOT expected to change — SQLite
+        # reuses a rowid freed by the delete, which is precisely the hazard
+        # STUDIO-301 had to guard when clearing member references first.
+        assert len(_groups(db, creator)) == 1
+        assert db.query(VariantGroup).filter_by(creator_id=creator.id).count() == 1
+
+    def test_materialising_no_proposals_leaves_no_auto_groups(self, db):
+        creator = make_creator(db)
+        model = make_model(db, creator, name="Lonely Sculpt")
+        db.flush()
+
+        grouping.materialise_proposals(db, creator.id, [], {model.id: model}, [model.id])
+        db.flush()
+
+        assert _groups(db, creator) == []
+        db.refresh(model)
+        assert model.variant_group_id is None
+
+
+class TestRepeatedRegroupingIsStable:
+    """Regrouping the same library twice persists equivalent metadata (STUDIO-248)."""
+
+    def _snapshot(self, db, creator):
+        return sorted(
+            (
+                g.label,
+                g.reason,
+                g.confidence,
+                # Compare by folder path, not id: ids change as groups are
+                # dropped and recreated each run.
+                next(m.folder_path for m in g.models if m.id == g.rep_model_id),
+                tuple(sorted(m.folder_path for m in g.models)),
+            )
+            for g in _groups(db, creator)
+        )
+
+    def test_second_run_reproduces_the_first(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Goblin Archer")
+        b = make_model(db, creator, name="Goblin Scout")
+        c = make_model(db, creator, name="Orc Brute")
+        d = make_model(db, creator, name="Orc Warlord")
+        db.flush()
+        for model, file_hash in ((a, "goblin"), (b, "goblin"), (c, "orc"), (d, "orc")):
+            _stl(db, model, "body.stl", file_hash=file_hash)
+            _stl(db, model, f"{model.name}.stl", file_hash=file_hash)
+        db.flush()
+
+        _run(db, creator)
+        first = self._snapshot(db, creator)
+        _run(db, creator)
+        second = self._snapshot(db, creator)
+
+        assert len(first) == 2
+        assert first == second
+
+    def test_repeat_run_is_stable_with_hierarchy_enabled(self, db):
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Supported Files")
+        b = make_model(db, creator, name="Alternate Cut")
+        a.character = b.character = "Ada Wong"
+        _enable_hierarchy(db)
+        db.flush()
+
+        _run(db, creator)
+        first = self._snapshot(db, creator)
+        _run(db, creator)
+
+        assert first == self._snapshot(db, creator)
+        assert len(first) == 1
 
 
 class TestStructuralFolderNames:

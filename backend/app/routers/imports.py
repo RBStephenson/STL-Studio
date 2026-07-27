@@ -11,9 +11,6 @@ import os
 import shutil
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
-
-import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +34,7 @@ from app.services import reorganize_apply, scanner, write_lock
 from app.services.job_runner import JobHandle, JobState, runner
 from app.services.path_guard import assert_within_roots
 from app.services.reorganize_apply import ApplyError
-from app.services.thumbnails import CONTENT_TYPE_EXT, IMAGE_EXTS
+from app.services.thumbnails import IMAGE_EXTS, fetch_image_bytes
 
 # Single global job key — an import-apply's real mutual exclusion comes from
 # the write lock apply_manifest already holds; this just lets one apply be
@@ -48,7 +45,6 @@ _IMPORT_APPLY_KEY = "import_apply"
 # tracked/polled through the shared job runner.
 _DOWNLOAD_IMAGES_KEY = "download_images"
 _DOWNLOAD_CONCURRENCY = 6
-_DOWNLOAD_IMAGE_TIMEOUT = 10.0
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -359,15 +355,6 @@ def set_source_mapping(body: SourceMappingSet, db: Session = Depends(get_db)):
     return mapping
 
 
-def _image_ext(url: str, content_type: str) -> str:
-    """Best-effort image extension from Content-Type, falling back to URL suffix."""
-    ext = CONTENT_TYPE_EXT.get(content_type.split(";")[0].strip().lower(), "")
-    if ext:
-        return ext
-    suffix = Path(urlparse(url).path).suffix.lower()
-    return suffix if suffix in IMAGE_EXTS else ".jpg"
-
-
 async def _download_images_async(handle: JobHandle, pack_dir_str: str, urls: list[str]) -> int:
     """Fetch every URL into pack_dir concurrently (bounded), reporting progress
     on handle after each one finishes. Returns the count actually written.
@@ -382,24 +369,29 @@ async def _download_images_async(handle: JobHandle, pack_dir_str: str, urls: lis
     lock = asyncio.Lock()
     sem = asyncio.Semaphore(_DOWNLOAD_CONCURRENCY)
 
-    async def fetch_one(client: httpx.AsyncClient, n: int, url: str) -> None:
+    async def fetch_one(n: int, url: str) -> None:
         nonlocal downloaded, done
         async with sem:
             try:
-                r = await client.get(url)
-                r.raise_for_status()
-                ct = r.headers.get("content-type", "").split(";")[0].strip().lower()
-                if ct in ("image/svg+xml", "text/html", "application/json"):
-                    logger.warning("gallery image %d skipped — unsupported content-type %r", n, ct)
-                    return
-                ext = _image_ext(url, ct)
-                # Guard: ext must be a known-safe image extension — reject anything
-                # that could escape the filename (e.g. a crafted URL suffix).
+                # Delegates to the hardened fetch shared with the thumbnail and
+                # collection-cover paths (STUDIO-320): it applies the SSRF guard
+                # on the URL and every redirect hop, caps the redirect count and
+                # the response size, and returns an extension derived from the
+                # body's magic bytes rather than the server's content-type claim
+                # or the URL suffix. This path previously used a bare client with
+                # a content-type blocklist, so `application/octet-stream` plus an
+                # unhelpful suffix persisted arbitrary bytes as `.jpg`.
+                #
+                # _follow_html=False keeps the existing behaviour of skipping a
+                # URL that serves a web page, rather than chasing its og:image.
+                ext, data = await fetch_image_bytes(url, _follow_html=False)
                 if ext not in IMAGE_EXTS:
                     logger.warning("gallery image %d skipped — unexpected ext %r", n, ext)
                     return
                 dest = pack_dir / f"gallery_{n:02d}{ext}"
-                dest.write_bytes(r.content)
+                # Off the event loop: a synchronous write here stalled every
+                # other concurrent fetch for the duration of the write.
+                await asyncio.to_thread(dest.write_bytes, data)
                 async with lock:
                     downloaded += 1
             except Exception as e:
@@ -412,11 +404,7 @@ async def _download_images_async(handle: JobHandle, pack_dir_str: str, urls: lis
                         downloaded=downloaded, total=total,
                     )
 
-    async with httpx.AsyncClient(
-        timeout=_DOWNLOAD_IMAGE_TIMEOUT, follow_redirects=True,
-        headers={"User-Agent": "STL-Inventory/1.0"},
-    ) as client:
-        await asyncio.gather(*(fetch_one(client, n, url) for n, url in enumerate(urls)))
+    await asyncio.gather(*(fetch_one(n, url) for n, url in enumerate(urls)))
     return downloaded
 
 

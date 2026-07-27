@@ -85,6 +85,30 @@ Click it to open the group and see each variant individually.
 
 This keeps the grid tidy when a creator ships many cuts/versions of one model.
 
+### Open a group in a side panel (opt-in)
+
+By default, clicking a group card leaves the Library and opens the full Variant
+Group screen. Turn on **Open variant groups in a side panel** (Settings →
+Library) and it instead opens a panel beside the grid listing each variant with
+its thumbnail and tags, so you can look inside a group without losing your
+place, your filters, or your scroll position.
+
+- **Open full view** at the bottom of the panel goes to the Variant Group screen
+  for renaming, re-ordering, merging and splitting — the panel is for looking,
+  not editing.
+- **Ctrl-click** (or middle-click) a group card to go straight to the full page,
+  bypassing the panel.
+- Close it with the **×**, the **Escape** key, or the browser **Back** button.
+  The open group is part of the address, so the panel survives a reload and the
+  link can be shared.
+- **Drag the panel's left edge** to resize it; rows show larger thumbnails and
+  more tags as it widens. Double-click the edge to reset. The width is
+  remembered per machine. The handle is keyboard-operable: focus it and use the
+  arrow keys, or Home/End for the extremes.
+
+Off by default. Models grouped before variant groups became first-class carry no
+group id, so those cards continue to open the full page.
+
 ### Group variants by character folder (opt-in)
 
 If your library is laid out as `{creator}/{character}/…` — every variant of a
@@ -346,8 +370,12 @@ If the auto-chosen thumbnail is wrong (or missing), open a model and click
 **Change image** on the preview. The **Set Thumbnail** dialog offers:
 
 - **From Folder** — every image found in that model's own folder, to pick from.
-- **From URL** — paste any image URL; the image is downloaded and stored
-  locally, so it keeps working even when the site blocks hot-linking.
+- **From URL** — paste an image URL; the image is downloaded and stored
+  locally, so it keeps working even when the site blocks hot-linking. The
+  downloaded file must actually be a PNG, JPEG, WebP, or GIF (max 15 MB) —
+  this is checked against the file's own contents, not the address or what
+  the server claims to be sending, so a link that returns something else is
+  rejected rather than saved.
 - **Upload** — pick a PNG, JPEG, WebP, or GIF from your computer (max 15 MB);
   it's applied as the thumbnail immediately.
 - **Clear** — remove the thumbnail entirely.
@@ -552,7 +580,9 @@ see [Scanning & folders](scanning-and-folders.md#libraries-import-destinations).
    (the store — `source_site` — is recorded too). Then click **Import**. That
    ingests just that pack's folder as inbox models, downloads any fetched
    gallery images into the pack folder (concurrently, so a slow/unreachable
-   image doesn't block the rest), applies the metadata, and immediately moves
+   image doesn't block the rest; anything that isn't a real PNG, JPEG, WebP,
+   or GIF is skipped and logged rather than saved), applies the metadata,
+   and immediately moves
    that pack into the destination library on disk (drift-checked, with undo)
    — no separate move step. The **inbox** flag clears as the pack lands, and a
    progress bar shows what's happening at each stage (downloading images,

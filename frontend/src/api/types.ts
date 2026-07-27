@@ -298,6 +298,7 @@ export interface AppSettings {
   // Use scan hierarchy as a constrained signal for automatic variant groups.
   // Off by default; manual groups and explicit exclusions remain authoritative.
   hierarchy_variant_grouping_enabled: boolean;
+  variant_sidebar_enabled: boolean;
   system_info_enabled: boolean;
   persistent_diagnostics_enabled: boolean;
   storage_recovery_enabled: boolean;
@@ -923,6 +924,16 @@ export interface ScanStatus {
   models_found: number | null;
   files_found: number | null;
   cancelled: boolean;
+  /** Roots that were missing or empty (detached mount); pruning was skipped beneath them. */
+  offline_roots?: string[];
+  /**
+   * Entries the scan could not read. Non-zero means the run saw an incomplete view
+   * of the disk — model counts are a floor, and prunes that assume a complete walk
+   * were skipped.
+   */
+  read_failures?: number;
+  /** Capped sample of unreadable paths, for diagnostics. */
+  read_failure_samples?: string[];
 }
 
 export interface Collection {

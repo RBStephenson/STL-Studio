@@ -37,6 +37,7 @@ const DEFAULTS: AppSettings = {
   reorganize_package_mode_enabled: false,
   reorganize_ai_suggestions_enabled: false,
   hierarchy_variant_grouping_enabled: false,
+  variant_sidebar_enabled: false,
   system_info_enabled: false,
   persistent_diagnostics_enabled: false,
   storage_recovery_enabled: false,

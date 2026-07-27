@@ -1,11 +1,14 @@
 # Troubleshooting & FAQ
 
+- [Windows blocked the installer (SmartScreen)](#windows-blocked-the-installer-smartscreen)
+- [The app does nothing for a while after an update](#the-app-does-nothing-for-a-while-after-an-update)
 - [I added models to a creator but they don't show up](#i-added-models-to-a-creator-but-they-dont-show-up)
 - [A model has the wrong thumbnail](#a-model-has-the-wrong-thumbnail)
 - [A model has no thumbnail at all](#a-model-has-no-thumbnail-at-all)
 - [Images in a hidden folder aren't picked up](#images-in-a-hidden-folder-arent-picked-up)
 - [When should I rescan vs. run a full scan?](#when-should-i-rescan-vs-run-a-full-scan)
 - [A whole creator is missing or shows only one model](#a-whole-creator-is-missing-or-shows-only-one-model)
+- [The scan reports files it couldn't read](#the-scan-reports-files-it-couldnt-read)
 - [Models are flagged "needs review"](#models-are-flagged-needs-review)
 - [The scan seems stuck or slow](#the-scan-seems-stuck-or-slow)
 - [Scale or type tags are wrong/missing](#scale-or-type-tags-are-wrongmissing)
@@ -14,9 +17,65 @@
 - [How do I back up or move my library?](#how-do-i-back-up-or-move-my-library)
 - [A collection shows 0 models after I added some](#a-collection-shows-0-models-after-i-added-some)
 - [Application crashes and recovery](#application-crashes-and-recovery)
+- ["The STL Studio backend stopped unexpectedly"](#the-stl-studio-backend-stopped-unexpectedly)
 - [Accessing support logs](#accessing-support-logs)
 
 ---
+
+## Windows blocked the installer (SmartScreen)
+
+**This is expected.** STL Studio is not code-signed yet, so Windows has no
+publisher identity to check the installer against. It is not a malware
+detection, and it happens on every current release.
+
+**"Windows protected your PC" (blue dialog):** click **More info**, then
+**Run anyway**.
+
+**No "More info" link, or the button only says "Don't run":** Windows is
+treating the file as blocked rather than merely unrecognized. Clear the
+mark-of-the-web that your browser attached when it downloaded the file:
+
+1. Right-click `STL-Studio-Setup-<version>.exe` → **Properties**.
+2. On the **General** tab, tick **Unblock** at the bottom.
+3. **Apply**, then run the installer again.
+
+**Your browser refused to finish the download**, or removed the file after it
+completed: this is browser-level reputation filtering, separate from
+SmartScreen. In Chrome or Edge, open the downloads list and choose **Keep** on
+the blocked entry. Corporate-managed machines may block unsigned installers by
+policy — in that case the download cannot be recovered locally and needs your IT
+administrator.
+
+**Microsoft Defender quarantined the file:** that is a different message
+("Threat found" / "Virus detected"), not SmartScreen. STL Studio's installer
+should not trigger it. Before overriding anything, verify the download is
+genuine using the checksum and build attestation steps in
+[Verifying your download](getting-started.md#verifying-your-download). If
+verification passes and Defender still objects, please
+[open an issue](https://github.com/RBStephenson/STL-Studio/issues) — a false
+positive on a released binary is worth knowing about.
+
+Signed installers are planned but are not part of the current release scope
+(see [Release scope](support-policy.md#release-scope)). Until then, the
+verification steps above are the reliable way to confirm you have the real file.
+
+## The app does nothing for a while after an update
+
+**This is expected, and it's only a first-launch cost.** After the installer
+runs (auto-update or manual), antivirus software scans the newly-installed
+files the first time you launch that version — STL Studio itself does not
+control when this happens or how long it takes. On some machines this can look
+like the window never appears, or appears but stays blank for up to a minute.
+
+This is a one-time cost per version, not per launch: your antivirus caches its
+verdict on the installed files, so subsequent launches of the same version
+start normally. If it happens on every launch, that points to something else —
+see [Application crashes and recovery](#application-crashes-and-recovery).
+
+If this is disruptive, add an exclusion for STL Studio's install directory
+(default `%LOCALAPPDATA%\Programs\STL Studio`) in your antivirus settings so
+the scan happens once, in the background, rather than blocking the first
+launch.
 
 ## I added models to a creator but they don't show up
 
@@ -74,6 +133,29 @@ If a creator that previously worked suddenly shows only a single model, run a
 full Scan Library — older versions of the app could mis-handle creators whose
 **name** contained a type word (like "Figures" or "Miniatures"); current versions
 fix this, and a rescan corrects the data.
+
+## The scan reports files it couldn't read
+
+Some folders can be listed while an individual file or sub-folder inside them
+can't be. The scan skips just that entry, keeps indexing the rest of the folder,
+and reports how many it hit — the scan status carries a `read_failures` count
+plus a capped sample of the paths (`read_failure_samples`).
+
+Common causes:
+
+- **Very long paths on Windows.** A path over ~260 characters can't be opened
+  unless long-path support is enabled. Deeply-nested packs are the usual
+  culprit. This is the most common reason the *same* library scanned from Docker
+  and from Windows ends up with different model counts.
+- **Cloud placeholder files** (OneDrive "online-only" items) that aren't
+  downloaded locally.
+- **Permissions**, or a broken symlink/shortcut.
+
+When a scan reports read failures, treat its model count as a **floor, not a
+total** — the run saw an incomplete view of the disk. The scanner deliberately
+**skips its cleanup passes** for anything affected, so nothing is deleted based
+on a partial listing. Fix the underlying cause and rescan; the counts settle
+once the scan can read everything.
 
 ## Models are flagged "needs review"
 
@@ -163,6 +245,26 @@ window or quit. An internal Electron main-process error is shown in an error dia
 silently ignored. After reopening the app, use **Help → About & support → Copy diagnostics** when
 reporting a repeatable failure.
 
+## "The STL Studio backend stopped unexpectedly"
+
+The desktop app runs its backend as a separate process. If that process stops on its own after the
+app has started — an out-of-memory condition during a very large scan, an antivirus quarantine, or a
+crash — the app now notices and offers **Restart backend** or **Quit**.
+
+**Your saved catalog data is unchanged.** The database is written as work completes, so models
+already scanned stay scanned. Anything you had typed but not yet saved may need re-entering, and a
+scan or import that was mid-run stops where it was; start it again after the restart.
+
+Choosing **Restart backend** shows the loading screen while a fresh backend starts, then returns you
+to the app. If the backend stops several times in quick succession the app stops offering to restart
+it and shows the recovery page instead, rather than looping the same prompt — at that point close and
+reopen STL Studio.
+
+If this happens repeatedly, enable **Persistent support logs** under **Settings → Preferences**,
+reproduce it, then attach the logs to an issue (see
+[Accessing support logs](#accessing-support-logs)). The backend's own output is captured there and is
+usually what identifies the cause.
+
 ## Accessing support logs
 
 Enable **Persistent support logs** under **Settings → Preferences**, then open
@@ -174,3 +276,32 @@ file that is the host's `./data/logs` directory. For a live terminal stream, use
 `docker compose logs backend`. Each process keeps a 2 MiB active log and three
 rotated backups. Disabling the feature stops new persistent writes but does not
 delete existing diagnostic files.
+
+### When the app won't start at all
+
+The Settings toggle above needs a working window to reach — no help if STL
+Studio never gets that far (see
+[the app does nothing for a while after an update](#the-app-does-nothing-for-a-while-after-an-update)
+for the common cause). Two ways around that, both effective before any window
+exists:
+
+**Environment variable.** Set `STL_STUDIO_DIAGNOSTICS=1` before launching STL
+Studio and it logs from the very first startup checkpoint, with no Settings
+step required:
+
+```powershell
+$env:STL_STUDIO_DIAGNOSTICS = "1"
+& "$env:LOCALAPPDATA\Programs\STL Studio\STL Studio.exe"
+```
+
+**Marker file.** The Settings toggle just writes an empty file named
+`persistent-diagnostics.enabled` in the app's userData folder — creating it by
+hand has the same effect on the next launch. The folder name has changed
+across versions, so check both:
+
+- `%APPDATA%\STL Studio\`
+- `%APPDATA%\stl-studio-desktop\`
+
+Whichever one exists on your machine is the right one; `desktop.log` and its
+rotated backups (`desktop.log.1`–`.3`) land in a `logs` subfolder there once
+diagnostics are on.

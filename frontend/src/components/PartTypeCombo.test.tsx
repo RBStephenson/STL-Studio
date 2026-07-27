@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { PartTypeCombo } from "./PartTypeCombo";
 
 const OPTIONS = ["Weapon", "Accessories", "Base", "Arms"];
@@ -44,6 +44,56 @@ describe("PartTypeCombo", () => {
     const list = screen.getByRole("list");
     expect(list.style.top).toBe("");
     expect(list.style.bottom).toBe(`${300 - 260 + 2}px`);
+  });
+
+  it("does not close the list after unmount when blurred moments before (STUDIO-348)", () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = render(
+        <PartTypeCombo value="" options={OPTIONS} onChange={vi.fn()} onCommit={vi.fn()} />,
+      );
+      fireEvent.focus(screen.getByRole("textbox"));
+      fireEvent.blur(screen.getByRole("textbox"));
+      expect(vi.getTimerCount()).toBe(1);
+
+      unmount();
+
+      // Must be cleared by unmount, not merely harmless once it fires: left
+      // pending it calls setOpen on a dead component, and under jsdom that
+      // lands after teardown as React dereferencing a gone window — an
+      // unhandled error that fails the entire test run.
+      expect(vi.getTimerCount()).toBe(0);
+      expect(() => vi.advanceTimersByTime(500)).not.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still closes the list shortly after blur while mounted", () => {
+    vi.useFakeTimers();
+    try {
+      render(<PartTypeCombo value="" options={OPTIONS} onChange={vi.fn()} onCommit={vi.fn()} />);
+      fireEvent.focus(screen.getByRole("textbox"));
+      expect(screen.getByRole("list")).toBeInTheDocument();
+
+      fireEvent.blur(screen.getByRole("textbox"));
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("commits on blur", () => {
+    const onCommit = vi.fn();
+    render(<PartTypeCombo value="Base" options={OPTIONS} onChange={vi.fn()} onCommit={onCommit} />);
+
+    fireEvent.blur(screen.getByRole("textbox"));
+
+    expect(onCommit).toHaveBeenCalledWith("Base");
   });
 
   it("commits the picked option and closes the list", () => {

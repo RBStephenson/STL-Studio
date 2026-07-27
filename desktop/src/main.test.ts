@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const showErrorBox = vi.fn();
 const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
@@ -10,7 +10,9 @@ const setApplicationMenu = vi.fn();
 const menuPopup = vi.fn();
 const buildFromTemplate = vi.fn().mockReturnValue({ popup: menuPopup });
 const openPath = vi.fn().mockResolvedValue("");
+const openExternal = vi.fn().mockResolvedValue(undefined);
 const requestSingleInstanceLock = vi.fn().mockReturnValue(true);
+const onHeadersReceived = vi.fn();
 const appOn = vi.fn();
 const whenReadyCallbacks: Array<() => Promise<void>> = [];
 
@@ -23,6 +25,7 @@ class FakeWebContents extends EventEmitter {
     goForward: vi.fn(),
   };
   reload = vi.fn();
+  setWindowOpenHandler = vi.fn();
 }
 
 class FakeBrowserWindow extends EventEmitter {
@@ -79,7 +82,8 @@ vi.mock("electron", () => ({
   dialog: { showErrorBox, showMessageBox },
   ipcMain: { handle: vi.fn() },
   screen: { getAllDisplays: vi.fn().mockReturnValue([]) },
-  shell: { openPath },
+  session: { defaultSession: { webRequest: { onHeadersReceived } } },
+  shell: { openPath, openExternal },
 }));
 
 vi.mock("electron-updater", () => ({
@@ -99,12 +103,28 @@ vi.mock("./appController", () => ({
   }),
 }));
 
+// Real PersistentLogger does a real mkdirSync — stub the class only, keep
+// diagnosticsWereEnabled real so its env-var/marker-file logic is exercised
+// as main.ts actually calls it (STUDIO-352 coverage is in
+// persistentLogger.test.ts; this file only proves main.ts's wiring).
+const persistentLoggerCtor = vi.fn().mockImplementation(function PersistentLoggerStub() {
+  return { write: vi.fn(), flush: vi.fn().mockResolvedValue(undefined) };
+});
+vi.mock("./persistentLogger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./persistentLogger")>();
+  return { ...actual, PersistentLogger: persistentLoggerCtor };
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   whenReadyCallbacks.length = 0;
   FakeBrowserWindow.instances.length = 0;
   FakeBrowserWindow.focused = null;
   capturedDeps = undefined;
+});
+
+afterEach(() => {
+  delete process.env.STL_STUDIO_DIAGNOSTICS;
 });
 
 async function loadMain() {
@@ -121,6 +141,13 @@ describe("main.ts wiring", () => {
     expect(FakeBrowserWindow.instances).toHaveLength(1);
     expect(bootBackendAndLoad).toHaveBeenCalledWith(FakeBrowserWindow.instances[0]);
     expect(setApplicationMenu).toHaveBeenCalled();
+  });
+
+  it("enforces CSP on the default session before any window exists (STUDIO-258)", async () => {
+    await loadMain();
+    expect(onHeadersReceived).toHaveBeenCalledOnce();
+    const order = onHeadersReceived.mock.invocationCallOrder[0] ?? Infinity;
+    expect(order).toBeLessThan(bootBackendAndLoad.mock.invocationCallOrder[0] ?? -Infinity);
   });
 
   it("quits immediately when the single-instance lock is denied", async () => {
@@ -153,6 +180,17 @@ describe("main.ts wiring", () => {
     expect(bootBackendAndLoad).toHaveBeenCalledTimes(2);
   });
 
+  it("constructs a persistent logger when STL_STUDIO_DIAGNOSTICS is set, with no marker file (STUDIO-352)", async () => {
+    process.env.STL_STUDIO_DIAGNOSTICS = "1";
+    await loadMain();
+    expect(persistentLoggerCtor).toHaveBeenCalledWith(join("/userdata", "logs"));
+  });
+
+  it("does not construct a persistent logger when neither the env var nor a marker file is set", async () => {
+    await loadMain();
+    expect(persistentLoggerCtor).not.toHaveBeenCalled();
+  });
+
   it("quits normally on window-all-closed outside macOS", async () => {
     await loadMain();
     const { app } = await import("electron");
@@ -174,6 +212,49 @@ describe("main.ts wiring", () => {
     await handler(event);
     expect(stopOwnedSidecar).toHaveBeenCalledTimes(1);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("before-quit still quits if stopOwnedSidecar never resolves (STUDIO-340)", async () => {
+    vi.useFakeTimers();
+    try {
+      stopOwnedSidecar.mockReturnValueOnce(new Promise(() => {}));
+      await loadMain();
+      const { app } = await import("electron");
+      const handler = (app.on as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([event]) => event === "before-quit",
+      )?.[1] as (e: { preventDefault: () => void }) => Promise<void>;
+      const event = { preventDefault: vi.fn() };
+
+      const settled = handler(event);
+      let done = false;
+      void settled.then(() => {
+        done = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(done).toBe(false);
+      expect(app.quit).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await settled;
+      expect(app.quit).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes the persistent logger before quitting when one exists (STUDIO-342)", async () => {
+    process.env.STL_STUDIO_DIAGNOSTICS = "1";
+    await loadMain();
+    const { app } = await import("electron");
+    const logger = persistentLoggerCtor.mock.results[0].value as { flush: ReturnType<typeof vi.fn> };
+    const handler = (app.on as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([event]) => event === "before-quit",
+    )?.[1] as (e: { preventDefault: () => void }) => Promise<void>;
+
+    await handler({ preventDefault: vi.fn() });
+
+    expect(logger.flush).toHaveBeenCalled();
   });
 
   it("wires the application menu's regenerate-key action to the focused window", async () => {
@@ -220,12 +301,40 @@ describe("main.ts wiring", () => {
     expect(bootBackendAndLoad).toHaveBeenCalledTimes(2);
   });
 
-  it("ignores unrelated will-navigate URLs", async () => {
+  // Superseded by STUDIO-259: an external will-navigate used to be allowed to
+  // load in the app window. It is now diverted to the system browser.
+  it("diverts an external will-navigate to the system browser (STUDIO-259)", async () => {
     await loadMain();
     const win = FakeBrowserWindow.instances[0];
     const event = { preventDefault: vi.fn() };
     win.webContents.emit("will-navigate", event, "https://example.com");
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(openExternal).toHaveBeenCalledWith("https://example.com");
+  });
+
+  it("lets same-origin backend navigation proceed in the window (STUDIO-259)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const event = { preventDefault: vi.fn() };
+    win.webContents.emit("will-navigate", event, "http://127.0.0.1:5555/library");
     expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("denies window.open and routes an external target to the browser (STUDIO-259)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const handler = win.webContents.setWindowOpenHandler.mock.calls[0]?.[0];
+    expect(handler({ url: "https://www.patreon.com/x" })).toEqual({ action: "deny" });
+    expect(openExternal).toHaveBeenCalledWith("https://www.patreon.com/x");
+  });
+
+  it("never hands a non-https scheme to the shell (STUDIO-259)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const handler = win.webContents.setWindowOpenHandler.mock.calls[0]?.[0];
+    expect(handler({ url: "ms-msdt:/id PCWDiagnostic" })).toEqual({ action: "deny" });
+    expect(openExternal).not.toHaveBeenCalled();
   });
 
   it("schedules a window-state save on resize/move and flushes on close", async () => {
@@ -245,7 +354,7 @@ describe("main.ts wiring", () => {
       resolveBackendExePath: () => string;
       createSidecarDeps: () => { log: (m: string) => void };
       backendBaseUrl: (port: number) => string;
-      getOrCreateSecretKey: (dir: string) => { key: string; isNew: boolean };
+      getOrCreateSecretKey: (dir: string) => { key: string; needsReveal: boolean };
       regenerateSecretKeyFile: (dir: string) => string;
       setUpdateFeedUrl: (url: string) => void;
       fetchJson: (url: string) => Promise<unknown>;

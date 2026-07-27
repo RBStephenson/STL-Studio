@@ -57,6 +57,16 @@ export interface StartOptions {
   port: number;
   timeoutMs?: number;
   intervalMs?: number;
+  /** Invoked as soon as the process exists, before the lockfile write and the
+   *  health poll. The caller takes ownership of the process here rather than on
+   *  a successful return, so a quit that races the (up to 30s) health poll can
+   *  still terminate it instead of orphaning it (STUDIO-336). */
+  onSpawn?: (proc: SidecarProcess) => void;
+  /** Invoked on *every* exit, expected or not, with the process that exited.
+   *  This module deliberately does not judge which exits are expected — only
+   *  the caller knows whether it asked for the stop, whether a boot is still in
+   *  flight, and whether this process is still the current one (STUDIO-338). */
+  onExit?: (proc: SidecarProcess, code: number | null) => void;
 }
 
 export interface StartResult {
@@ -135,9 +145,13 @@ export async function startSidecar(
   const args = opts.args ?? [];
   deps.log(`spawning backend: ${opts.exePath} ${args.join(" ")}`);
   const proc = deps.spawn(opts.exePath, args, opts.env);
+  opts.onSpawn?.(proc);
 
   proc.on("error", (err) => deps.log(`sidecar process error: ${err.message}`));
-  proc.on("exit", (code) => deps.log(`sidecar exited with code ${code}`));
+  proc.on("exit", (code) => {
+    deps.log(`sidecar exited with code ${code}`);
+    opts.onExit?.(proc, code);
+  });
 
   if (proc.pid !== undefined) {
     deps.writeLock({ pid: proc.pid, port: opts.port });

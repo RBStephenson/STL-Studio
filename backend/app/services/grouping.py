@@ -1,106 +1,103 @@
-"""Variant-grouping proposal engine (#615, epic #613).
+"""Variant-group orchestration and persistence (#615, epic #613).
 
-Given a creator's indexed models, propose durable variant groups by blending
-four signals, strongest first:
+Thin database layer over `grouping_policy`, which owns every decision about what
+automatic grouping should do. This module supplies that policy with inputs, then
+writes its output:
 
-  1. hierarchy context  — when enabled, the scanner-derived character envelope
-     groups sibling packages and prevents weak signals crossing product boundaries.
-  2. file_hash overlap  — two folders sharing identical meshes are almost
-     certainly variants of one product (near-free: hashes already indexed on
-     STLFile).
-  3. STL filename overlap — folders whose STL file *names* substantially overlap
-     are the same part set prepared differently (supported/unsupported/hollow…).
-  4. name key            — name_parser.character_key, the existing heuristic
-     (weakest on its own; the baseline when no content signal exists).
+    load inputs  →  propose (pure)  →  materialise
 
-The engine derives auto groups from scratch. By default it does not read the
-model's current `character` assignment; the hierarchy feature flag deliberately
-adds that scanner-owned context as a constrained signal. It writes
-`variant_group_id` and recreates the creator's `auto` groups each run;
-`source="manual"` groups and their members are never touched. `Model.no_group`
-(#678 Phase 5 — explicit
-"keep me out of any group", sticky across rescans) is fully excluded from
-proposals.
+`regroup_creator` recreates a creator's `auto` groups from scratch on every run.
+`source="manual"` groups and their members are never touched, and `Model.no_group`
+— an explicit, sticky "keep me out of any group" decision (#678 Phase 5) — is
+excluded from proposals. Both protections are enforced in the policy layer's
+eligibility stage; the only write this module does on their behalf is clearing
+stale automatic membership from models that have since fallen under an `off`
+subtree.
+
+Transaction ownership stays with the caller: this module flushes, never commits,
+so a caller can still roll back everything a regroup did (STUDIO-247).
+
+The pure policy names are re-exported below so existing callers and tests keep
+their import paths. `grouping.select_eligible` and
+`grouping_policy.select_eligible` are the same object.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import AppSetting, Model, STLFile, VariantGroup, GroupingStrategy
-from app.services import name_parser
+from app.services.grouping_policy import (
+    # Underscored but shared deliberately: the orchestrator is the one sanctioned
+    # consumer of the union-find and the evidence applier.
+    _apply_evidence,
+    _UnionFind,
+    SIGNAL_POLICY,
+    CandidateFacts,
+    CandidateModel,
+    EligibilityDecision,
+    Evidence,
+    EvidenceLedger,
+    GroupProposal,
+    IneligibilityReason,
+    SignalKind,
+    SignalPolicy,
+    assert_policies_complete,
+    build_clusters,
+    filename_evidence,
+    hash_evidence,
+    hierarchy_evidence,
+    name_evidence,
+    name_keys,
+    order_candidates,
+    policy_for,
+    product_boundaries,
+    propose_groups,
+    select_eligible,
+    select_label,
+    select_representative,
+)
+from app.services.grouping_strategy import SubtreeStrategy, normalize_path, resolve_subtree_strategy
 from app.services.product_context import ProductContext, resolve_product_context
 
+__all__ = [
+    "regroup_creator",
+    "prune_empty_groups",
+    "materialise_proposals",
+    # Re-exported policy surface (see grouping_policy for the implementations).
+    "CandidateFacts",
+    "CandidateModel",
+    "EligibilityDecision",
+    "Evidence",
+    "EvidenceLedger",
+    "GroupProposal",
+    "IneligibilityReason",
+    "SIGNAL_POLICY",
+    "SignalKind",
+    "SignalPolicy",
+    "SubtreeStrategy",
+    "assert_policies_complete",
+    "build_clusters",
+    "filename_evidence",
+    "hash_evidence",
+    "hierarchy_evidence",
+    "name_evidence",
+    "name_keys",
+    "normalize_path",
+    "order_candidates",
+    "policy_for",
+    "product_boundaries",
+    "propose_groups",
+    "resolve_subtree_strategy",
+    "select_eligible",
+    "select_label",
+    "select_representative",
+]
 
-def _norm(path: str) -> str:
-    """Normalise a folder path for ancestor comparison (separators + trailing /)."""
-    return path.replace("\\", "/").rstrip("/")
-
-
-def _resolve_strategy(model_path: str, strategies: list[tuple[str, str]]) -> str:
-    """Nearest-ancestor strategy for a model folder, defaulting to "auto".
-
-    `strategies` is a list of (normalised_path, strategy); the longest path that is
-    the model's folder or an ancestor of it wins."""
-    mp = _norm(model_path)
-    best_len, best = -1, "auto"
-    for spath, strat in strategies:
-        if (mp == spath or mp.startswith(spath + "/")) and len(spath) > best_len:
-            best_len, best = len(spath), strat
-    return best
-
-# A file_hash shared by more than this many models is treated as a ubiquitous
-# part (a common base, a shared support raft) and ignored for grouping — it would
-# otherwise chain unrelated products together.
-_HASH_BUCKET_CAP = 8
-
-# Minimum Jaccard similarity of two models' STL filename sets to call them the
-# same part set prepared differently.
-_FILENAME_JACCARD = 0.6
-
-# A filename shared by more than this many models is generic (body.stl, base.stl,
-# supports.stl…) and carries no product identity — ignored for the filename
-# signal so it can't chain unrelated sculpts together (#639).
-_FILENAME_BUCKET_CAP = 8
-
-# Require at least this many shared *distinct, non-generic* filenames before the
-# filename signal merges two models (#639) — a single shared "body.stl" is not
-# evidence of the same product.
-_FILENAME_MIN_SHARED = 2
-
-# Skip the O(n^2) filename-overlap pass for creators with more models than this,
-# so a pathological creator can't stall a scan. Hash + name signals still apply.
-_FILENAME_PASS_MODEL_CAP = 400
-
-_CONFIDENCE = {"override": 0.95, "hash": 0.9, "hierarchy": 0.85, "filename": 0.7, "name": 0.6}
 _HIERARCHY_SETTING = "hierarchy_variant_grouping_enabled"
-
-
-class _UnionFind:
-    def __init__(self, ids: list[int], boundaries: dict[int, str | None] | None = None):
-        self.parent = {i: i for i in ids}
-        self.boundaries = {i: ({boundaries[i]} if boundaries and boundaries.get(i) else set()) for i in ids}
-
-    def find(self, x: int) -> int:
-        root = x
-        while self.parent[root] != root:
-            root = self.parent[root]
-        while self.parent[x] != root:
-            self.parent[x], x = root, self.parent[x]
-        return root
-
-    def union(self, a: int, b: int) -> bool:
-        ra, rb = self.find(a), self.find(b)
-        if ra == rb:
-            return True
-        combined = self.boundaries[ra] | self.boundaries[rb]
-        if len(combined) > 1:
-            return False
-        self.parent[rb] = ra
-        self.boundaries[ra] = combined
-        return True
 
 
 def _hierarchy_enabled(db: Session) -> bool:
@@ -116,36 +113,43 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         .all()
     )
 
-    # Models already curated into a manual group are off-limits: don't re-propose
-    # them and don't disturb their group.
     manual_group_ids = {
         g.id for g in db.query(VariantGroup).filter(
             VariantGroup.creator_id == creator_id, VariantGroup.source == "manual"
         )
     }
-    # Model.no_group is an explicit "ungroup this, sticky across rescans"
-    # decision (#678 Phase 5) — always off-limits.
-    candidates = [
-        m for m in models
-        if m.variant_group_id not in manual_group_ids and not m.no_group
-    ]
+    strategies = db.query(GroupingStrategy.path, GroupingStrategy.strategy).all()
 
-    # Per-subtree strategy (#618): models under an "off" subtree are never
-    # auto-grouped — each stays standalone. The nearest-ancestor strategy wins,
-    # defaulting to "auto".
-    strategies = [(_norm(p), s) for (p, s) in db.query(GroupingStrategy.path, GroupingStrategy.strategy)]
-    if strategies:
-        off_ids = {m.id for m in candidates if _resolve_strategy(m.folder_path, strategies) == "off"}
-        off_models = [m for m in candidates if m.id in off_ids]
-        candidates = [m for m in candidates if m.id not in off_ids]
-        for m in off_models:
-            if m.variant_group_id not in manual_group_ids:
-                m.variant_group_id = None
-    else:
-        off_models = []
+    # --- eligibility (pure) ---
+    by_id = {m.id: m for m in models}
+    decision = select_eligible(
+        (
+            CandidateModel(
+                id=m.id,
+                folder_path=m.folder_path,
+                excluded=m.excluded,
+                no_group=m.no_group,
+                variant_group_id=m.variant_group_id,
+            )
+            for m in models
+        ),
+        manual_group_ids,
+        strategies,
+    )
+    candidates = [by_id[mid] for mid in decision.eligible]
+
+    # Models under an "off" subtree may still carry automatic membership from a
+    # previous run; clearing that is orchestration's job, not the policy's.
+    # The manual-group check is belt-and-braces: `select_eligible` reports a
+    # curated model as MANUAL_GROUP and keeps it out of `off_subtree` entirely,
+    # so this can only matter if that precedence ever changes.
+    off_models = [by_id[mid] for mid in decision.off_subtree]
+    for m in off_models:
+        if m.variant_group_id not in manual_group_ids:
+            m.variant_group_id = None
 
     if not candidates and not off_models:
-        _drop_auto_groups(db, creator_id, manual_group_ids)
+        _drop_auto_groups(db, creator_id)
         return
 
     stl_rows = (
@@ -162,129 +166,103 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         if file_hash:
             hashes[model_id].add(file_hash)
 
-    ids = [m.id for m in candidates]
+    # `ids` is the single ordering authority for the whole pipeline (STUDIO-248):
+    # every stage below iterates it, so one stable order makes evidence, clusters,
+    # proposals and persistence all reproducible.
+    ids = order_candidates(
+        [m.id for m in candidates],
+        folder_paths={m.id: m.folder_path for m in candidates},
+        names={m.id: m.name for m in candidates},
+    )
     hierarchy_enabled = _hierarchy_enabled(db)
     creator_name = _creator_name(db, creator_id)
     contexts: dict[int, ProductContext] = {
-        m.id: resolve_product_context(
-            folder_path=m.folder_path,
-            character=m.character,
+        mid: resolve_product_context(
+            folder_path=by_id[mid].folder_path,
+            character=by_id[mid].character,
             creator_name=creator_name,
         )
-        for m in candidates
+        for mid in ids
     } if hierarchy_enabled else {}
-    boundaries = {mid: contexts[mid].product_key for mid in ids} if hierarchy_enabled else None
+    boundaries = product_boundaries(contexts) if hierarchy_enabled else None
     uf = _UnionFind(ids, boundaries)
-    signal: dict[int, str] = {}  # model_id -> strongest signal that merged it
+    ledger = EvidenceLedger()
 
     # --- hierarchy signal: same scanner-derived character envelope ---
-    # It is both positive evidence and a hard boundary: later weak/content
-    # signals cannot transitively bridge two conflicting product envelopes.
+    # It is both positive evidence and a hard boundary: the boundaries seeded
+    # above stop later weak/content signals transitively bridging two
+    # conflicting product envelopes.
     if hierarchy_enabled:
-        hierarchy_index: dict[str, list[int]] = defaultdict(list)
-        for mid, context in contexts.items():
-            if context.product_key:
-                hierarchy_index[context.product_key].append(mid)
-        for bucket in hierarchy_index.values():
-            if len(bucket) >= 2:
-                first = bucket[0]
-                for other in bucket[1:]:
-                    if uf.union(first, other):
-                        signal.setdefault(first, "hierarchy")
-                        signal.setdefault(other, "hierarchy")
+        _apply_evidence(uf, ledger, hierarchy_evidence(contexts))
 
     # --- signal 1: file_hash overlap (strongest content signal) ---
-    hash_index: dict[str, list[int]] = defaultdict(list)
-    for mid in ids:
-        for h in hashes.get(mid, ()):
-            hash_index[h].append(mid)
-    for bucket in hash_index.values():
-        if 2 <= len(bucket) <= _HASH_BUCKET_CAP:
-            first = bucket[0]
-            for other in bucket[1:]:
-                if uf.union(first, other):
-                    signal[first] = "hash"
-                    signal[other] = "hash"
+    _apply_evidence(uf, ledger, hash_evidence(ids, hashes))
 
     # --- signal 2: STL filename overlap ---
-    # Drop generic filenames (shared by many models) so common part names like
-    # body/base/supports.stl don't fake overlap between unrelated sculpts (#639).
-    if len(ids) <= _FILENAME_PASS_MODEL_CAP:
-        fname_freq: dict[str, int] = defaultdict(int)
-        for mid in ids:
-            for fn in filenames.get(mid, ()):
-                fname_freq[fn] += 1
-        distinctive = {
-            mid: {fn for fn in filenames.get(mid, ()) if fname_freq[fn] <= _FILENAME_BUCKET_CAP}
-            for mid in ids
-        }
-        for i in range(len(ids)):
-            a = ids[i]
-            fa = distinctive.get(a)
-            if not fa:
-                continue
-            for j in range(i + 1, len(ids)):
-                b = ids[j]
-                fb = distinctive.get(b)
-                if not fb:
-                    continue
-                inter = len(fa & fb)
-                if inter >= _FILENAME_MIN_SHARED and inter / len(fa | fb) >= _FILENAME_JACCARD:
-                    if uf.union(a, b):
-                        signal.setdefault(a, "filename")
-                        signal.setdefault(b, "filename")
+    _apply_evidence(uf, ledger, filename_evidence(ids, filenames))
 
     # --- signal 3: name key (baseline) ---
-    key_index: dict[str, list[int]] = defaultdict(list)
-    keys: dict[int, str] = {}
-    by_id = {m.id: m for m in candidates}
-    for mid in ids:
-        key = name_parser.character_key(by_id[mid].name, _creator_name(db, creator_id))
-        if key:
-            keys[mid] = key
-            key_index[key].append(mid)
-    for bucket in key_index.values():
-        if len(bucket) >= 2:
-            first = bucket[0]
-            for other in bucket[1:]:
-                if uf.union(first, other):
-                    signal.setdefault(first, "name")
-                    signal.setdefault(other, "name")
+    # `names` and `keys` outlive this pass: cluster labelling and the
+    # structural-only rejection below both read them.
+    names = {mid: by_id[mid].name for mid in ids}
+    keys = name_keys(ids, names, creator_name)
+    _apply_evidence(uf, ledger, name_evidence(ids, keys))
 
-    # --- materialise clusters ---
-    clusters: dict[int, list[int]] = defaultdict(list)
-    for mid in ids:
-        clusters[uf.find(mid)].append(mid)
+    # --- propose groups (pure) ---
+    facts = CandidateFacts(
+        names=names,
+        keys=keys,
+        contexts=contexts,
+        explicit_reps=frozenset(mid for mid in ids if by_id[mid].is_group_rep),
+    )
+    proposals = propose_groups(ids, uf, ledger, facts)
 
-    _drop_auto_groups(db, creator_id, manual_group_ids)
+    # --- materialise ---
+    materialise_proposals(db, creator_id, proposals, by_id, ids)
 
-    for members in clusters.values():
-        # Don't group a cluster with no real product identity — i.e. every member
-        # is a structural/junk folder ("supported", "unsupported", "STL"). These
-        # only ever clustered by filename/hash; grouping + labeling them with a
-        # junk name produces the duplicate "supported" groups (#639).
-        if len(members) < 2 or not any(
-            keys.get(mid) and not name_parser.is_structural_folder(by_id[mid].name)
-            for mid in members
-        ):
-            for mid in members:
-                by_id[mid].variant_group_id = None
-            continue
-        strongest = _strongest_signal(members, signal)
-        label = _label_for(members, keys, by_id, contexts)
-        rep = next((m for m in members if by_id[m].is_group_rep), members[0])
+
+def materialise_proposals(
+    db: Session,
+    creator_id: int,
+    proposals: Sequence[GroupProposal],
+    by_id: Mapping[int, Model],
+    candidate_ids: Sequence[int],
+) -> None:
+    """Replace a creator's `auto` groups with `proposals` (STUDIO-247).
+
+    The creator's previous automatic groups are dropped first, so an id is never
+    reused for a different cluster and repeated runs cannot accumulate duplicates.
+    Manual groups are untouched — `_drop_auto_groups` filters on
+    `source == "auto"`.
+
+    Flushes but never commits: the caller owns the transaction and can still roll
+    the whole regroup back.
+    """
+    _drop_auto_groups(db, creator_id)
+
+    grouped: set[int] = set()
+    for proposal in proposals:
         group = VariantGroup(
             creator_id=creator_id,
-            label=label,
-            rep_model_id=rep,
+            label=proposal.label,
+            rep_model_id=proposal.rep_model_id,
             source="auto",
-            reason=_reason_for(strongest, members, keys, label),
-            confidence=_CONFIDENCE[strongest],
+            reason=proposal.reason,
+            confidence=proposal.confidence,
         )
         db.add(group)
         db.flush()
-        for mid in members:
+        for mid in proposal.members:
             by_id[mid].variant_group_id = group.id
+            grouped.add(mid)
+
+    # Anything the engine declined to group belongs to no auto group. This is
+    # normally already true — _drop_auto_groups cleared the creator's auto
+    # members, and manual members were never candidates — but stating it keeps
+    # the invariant local rather than inherited.
+    for mid in candidate_ids:
+        if mid not in grouped:
+            by_id[mid].variant_group_id = None
 
     db.flush()
 
@@ -326,8 +304,13 @@ def prune_empty_groups(db: Session) -> int:
     return len(empties)
 
 
-def _drop_auto_groups(db: Session, creator_id: int, manual_group_ids: set[int]) -> None:
-    """Clear variant_group_id off auto-grouped models and delete the auto groups."""
+def _drop_auto_groups(db: Session, creator_id: int) -> None:
+    """Clear variant_group_id off auto-grouped models and delete the auto groups.
+
+    Manual groups are protected by the `source == "auto"` filter below, not by any
+    caller-supplied id set: a manual group is never selected, so its members are
+    never cleared.
+    """
     auto_groups = (
         db.query(VariantGroup)
         .filter(VariantGroup.creator_id == creator_id, VariantGroup.source == "auto")
@@ -347,37 +330,3 @@ def _creator_name(db: Session, creator_id: int) -> str | None:
     from app.models import Creator
     c = db.get(Creator, creator_id)
     return c.name if c else None
-
-
-def _strongest_signal(members: list[int], signal: dict[int, str]) -> str:
-    present = {signal.get(m) for m in members} - {None}
-    for s in ("hash", "hierarchy", "filename", "name"):
-        if s in present:
-            return s
-    return "name"
-
-
-def _label_for(
-    members: list[int],
-    keys: dict[int, str],
-    by_id: dict[int, Model],
-    contexts: dict[int, ProductContext],
-) -> str:
-    """Most common name key wins; else the first member's name."""
-    hierarchy_labels = [contexts[m].display_label for m in members if m in contexts and contexts[m].display_label]
-    if hierarchy_labels:
-        return Counter(hierarchy_labels).most_common(1)[0][0]
-    member_keys = [keys[m] for m in members if m in keys]
-    if member_keys:
-        return Counter(member_keys).most_common(1)[0][0]
-    return by_id[members[0]].name
-
-
-def _reason_for(signal: str, members: list[int], keys: dict[int, str], label: str) -> str:
-    if signal == "hash":
-        return "shared mesh files"
-    if signal == "filename":
-        return "shared STL file names"
-    if signal == "hierarchy":
-        return "same product hierarchy"
-    return f"name: {label}"

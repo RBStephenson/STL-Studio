@@ -119,9 +119,20 @@ macOS now points at Docker / source-run.
 
 ## Follow-up work
 
-- **Auto-update** (electron-updater / GitHub Releases feed) — required pre-1.0
-  work tracked in #1058.
-- **Code signing** — SignPath application and integration tracked in #1056.
+- **Auto-update** (electron-updater / GitHub Releases feed) — originally tracked
+  in #1058. **Outcome: shipped in the v0.20 release line.** Implemented in
+  [desktop/src/updater.ts](../../desktop/src/updater.ts), driven by the
+  `auto_update_enabled` setting (default on, toggled from Settings →
+  Preferences), with `allow_prerelease_updates` added later for opt-in beta
+  builds. The unsigned v0.20.4 publication rehearsal exercised the full
+  download → install → relaunch path.
+- **Code signing** — originally tracked in #1056, now
+  [STUDIO-99](https://rbrentstephenson.atlassian.net/browse/STUDIO-99).
+  **Outcome: not done, and out of scope for v1.0.** SignPath's free OSS
+  programme declined the application pending greater project adoption; no paid
+  certificate was acquired. The "SignPath signing pending" note in this plan's
+  v1 scope line above records what was expected at the time and is no longer
+  accurate — see [Code signing](../../ROADMAP.md#code-signing) for current status.
 - **Linux/macOS Electron packaging** — Linux keeps the current loose-binary + browser fallback;
   macOS notarization stays in backlog (#17).
 

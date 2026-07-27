@@ -6,6 +6,13 @@ Before approving a release candidate:
   on a disposable Windows VM. Record its operator, candidate version, VM image,
   PASS result, and evidence location in the release ticket; release promotion
   must reference that completed ticket.
+- Complete the release-candidate hardening test plans, which exercise
+  application behaviour rather than install mechanics:
+  [Windows/desktop](release/rc-hardening-test-plan.md) and
+  [Linux](release/rc-hardening-test-plan-linux.md). Run both if the release
+  ships both. Their Section 2 must be rewritten each cycle to cover what
+  actually changed since the previous build; changes verified only by unit
+  tests have not been run in a packaged app until this pass runs them.
 - Confirm the normal Tests, Build Check, CodeQL, and packaging jobs are green.
 - Require the Windows packaging smoke to pass its custom/default-directory,
   shortcut creation/removal, repair/reinstall, relaunch, user-data retention,

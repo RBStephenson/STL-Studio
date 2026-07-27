@@ -63,6 +63,16 @@ function DraggableCard({ model, draggingCreatorId, children }: {
   );
 }
 
+/** Tailwind's responsive prefixes measure the viewport, not this container, so
+ *  with the 380px variant panel open a `lg:grid-cols-5` grid still renders five
+ *  columns into far less space (~108px cards, truncated titles). Drop a step
+ *  while the panel is open. */
+function gridCols(panelOpen: boolean): string {
+  return panelOpen
+    ? "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4"
+    : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4";
+}
+
 interface ModelGridProps {
   loading: boolean;
   isError: boolean;
@@ -89,12 +99,17 @@ interface ModelGridProps {
   onDragCancel: () => void;
   draggingModel: Model | null;
   dragCount: number;
+  /** Variant-group side panel (STUDIO-350); returns true when it consumed the
+   *  click, so the card suppresses its own navigation. */
+  onOpenGroup?: (model: Model) => boolean;
+  /** True while the variant side panel is docked, so the grid can shed a column. */
+  variantPanelOpen?: boolean;
 }
 
 function CardGrid({
   models, selection, onSelect, onMutate, excludedView, onRemoved,
-  guideModelIds, allTagSuggestions, focusedIndex,
-}: Pick<ModelGridProps, "models" | "selection" | "onSelect" | "onMutate" | "excludedView" | "onRemoved" | "guideModelIds" | "allTagSuggestions" | "focusedIndex">) {
+  guideModelIds, allTagSuggestions, focusedIndex, onOpenGroup,
+}: Pick<ModelGridProps, "models" | "selection" | "onSelect" | "onMutate" | "excludedView" | "onRemoved" | "guideModelIds" | "allTagSuggestions" | "focusedIndex" | "onOpenGroup">) {
   return (
     <>
       {models.map((m, i) => (
@@ -109,6 +124,7 @@ function CardGrid({
           hasGuide={guideModelIds.has(m.id)}
           allTagSuggestions={allTagSuggestions}
           focused={focusedIndex === i}
+          onOpenGroup={onOpenGroup}
         />
       ))}
     </>
@@ -135,7 +151,7 @@ export default function ModelGrid(props: ModelGridProps) {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+      <div className={gridCols(!!props.variantPanelOpen)}>
         {Array.from({ length: 10 }).map((_, i) => (
           <div
             key={i}
@@ -169,7 +185,7 @@ export default function ModelGrid(props: ModelGridProps) {
 
   if (!dndEnabled) {
     return (
-      <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+      <div ref={gridRef} className={gridCols(!!props.variantPanelOpen)}>
         <CardGrid {...props} />
       </div>
     );
@@ -184,7 +200,7 @@ export default function ModelGrid(props: ModelGridProps) {
       onDragEnd={onDragEnd}
       onDragCancel={onDragCancel}
     >
-      <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+      <div ref={gridRef} className={gridCols(!!props.variantPanelOpen)}>
         {models.map((m, i) => (
           <DraggableCard key={m.id} model={m} draggingCreatorId={draggingModel?.creator_id ?? null}>
             <ModelCard
@@ -197,6 +213,7 @@ export default function ModelGrid(props: ModelGridProps) {
               hasGuide={props.guideModelIds.has(m.id)}
               allTagSuggestions={props.allTagSuggestions}
               focused={props.focusedIndex === i}
+              onOpenGroup={props.onOpenGroup}
             />
           </DraggableCard>
         ))}

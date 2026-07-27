@@ -36,6 +36,7 @@ DEFAULTS = {
     "reorganize_package_mode_enabled": False,
     "reorganize_ai_suggestions_enabled": False,
     "hierarchy_variant_grouping_enabled": False,
+    "variant_sidebar_enabled": False,
     "system_info_enabled": False,
     "persistent_diagnostics_enabled": False,
     "storage_recovery_enabled": False,
@@ -61,6 +62,15 @@ def test_reorganize_enabled_round_trips(client):
     assert client.get("/settings").json()["reorganize_enabled"] is False
     assert client.patch("/settings", json={"reorganize_enabled": True}).status_code == 200
     assert client.get("/settings").json()["reorganize_enabled"] is True
+
+
+def test_variant_sidebar_enabled_round_trips(client):
+    # Server-gated, default off: the Library panel must not be reachable just
+    # because a client sends the flag (STUDIO-350).
+    assert client.get("/settings").json()["variant_sidebar_enabled"] is False
+    response = client.patch("/settings", json={"variant_sidebar_enabled": True})
+    assert response.status_code == 200
+    assert client.get("/settings").json()["variant_sidebar_enabled"] is True
 
 
 def test_hierarchy_variant_grouping_enabled_round_trips(client):

@@ -10,14 +10,26 @@ without a second real filesystem.
 import errno
 import json
 import os
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
 from app.config import settings
 from app.models import PackOverride
-from app.services import write_lock
+from app.services import reorganize_apply, write_lock
 from app.services.reorganize_apply import ApplyError, _safe_move, apply_manifest
 from tests.conftest import make_creator, make_model, make_stl_file, set_reorganize_enabled
+
+
+def _stored(path) -> str:
+    """The form reorganize writes to the database: host-native separators.
+
+    Before STUDIO-366 the canonical '/' form was persisted verbatim, so these
+    assertions used to spell destinations with forward slashes (several via an
+    explicit `.replace("\\\\", "/")`). That matched the scanner's convention on
+    POSIX only, which is why the mismatch was invisible to Linux CI.
+    """
+    return str(Path(str(path)))
 
 
 @pytest.fixture
@@ -88,7 +100,7 @@ class TestApplyHappyPath:
         # File now lives at the proposed path.
         assert os.path.exists(entry["files"][0]["proposed_path"])
         db.refresh(m)
-        assert m.folder_path == entry["proposed_dir"]
+        assert m.folder_path == _stored(entry["proposed_dir"])
         # Undo log written beside the DB.
         assert os.path.exists(data["undo_log"])
         lines = [json.loads(l) for l in open(data["undo_log"]) if l.strip()]
@@ -139,10 +151,10 @@ class TestPackageApply:
         assert os.path.exists(character_destination + "/img/preview.jpg")
         db.refresh(standard)
         db.refresh(alt_model)
-        assert standard.folder_path == destination
-        assert standard.other_files == [destination + "/README.txt"]
-        assert standard.thumbnail_path == character_destination + "/img/preview.jpg"
-        assert alt_model.folder_path == destination + "/Alternate"
+        assert standard.folder_path == _stored(destination)
+        assert standard.other_files == [_stored(destination + "/README.txt")]
+        assert standard.thumbnail_path == _stored(character_destination + "/img/preview.jpg")
+        assert alt_model.folder_path == _stored(destination + "/Alternate")
 
         undo = client.post("/reorganize/undo", json={"manifest_id": preview["manifest_id"]})
         assert undo.status_code == 200, undo.text
@@ -152,10 +164,10 @@ class TestPackageApply:
         assert os.path.exists(str(shared_image))
         db.refresh(standard)
         db.refresh(alt_model)
-        assert standard.folder_path == str(package).replace("\\", "/")
-        assert standard.other_files == [str(notes).replace("\\", "/")]
-        assert standard.thumbnail_path == str(shared_image).replace("\\", "/")
-        assert alt_model.folder_path == str(alternate).replace("\\", "/")
+        assert standard.folder_path == _stored(package)
+        assert standard.other_files == [_stored(notes)]
+        assert standard.thumbnail_path == _stored(shared_image)
+        assert alt_model.folder_path == _stored(alternate)
 
     def test_partial_character_selection_retains_shared_assets(self, client, db, tmp_path, write_mode):
         _root(db, tmp_path)
@@ -207,7 +219,7 @@ class TestPackageApply:
         assert os.path.exists(complete_owner["character_proposed_dir"] + "/img/preview.jpg")
         assert not character.exists()
         db.refresh(first)
-        assert first.thumbnail_path == complete_owner["character_proposed_dir"] + "/img/preview.jpg"
+        assert first.thumbnail_path == _stored(complete_owner["character_proposed_dir"] + "/img/preview.jpg")
 
     def test_character_asset_undo_does_not_touch_unrelated_models(self, client, db, tmp_path, write_mode):
         """STUDIO-314: undoing a character-level shared-asset move must only
@@ -323,7 +335,7 @@ class TestInboxEndToEnd:
         assert os.path.exists(dest_file)
         assert not os.path.exists(src_str)
         db.refresh(m)
-        assert m.folder_path == entry["proposed_dir"]
+        assert m.folder_path == _stored(entry["proposed_dir"])
         assert m.is_inbox is False
 
         # Undo: file returns to the inbox source; is_inbox restored.
@@ -332,7 +344,7 @@ class TestInboxEndToEnd:
         assert os.path.exists(src_str)
         assert not os.path.exists(dest_file)
         db.refresh(m)
-        assert m.folder_path == inbox_str
+        assert m.folder_path == _stored(inbox_str)
         assert m.is_inbox is True
 
 
@@ -523,7 +535,7 @@ class TestUndo:
         assert os.path.exists(src) and not os.path.exists(dst)
         db.refresh(m)
         # folder_path restored to the original source dir.
-        assert m.folder_path == src.rsplit("/", 1)[0]
+        assert m.folder_path == _stored(src.rsplit("/", 1)[0])
 
     def test_undo_restores_cross_device_move(self, client, db, tmp_path, write_mode, monkeypatch):
         """STUDIO-312 regression: a move that falls back to the EXDEV copy path
@@ -698,7 +710,7 @@ class TestOverrideRepath:
                            json={"manifest_id": mid, "entry_ids": [m.id]})
         assert resp.status_code == 200
         new_dir = entry["proposed_dir"]
-        assert db.query(PackOverride).filter_by(path=new_dir).first() is not None
+        assert db.query(PackOverride).filter_by(path=_stored(new_dir)).first() is not None
 
     def test_multiple_entries_each_repath_their_own_override(self, db, tmp_path, write_mode, client):
         """STUDIO-314: _repath_overrides now batches every entry's (old, new)
@@ -721,8 +733,8 @@ class TestOverrideRepath:
         assert resp.status_code == 200, resp.text
 
         new1, new2 = by_id[m1.id]["proposed_dir"], by_id[m2.id]["proposed_dir"]
-        assert db.query(PackOverride).filter_by(path=new1).first() is not None
-        assert db.query(PackOverride).filter_by(path=new2).first() is not None
+        assert db.query(PackOverride).filter_by(path=_stored(new1)).first() is not None
+        assert db.query(PackOverride).filter_by(path=_stored(new2)).first() is not None
         assert db.query(PackOverride).filter_by(path=old1).first() is None
         assert db.query(PackOverride).filter_by(path=old2).first() is None
 
@@ -838,8 +850,8 @@ class TestImageMoves:
         assert os.path.exists(img_path)
 
         db.refresh(m)
-        assert m.thumbnail_path == img_path
-        assert img_path in m.image_paths
+        assert m.thumbnail_path == _stored(img_path)
+        assert _stored(img_path) in m.image_paths
 
 
 class TestImageCollisionSkip:
@@ -917,3 +929,106 @@ class TestImageCollisionSkip:
         db.refresh(m)
         assert os.path.exists(img_path)  # nothing moved — image untouched too
         assert m.folder_path == str(tmp_path / "_inbox" / "Bust").replace("\\", "/")
+
+
+# ---------------------------------------------------------------------------
+# Stored separator convention (STUDIO-366)
+# ---------------------------------------------------------------------------
+
+class TestStoredSeparatorConvention:
+    """Reorganize must persist host-native paths, matching what a scan writes.
+
+    Every test here pins _STORE_PATH to an explicit flavour instead of relying
+    on the host. On POSIX _canon's output already *is* the native form, so a
+    host-dependent assertion passes without exercising anything — the vacuous
+    -test trap this ticket and STUDIO-365 both call out. Pinning the flavour
+    makes the Windows behaviour observable from Linux CI.
+    """
+
+    @pytest.fixture
+    def windows_store(self, monkeypatch):
+        monkeypatch.setattr(reorganize_apply, "_STORE_PATH", PureWindowsPath)
+
+    @pytest.fixture
+    def posix_store(self, monkeypatch):
+        monkeypatch.setattr(reorganize_apply, "_STORE_PATH", PurePosixPath)
+
+    def test_canonical_path_is_stored_with_native_separators(self, windows_store):
+        assert reorganize_apply._native_store("C:/lib/abe3d/bust") == r"C:\lib\abe3d\bust"
+
+    def test_posix_storage_is_unchanged(self, posix_store):
+        assert reorganize_apply._native_store("/lib/abe3d/bust") == "/lib/abe3d/bust"
+
+    @pytest.mark.parametrize("value", [None, ""])
+    def test_empty_values_pass_through(self, value, windows_store):
+        assert reorganize_apply._native_store(value) == value
+
+    def test_replace_prefix_returns_native_form(self, windows_store):
+        moved = reorganize_apply._replace_prefix(
+            "C:/inbox/Bust/head.stl", "C:/inbox/Bust", "C:/lib/abe3d/bust",
+        )
+        assert moved == r"C:\lib\abe3d\bust\head.stl"
+
+    def test_replace_prefix_preserves_suffix_case(self, windows_store):
+        """The suffix must be sliced from the raw value, not the casefolded key."""
+        moved = reorganize_apply._replace_prefix(
+            "C:/inbox/Bust/SubDir/Head.STL", "C:/inbox/Bust", "C:/lib/abe3d/bust",
+        )
+        assert moved == r"C:\lib\abe3d\bust\SubDir\Head.STL"
+
+    def test_replace_prefix_accepts_an_already_native_input(self, windows_store):
+        """Rows written by the scanner are native; rebasing one must still work."""
+        moved = reorganize_apply._replace_prefix(
+            r"C:\inbox\Bust\head.stl", "C:/inbox/Bust", "C:/lib/abe3d/bust",
+        )
+        assert moved == r"C:\lib\abe3d\bust\head.stl"
+
+    def test_non_matching_path_is_left_alone(self, windows_store):
+        untouched = reorganize_apply._replace_prefix(
+            "C:/other/thing.stl", "C:/inbox/Bust", "C:/lib/abe3d/bust",
+        )
+        assert untouched == "C:/other/thing.stl"
+
+    def test_image_fields_are_repathed_natively(self, db, windows_store):
+        creator = make_creator(db, name="Abe3d")
+        m = make_model(db, creator, name="Bust")
+        m.image_paths = ["C:/inbox/Bust/cover.jpg"]
+        m.thumbnail_path = "C:/inbox/Bust/cover.jpg"
+        m.primary_image_path = "C:/inbox/Bust/cover.jpg"
+        m.removed_image_paths = ["C:/inbox/Bust/cover.jpg"]
+        db.flush()
+
+        reorganize_apply._repath_model_image(
+            m, "C:/inbox/Bust/cover.jpg", "C:/lib/abe3d/bust/cover.jpg",
+        )
+
+        expected = r"C:\lib\abe3d\bust\cover.jpg"
+        assert m.image_paths == [expected]
+        assert m.thumbnail_path == expected
+        assert m.primary_image_path == expected
+        assert m.removed_image_paths == [expected]
+
+    def test_undo_finds_a_row_stored_natively(self, db, windows_store):
+        """The undo log records the canonical form; rows are stored native."""
+        creator = make_creator(db, name="Abe3d")
+        m = make_model(db, creator, name="Bust")
+        make_stl_file(db, m, filename="head.stl", path=r"C:\lib\abe3d\bust\head.stl")
+        db.flush()
+
+        found = reorganize_apply._find_stl_by_path(db, "C:/lib/abe3d/bust/head.stl")
+        assert found is not None
+
+    def test_undo_still_finds_a_row_left_in_the_old_canonical_form(self, db, windows_store):
+        """Undo logs predating STUDIO-366 point at rows never converted."""
+        creator = make_creator(db, name="Abe3d")
+        m = make_model(db, creator, name="Bust")
+        make_stl_file(db, m, filename="head.stl", path="C:/lib/abe3d/bust/head.stl")
+        db.flush()
+
+        found = reorganize_apply._find_stl_by_path(db, "C:/lib/abe3d/bust/head.stl")
+        assert found is not None
+
+    def test_canon_is_not_changed_by_any_of_this(self, windows_store):
+        """_canon stays the comparison/preview form — proposals keep '/'."""
+        from app.services.reorganize import _canon
+        assert _canon(r"C:\lib\abe3d\bust") == "C:/lib/abe3d/bust"

@@ -12,18 +12,20 @@
  */
 import { join } from "node:path";
 
-import { Menu, app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
+import { Menu, app, BrowserWindow, dialog, ipcMain, screen, session, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 
 import { createAppController } from "./appController";
-import { LOCKFILE_NAME, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
+import { LOCKFILE_NAME, QUIT_TIMEOUT_MS, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
+import { registerCspHandler } from "./csp";
+import { routeNavigation, type NavigationHost } from "./externalNavigation";
 import { patchConsoleForDiagnostics, registerDiagnosticsIpcHandlers } from "./diagnostics";
 import {
   buildApplicationMenuTemplate,
   buildContextMenuTemplate,
 } from "./menu";
 import { findFreePort, runtimeDeps } from "./runtime";
-import { getOrCreateSecretKey, regenerateSecretKey } from "./secretKey";
+import { getOrCreateSecretKey, markSecretKeyRevealed, regenerateSecretKey } from "./secretKey";
 import { applyUserDataOverride } from "./userDataOverride";
 import { readWindowState } from "./windowState";
 import {
@@ -102,6 +104,7 @@ const appController = createAppController<BrowserWindow>({
   backendBaseUrl: (port) => baseUrl(port),
   getOrCreateSecretKey: (dir) => getOrCreateSecretKey(dir),
   regenerateSecretKeyFile: (dir) => regenerateSecretKey(dir),
+  markSecretKeyRevealed: (dir) => markSecretKeyRevealed(dir),
   autoUpdaterAdapter: autoUpdater,
   setUpdateFeedUrl: (url) => autoUpdater.setFeedURL({ provider: "generic", url }),
   fetchJson: async (url) => {
@@ -113,6 +116,9 @@ const appController = createAppController<BrowserWindow>({
   showMessageBox: (win, opts) => (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)),
   showKeyRevealWindow: (key) => showKeyRevealWindow(key),
   loadPlaceholderPage: (win) => win.loadFile(PLACEHOLDER_HTML),
+  loadSplashPage: (win) => win.loadFile(SPLASH_HTML),
+  quitApp: () => app.quit(),
+  now: () => Date.now(),
   log: (message) => console.log(message),
 });
 
@@ -132,15 +138,27 @@ const failureUi: FailureUi = {
     });
     return response === 0 ? "reload" : "quit";
   },
-  showMainFailure(detail) {
-    dialog.showErrorBox(
-      "STL Studio encountered an internal error",
-      `${detail}\n\nClose and reopen STL Studio if the application no longer responds.`,
-    );
+  async showMainFailure(detail) {
+    // showMessageBox (not showErrorBox) because the dedupe guard in
+    // registerProcessFailureHandlers needs a promise that resolves on
+    // dismissal (STUDIO-339) — showErrorBox is fire-and-forget and void.
+    await dialog.showMessageBox({
+      type: "error",
+      buttons: ["OK"],
+      defaultId: 0,
+      title: "STL Studio encountered an internal error",
+      message: "STL Studio encountered an internal error",
+      detail: `${detail}\n\nClose and reopen STL Studio if the application no longer responds.`,
+    });
   },
   quit() {
     app.quit();
   },
+};
+
+const navigationHost: NavigationHost = {
+  openExternal: (url) => shell.openExternal(url),
+  log: (message) => console.warn(message),
 };
 
 registerProcessFailureHandlers(process, failureUi);
@@ -216,9 +234,23 @@ function createWindow(): BrowserWindow {
   registerRendererFailureHandler(win, failureUi);
 
   win.webContents.on("will-navigate", (event, url) => {
-    if (!isBackendRetryUrl(url)) return;
-    event.preventDefault();
-    void win.loadFile(SPLASH_HTML).then(() => appController.bootBackendAndLoad(win));
+    if (isBackendRetryUrl(url)) {
+      event.preventDefault();
+      void win.loadFile(SPLASH_HTML).then(() => appController.bootBackendAndLoad(win));
+      return;
+    }
+    // Anything that isn't our own origin leaves the window: external links go
+    // to the system browser, everything else is refused (STUDIO-259).
+    if (!routeNavigation(url, navigationHost)) {
+      event.preventDefault();
+    }
+  });
+
+  // `target="_blank"` / window.open would otherwise render a remote page in a
+  // chromeless Electron window with no address bar.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    routeNavigation(url, navigationHost);
+    return { action: "deny" };
   });
 
   // Right-click context menu: Back/Forward/Reload + clipboard when relevant.
@@ -264,6 +296,8 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     startupLog(`ready userData=${app.getPath("userData")}`);
+    // Before any window exists, so no response can reach a renderer unpoliced.
+    registerCspHandler(session.defaultSession);
     installApplicationMenu();
     mainWindow = createWindow();
     startupLog("window-created");
@@ -290,7 +324,25 @@ if (!gotLock) {
     if (quitting) return;
     quitting = true;
     event.preventDefault();
-    await appController.stopOwnedSidecar();
+    // Buffered log lines (STUDIO-342) must land before exit, or the last
+    // moments before a crash/quit — often the most useful part — are lost.
+    await persistentLogger?.flush();
+    // Belt-and-braces: killTree already caps itself at SHUTDOWN_GRACE_MS, but
+    // this outer race means quit still proceeds even if something else in
+    // stopOwnedSidecar hangs. Without it, quitting is already true, so a wedge
+    // here would mean the only way out is Task Manager (STUDIO-340).
+    await Promise.race([
+      appController.stopOwnedSidecar(),
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          console.error(
+            `[shutdown] stopOwnedSidecar did not complete within ${QUIT_TIMEOUT_MS}ms; quitting anyway (STUDIO-340)`,
+          );
+          resolve();
+        }, QUIT_TIMEOUT_MS);
+        timer.unref?.();
+      }),
+    ]);
     app.quit();
   });
 }

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 
 interface Props {
@@ -19,6 +19,15 @@ export function PartTypeCombo({ value, options, placeholder, className, onChange
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The blur handler defers closing so a dropdown click lands first. Clear that
+  // pending timer on unmount — otherwise a field blurred moments before its row
+  // goes away calls setOpen on a dead component, which in jsdom means React
+  // touching an already-torn-down window (STUDIO-348).
+  useEffect(() => () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+  }, []);
 
   const sorted = [...options].sort((a, b) => a.localeCompare(b));
   const filtered = value
@@ -80,7 +89,11 @@ export function PartTypeCombo({ value, options, placeholder, className, onChange
         onClick={(e) => { e.stopPropagation(); onClick?.(e); openDrop(); }}
         onChange={(e) => onChange(e.target.value)}
         onFocus={openDrop}
-        onBlur={() => { setTimeout(() => setOpen(false), 150); onCommit(value); }}
+        onBlur={() => {
+          if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+          closeTimerRef.current = setTimeout(() => setOpen(false), 150);
+          onCommit(value);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           if (e.key === "Escape") setOpen(false);

@@ -28,6 +28,7 @@ import re
 import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime
 from pathlib import Path
 from sqlalchemy.orm import Session
@@ -38,6 +39,7 @@ from app.database import SessionLocal
 from app.models import Creator, Model, STLFile, ScanRoot, ModelTag, CollectionModel, PackOverride
 from app.services.job_runner import JobHandle, JobState, runner
 from app.services import name_parser, layout, grouping
+from app.services.path_boundary import PathBoundary
 from app.services.scan_rules import (
     IgnoreMatcher, load_ignore_matcher, load_tag_rules, load_parts_names,
 )
@@ -71,6 +73,35 @@ NESTED_VARIANT_BOUNDARY = re.compile(
     r"^(?:alt(?:ernate|ernative)?|variant)(?:[\s_-].*)?$|^v\d+(?:\.\d+)?$",
     re.I,
 )
+# How many read-failure paths a scan reports back through its status payload. The
+# count is exact; the sample is capped so a systematically unreadable library
+# (e.g. every path past MAX_PATH) can't grow the status response without bound.
+READ_FAILURE_SAMPLE_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class ReadFailure:
+    """One filesystem entry the scanner could not stat while classifying a folder.
+
+    Defined up here rather than beside :func:`_list_dir` because
+    ``_walk_for_models`` annotates a parameter with it, and annotations are
+    evaluated at def time.
+    """
+    path: str
+    error: str
+
+
+@dataclass(frozen=True)
+class DirListing:
+    """A folder's immediate children, split by kind, plus any per-entry failures.
+
+    ``dirs``/``files`` are unsorted and unfiltered (hidden entries included) —
+    call sites apply their own ordering and hidden-filtering so this stays a
+    faithful listing rather than a policy decision.
+    """
+    dirs: list[Path] = dataclass_field(default_factory=list)
+    files: list[Path] = dataclass_field(default_factory=list)
+    failures: list[ReadFailure] = dataclass_field(default_factory=list)
 
 # The "one scan at a time" gate is the app-wide library write lock
 # (services/write_lock.py), so a scan and a reorganize apply/undo are mutually
@@ -103,16 +134,47 @@ def _bump(**deltas: int) -> None:
 
 def _cancelled() -> bool:
     return _active is not None and _active.cancelled
-# Folders the user has explicitly split into per-child models (see PackOverride).
-# Loaded from the DB at the start of every scan; the walk treats these as
-# boundaries. Module-level because only one scan runs at a time (held by the
-# library write lock) and threading it through every recursive call would be noisy.
-_pack_overrides: set[str] = set()
-# Configurable folder/file ignore patterns (#31). Loaded from app_settings at the
-# start of every scan; the walk skips any folder it matches. Module-level for the
-# same reason as the overrides above — one scan at a time, threading it through
-# every recursive call would be noise.
-_ignore_matcher: IgnoreMatcher = IgnoreMatcher(())
+@dataclass(frozen=True)
+class ScanRules:
+    """Immutable per-run rules the walk consults for every folder (STUDIO-231).
+
+    Previously two module-level mutable globals populated at scan start. That
+    worked only because one scan runs at a time (held by the library write lock),
+    and it hid a real dependency: nothing in the signature of ``_walk_for_models``
+    said its classification depended on process-wide state, and an entry point
+    that forgot to load them silently walked with whatever the previous operation
+    left behind.
+
+    Frozen, so the four parallel creator workers share read-only state by
+    construction rather than by convention.
+
+    * ``pack_overrides`` — folders the user has explicitly split into per-child
+      models (see PackOverride). The walk treats these as boundaries; this is what
+      makes an opt-in split durable across rescans.
+    * ``ignore`` — configurable folder/file ignore patterns (#31). The walk skips
+      any folder it matches.
+    """
+
+    pack_overrides: frozenset[str] = frozenset()
+    ignore: IgnoreMatcher = IgnoreMatcher(())
+
+    @classmethod
+    def load(cls, db: Session) -> "ScanRules":
+        """Read this run's rules from the database.
+
+        Also pushes the user's tag-inference rules and parts/structural folder
+        names into the name parser (#31). Those remain module-level state owned by
+        ``services/name_parser``, so this constructor is NOT free of side effects
+        despite returning a value — it both builds the scanner's rules and mutates
+        another module. Removing that half is tracked as STUDIO-363; it was left
+        out of STUDIO-231 to keep the scanner-global removal reviewable on its own.
+        """
+        name_parser.set_tag_rules([(r.pattern, r.tag) for r in load_tag_rules(db)])
+        name_parser.set_parts_names(load_parts_names(db))
+        return cls(
+            pack_overrides=frozenset(row[0] for row in db.query(PackOverride.path)),
+            ignore=load_ignore_matcher(db),
+        )
 
 
 def get_status() -> dict:
@@ -131,6 +193,11 @@ def get_status() -> dict:
         # before the job reaches its terminal CANCELLED state during teardown.
         "cancelled": payload["state"] == JobState.CANCELLED.value or prog.get("cancelled", False),
         "offline_roots": prog.get("offline_roots", []),
+        # Entries the walk could not stat (STUDIO-358). Non-zero means this run saw
+        # an incomplete view of the disk, so its model count is a floor, not a
+        # total — and the prunes that depend on a complete walk were skipped.
+        "read_failures": prog.get("read_failures", 0),
+        "read_failure_samples": prog.get("read_failure_samples", []),
     }
 
 
@@ -152,20 +219,6 @@ def _root_available(path: str) -> bool:
             return next(it, None) is not None
     except OSError:
         return False
-
-
-def _load_pack_overrides(db: Session) -> None:
-    global _pack_overrides
-    _pack_overrides = {row[0] for row in db.query(PackOverride.path)}
-
-
-def _load_scan_rules(db: Session) -> None:
-    global _ignore_matcher
-    _ignore_matcher = load_ignore_matcher(db)
-    # Push user tag-inference rules + parts/structural names into the name
-    # parser for this run (#31).
-    name_parser.set_tag_rules([(r.pattern, r.tag) for r in load_tag_rules(db)])
-    name_parser.set_parts_names(load_parts_names(db))
 
 
 def request_cancel():
@@ -204,13 +257,13 @@ def _full_scan(job: JobHandle, db: Session | None = None):
     # launcher); released in the finally below.
     global _active
     _active = job
-    job.update(message="starting", models_found=0, files_found=0, cancelled=False, offline_roots=[])
+    job.update(message="starting", models_found=0, files_found=0, cancelled=False, offline_roots=[],
+               read_failures=0, read_failure_samples=[])
     try:
         _db = db or SessionLocal()
         own_db = db is None
         try:
-            _load_pack_overrides(_db)
-            _load_scan_rules(_db)
+            rules = ScanRules.load(_db)
 
             # Clear needs_review for any model that already has indexed STL files —
             # those are confirmed real products that were over-eagerly flagged.
@@ -241,7 +294,7 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 if _cancelled():
                     job.update(state=JobState.CANCELLED, message="cancelled", cancelled=True)
                     break
-                root_failed = _scan_root(root, _db)
+                root_failed = _scan_root(root, _db, rules)
                 failed_creator_ids |= root_failed
                 # Only advance the baseline for a root that was ONLINE (missing or
                 # detached-mount-empty roots present as "no creators found", which
@@ -286,7 +339,7 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                     _db, available_paths, protected_creator_ids=failed_creator_ids,
                 )
                 # Drop models that a newly-added ignore pattern now covers (#31).
-                removed += _prune_ignored(_db, available_paths)
+                removed += _prune_ignored(_db, available_paths, rules.ignore)
                 # Slicer rows must go before the phantom prune so a model whose
                 # only "STL" was a slicer project is removed in the same scan.
                 _prune_slicer_files(_db)
@@ -370,16 +423,10 @@ def _prune_stale_paths(
 
     Returns the number of models pruned (for the scan completion summary, #223).
     """
-    if not available_root_paths:
+    online = PathBoundary.from_paths(available_root_paths)
+    if not online:
         return 0
     protected = protected_creator_ids or set()
-    roots_norm = [os.path.normcase(os.path.normpath(p)) for p in available_root_paths]
-
-    def _under_online_root(folder_path: str | None) -> bool:
-        if not folder_path:
-            return False
-        n = os.path.normcase(os.path.normpath(folder_path))
-        return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
     rows = (
         db.query(Model.id, Model.folder_path, Model.creator_id)
@@ -388,7 +435,7 @@ def _prune_stale_paths(
     )
     under = [
         r for r in rows
-        if r.creator_id not in protected and _under_online_root(r.folder_path)
+        if r.creator_id not in protected and online.contains(r.folder_path)
     ]
     total = len(under)
     stale_ids = [r.id for r in under if not Path(r.folder_path).exists()]
@@ -429,16 +476,10 @@ def _prune_stale_stl_files(
 
     Returns the number of STL rows pruned (for the scan completion summary).
     """
-    if not available_root_paths:
+    online = PathBoundary.from_paths(available_root_paths)
+    if not online:
         return 0
     protected = protected_creator_ids or set()
-    roots_norm = [os.path.normcase(os.path.normpath(p)) for p in available_root_paths]
-
-    def _under_online_root(folder_path: str | None) -> bool:
-        if not folder_path:
-            return False
-        n = os.path.normcase(os.path.normpath(folder_path))
-        return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
     models = (
         db.query(Model.id, Model.folder_path, Model.creator_id)
@@ -448,7 +489,7 @@ def _prune_stale_stl_files(
     model_ids = [
         m.id for m in models
         if m.creator_id not in protected
-        and _under_online_root(m.folder_path)
+        and online.contains(m.folder_path)
         and Path(m.folder_path).exists()
     ]
     if not model_ids:
@@ -474,7 +515,7 @@ def _prune_stale_stl_files(
     return len(stale_ids)
 
 
-def _prune_ignored(db: Session, root_paths: list[str]):
+def _prune_ignored(db: Session, root_paths: list[str], ignore: IgnoreMatcher):
     """Remove already-indexed models that now fall under a configured ignore
     pattern (#31).
 
@@ -490,9 +531,11 @@ def _prune_ignored(db: Session, root_paths: list[str]):
 
     Returns the number of models pruned (for the scan completion summary, #223).
     """
-    if not _ignore_matcher.patterns or not root_paths:
+    if not ignore.patterns:
         return 0
-    roots_norm = {os.path.normcase(os.path.normpath(p)) for p in root_paths}
+    roots = PathBoundary.from_paths(root_paths)
+    if not roots:
+        return 0
 
     def _is_ignored(folder_path: str | None) -> bool:
         if not folder_path:
@@ -501,10 +544,16 @@ def _prune_ignored(db: Session, root_paths: list[str]):
         # Walk leaf → up, stopping when we step onto a scan root (don't test the
         # root itself — ignoring a whole root is not this feature's job) or run
         # out of parents.
+        #
+        # is_root(), NOT contains(): this is the stop condition for the climb, so
+        # it must match the root EXACTLY. contains() would also match every
+        # descendant, i.e. the model's own folder on the first iteration, ending
+        # the walk immediately and silently disabling ignore rules for anything
+        # nested below an ignored folder.
         while True:
-            if os.path.normcase(os.path.normpath(str(current))) in roots_norm:
+            if roots.is_root(current):
                 return False
-            if _ignore_matcher.matches(current):
+            if ignore.matches(current):
                 return True
             parent = current.parent
             if parent == current:  # filesystem root, no scan-root match found
@@ -541,11 +590,11 @@ def _prune_stale_models(
     longer a leaf. Safety cap: skip if >50% of models under the scanned roots
     would be pruned (suggests an indexing failure rather than legitimate pruning).
 
-    Root membership is matched on the normalised path with a separator boundary
-    (not a SQL LIKE prefix): folder paths and root names routinely contain '_' and
-    other LIKE metacharacters, and an unanchored prefix would also match sibling
-    roots ('D:/STL' vs 'D:/STLBackup'). os.path.normcase handles per-platform
-    separator + case folding (case-insensitive on Windows).
+    Root membership goes through services/path_boundary.PathBoundary rather than a
+    SQL LIKE prefix: folder paths and root names routinely contain '_' and other
+    LIKE metacharacters, and an unanchored prefix would also match sibling roots
+    ('D:/STL' vs 'D:/STLBackup'). The boundary anchors descendants on a separator
+    and folds case per host filesystem, which is why this stays in Python.
 
     User-EXCLUDED models are never pruned: the walk returns before bumping their
     updated_at (so it always predates scan_start), and deleting them would let a
@@ -558,22 +607,16 @@ def _prune_stale_models(
 
     Returns the number of models pruned (for the scan completion summary, #223).
     """
-    if not root_paths:
+    scanned = PathBoundary.from_paths(root_paths)
+    if not scanned:
         return 0
-    roots_norm = [os.path.normcase(os.path.normpath(p)) for p in root_paths]
     protected = protected_creator_ids or set()
-
-    def _under_root(folder_path: str | None) -> bool:
-        if not folder_path:
-            return False
-        n = os.path.normcase(os.path.normpath(folder_path))
-        return any(n == r or n.startswith(r + os.sep) for r in roots_norm)
 
     # Fetch non-excluded candidates once (id + folder + timestamp + creator), then
     # derive both the under-root total and the stale subset in Python. Root
-    # membership still needs normpath comparison (see docstring re: LIKE
-    # metacharacters), so it can't move to SQL — but a single pass replaces the two
-    # overlapping full-table queries this ran before (#653).
+    # membership can't move to SQL (see docstring re: LIKE metacharacters), but a
+    # single pass replaces the two overlapping full-table queries this ran before
+    # (#653).
     rows = (
         db.query(Model.id, Model.folder_path, Model.updated_at, Model.creator_id)
         .filter(Model.excluded == False, Model.folder_path != None)  # noqa: E711, E712
@@ -581,7 +624,7 @@ def _prune_stale_models(
     )
     under = [
         r for r in rows
-        if _under_root(r.folder_path) and r.creator_id not in protected
+        if scanned.contains(r.folder_path) and r.creator_id not in protected
     ]
     total = len(under)
     stale_ids = [
@@ -599,8 +642,7 @@ def _prune_stale_models(
 
 
 def prune_empty_creators(db: Session):
-    """Delete Creator rows that have no models — left behind by the scraper
-    creating duplicate creators with different casing, by stale-path pruning,
+    """Delete Creator rows that have no models — left behind by stale-path pruning,
     or by a caller reassigning every one of a creator's models elsewhere
     (single-pack import's placeholder creator — named after the pack folder,
     e.g. "Ignisaurus Clan ..." — orphaned the moment the user sets the real
@@ -739,7 +781,8 @@ def _creator_scan(job: JobHandle, creator_id: int):
     # Assumes the write lock is already held; released in the finally below.
     global _active
     _active = job
-    job.update(message="starting", models_found=0, files_found=0, cancelled=False)
+    job.update(message="starting", models_found=0, files_found=0, cancelled=False,
+               read_failures=0, read_failure_samples=[])
     try:
         db = SessionLocal()
         try:
@@ -748,8 +791,7 @@ def _creator_scan(job: JobHandle, creator_id: int):
                 job.update(state=JobState.DONE, message="creator not found")
                 return
 
-            _load_pack_overrides(db)
-            _load_scan_rules(db)
+            rules = ScanRules.load(db)
 
             # Clear stale needs_review on this creator's already-indexed models.
             db.execute(_sqltext(
@@ -778,6 +820,7 @@ def _creator_scan(job: JobHandle, creator_id: int):
                 db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
             db.commit()
 
+            walk_failures: list[ReadFailure] = []
             for creator_dir, layout_tags, grp_by_char in dirs:
                 if _cancelled():
                     job.update(state=JobState.CANCELLED, message="cancelled", cancelled=True)
@@ -791,12 +834,23 @@ def _creator_scan(job: JobHandle, creator_id: int):
                     character=None,
                     stl_cache={},
                     last_scanned=None,  # full reindex of this creator
+                    rules=rules,
                     layout_tags=layout_tags,
                     group_by_character=grp_by_char,
+                    read_failures=walk_failures,
                 )
+            _report_read_failures(walk_failures)
 
             if not _cancelled():
-                removed = _prune_phantoms(db, creator_id=creator_id)
+                # This path wiped the creator's STL rows above and rebuilt them from
+                # disk, so a short listing can leave a real model looking phantom.
+                # Skip the phantom prune rather than delete on an incomplete view.
+                if walk_failures:
+                    logger.warning(
+                        f"Creator rescan hit {len(walk_failures)} unreadable entries — "
+                        "phantom prune skipped to avoid removing live models"
+                    )
+                removed = 0 if walk_failures else _prune_phantoms(db, creator_id=creator_id)
                 # Match the full-scan path: creator rescans refresh only
                 # machine-owned groups after the filesystem walk. The grouping
                 # service keeps manual groups and explicit no_group decisions
@@ -856,11 +910,20 @@ def split_pack(model_id: int) -> dict:
                 return {"ok": False, "created": 0,
                         "message": "no child folders with STLs to split into"}
 
-            # Record the durable override (idempotent) and refresh the in-memory set.
+            # Record the durable override (idempotent), then build this operation's
+            # rules so the re-walk below sees it as a boundary.
+            #
+            # This now loads the FULL rule set, including ignore patterns. It
+            # previously loaded only the overrides, so the re-walk consulted
+            # whatever _ignore_matcher the module global happened to hold — the
+            # previous scan's patterns in a long-lived process, empty in a fresh
+            # one. That was leftover state, not a designed contract; a split now
+            # honours the user's ignore rules the same way every other entry point
+            # does, and does so deterministically (STUDIO-231).
             if not db.query(PackOverride).filter(PackOverride.path == str(pack)).first():
                 db.add(PackOverride(path=str(pack)))
                 db.commit()
-            _load_pack_overrides(db)
+            rules = ScanRules.load(db)
 
             # Drop the collapsed model (and its dependents) so the re-walk starts clean.
             _cascade_delete_models(db, [model_id])
@@ -882,6 +945,7 @@ def split_pack(model_id: int) -> dict:
                 break
 
             before = db.query(func.count(Model.id)).filter(Model.creator_id == creator_id).scalar() or 0
+            walk_failures: list[ReadFailure] = []
             _walk_for_models(
                 folder=pack,
                 creator=creator,
@@ -890,8 +954,11 @@ def split_pack(model_id: int) -> dict:
                 character=None,
                 stl_cache={},
                 last_scanned=None,
+                rules=rules,
                 layout_tags=pack_layout_tags,
+                read_failures=walk_failures,
             )
+            _report_read_failures(walk_failures)
             db.commit()
             after = db.query(func.count(Model.id)).filter(Model.creator_id == creator_id).scalar() or 0
             created = max(0, after - before)
@@ -907,7 +974,7 @@ def split_pack(model_id: int) -> dict:
         write_lock.release_scan()
 
 
-def _scan_root(root: ScanRoot, db: Session) -> set[int]:
+def _scan_root(root: ScanRoot, db: Session, rules: ScanRules) -> set[int]:
     """Walk a scan root's creators in parallel. Returns the set of creator ids whose
     walk did NOT complete cleanly (raised mid-walk). Those creators were only
     partially indexed, so their models must be protected from the "not visited this
@@ -943,12 +1010,17 @@ def _scan_root(root: ScanRoot, db: Session) -> set[int]:
     # by a lock; contention is negligible (only touched on the exception path).
     failed_creator_ids: set[int] = set()
     failed_lock = threading.Lock()
+    # Per-entry read failures across all workers. Aggregated under failed_lock and
+    # reported once after the pool joins — _report_read_failures does a
+    # read-modify-write on the progress payload and must not run in parallel.
+    root_read_failures: list[ReadFailure] = []
 
     def _scan_one(creator_dir: Path, layout_tags: list[str]):
         if _cancelled():
             return
         creator_id = creator_ids[str(creator_dir)]
         thread_db = SessionLocal()
+        walk_failures: list[ReadFailure] = []
         try:
             creator = thread_db.get(Creator, creator_id)
             _msg(f"scanning {creator_dir.name}")
@@ -960,9 +1032,23 @@ def _scan_root(root: ScanRoot, db: Session) -> set[int]:
                 character=None,
                 stl_cache={},
                 last_scanned=root_last_scanned,
+                rules=rules,
                 layout_tags=layout_tags,
                 group_by_character=root.group_by_character,
+                read_failures=walk_failures,
             )
+            if walk_failures:
+                # The walk finished, but on an incomplete view of the disk. Treat it
+                # like a failed walk for prune purposes: a folder whose listing was
+                # short may have classified differently (or not been reached at
+                # all), so its models must not be pruned as stale this run.
+                logger.warning(
+                    f"Creator '{creator_dir.name}' had {len(walk_failures)} unreadable "
+                    "entries — stale prune skipped for its models"
+                )
+                with failed_lock:
+                    failed_creator_ids.add(creator_id)
+                    root_read_failures.extend(walk_failures)
         except Exception:
             # Swallow so one bad creator doesn't abort the whole scan, but RECORD it:
             # a partially-walked creator's untouched models must not be pruned as
@@ -977,6 +1063,9 @@ def _scan_root(root: ScanRoot, db: Session) -> set[int]:
         futures = [executor.submit(_scan_one, d, tags) for d, tags in creator_entries]
         for future in as_completed(futures):
             future.result()  # propagate any unexpected exception to the outer handler
+
+    # Single-threaded again — safe to fold the workers' read failures into progress.
+    _report_read_failures(root_read_failures)
 
     # Propose durable variant groups (#615) once per *distinct* creator, AFTER the
     # parallel walk, on a single session. Running it inside the thread pool (once
@@ -1007,11 +1096,26 @@ def _walk_for_models(
     character: str | None,
     stl_cache: dict[str, bool],
     last_scanned: datetime | None,
+    rules: ScanRules,
     parent_names: list[str] | None = None,
     layout_tags: list[str] | None = None,
     is_inbox: bool = False,
     group_by_character: bool = False,
+    read_failures: list[ReadFailure] | None = None,
 ):
+    """Walk *folder*, indexing models and recursing per classification.
+
+    ``rules`` carries this run's pack overrides and ignore patterns. Required
+    rather than defaulted: these decide whether a folder becomes a model at all,
+    so a caller that omitted them would silently walk with no pack splits and no
+    ignore rules — the exact failure the module globals used to allow (STUDIO-231).
+
+    ``read_failures``, when supplied, accumulates every entry this walk could not
+    stat (see :func:`_list_dir`). Callers use a non-empty list as the signal to
+    shield the creator from the stale prune — an incomplete listing may have
+    changed which folders were classified as models, so anything not rediscovered
+    this run must not be assumed deleted (same protection as STUDIO-79).
+    """
     if not folder.is_dir():
         return
 
@@ -1020,7 +1124,7 @@ def _walk_for_models(
     # The creator boundary itself is never ignored — a pattern that happened to match
     # a creator folder would silently drop every model under it; ignore is for
     # sub-folders (WIP dumps, archives, slicer project dirs), not whole creators.
-    if folder != creator_boundary and _ignore_matcher.matches(folder):
+    if folder != creator_boundary and rules.ignore.matches(folder):
         return
 
     # The creator-boundary folder is never itself a model. Its name may contain a
@@ -1031,20 +1135,26 @@ def _walk_for_models(
     # A folder the user has explicitly split (a pack override) is treated the same
     # way: never a model itself, always recursed past, so each child becomes its own
     # model. This is what makes an opt-in split durable across rescans.
-    is_creator_root = folder == creator_boundary or str(folder) in _pack_overrides
+    is_creator_root = folder == creator_boundary or str(folder) in rules.pack_overrides
 
-    child_dirs = [d for d in sorted(folder.iterdir()) if d.is_dir() and not _is_hidden(d.name)]
-    has_direct_stls = _has_stls(folder, recurse=False)
+    # One listing feeds all three classification inputs below. Previously each read
+    # the directory again with its own error handling — child_dirs and
+    # has_direct_stls let OSError propagate while the filename collection swallowed
+    # it into an empty list, so whichever raised first decided the outcome. A single
+    # read makes the failure handling consistent (and costs two fewer syscall
+    # round-trips per folder on a network mount).
+    listing = _list_dir(folder)
+    if read_failures is not None:
+        read_failures.extend(listing.failures)
+
+    child_dirs = [d for d in sorted(listing.dirs) if not _is_hidden(d.name)]
+    has_direct_stls = any(f.suffix.lower() in STL_EXTENSIONS for f in listing.files)
     any_child_stls = _any_child_has_stls_cached(child_dirs, stl_cache)
     has_any_stls = has_direct_stls or any_child_stls
 
-    # Collect file names for signal detection. iterdir()/is_file() only raise
-    # OSError (permissions, vanished mount) — narrow so a real bug isn't masked as
-    # an empty folder.
-    try:
-        filenames = [f.name for f in folder.iterdir() if f.is_file()]
-    except OSError:
-        filenames = []
+    # File names for signal detection. Hidden files are deliberately NOT filtered
+    # here — unchanged from the previous iterdir()-based collection.
+    filenames = [f.name for f in listing.files]
 
     # --- Step 1: name-based product detection (folder + files + parents) ---
     # Require the subtree to actually contain STLs. A folder whose *name* (or whose
@@ -1217,8 +1327,10 @@ def _walk_for_models(
         _walk_for_models(child, creator, db, creator_boundary,
                          character=child_character, parent_names=next_parents,
                          stl_cache=stl_cache, last_scanned=last_scanned,
+                         rules=rules,
                          layout_tags=layout_tags, is_inbox=is_inbox,
-                         group_by_character=group_by_character)
+                         group_by_character=group_by_character,
+                         read_failures=read_failures)
 
 
 def _index_model(
@@ -1254,24 +1366,51 @@ def _index_model(
         # in place so identity — and everything hanging off it — survives.
         # Only case-insensitive volumes can produce this miss, so skip the extra
         # query entirely on case-sensitive filesystems (Linux servers/CI), where
-        # a differently-cased path is a genuinely different folder. The SQL
-        # lower()-match keeps this to a single narrow query per new model instead
-        # of scanning every model for the creator; the _normpath guard on the
-        # result rejects any ASCII-lower() false positive.
+        # a differently-cased path is a genuinely different folder (STUDIO-226).
+        #
+        # The SQL match keeps this to a single narrow query per new model instead
+        # of scanning every model for the creator; the _normpath guard on each
+        # result is what actually decides identity, so the query only has to be
+        # loose enough not to miss a real match.
+        #
+        # Separators are folded on BOTH sides (STUDIO-365). _normpath() is
+        # normcase(normpath(...)), which on Windows folds case *and* rewrites '/'
+        # to '\'. A prefilter that folded case alone therefore could not see a row
+        # stored in forward-slash form — 'F:/lib/x' vs 'F:\lib\x' compare unequal
+        # under lower() — so the guard below never ran and a duplicate row was
+        # inserted for a folder already indexed. Such duplicates then survive every
+        # prune, because on a case-insensitive volume the forward-slash path still
+        # exists() and the row looks live.
+        #
+        # Still not folded here: '..' segments and repeated separators, which
+        # normpath() would collapse but this comparison will not. A row stored in
+        # such a form remains un-matchable; no writer is known to produce one.
         recased_from: str | None = None
         if model is None and _normpath("A") == _normpath("a"):
             target_norm = _normpath(folder_path)
             candidates = (
                 db.query(Model)
                 .filter(Model.creator_id == creator.id,
-                        func.lower(Model.folder_path) == folder_path.lower())
+                        func.lower(func.replace(Model.folder_path, "\\", "/"))
+                        == folder_path.lower().replace("\\", "/"))
                 .all()
             )
-            for candidate in candidates:
-                if candidate.folder_path and _normpath(candidate.folder_path) == target_norm:
-                    model = candidate
-                    recased_from = candidate.folder_path
-                    break
+            matches = [
+                c for c in candidates
+                if c.folder_path and _normpath(c.folder_path) == target_norm
+            ]
+            if len(matches) > 1:
+                # Pre-existing duplicates for one physical folder (the bug above,
+                # before it was fixed). Adopting one leaves the rest stale and
+                # unprunable; surface it rather than silently picking one.
+                logger.warning(
+                    f"{len(matches)} model rows resolve to the same folder "
+                    f"{folder_path!r}: ids={[m.id for m in matches]}. Adopting "
+                    f"id={matches[0].id}; the others need manual cleanup."
+                )
+            if matches:
+                model = matches[0]
+                recased_from = model.folder_path
 
         # User-excluded model: leave it hidden. Never re-index, re-tag, or reset
         # the flag, so a rescan never resurrects something the user removed.
@@ -1458,25 +1597,59 @@ def _index_model(
 # ---------------------------------------------------------------------------
 
 def _normpath(p: str) -> str:
-    """Normalize a filesystem path for identity comparison — case- and
+    """Normalize a filesystem path for MODEL IDENTITY comparison — case- and
     separator-folded on the current platform (case-insensitive on Windows).
-    Mirrors the normalization the prune paths already use so lookup and prune
-    agree on model identity (STUDIO-78)."""
+
+    Currently identical to services/path_boundary.normalize(), and deliberately
+    kept as a separate function rather than delegating to it. The two answer
+    different questions and are expected to diverge:
+
+    * ``path_boundary`` compares paths against roots on THIS host — a live
+      filesystem question, so host casing semantics are correct there permanently.
+    * This one decides whether a path is the same LIBRARY OBJECT as a stored row.
+      STUDIO-78 made it match the prune normalization so lookup and prune agree;
+      STUDIO-359 will make it canonical and host-INDEPENDENT so a database is
+      portable between the Docker and Windows deployments.
+
+    Collapsing them would make that change silently alter prune membership too.
+    """
     return os.path.normcase(os.path.normpath(p))
 
 
 def _recase_model_paths(db: Session, model: Model, old_folder_path: str, new_folder_path: str):
-    """Adopt a case-only folder rename on an existing model in place (STUDIO-78).
+    """Adopt a case- or separator-only folder rename on an existing model in place
+    (STUDIO-78, extended by STUDIO-365).
 
-    Updates the model's folder_path and re-cases the prefix of every child
-    STLFile.path so they line up with the new-cased folder on disk. The relative
-    suffix under the model folder is unchanged (only an ancestor's case differs),
-    so a straight prefix swap is exact and preserves STL-level metadata
-    (sup_of_id, part_name) that a delete-and-reindex would drop."""
+    Updates the model's folder_path and rewrites the prefix of every child
+    STLFile.path so they line up with the folder as the walk sees it. The relative
+    suffix under the model folder names the same files either way, so a prefix
+    swap preserves STL-level metadata (sup_of_id, part_name) that a
+    delete-and-reindex would drop.
+
+    Both the prefix test and the suffix are separator-folded. A plain
+    ``startswith`` missed a stored path that differed from the model folder only
+    by separator style, and even when it matched it left the OLD style in the
+    suffix — producing a mixed path like ``C:\\lib\\Model/part.stl`` that
+    ``_index_stl_files`` then failed to match, inserting a duplicate row and
+    stranding the original's metadata.
+
+    Only reached from the case-insensitive-volume fallback in ``_index_model``,
+    so folding separators is safe here: on a case-sensitive host a backslash is a
+    legal filename character and this code does not run.
+    """
     model.folder_path = new_folder_path
+    old_norm = _normpath(old_folder_path)
     for stl in db.query(STLFile).filter(STLFile.model_id == model.id).all():
-        if stl.path and stl.path.startswith(old_folder_path):
-            stl.path = new_folder_path + stl.path[len(old_folder_path):]
+        if not stl.path:
+            continue
+        # Compare normalized, but slice the RAW path so the file's own casing is
+        # preserved. normcase/normpath are length-preserving for these inputs
+        # (case fold and separator swap are both one-for-one), so the offset is
+        # valid on either form.
+        if not _normpath(stl.path).startswith(old_norm):
+            continue
+        suffix = stl.path[len(old_folder_path):]
+        stl.path = new_folder_path + suffix.replace("\\", os.sep).replace("/", os.sep)
 
 
 def _merge_auto_tags(detected: list[str], layout_tags: list[str] | None) -> list[str]:
@@ -1538,6 +1711,64 @@ def _iter_files_recursive(folder: Path):
             yield from _iter_files_recursive(Path(entry.path))
         else:
             yield Path(entry.path)
+
+
+def _list_dir(folder: Path) -> DirListing:
+    """List a folder's immediate children, tolerating PER-ENTRY stat failures.
+
+    Two failure modes must be told apart, because they need opposite handling:
+
+    * The whole directory cannot be listed (permissions, vanished mount). The
+      OSError PROPAGATES — the creator walk catches it and shields that creator's
+      models from the stale prune (STUDIO-79). Swallowing it here would remove
+      that protection and let a transient mount drop prune a live library.
+    * A single entry cannot be stat'd while the directory itself lists fine. This
+      is the common Windows case: the directory path fits inside MAX_PATH but an
+      individual child's full path does not, so ``is_dir()`` raises for that entry
+      alone. It also covers broken symlinks and dehydrated cloud placeholders.
+      Aborting the whole folder over one bad entry would be worse than useless, so
+      the entry is skipped — but RECORDED, never silently dropped.
+
+    Recording matters because an incomplete listing is not inert: it feeds
+    ``name_parser.parse_folder()`` product detection, so a missing file can change
+    whether this folder becomes a model at all. Same reasoning as
+    :func:`_iter_files_recursive`, which avoids rglob for exactly this reason.
+    """
+    with os.scandir(folder) as it:
+        entries = list(it)
+
+    dirs: list[Path] = []
+    files: list[Path] = []
+    failures: list[ReadFailure] = []
+    for entry in entries:
+        try:
+            is_dir = entry.is_dir()
+        except OSError as e:
+            failures.append(ReadFailure(path=entry.path, error=str(e)))
+            continue
+        (dirs if is_dir else files).append(Path(entry.path))
+    return DirListing(dirs=dirs, files=files, failures=failures)
+
+
+def _report_read_failures(failures: list[ReadFailure]) -> None:
+    """Push per-entry read failures onto scan progress and the log.
+
+    Call from single-threaded code only: the bounded sample is a read-modify-write
+    on the progress payload, which the parallel creator workers must not race on.
+    ``_scan_root`` therefore aggregates its workers' failures under the existing
+    ``failed_lock`` and reports once, after the pool joins.
+    """
+    if not failures:
+        return
+    for f in failures:
+        logger.warning(f"Scan could not read entry (skipped, folder still indexed): {f.path} — {f.error}")
+    if _active is None:
+        return
+    _active.increment(read_failures=len(failures))
+    existing = _active.payload()["progress"].get("read_failure_samples", []) or []
+    room = READ_FAILURE_SAMPLE_LIMIT - len(existing)
+    if room > 0:
+        _active.update(read_failure_samples=existing + [f.path for f in failures[:room]])
 
 
 def _has_stls(folder: Path, recurse: bool = False) -> bool:
@@ -1878,11 +2109,35 @@ def _index_stl_files(
 
 
 def _get_or_create_creator(name: str, db: Session) -> Creator:
-    creator = db.query(Creator).filter(Creator.name == name).first()
-    if not creator:
-        creator = Creator(name=name)
-        db.add(creator)
-        db.flush()
+    """Get-or-create for a creator named after an on-disk folder.
+
+    Delegates to resolve_creator so folder-derived names use the same
+    case-insensitive dedup rule as scraped and user-entered ones. Before
+    STUDIO-298 this matched exact case only, so a creator already stored
+    with different casing than the folder — a scraped "Abe3d" alongside a
+    folder "abe3d" — made every scan insert a second Creator row.
+
+    Deliberately case-insensitive on every platform, including
+    case-sensitive filesystems where "Abe3D/" and "abe3d/" can coexist:
+    two spellings of one creator are one creator, and each model still
+    records its own folder_path. Note this is the opposite of the model
+    -folder identity rule, which is host-sensitive by design (_normpath).
+
+    The Linux case-variant adoption is logged: it is harmless when the two
+    spellings are one artist (the common case, and unavoidable on Windows
+    and macOS where the filesystem itself folds case), but it would merge
+    two genuinely different artists onto one creator. That is recoverable
+    by renaming a folder and rescanning, and no model is lost either way,
+    but it should not happen without a trace.
+    """
+    creator = resolve_creator(name, db)
+    if creator.name != name.strip():
+        logger.warning(
+            "Folder %r indexed under existing creator %r (differs only by case or "
+            "surrounding whitespace). Rename the folder and rescan if these are "
+            "meant to be separate creators.",
+            name, creator.name,
+        )
     return creator
 
 
@@ -2059,15 +2314,16 @@ def _inbox_scan(
       individual un-enriched pack's own folder."""
     global _active
     _active = job
-    job.update(message="importing", models_found=0, files_found=0, cancelled=False)
+    job.update(message="importing", models_found=0, files_found=0, cancelled=False,
+               read_failures=0, read_failure_samples=[])
     try:
         own_db = db is None
         _db = db or SessionLocal()
         try:
             inbox = Path(path)
-            _load_pack_overrides(_db)
-            _load_scan_rules(_db)
+            rules = ScanRules.load(_db)
 
+            walk_failures: list[ReadFailure] = []
             if single_pack:
                 known_name = (creator_name or "").strip()
                 creator = resolve_creator(known_name if known_name else "_Inbox", _db)
@@ -2081,7 +2337,9 @@ def _inbox_scan(
                     character=None,
                     stl_cache={},
                     last_scanned=None,
+                    rules=rules,
                     is_inbox=True,
+                    read_failures=walk_failures,
                 )
                 if not _cancelled():
                     _auto_link_sups_for_creator(_db, creator.id)
@@ -2128,11 +2386,24 @@ def _inbox_scan(
                         character=None,
                         stl_cache={},
                         last_scanned=None,
+                        rules=rules,
                         is_inbox=True,
+                        read_failures=walk_failures,
                     )
 
+            _report_read_failures(walk_failures)
+
             if not _cancelled():
-                _prune_phantoms(_db)
+                # This prune is library-wide, not scoped to the imported folder, so
+                # an incomplete listing here could remove models the import never
+                # touched. Skip it rather than delete on a partial view of disk.
+                if walk_failures:
+                    logger.warning(
+                        f"Inbox import hit {len(walk_failures)} unreadable entries — "
+                        "phantom prune skipped to avoid removing live models"
+                    )
+                else:
+                    _prune_phantoms(_db)
                 prog = job.payload()["progress"]
                 job.update(
                     state=JobState.DONE,

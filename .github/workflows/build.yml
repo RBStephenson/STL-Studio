@@ -97,7 +97,8 @@ jobs:
       # The backend exe is a headless windowless sidecar (Phase 2, STUDIO-72). On
       # Windows it is wrapped by Electron below; on Linux it ships as-is with the
       # browser fallback (#463). electron-builder expects the *unlabelled*
-      # dist-standalone/stl-studio.exe, so packaging runs before any rename.
+      # dist-standalone/stl-studio/ dir (one-dir, STUDIO-351), so packaging runs
+      # before any rename.
       - name: Build executable
         run: pyinstaller packaging/stl-studio.spec --distpath dist-standalone
 
@@ -108,8 +109,11 @@ jobs:
       - name: Smoke-test standalone exe
         shell: bash
         run: |
+          # Windows is one-dir (STUDIO-351): the exe lives inside its own
+          # dist-standalone/stl-studio/ folder alongside _internal/. Linux
+          # stays one-file, a single loose binary.
           exe="dist-standalone/stl-studio"
-          [ "${{ matrix.os }}" = "windows-latest" ] && exe="dist-standalone/stl-studio.exe"
+          [ "${{ matrix.os }}" = "windows-latest" ] && exe="dist-standalone/stl-studio/stl-studio.exe"
           python scripts/smoke_boot.py "$exe"
 
       # ---- Windows: wrap the backend exe in the Electron NSIS installer ----

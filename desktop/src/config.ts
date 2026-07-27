@@ -24,13 +24,31 @@ export function isBackendRetryUrl(url: string): boolean {
   return url === BACKEND_RETRY_URL;
 }
 
-/** Health-poll cadence and ceiling (ms). Python + uvicorn cold start is the
- *  slow part; 30s is generous headroom before we surface a startup error. */
+/** Health-poll cadence and ceiling (ms). Python + uvicorn cold start is
+ *  normally fast, but the first launch after an update can be dominated by
+ *  antivirus scanning the newly-installed files rather than by the backend
+ *  itself (STUDIO-341) — 90s gives that room without a real cost, since the
+ *  failure mode here is "user waits longer," not "user loses data." */
 export const HEALTH_POLL_INTERVAL_MS = 250;
-export const HEALTH_POLL_TIMEOUT_MS = 30_000;
+export const HEALTH_POLL_TIMEOUT_MS = 90_000;
 
-/** Grace period between SIGTERM and the SIGKILL fallback on POSIX (ms). */
+/** Grace period between SIGTERM and the SIGKILL fallback on POSIX (ms), and
+ *  the ceiling on the Windows taskkill wait (killTreeWindows in runtime.ts). */
 export const SHUTDOWN_GRACE_MS = 5_000;
+
+/** Belt-and-braces ceiling on the whole before-quit shutdown sequence (ms).
+ *  killTree already caps at SHUTDOWN_GRACE_MS; this is a wider backstop so
+ *  quit still proceeds even if something else in stopOwnedSidecar hangs
+ *  (STUDIO-340). reapStale cleans up a surviving backend on next launch, so
+ *  quitting without a confirmed kill is an accepted fallback, not data loss. */
+export const QUIT_TIMEOUT_MS = 10_000;
+
+/** Crash-loop guard for post-boot backend restarts (STUDIO-338). A backend that
+ *  dies immediately on every launch must not produce an endless offer-restart
+ *  dialog: once this many restarts have been attempted inside the window below,
+ *  stop offering and fall back to the recovery page. */
+export const MAX_SIDECAR_RESTARTS = 3;
+export const SIDECAR_RESTART_WINDOW_MS = 120_000;
 
 /** Lockfile (PID + port of the spawned backend) lives in the Electron userData
  *  dir; the absolute path is resolved at runtime from `app.getPath('userData')`. */
@@ -58,18 +76,25 @@ export interface BackendExeLocation {
  * Resolution order:
  *   1. `STL_BACKEND_EXE` override — used by devs / CI to point at a hand-built exe.
  *   2. Packaged: `<resourcesPath>/stl-studio.exe`, where electron-builder's
- *      `extraResources` copied the PyInstaller sidecar.
- *   3. Dev (`electron .`): `<repoRoot>/dist-standalone/stl-studio.exe`.
+ *      `extraResources` copied the PyInstaller one-dir sidecar's contents
+ *      (exe + `_internal/`) into the resources root (STUDIO-351).
+ *   3. Dev (`electron .`): `<repoRoot>/dist-standalone/stl-studio.exe` on
+ *      Windows — PyInstaller one-dir output nests the exe in a `stl-studio/`
+ *      folder named after the spec's build name. Non-Windows dev builds stay
+ *      one-file at `<repoRoot>/dist-standalone/stl-studio`.
  */
 export function resolveBackendExe(loc: BackendExeLocation): string {
   const override = process.env.STL_BACKEND_EXE;
   if (override && override.trim()) {
     return override.trim();
   }
-  const exeName =
-    process.platform === "win32" ? "stl-studio.exe" : "stl-studio";
+  const isWindows = process.platform === "win32";
+  const exeName = isWindows ? "stl-studio.exe" : "stl-studio";
   if (loc.packaged) {
     return join(loc.resourcesPath, exeName);
+  }
+  if (isWindows) {
+    return join(loc.repoRoot, "dist-standalone", "stl-studio", exeName);
   }
   return join(loc.repoRoot, "dist-standalone", exeName);
 }

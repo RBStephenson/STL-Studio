@@ -139,6 +139,15 @@ class ScanStatus(BaseModel):
     models_found: Optional[int] = None
     files_found: Optional[int] = None
     cancelled: bool = False
+    # Roots that were missing or empty (detached mount) — everything beneath them
+    # was skipped by the destructive prunes. The scanner has always reported this
+    # from get_status(); it was absent here, so /scan/status silently dropped it.
+    offline_roots: list[str] = []
+    # Entries the walk could not stat (STUDIO-358). Non-zero means the run saw an
+    # incomplete view of the disk: model counts are a floor, and the prunes that
+    # assume a complete walk were skipped. Sample is capped server-side.
+    read_failures: int = 0
+    read_failure_samples: list[str] = []
 
 
 class CollectionBase(BaseModel):
@@ -590,6 +599,9 @@ class AppSettingsRead(BaseModel):
     # Improve scanner-owned auto groups using the hierarchy-derived character
     # envelope. Manual groups and no_group decisions remain authoritative.
     hierarchy_variant_grouping_enabled: bool = False
+    # Open a variant group in a docked Library side panel instead of navigating
+    # to the Variant Group page. Default off; toggled from the Library tab.
+    variant_sidebar_enabled: bool = False
     # Read-only About & System Info diagnostics. Default off and server-gated.
     system_info_enabled: bool = False
     # Bounded sanitized log files and self-service support downloads.
@@ -647,6 +659,7 @@ class AppSettingsUpdate(BaseModel):
     reorganize_package_mode_enabled: Optional[bool] = None
     reorganize_ai_suggestions_enabled: Optional[bool] = None
     hierarchy_variant_grouping_enabled: Optional[bool] = None
+    variant_sidebar_enabled: Optional[bool] = None
     system_info_enabled: Optional[bool] = None
     persistent_diagnostics_enabled: Optional[bool] = None
     storage_recovery_enabled: Optional[bool] = None

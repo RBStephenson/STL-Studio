@@ -10,6 +10,9 @@ import re
 import threading
 from pathlib import Path
 
+import pytest
+
+from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Creator, Model, STLFile, VariantGroup
@@ -35,11 +38,21 @@ def _img(folder: Path, name: str = "render.png") -> None:
     (folder / name).write_bytes(b"\x89PNG\r\n")
 
 
-def _walk(db, creator: Creator, creator_dir: Path, group_by_character: bool = False) -> None:
+def _walk(
+    db,
+    creator: Creator,
+    creator_dir: Path,
+    group_by_character: bool = False,
+    rules: scanner.ScanRules | None = None,
+) -> None:
+    """Run the real walk. `rules` defaults to an empty rule set — no pack
+    overrides, no ignore patterns — which is what most tests want; pass an
+    explicit ScanRules to exercise either (STUDIO-231)."""
     scanner._walk_for_models(
         folder=creator_dir, creator=creator, db=db,
         creator_boundary=creator_dir, character=None,
         stl_cache={}, last_scanned=None,
+        rules=rules if rules is not None else scanner.ScanRules(),
         group_by_character=group_by_character,
     )
 
@@ -276,8 +289,8 @@ class TestIgnorePatterns:
         _stl(creator_dir / "WIP" / "HalfDone" / "STL")
         creator = make_creator(db, "Creator")
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
-        _walk(db, creator, creator_dir)
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        _walk(db, creator, creator_dir, rules=rules)
 
         paths = {_rel(m, creator_dir) for m in _models(db, creator)}
         assert any("Knight" in p for p in paths)
@@ -290,8 +303,8 @@ class TestIgnorePatterns:
         _stl(creator_dir / "Knight" / "STL")
         creator = make_creator(db, "Creator")
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("creator",)))
-        _walk(db, creator, creator_dir)
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("creator",)))
+        _walk(db, creator, creator_dir, rules=rules)
 
         assert any("Knight" in _rel(m, creator_dir) for m in _models(db, creator))
 
@@ -305,8 +318,8 @@ class TestIgnorePatterns:
         _walk(db, creator, creator_dir)
         assert len(_models(db, creator)) == 2  # nothing ignored on first walk
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
-        removed = scanner._prune_ignored(db, [str(tmp_path)])
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(tmp_path)], rules.ignore)
 
         assert removed == 1
         paths = {_rel(m, creator_dir) for m in _models(db, creator)}
@@ -324,8 +337,8 @@ class TestIgnorePatterns:
         _walk(db, creator, creator_dir)
         before = len(_models(db, creator))
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip*",)))
-        removed = scanner._prune_ignored(db, [str(tmp_path)])
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip*",)))
+        removed = scanner._prune_ignored(db, [str(tmp_path)], rules.ignore)
 
         assert removed == 0
         assert len(_models(db, creator)) == before
@@ -342,8 +355,8 @@ class TestIgnorePatterns:
         wip.excluded = True
         db.commit()
 
-        monkeypatch.setattr(scanner, "_ignore_matcher", IgnoreMatcher(("wip",)))
-        removed = scanner._prune_ignored(db, [str(tmp_path)])
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(tmp_path)], rules.ignore)
 
         assert removed == 0
         assert any("WIP" in m.folder_path for m in _models(db, creator))
@@ -524,7 +537,7 @@ class TestLayoutTags:
         scanner._walk_for_models(
             folder=creator_dir, creator=creator, db=db,
             creator_boundary=creator_dir, character=None,
-            stl_cache={}, last_scanned=None,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
             layout_tags=["Sci-Fi", "Mechs"],
         )
 
@@ -558,7 +571,7 @@ class TestLayoutTags:
         scanner._walk_for_models(
             folder=creator_dir, creator=creator, db=db,
             creator_boundary=creator_dir, character=None,
-            stl_cache={}, last_scanned=None,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
             layout_tags=["Sci-Fi"],
         )
 
@@ -742,8 +755,8 @@ class TestSplitPack:
             _stl(pack / char / "unsupported")
         creator = make_creator(db, "Creator")
 
-        monkeypatch.setattr(scanner, "_pack_overrides", {str(pack)})
-        _walk(db, creator, creator_dir)
+        rules = scanner.ScanRules(pack_overrides=frozenset({str(pack)}))
+        _walk(db, creator, creator_dir, rules=rules)
 
         models = _models(db, creator)
         assert {m.character for m in models} == {"Electro", "Sandman", "Spiderman"}
@@ -1444,7 +1457,11 @@ class TestScanAllRootsMountGate:
 
         def _cap(key):
             def _fn(_db, *args, **kwargs):
-                captured[key] = args[-1]
+                # Capture the root-paths list explicitly. The prunes take it at
+                # different positions and _prune_ignored now takes an ignore
+                # matcher after it, so a positional heuristic (args[-1]) grabs
+                # the wrong argument.
+                captured[key] = next(a for a in args if isinstance(a, list))
                 return 0
             return _fn
 
@@ -1524,7 +1541,7 @@ class TestScanRootLastScannedBaseline:
         db.add(root)
         db.commit()
         self._stub_prunes(monkeypatch)
-        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db: {999})  # simulate a failed creator
+        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db, _rules: {999})  # simulate a failed creator
 
         scanner.scan_all_roots(db)
         db.refresh(root)
@@ -1541,7 +1558,7 @@ class TestScanRootLastScannedBaseline:
         db.add(root)
         db.commit()
         self._stub_prunes(monkeypatch)
-        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db: set())
+        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db, _rules: set())
 
         before = utcnow()
         scanner.scan_all_roots(db)
@@ -1636,6 +1653,79 @@ class TestResolveCreator:
         created = scanner.resolve_creator("Brand New", db)
         assert created.id is not None
         assert scanner.resolve_creator("brand new", db).id == created.id
+
+
+# ---------------------------------------------------------------------------
+# _get_or_create_creator case handling (STUDIO-298)
+# ---------------------------------------------------------------------------
+
+class TestGetOrCreateCreatorCaseInsensitive:
+    """Folder-derived creator lookup must dedup on case like resolve_creator.
+
+    The reported failure: a creator stored by the scraper as "Abe3d" plus an
+    on-disk folder "abe3d" made every scan insert a second Creator row, which
+    prune_empty_creators then cleaned up after the fact.
+    """
+
+    def test_reuses_a_creator_stored_with_different_casing(self, db):
+        existing = make_creator(db, name="Abe3d")
+        assert scanner._get_or_create_creator("abe3d", db).id == existing.id
+
+    def test_repeated_scans_do_not_fork_a_duplicate_row(self, db):
+        make_creator(db, name="Abe3d")
+        for spelling in ("abe3d", "ABE3D", "Abe3D"):
+            scanner._get_or_create_creator(spelling, db)
+        db.flush()
+        assert db.query(Creator).filter(func.lower(Creator.name) == "abe3d").count() == 1
+
+    def test_creates_with_the_folder_casing_when_no_match_exists(self, db):
+        created = scanner._get_or_create_creator("BrandNewCreator", db)
+        assert created.name == "BrandNewCreator"
+
+    def test_case_variant_adoption_is_logged(self, db, caplog):
+        """On Linux this can merge two genuinely distinct artists, so it must
+        leave a trace even though it is harmless in the common case."""
+        make_creator(db, name="Abe3d")
+        with caplog.at_level("WARNING"):
+            scanner._get_or_create_creator("ABE3D", db)
+        assert any("differs only by case" in r.getMessage() for r in caplog.records)
+
+    def test_an_exact_match_logs_nothing(self, db, caplog):
+        make_creator(db, name="Abe3d")
+        with caplog.at_level("WARNING"):
+            scanner._get_or_create_creator("Abe3d", db)
+        assert not caplog.records
+
+    def test_creating_a_new_creator_logs_nothing(self, db, caplog):
+        with caplog.at_level("WARNING"):
+            scanner._get_or_create_creator("Totally New", db)
+        assert not caplog.records
+
+    def test_wildcard_characters_in_folder_names_are_literal(self, db):
+        # Inherited from resolve_creator's lowered-equality rule (#217): a
+        # folder named "My_Studio" must not adopt an existing "MyXStudio".
+        decoy = make_creator(db, name="MyXStudio")
+        assert scanner._get_or_create_creator("My_Studio", db).id != decoy.id
+
+    def test_a_full_scan_indexes_case_variant_folders_under_one_creator(self, db, tmp_path):
+        """End-to-end: two case-distinct creator folders, one Creator row.
+
+        Chosen over host-sensitive folder identity deliberately — see the
+        STUDIO-298 decision recorded on the ticket. Each model still keeps its
+        own folder_path, so no model is lost by sharing a creator.
+        """
+        root = tmp_path / "library"
+        _stl(root / "Abe3d" / "model-a", name="a.stl")
+        _stl(root / "abe3d" / "model-b", name="b.stl")
+
+        first = scanner._get_or_create_creator("Abe3d", db)
+        second = scanner._get_or_create_creator("abe3d", db)
+        db.flush()
+
+        assert first.id == second.id
+        _walk(db, first, root / "Abe3d")
+        _walk(db, second, root / "abe3d")
+        assert len(_models(db, first)) == 2, "both folders' models land on one creator"
 
 
 # ---------------------------------------------------------------------------
@@ -1779,7 +1869,7 @@ class TestScanCompletionSummary:
         db.add(ScanRoot(path=str(tmp_path), enabled=True))
         db.commit()
 
-        def fake_scan_root(root, _db):
+        def fake_scan_root(root, _db, _rules):
             # Counters live on the active job handle now; _bump adds to the
             # zero-initialised progress the scan set at start.
             scanner._bump(models_found=models, files_found=files)
@@ -2180,8 +2270,7 @@ def test_creator_rescan_refreshes_automatic_groups(db, tmp_path, monkeypatch):
     calls: list[int] = []
 
     monkeypatch.setattr(scanner, "SessionLocal", Session)
-    monkeypatch.setattr(scanner, "_load_pack_overrides", lambda _db: None)
-    monkeypatch.setattr(scanner, "_load_scan_rules", lambda _db: None)
+    monkeypatch.setattr(scanner.ScanRules, "load", classmethod(lambda cls, _db: cls()))
     monkeypatch.setattr(scanner, "_creator_dirs_for", lambda _creator, _db: [(tmp_path, [], False)])
     monkeypatch.setattr(scanner, "_walk_for_models", lambda *args, **kwargs: None)
     monkeypatch.setattr(scanner, "_prune_phantoms", lambda _db, creator_id=None: 0)
@@ -2308,7 +2397,7 @@ class TestIncrementalSkipBaseline:
         scanner._walk_for_models(
             folder=creator_dir, creator=creator, db=db,
             creator_boundary=creator_dir, character=None,
-            stl_cache={}, last_scanned=last_scanned,
+            stl_cache={}, last_scanned=last_scanned, rules=scanner.ScanRules(),
         )
 
     def _stl_count(self, db, creator):
@@ -2358,3 +2447,612 @@ class TestIncrementalSkipBaseline:
 
         self._rewalk(db, creator, creator_dir, last_scanned=baseline)
         assert self._stl_count(db, creator) == 0, "unchanged folder must skip file indexing"
+
+
+# ---------------------------------------------------------------------------
+# Read-failure reporting (STUDIO-358)
+# ---------------------------------------------------------------------------
+
+class _RaisingEntry:
+    """A DirEntry stand-in whose is_dir() raises, as a too-long or broken path does."""
+
+    def __init__(self, path: str, error: OSError):
+        self.path = path
+        self.name = os.path.basename(path)
+        self._error = error
+
+    def is_dir(self):
+        raise self._error
+
+
+class _FakeScandir:
+    """Context-manager iterator matching os.scandir()'s protocol."""
+
+    def __init__(self, entries):
+        self._entries = entries
+
+    def __enter__(self):
+        return iter(self._entries)
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _inject_entry_failure(monkeypatch, target: Path, bad_name: str, error: OSError):
+    """Make one entry of *target* raise on is_dir(); every other folder reads normally."""
+    real_scandir = os.scandir
+
+    def fake_scandir(path):
+        if Path(path) == target:
+            entries = list(real_scandir(path))
+            entries.append(_RaisingEntry(str(target / bad_name), error))
+            return _FakeScandir(entries)
+        return real_scandir(path)
+
+    monkeypatch.setattr(scanner.os, "scandir", fake_scandir)
+
+
+class TestListDir:
+    def test_per_entry_failure_is_recorded_not_raised(self, tmp_path, monkeypatch):
+        _stl(tmp_path / "Good")
+        _inject_entry_failure(monkeypatch, tmp_path, "TooLong.stl", OSError(63, "File name too long"))
+
+        listing = scanner._list_dir(tmp_path)
+
+        assert [d.name for d in listing.dirs] == ["Good"]
+        assert len(listing.failures) == 1
+        assert listing.failures[0].path.endswith("TooLong.stl")
+        assert "too long" in listing.failures[0].error.lower()
+
+    def test_whole_directory_failure_propagates(self, tmp_path, monkeypatch):
+        """Must NOT be swallowed: the creator walk relies on this to shield its
+        models from the stale prune (STUDIO-79)."""
+        def boom(path):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(scanner.os, "scandir", boom)
+
+        with pytest.raises(PermissionError):
+            scanner._list_dir(tmp_path)
+
+    def test_readable_folder_reports_no_failures(self, tmp_path):
+        _stl(tmp_path / "Good")
+        (tmp_path / "notes.txt").write_text("x")
+
+        listing = scanner._list_dir(tmp_path)
+
+        assert listing.failures == []
+        assert [d.name for d in listing.dirs] == ["Good"]
+        assert [f.name for f in listing.files] == ["notes.txt"]
+
+    def test_empty_folder_is_not_a_failure(self, tmp_path):
+        listing = scanner._list_dir(tmp_path)
+        assert listing == scanner.DirListing(dirs=[], files=[], failures=[])
+
+
+class TestWalkReadFailures:
+    def test_walk_records_failure_and_still_indexes(self, db, tmp_path, monkeypatch):
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron")
+        creator = make_creator(db, "Creator")
+        _inject_entry_failure(
+            monkeypatch, creator_dir, "Deep.stl", OSError(63, "File name too long"),
+        )
+
+        failures: list[scanner.ReadFailure] = []
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
+            read_failures=failures,
+        )
+
+        assert len(failures) == 1, "the unreadable entry must be reported"
+        assert [_rel(m, creator_dir) for m in _models(db, creator)] == ["Auron"], \
+            "one bad entry must not abort indexing of the rest of the folder"
+
+    def test_clean_walk_records_nothing(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron")
+        creator = make_creator(db, "Creator")
+
+        failures: list[scanner.ReadFailure] = []
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
+            read_failures=failures,
+        )
+
+        assert failures == []
+
+    def test_empty_folder_classifies_as_before(self, db, tmp_path):
+        """A genuinely empty folder is not a model — unchanged by this ticket."""
+        creator_dir = tmp_path / "Creator"
+        (creator_dir / "Empty").mkdir(parents=True)
+        creator = make_creator(db, "Creator")
+
+        failures: list[scanner.ReadFailure] = []
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
+            read_failures=failures,
+        )
+
+        assert failures == []
+        assert _models(db, creator) == []
+
+
+class TestReadFailureReporting:
+    """_report_read_failures writes onto the active job's progress payload.
+
+    Asserted against the handle directly rather than get_status(), which reads the
+    shared runner registry — these tests exercise the writer, and the end-to-end
+    mapping through get_status() is covered by TestReadFailureStatus below.
+    """
+
+    def _job(self, monkeypatch):
+        job = JobHandle(key="scan", _lock=threading.Lock())
+        monkeypatch.setattr(scanner, "_active", job)
+        return job
+
+    def test_reports_count_and_samples(self, monkeypatch):
+        job = self._job(monkeypatch)
+
+        scanner._report_read_failures([
+            scanner.ReadFailure(path="/lib/a.stl", error="too long"),
+            scanner.ReadFailure(path="/lib/b.stl", error="too long"),
+        ])
+
+        prog = job.payload()["progress"]
+        assert prog["read_failures"] == 2
+        assert prog["read_failure_samples"] == ["/lib/a.stl", "/lib/b.stl"]
+
+    def test_sample_is_capped_but_count_is_exact(self, monkeypatch):
+        job = self._job(monkeypatch)
+        limit = scanner.READ_FAILURE_SAMPLE_LIMIT
+
+        scanner._report_read_failures([
+            scanner.ReadFailure(path=f"/lib/{i}.stl", error="too long")
+            for i in range(limit + 10)
+        ])
+
+        prog = job.payload()["progress"]
+        assert prog["read_failures"] == limit + 10, "count must not be capped"
+        assert len(prog["read_failure_samples"]) == limit
+
+    def test_repeated_reports_accumulate_without_exceeding_cap(self, monkeypatch):
+        job = self._job(monkeypatch)
+        limit = scanner.READ_FAILURE_SAMPLE_LIMIT
+
+        for _ in range(3):
+            scanner._report_read_failures([
+                scanner.ReadFailure(path=f"/lib/{i}.stl", error="too long")
+                for i in range(limit)
+            ])
+
+        prog = job.payload()["progress"]
+        assert prog["read_failures"] == limit * 3
+        assert len(prog["read_failure_samples"]) == limit
+
+    def test_nothing_reported_when_clean(self, monkeypatch):
+        job = self._job(monkeypatch)
+
+        scanner._report_read_failures([])
+
+        assert job.payload()["progress"] == {}
+
+
+class TestReadFailureStatus:
+    """_scan_root fans out to worker threads that open their own SessionLocal(),
+    so it must be pointed at the test engine — same idiom as the other tests that
+    exercise the real parallel walk."""
+
+    def _bind(self, db, monkeypatch):
+        monkeypatch.setattr(scanner, "SessionLocal", sessionmaker(bind=db.get_bind()))
+
+    def test_status_surfaces_read_failures_end_to_end(self, db, tmp_path, monkeypatch):
+        from app.models import ScanRoot
+
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron")
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        self._bind(db, monkeypatch)
+        _inject_entry_failure(
+            monkeypatch, creator_dir, "Deep.stl", OSError(63, "File name too long"),
+        )
+
+        scanner.scan_all_roots(db)
+
+        status = scanner.get_status()
+        assert status["read_failures"] >= 1
+        assert any(p.endswith("Deep.stl") for p in status["read_failure_samples"])
+
+    def test_status_reports_zero_on_a_clean_scan(self, db, tmp_path, monkeypatch):
+        from app.models import ScanRoot
+
+        _stl(tmp_path / "Creator" / "Auron")
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        self._bind(db, monkeypatch)
+
+        scanner.scan_all_roots(db)
+
+        status = scanner.get_status()
+        assert status["read_failures"] == 0
+        assert status["read_failure_samples"] == []
+
+
+class TestReadFailureProtectsPrune:
+    def test_creator_with_read_failure_is_shielded_from_stale_prune(
+        self, db, tmp_path, monkeypatch
+    ):
+        """A short listing may have changed classification, so anything not
+        rediscovered this run must not be assumed deleted (STUDIO-79 protection)."""
+        from app.models import ScanRoot
+
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Auron")
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        monkeypatch.setattr(scanner, "SessionLocal", sessionmaker(bind=db.get_bind()))
+        _inject_entry_failure(
+            monkeypatch, creator_dir, "Deep.stl", OSError(63, "File name too long"),
+        )
+
+        root = db.query(ScanRoot).first()
+        failed = scanner._scan_root(root, db, scanner.ScanRules())
+
+        creator = db.query(Creator).filter(Creator.name == "Creator").one()
+        assert creator.id in failed, \
+            "an unreadable entry must protect the creator's models from the stale prune"
+
+
+# ---------------------------------------------------------------------------
+# Shared path-boundary migration (STUDIO-230)
+# ---------------------------------------------------------------------------
+
+class TestPruneBoundarySharedBehavior:
+    """All four prune helpers now share one root-membership implementation
+    (services/path_boundary.PathBoundary). These pin the boundary behaviors that
+    would fail SILENTLY if a call site were wired to the wrong method: a
+    prefix-sharing sibling being treated as a descendant, or an empty root list
+    being treated as "everything".
+
+    _prune_stale_models already had sibling coverage; this extends the same
+    assertion to the three helpers that previously carried their own copies.
+    """
+
+    def _model(self, db, creator, folder: Path, name: str, stale: bool = False):
+        from datetime import timedelta
+        ts = utcnow() - timedelta(hours=1) if stale else utcnow()
+        m = Model(name=name, folder_path=str(folder), creator_id=creator.id, updated_at=ts)
+        db.add(m)
+        db.commit()
+        return m
+
+    def test_stale_paths_ignores_prefix_sharing_sibling(self, db, tmp_path):
+        """A row under 'STLBackup' must not be pruned when only 'STL' is online —
+        an unanchored prefix match would delete a whole parallel library."""
+        scanned = tmp_path / "STL"
+        scanned.mkdir()
+        sibling = tmp_path / "STLBackup"
+        creator = make_creator(db, "Creator")
+        # Both folders are missing on disk; only the one under the online root
+        # is eligible. Keep one live row so the 50% cap isn't tripped.
+        (scanned / "live").mkdir()
+        self._model(db, creator, scanned / "live", "live")
+        self._model(db, creator, scanned / "gone", "gone")
+        self._model(db, creator, sibling / "gone", "in_sibling")
+
+        scanner._prune_stale_paths(db, [str(scanned)])
+
+        names = {m.name for m in db.query(Model).all()}
+        assert "gone" not in names, "missing folder under the online root should prune"
+        assert "in_sibling" in names, "prefix-sharing sibling must never match"
+
+    def test_stale_stl_files_ignores_prefix_sharing_sibling(self, db, tmp_path):
+        scanned = tmp_path / "STL"
+        sibling = tmp_path / "STLBackup"
+        live = scanned / "live"
+        live.mkdir(parents=True)
+        sib_dir = sibling / "m"
+        sib_dir.mkdir(parents=True)
+        creator = make_creator(db, "Creator")
+
+        m_in = self._model(db, creator, live, "in_root")
+        m_out = self._model(db, creator, sib_dir, "in_sibling")
+        db.add_all([
+            STLFile(model_id=m_in.id, filename="a.stl", path=str(live / "a.stl")),
+            STLFile(model_id=m_in.id, filename="b.stl", path=str(live / "b.stl")),
+            STLFile(model_id=m_out.id, filename="c.stl", path=str(sib_dir / "c.stl")),
+        ])
+        db.commit()
+        # Only b.stl exists on disk; a.stl and c.stl are stale rows.
+        (live / "b.stl").write_bytes(b"x")
+
+        scanner._prune_stale_stl_files(db, [str(scanned)])
+
+        remaining = {r.filename for r in db.query(STLFile).all()}
+        assert "a.stl" not in remaining, "missing file under the online root should prune"
+        assert "c.stl" in remaining, "row under a prefix-sharing sibling must not match"
+
+    def test_ignore_walkup_stops_at_the_scan_root(self, db, tmp_path, monkeypatch):
+        """The walk-up uses is_root() (exact), not contains() (exact-or-descendant).
+
+        With contains(), the very first iteration would match the model's own
+        folder — it IS under the root — ending the climb immediately and silently
+        disabling ignore rules for everything nested. Here the pattern only matches
+        an ANCESTOR, so it is reachable solely by a climb that does not stop early.
+        """
+        root = tmp_path / "STL"
+        creator_dir = root / "Creator"
+        _stl(creator_dir / "WIP" / "HalfDone" / "Deep")
+        _stl(creator_dir / "Knight")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+        assert len(_models(db, creator)) == 2
+
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(root)], rules.ignore)
+
+        assert removed == 1, "a model nested below an ignored ancestor must be pruned"
+        assert not any("WIP" in m.folder_path for m in _models(db, creator))
+
+    def test_ignore_never_prunes_when_the_root_itself_matches(self, db, tmp_path, monkeypatch):
+        """The climb stops ON the root without testing it — ignoring a whole scan
+        root is not this feature's job, and doing so would wipe the library."""
+        root = tmp_path / "wip"          # the ROOT's own name matches the pattern
+        creator_dir = root / "Creator"
+        _stl(creator_dir / "Knight")
+        creator = make_creator(db, "Creator")
+        _walk(db, creator, creator_dir)
+        before = len(_models(db, creator))
+
+        rules = scanner.ScanRules(ignore=IgnoreMatcher(("wip",)))
+        removed = scanner._prune_ignored(db, [str(root)], rules.ignore)
+
+        assert removed == 0
+        assert len(_models(db, creator)) == before
+
+    def test_empty_root_list_prunes_nothing(self, db, tmp_path):
+        """'No roots' must never decay into 'everything'."""
+        creator = make_creator(db, "Creator")
+        self._model(db, creator, tmp_path / "gone", "gone", stale=True)
+
+        assert scanner._prune_stale_paths(db, []) == 0
+        assert scanner._prune_stale_stl_files(db, []) == 0
+        assert scanner._prune_stale_models(db, utcnow(), []) == 0
+        assert {m.name for m in db.query(Model).all()} == {"gone"}
+
+    def test_blank_root_entry_prunes_nothing(self, db, tmp_path):
+        """A blank root normalizes to '.', which as a boundary would match every
+        relative path. PathBoundary.from_paths drops it instead."""
+        creator = make_creator(db, "Creator")
+        self._model(db, creator, tmp_path / "gone", "gone", stale=True)
+
+        assert scanner._prune_stale_paths(db, [""]) == 0
+        assert scanner._prune_stale_models(db, utcnow(), [""]) == 0
+        assert {m.name for m in db.query(Model).all()} == {"gone"}
+
+
+# ---------------------------------------------------------------------------
+# Explicit scan-rules context (STUDIO-231)
+# ---------------------------------------------------------------------------
+
+class TestScanRules:
+    """The per-run rule context that replaced the _pack_overrides /
+    _ignore_matcher module globals."""
+
+    def test_defaults_are_inert(self):
+        """An empty context must mean 'no overrides, no ignore patterns' — the
+        state a fresh scan starts from."""
+        rules = scanner.ScanRules()
+        assert rules.pack_overrides == frozenset()
+        assert rules.ignore.patterns == ()
+
+    def test_is_immutable(self):
+        """Frozen so the four parallel creator workers share read-only state by
+        construction rather than by convention."""
+        rules = scanner.ScanRules()
+        with pytest.raises(Exception):
+            rules.pack_overrides = frozenset({"/x"})  # type: ignore[misc]
+
+    def test_load_reads_overrides_and_ignore_patterns(self, db):
+        from app.models import AppSetting, PackOverride
+        db.add(PackOverride(path="/lib/Creator/Pack"))
+        db.add(AppSetting(key="scan_ignore_patterns", value=["wip"]))
+        db.commit()
+
+        rules = scanner.ScanRules.load(db)
+
+        assert rules.pack_overrides == frozenset({"/lib/Creator/Pack"})
+        assert rules.ignore.patterns == ("wip",)
+
+    def test_load_on_an_empty_db_is_inert(self, db):
+        rules = scanner.ScanRules.load(db)
+        assert rules.pack_overrides == frozenset()
+        assert rules.ignore.patterns == ()
+
+    def test_walk_requires_rules(self, db, tmp_path):
+        """Required, not defaulted: omitting them would silently walk with no
+        pack splits and no ignore rules, which is what the globals allowed."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Knight")
+        creator = make_creator(db, "Creator")
+
+        with pytest.raises(TypeError):
+            scanner._walk_for_models(
+                folder=creator_dir, creator=creator, db=db,
+                creator_boundary=creator_dir, character=None,
+                stl_cache={}, last_scanned=None,
+            )
+
+
+class TestSplitPackHonoursIgnoreRules:
+    def test_split_pack_applies_configured_ignore_patterns(self, db, tmp_path, monkeypatch):
+        """split_pack now loads the FULL rule set (STUDIO-231).
+
+        It previously loaded only pack overrides, so the re-walk consulted
+        whatever _ignore_matcher the module global happened to hold — the last
+        scan's patterns in a long-lived process, empty in a fresh one. A split now
+        honours the user's ignore rules deterministically, like every other entry
+        point.
+        """
+        from sqlalchemy.orm import sessionmaker
+        from app.models import AppSetting
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Sinister Six"
+        for char in ("Electro", "Sandman"):
+            _stl(pack / char / "supported")
+        _stl(pack / "WIP" / "supported")   # covered by the ignore pattern below
+
+        setup = Session()
+        setup.add(AppSetting(key="scan_ignore_patterns", value=["wip"]))
+        creator = Creator(name="Creator")
+        setup.add(creator); setup.flush()
+        creator_id = creator.id
+        collapsed = Model(name="Sinister Six", folder_path=str(pack), creator_id=creator_id)
+        setup.add(collapsed); setup.flush()
+        collapsed_id = collapsed.id
+        setup.commit(); setup.close()
+
+        result = scanner.split_pack(collapsed_id)
+
+        assert result["ok"] is True
+        assert result["created"] == 2, "the ignored child must not become a model"
+        check = Session()
+        chars = {m.character for m in check.query(Model).filter(Model.creator_id == creator_id)}
+        check.close()
+        assert chars == {"Electro", "Sandman"}, "the ignored child must not be indexed"
+
+
+# ---------------------------------------------------------------------------
+# Separator-insensitive stored-path identity (STUDIO-365)
+# ---------------------------------------------------------------------------
+
+class TestSeparatorInsensitiveIdentity:
+    """A row stored with the other separator style must be matched, not duplicated.
+
+    The real `_normpath` is `normcase(normpath(...))`, which folds separators only
+    on Windows — so the whole code path is skipped on case-sensitive hosts and a
+    Linux-only CI run would report a green skip while the bug was live. These
+    tests therefore INJECT a Windows-like normalizer rather than skipping on
+    platform, so CI actually exercises the branch.
+    """
+
+    def _windows_like_normpath(self, monkeypatch):
+        monkeypatch.setattr(
+            scanner, "_normpath",
+            lambda p: os.path.normpath(p).replace("\\", "/").lower(),
+        )
+
+    def _index_one(self, db, creator, root):
+        _walk(db, creator, root)
+        models = _models(db, creator)
+        assert len(models) == 1
+        return models[0]
+
+    def test_stored_backslash_row_is_reused_not_duplicated(self, db, tmp_path, monkeypatch):
+        """The production shape: stored path in the other separator style AND a
+        different case. Before the fix the SQL prefilter folded case only, so this
+        row was invisible and a duplicate was inserted."""
+        self._windows_like_normpath(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "Creator" / "Auron"
+        _stl(leaf, name="auron.stl")
+        root = tmp_path / "Creator"
+
+        model = self._index_one(db, creator, root)
+        original_id = model.id
+        model.tags = ["favorite"]
+        model.notes = "hand-primed"
+        model.folder_path = str(leaf).replace("/", "\\").lower()
+        db.commit()
+
+        _walk(db, creator, root)
+
+        models = _models(db, creator)
+        assert len(models) == 1, "separator-only difference must not create a duplicate"
+        assert models[0].id == original_id, "the existing row is reused in place"
+        assert models[0].folder_path == str(leaf), "path adopted in the walked form"
+        assert models[0].tags == ["favorite"], "user metadata survives"
+        assert models[0].notes == "hand-primed"
+
+    def test_reverse_separator_direction_also_matches(self, db, tmp_path, monkeypatch):
+        self._windows_like_normpath(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "Creator" / "Auron"
+        _stl(leaf, name="auron.stl")
+        root = tmp_path / "Creator"
+
+        model = self._index_one(db, creator, root)
+        original_id = model.id
+        # Store a path whose separators are already folded the other way.
+        model.folder_path = str(leaf).replace("/", "\\")
+        db.commit()
+
+        _walk(db, creator, root)
+
+        models = _models(db, creator)
+        assert len(models) == 1
+        assert models[0].id == original_id
+
+    def test_stl_rows_are_recased_not_duplicated(self, db, tmp_path, monkeypatch):
+        self._windows_like_normpath(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "Creator" / "Auron"
+        _stl(leaf, name="auron.stl")
+        root = tmp_path / "Creator"
+
+        model = self._index_one(db, creator, root)
+        before = db.query(STLFile).filter(STLFile.model_id == model.id).count()
+        model.folder_path = str(leaf).replace("/", "\\").lower()
+        for stl in db.query(STLFile).filter(STLFile.model_id == model.id):
+            stl.path = stl.path.replace("/", "\\").lower()
+        db.commit()
+
+        _walk(db, creator, root)
+
+        model = _models(db, creator)[0]
+        after = db.query(STLFile).filter(STLFile.model_id == model.id).count()
+        assert after == before, "STL rows recased in place, not duplicated"
+
+    def test_pre_existing_duplicates_are_reported(self, db, tmp_path, monkeypatch, caplog):
+        """Rows already duplicated by the old bug: adopting one leaves the others
+        stale and unprunable, so the condition must be logged rather than silently
+        resolved."""
+        self._windows_like_normpath(monkeypatch)
+        creator = make_creator(db, "Creator")
+        leaf = tmp_path / "Creator" / "Auron"
+        _stl(leaf, name="auron.stl")
+        root = tmp_path / "Creator"
+
+        model = self._index_one(db, creator, root)
+        model.folder_path = str(leaf).replace("/", "\\").lower()
+        db.add(Model(name="dupe", folder_path=str(leaf).upper(), creator_id=creator.id))
+        db.commit()
+
+        with caplog.at_level("WARNING"):
+            _walk(db, creator, root)
+
+        assert any("resolve to the same folder" in r.message for r in caplog.records), \
+            "duplicate rows for one folder must be surfaced"
+
+    def test_case_sensitive_host_keeps_distinct_folders_distinct(self, db, tmp_path, monkeypatch):
+        """With a case-SENSITIVE normalizer the fallback is skipped entirely, so
+        two genuinely different folders stay two models (STUDIO-226)."""
+        monkeypatch.setattr(scanner, "_normpath", lambda p: os.path.normpath(p))
+        creator = make_creator(db, "Creator")
+        _stl(tmp_path / "Creator" / "Auron", name="a.stl")
+        _stl(tmp_path / "Creator" / "auron", name="b.stl")
+
+        _walk(db, creator, tmp_path / "Creator")
+
+        assert len(_models(db, creator)) == 2, "case-distinct folders remain distinct"
