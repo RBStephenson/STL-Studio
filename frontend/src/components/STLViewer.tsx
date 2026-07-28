@@ -1,6 +1,6 @@
 import { Component, ReactNode, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
-import { TrackballControls, Environment } from "@react-three/drei";
+import { TrackballControls } from "@react-three/drei";
 import type { TrackballControls as TrackballControlsImpl } from "three-stdlib";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { Box3, Vector3, Mesh, PerspectiveCamera, WebGLRenderer } from "three";
@@ -397,12 +397,11 @@ export default function STLViewer({ files, getUrl, modelId, onThumbnailCaptured,
               <color attach="background" args={["#111318"]} />
               <ambientLight intensity={0.5} />
               <directionalLight position={[5, 10, 5]} intensity={1.2} castShadow />
-              <directionalLight position={[-5, -5, -5]} intensity={0.3} />
+              <directionalLight position={[-5, -5, -5]} intensity={0.5} />
 
               <LoaderErrorBoundary onError={setError}>
                 <Suspense fallback={null}>
                   <STLMesh url={getUrl(selected.path, selected.size_bytes)} />
-                  <Environment preset="city" />
                 </Suspense>
               </LoaderErrorBoundary>
 
