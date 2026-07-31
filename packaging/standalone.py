@@ -114,13 +114,38 @@ def build_app():
     `_configure_env` must have run first. Kept out of module scope so importing
     this module (e.g. in tests) doesn't spin up the app + database.
     """
+    from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
     from app.main import create_app
 
     app = create_app(api_prefix="/api")
     dist = _frontend_dist()
     if dist.exists():
-        app.mount("/", StaticFiles(directory=str(dist), html=True), name="static")
+        app.mount("/assets", StaticFiles(directory=str(dist / "assets")), name="static-assets")
+
+        # React Router serves real paths (/collections/12, /models/5, ...) that
+        # don't exist as files. StaticFiles(html=True) only auto-serves
+        # index.html for the root or an actual directory — not for those routes
+        # — so reloading on one previously hit Starlette's 404 fallback and
+        # returned raw JSON with no app loaded (STUDIO-374). This catch-all
+        # serves any built asset that matches by path, and index.html for
+        # everything else not under /api, restoring normal SPA-refresh behavior.
+        dist_resolved = dist.resolve()
+
+        @app.get("/{full_path:path}")
+        def _spa_fallback(full_path: str):
+            # full_path is attacker-controlled (any GET reaching 127.0.0.1
+            # from the user's browser, not just the app itself); resolve and
+            # confirm it's still under dist before serving, or a ".." segment
+            # could read arbitrary files off disk.
+            candidate = (dist / full_path).resolve()
+            if (
+                full_path
+                and candidate.is_file()
+                and candidate.is_relative_to(dist_resolved)
+            ):
+                return FileResponse(candidate)
+            return FileResponse(dist / "index.html")
     else:
         @app.get("/")
         def _no_frontend():
