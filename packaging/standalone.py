@@ -130,21 +130,22 @@ def build_app():
         # returned raw JSON with no app loaded (STUDIO-374). This catch-all
         # serves any built asset that matches by path, and index.html for
         # everything else not under /api, restoring normal SPA-refresh behavior.
-        dist_resolved = dist.resolve()
+        dist_str = str(dist.resolve())
 
         @app.get("/{full_path:path}")
         def _spa_fallback(full_path: str):
             # full_path is attacker-controlled (any GET reaching 127.0.0.1
-            # from the user's browser, not just the app itself); resolve and
-            # confirm it's still under dist before serving, or a ".." segment
-            # could read arbitrary files off disk.
-            candidate = (dist / full_path).resolve()
+            # from the user's browser, not just the app itself). Normalize and
+            # confirm the result's commonpath with dist is dist itself before
+            # serving, or a ".." segment could read arbitrary files off disk —
+            # the same commonpath check Starlette's own StaticFiles uses.
+            joined = os.path.abspath(os.path.join(dist_str, full_path))
             if (
                 full_path
-                and candidate.is_file()
-                and candidate.is_relative_to(dist_resolved)
+                and os.path.commonpath([joined, dist_str]) == dist_str
+                and os.path.isfile(joined)
             ):
-                return FileResponse(candidate)
+                return FileResponse(joined)
             return FileResponse(dist / "index.html")
     else:
         @app.get("/")
