@@ -106,3 +106,77 @@ def test_no_window_decision_helpers_remain(standalone):
     """The pywebview window path is gone in Phase 2; these must not resurface."""
     assert not hasattr(standalone, "should_use_window")
     assert not hasattr(standalone, "_serve_background")
+
+
+# --- SPA fallback (STUDIO-374) ----------------------------------------------
+#
+# React Router serves real paths (/collections/12, /models/5, ...) that don't
+# exist as files under the built frontend. StaticFiles(html=True) alone only
+# auto-serves index.html for the root or an actual directory, so reloading on
+# one of those routes used to fall through to a raw JSON 404 with no app
+# loaded. build_app() now serves index.html for any unmatched, non-API path.
+
+@pytest.fixture
+def fake_dist(tmp_path, monkeypatch, standalone):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html><body>spa shell</body></html>")
+    (dist / "assets" / "app.js").write_text("console.log('app')")
+    (dist / "favicon.ico").write_text("icon")
+    monkeypatch.setattr(standalone, "_frontend_dist", lambda: dist)
+    return dist
+
+
+def test_deep_route_refresh_serves_index_html(standalone, fake_dist):
+    from fastapi.testclient import TestClient
+
+    client = TestClient(standalone.build_app())
+    res = client.get("/collections/12")
+
+    assert res.status_code == 200
+    assert "spa shell" in res.text
+
+
+def test_built_asset_is_served_directly(standalone, fake_dist):
+    from fastapi.testclient import TestClient
+
+    client = TestClient(standalone.build_app())
+    res = client.get("/assets/app.js")
+
+    assert res.status_code == 200
+    assert "console.log" in res.text
+
+
+def test_top_level_static_file_is_served_directly(standalone, fake_dist):
+    from fastapi.testclient import TestClient
+
+    client = TestClient(standalone.build_app())
+    res = client.get("/favicon.ico")
+
+    assert res.status_code == 200
+    assert res.text == "icon"
+
+
+def test_api_routes_are_not_shadowed_by_spa_fallback(standalone, fake_dist):
+    from fastapi.testclient import TestClient
+
+    client = TestClient(standalone.build_app())
+    res = client.get("/api/health")
+
+    assert res.status_code == 200
+    assert res.json() == {"status": "ok"}
+
+
+def test_path_traversal_falls_back_to_index_instead_of_escaping_dist(standalone, fake_dist, tmp_path):
+    """A ".." full_path must not let a GET read files outside the dist dir."""
+    from fastapi.testclient import TestClient
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("do not serve me")
+
+    client = TestClient(standalone.build_app())
+    res = client.get("/../secret.txt")
+
+    assert res.status_code == 200
+    assert "do not serve me" not in res.text
+    assert "spa shell" in res.text
