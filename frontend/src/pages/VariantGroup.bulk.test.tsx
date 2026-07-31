@@ -11,6 +11,8 @@ const applyGroup = vi.fn();
 const setGroupRep = vi.fn();
 const reorderGroup = vi.fn();
 const variantsMock = vi.fn();
+const collectionsList = vi.fn();
+const bulkAddModels = vi.fn();
 const toast = vi.fn();
 
 vi.mock("../api/client", () => ({
@@ -27,6 +29,10 @@ vi.mock("../api/client", () => ({
     },
     scrape: {
       applyGroup: (...a: unknown[]) => applyGroup(...a),
+    },
+    collections: {
+      list: (...a: unknown[]) => collectionsList(...a),
+      bulkAddModels: (...a: unknown[]) => bulkAddModels(...a),
     },
   },
 }));
@@ -68,12 +74,17 @@ beforeEach(() => {
   reorderGroup.mockReset();
   toast.mockReset();
   variantsMock.mockReset();
+  collectionsList.mockReset();
+  bulkAddModels.mockReset();
   variantsMock.mockResolvedValue({
     items: [
       { id: 10, name: "Bust", character: "Rocky", is_group_rep: false },
       { id: 11, name: "Full size", character: "Rocky", is_group_rep: false },
     ],
   });
+  collectionsList.mockResolvedValue([
+    { id: 1, name: "Painted", description: null, cover_image_path: null, model_count: 0, created_at: "" },
+  ]);
 });
 
 describe("VariantGroup bulk management (#183)", () => {
@@ -289,5 +300,47 @@ describe("VariantGroup bulk management (#183)", () => {
 
     expect(patchGroup).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(expect.stringContaining("no durable group id"), "error");
+  });
+
+  // STUDIO-373: bulk "Add to Collection" toolbar action. Group expansion for
+  // ids that aren't fully selected happens server-side (bulkAddModels), so
+  // this only needs to prove the selected ids reach that call correctly.
+  it("adds the selected members to a collection", async () => {
+    bulkAddModels.mockResolvedValue({ added: 1, total: 1 });
+    renderPage();
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Select Bust"));
+    fireEvent.click(screen.getByLabelText("Add selected to collection"));
+    fireEvent.change(screen.getByLabelText("Search collections"), { target: { value: "Pain" } });
+    await act(async () => { fireEvent.mouseDown(screen.getByText("Painted")); });
+
+    expect(bulkAddModels).toHaveBeenCalledWith(1, [10]);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('Added 1 model to "Painted"'), "success");
+  });
+
+  it("adds every selected member when the whole group is selected", async () => {
+    bulkAddModels.mockResolvedValue({ added: 2, total: 2 });
+    renderPage();
+    await flush();
+
+    fireEvent.click(screen.getByText("Select all"));
+    fireEvent.click(screen.getByLabelText("Add selected to collection"));
+    await act(async () => { fireEvent.mouseDown(screen.getByText("Painted")); });
+
+    expect(bulkAddModels).toHaveBeenCalledWith(1, [10, 11]);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("Added 2 models"), "success");
+  });
+
+  it("toasts an error when the collection add fails", async () => {
+    bulkAddModels.mockRejectedValue(new Error("500 Server Error"));
+    renderPage();
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Select Bust"));
+    fireEvent.click(screen.getByLabelText("Add selected to collection"));
+    await act(async () => { fireEvent.mouseDown(screen.getByText("Painted")); });
+
+    expect(toast).toHaveBeenCalledWith("500 Server Error", "error");
   });
 });

@@ -170,6 +170,15 @@ class CollectionRead(CollectionBase):
         from_attributes = True
 
 
+class CollectionBulkAdd(BaseModel):
+    model_ids: list[int]
+
+
+class CollectionBulkAddResponse(BaseModel):
+    added: int
+    total: int
+
+
 # ---------------------------------------------------------------------------
 # Request bodies
 # ---------------------------------------------------------------------------

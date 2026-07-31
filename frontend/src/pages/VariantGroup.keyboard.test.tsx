@@ -17,6 +17,9 @@ vi.mock("../api/client", () => ({
       characters: vi.fn().mockResolvedValue([]),
       setGroupOverride: vi.fn().mockResolvedValue({}),
     },
+    collections: {
+      list: vi.fn().mockResolvedValue([]),
+    },
   },
 }));
 

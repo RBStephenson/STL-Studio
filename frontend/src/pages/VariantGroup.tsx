@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Layers, MoveRight, X, Keyboard, Pencil, Check, Image as ImageIcon, GripVertical, ListRestart, Link as LinkIcon, LayoutGrid } from "lucide-react";
+import { ArrowLeft, Layers, MoveRight, X, Keyboard, Pencil, Check, Image as ImageIcon, GripVertical, ListRestart, Link as LinkIcon, LayoutGrid, FolderOpen } from "lucide-react";
 import {
   DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors,
   closestCenter, DragStartEvent, DragEndEvent,
@@ -9,7 +9,7 @@ import {
   SortableContext, useSortable, rectSortingStrategy, sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { api, Model } from "../api/client";
+import { api, Collection, Model } from "../api/client";
 import ModelCard from "../components/ModelCard";
 import ShortcutsOverlay from "../components/ShortcutsOverlay";
 import { useToast } from "../context/ToastContext";
@@ -355,6 +355,86 @@ function BulkSetStoreLink({ onApply }: { onApply: (url: string) => void | Promis
   );
 }
 
+// Bulk "add selected to a collection" control (STUDIO-373). Same
+// search-then-pick pattern as BulkTagBar's collection mode on the Library
+// page; group expansion (any grouped id pulls in its non-excluded siblings)
+// happens server-side, so selecting all + this action covers the whole-group
+// case without this component needing to know about it. Module-scope to
+// avoid the define-component-in-render remount/focus-loss trap.
+function BulkAddToCollection({ collections, onAdd }: {
+  collections: Collection[];
+  onAdd: (col: Collection) => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [listOpen, setListOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const openPicker = () => {
+    setSearch("");
+    setOpen(true);
+    setListOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const pick = async (col: Collection) => {
+    await onAdd(col);
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={openPicker}
+        aria-label="Add selected to collection"
+        className="flex items-center gap-1 px-2.5 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-text-secondary hover:text-text-primary-alt transition-colors"
+      >
+        <FolderOpen size={13} />
+        Add to collection
+      </button>
+    );
+  }
+
+  const filtered = collections.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="relative flex items-center gap-1">
+      <input
+        ref={inputRef}
+        type="text"
+        value={search}
+        onChange={(e) => { setSearch(e.target.value); setListOpen(true); }}
+        onFocus={() => setListOpen(true)}
+        onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+        placeholder={collections.length === 0 ? "No collections yet" : "Search collections…"}
+        disabled={collections.length === 0}
+        aria-label="Search collections"
+        className="px-2 py-1 rounded bg-panel border border-border focus:border-accent-start text-xs text-text-primary-alt outline-none w-48 disabled:opacity-40"
+      />
+      {listOpen && filtered.length > 0 && (
+        <ul className="absolute top-full mt-1 left-0 right-0 bg-panel border border-border rounded shadow-xl max-h-48 overflow-y-auto z-10">
+          {filtered.map((col) => (
+            <li key={col.id}>
+              <button
+                onMouseDown={(e) => { e.preventDefault(); pick(col); }}
+                className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary-alt hover:bg-indigo-700 hover:text-white transition-colors"
+              >
+                {col.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        onClick={() => setOpen(false)}
+        className="px-2 py-1 rounded bg-panel-secondary hover:bg-panel-secondary border border-border text-xs text-text-secondary"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 // Sortable wrapper for one variant card (#399). Drag listeners live on a small
 // grip handle (top-left) so card clicks, the selection checkbox, and the link
 // still work; the handle is keyboard-operable (Space to pick up, arrows to move).
@@ -393,9 +473,14 @@ export default function VariantGroup() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [collections, setCollections] = useState<Collection[]>([]);
   // Tracks whether the group has ever been populated, so emptying it via
   // bulk ops navigates back — but the initial empty render does not.
   const hadVariants = useRef(false);
+
+  useEffect(() => {
+    api.collections.list().then(setCollections).catch(() => {});
+  }, []);
 
   const decodedCharacter = character ? decodeURIComponent(character) : "";
   const numCreatorId = Number(creatorId);
@@ -597,6 +682,19 @@ export default function VariantGroup() {
     }
   };
 
+  // Add every selected member to a collection (STUDIO-373). The server
+  // expands any grouped id to its full non-excluded sibling set, so this is a
+  // no-op-safe superset when the selection is already the whole group.
+  const addSelectedToCollection = async (col: Collection) => {
+    if (selectedIds.length === 0) return;
+    try {
+      const res = await api.collections.bulkAddModels(col.id, selectedIds);
+      toast(`Added ${res.added} model${res.added !== 1 ? "s" : ""} to "${col.name}".`, "success");
+    } catch (e) {
+      toast(errMsg(e) || "Couldn't add to that collection — try again.", "error");
+    }
+  };
+
   // --- Rename (applies to the whole group) -----------------------------------
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -762,6 +860,7 @@ export default function VariantGroup() {
               <BulkMove creatorId={numCreatorId} currentGroup={decodedCharacter} onMove={moveSelected} />
               <BulkSetImage onApply={setImageForSelected} />
               <BulkSetStoreLink onApply={setStoreUrlForSelected} />
+              <BulkAddToCollection collections={collections} onAdd={addSelectedToCollection} />
               <button
                 onClick={ungroupSelected}
                 className="flex items-center gap-1 px-2.5 py-1 rounded bg-panel-secondary hover:bg-red-900/40 border border-border hover:border-red-600 text-text-secondary hover:text-red-400 transition-colors"

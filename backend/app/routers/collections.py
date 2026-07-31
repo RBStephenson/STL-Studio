@@ -6,7 +6,14 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Collection, CollectionModel, Model
-from app.schemas import CollectionBase, CollectionRead, CollectionUpdate, ModelRead
+from app.schemas import (
+    CollectionBase,
+    CollectionBulkAdd,
+    CollectionBulkAddResponse,
+    CollectionRead,
+    CollectionUpdate,
+    ModelRead,
+)
 from app.services.thumbnails import (
     ThumbnailDownloadError,
     clear_collection_cover,
@@ -61,6 +68,51 @@ def get_collection_models(collection_id: int, db: Session = Depends(get_db)):
         .all()
     )
     return models
+
+
+@router.post("/{collection_id}/models/bulk", response_model=CollectionBulkAddResponse)
+def bulk_add_models_to_collection(collection_id: int, body: CollectionBulkAdd, db: Session = Depends(get_db)):
+    """Add multiple models to a collection in one request (STUDIO-373).
+
+    Any requested id that belongs to a variant group expands to every
+    non-excluded model in that group — selecting a collapsed group card in the
+    Library grid only carries the representative model's id, so this is what
+    makes "add the whole group" work from that single click. Directly-selected
+    ids are added as given, whether or not they're excluded, since excluded
+    models can only reach this endpoint via explicit selection (the Library
+    grid never shows them). Declared before the /{model_id} route below so
+    "bulk" isn't swallowed by that route's int path param.
+    """
+    _col_or_404(collection_id, db)
+    if not body.model_ids:
+        raise HTTPException(status_code=400, detail="No model IDs provided")
+
+    seed_models = db.query(Model).filter(Model.id.in_(body.model_ids)).all()
+    if not seed_models:
+        raise HTTPException(status_code=404, detail="No matching models found")
+
+    expanded_ids = {m.id for m in seed_models}
+    group_ids = {m.variant_group_id for m in seed_models if m.variant_group_id is not None}
+    if group_ids:
+        siblings = (
+            db.query(Model.id)
+            .filter(Model.variant_group_id.in_(group_ids), Model.excluded == False)
+            .all()
+        )
+        expanded_ids.update(model_id for (model_id,) in siblings)
+
+    existing_ids = {
+        row.model_id
+        for row in db.query(CollectionModel.model_id).filter(
+            CollectionModel.collection_id == collection_id,
+            CollectionModel.model_id.in_(expanded_ids),
+        )
+    }
+    to_add = expanded_ids - existing_ids
+    for model_id in to_add:
+        db.add(CollectionModel(collection_id=collection_id, model_id=model_id))
+    db.commit()
+    return CollectionBulkAddResponse(added=len(to_add), total=len(expanded_ids))
 
 
 @router.post("/{collection_id}/models/{model_id}", status_code=204)
