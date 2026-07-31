@@ -29,14 +29,17 @@ export const collectionsApi = {
     const res = await fetch(`${BASE}/collections/${collectionId}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   },
-  // Reuses addModel so each POST's res.ok is checked — a non-2xx rejects the
-  // whole call rather than silently reporting success (#STUDIO-91). Callers wrap
-  // this in try/catch and surface the failure.
-  bulkAddModels: async (collectionId: number, modelIds: number[]) => {
-    await Promise.all(
-      modelIds.map((id) => collectionsApi.addModel(collectionId, id)),
-    );
-  },
+  // Single request; the server expands any id belonging to a variant group to
+  // that group's full non-excluded membership (STUDIO-373) — e.g. selecting a
+  // collapsed group card in the Library grid, which only carries the
+  // representative model's id, still adds every variant. Callers wrap this in
+  // try/catch and surface the failure.
+  bulkAddModels: (collectionId: number, modelIds: number[]) =>
+    request<{ added: number; total: number }>(`/collections/${collectionId}/models/bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_ids: modelIds }),
+    }),
   setCoverFromUrl: (collectionId: number, url: string) =>
     request<Collection>(`/collections/${collectionId}/cover/from-url`, {
       method: "POST",
