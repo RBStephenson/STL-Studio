@@ -114,39 +114,30 @@ def build_app():
     `_configure_env` must have run first. Kept out of module scope so importing
     this module (e.g. in tests) doesn't spin up the app + database.
     """
-    from fastapi.responses import FileResponse
+    from fastapi import Request
+    from fastapi.responses import FileResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
+    from starlette.exceptions import HTTPException as StarletteHTTPException
     from app.main import create_app
 
     app = create_app(api_prefix="/api")
     dist = _frontend_dist()
     if dist.exists():
-        app.mount("/assets", StaticFiles(directory=str(dist / "assets")), name="static-assets")
+        app.mount("/", StaticFiles(directory=str(dist), html=True), name="static")
 
         # React Router serves real paths (/collections/12, /models/5, ...) that
-        # don't exist as files. StaticFiles(html=True) only auto-serves
-        # index.html for the root or an actual directory — not for those routes
-        # — so reloading on one previously hit Starlette's 404 fallback and
-        # returned raw JSON with no app loaded (STUDIO-374). This catch-all
-        # serves any built asset that matches by path, and index.html for
-        # everything else not under /api, restoring normal SPA-refresh behavior.
-        dist_str = str(dist.resolve())
-
-        @app.get("/{full_path:path}")
-        def _spa_fallback(full_path: str):
-            # full_path is attacker-controlled (any GET reaching 127.0.0.1
-            # from the user's browser, not just the app itself). Normalize and
-            # confirm the result's commonpath with dist is dist itself before
-            # serving, or a ".." segment could read arbitrary files off disk —
-            # the same commonpath check Starlette's own StaticFiles uses.
-            joined = os.path.abspath(os.path.join(dist_str, full_path))
-            if (
-                full_path
-                and os.path.commonpath([joined, dist_str]) == dist_str
-                and os.path.isfile(joined)
-            ):
-                return FileResponse(joined)
-            return FileResponse(dist / "index.html")
+        # don't exist as files, so StaticFiles(html=True) 404s on them (it only
+        # auto-serves index.html for the root or an actual directory) — a page
+        # refresh on one of those routes used to die on that bare 404 with no
+        # app loaded (STUDIO-374). All path resolution for real files stays
+        # inside StaticFiles itself (which already guards against traversal);
+        # this handler only swaps in index.html when nothing matched, so no
+        # request-derived value ever reaches a filesystem call here.
+        @app.exception_handler(StarletteHTTPException)
+        async def _spa_fallback(request: Request, exc: StarletteHTTPException):
+            if exc.status_code == 404 and not request.url.path.startswith("/api/"):
+                return FileResponse(dist / "index.html")
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     else:
         @app.get("/")
         def _no_frontend():
