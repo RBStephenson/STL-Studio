@@ -27,3 +27,9 @@ corpus_validation_report.csv
 # running pytest/uvicorn from backend/), so it can appear outside data/ too.
 .secret_key
 backend/.secret_key
+
+# machine-local Norton SSL-inspection workaround — see backend/Dockerfile.local
+# and frontend/Dockerfile.local
+*.pem
+docker-compose.override.yml
+Dockerfile.local
