@@ -1548,10 +1548,11 @@ def _index_model(
                     model.needs_review = True
 
         if not folder_unchanged:
+            gallery_boundary = _gallery_boundary(folder, creator_boundary)
             try:
                 gallery_images = _collect_gallery_images(
                     folder,
-                    boundary=creator_boundary or folder,
+                    boundary=gallery_boundary,
                     stl_cache=stl_cache,
                 )
             except OSError:
@@ -1574,7 +1575,7 @@ def _index_model(
                     existing=model.image_paths or [],
                     discovered=[str(img) for img in gallery_images],
                     removed=model.removed_image_paths or [],
-                    boundary=creator_boundary or folder,
+                    boundary=gallery_boundary,
                 )
 
             _index_stl_files(
@@ -1817,6 +1818,38 @@ def _image_files_recursive(folder: Path) -> list[Path]:
     )
 
 
+def _gallery_boundary(folder: Path, creator_boundary: Path | None) -> Path:
+    """The real ceiling for a gallery-image walk: the character/product folder
+    directly under the creator, not the whole creator (STUDIO-377).
+
+    A model's own leaf can sit arbitrarily deep under the creator (Step 1/2/3 of
+    _walk_for_models index a model at whatever depth first qualifies), so this
+    walks up `folder`'s ancestors until it finds the one whose *parent* is the
+    creator boundary — the creator's immediate child. Sharing images within that
+    child's own subtree (e.g. a diorama folder's renders shared by its several
+    character models) is still intentional and unaffected. Sharing across
+    *sibling* children — a completely different product, or a stray image
+    dropped straight in the creator's own folder — is exactly what let one
+    product's marketing images bleed into every other model under the same
+    creator (Darth Vader Samurai/Regina's images into unrelated CA 3D Studios
+    models; a loose "RPG Pack - Names.jpg" into every DM Stash model).
+
+    Falls back to `folder` itself when there's no creator boundary to scope to,
+    and returns `folder` unchanged for the documented edge case where the
+    creator's own folder IS the product (no character level to climb to).
+    """
+    if creator_boundary is None:
+        return folder
+    if folder == creator_boundary:
+        return folder
+    current = folder
+    while current.parent != creator_boundary:
+        if current.parent == current:
+            return creator_boundary
+        current = current.parent
+    return current
+
+
 def _collect_gallery_images(leaf: Path, boundary: Path,
                             stl_cache: dict[str, bool] | None = None) -> list[Path]:
     """
@@ -1952,7 +1985,7 @@ def refresh_model_gallery(db: Session, model: Model) -> None:
                 creator_boundary = creator_dir
                 break
 
-    boundary = creator_boundary or folder
+    boundary = _gallery_boundary(folder, creator_boundary)
     gallery_images = _collect_gallery_images(folder, boundary=boundary, stl_cache={})
 
     if not model.thumbnail_path and gallery_images:
