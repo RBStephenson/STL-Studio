@@ -1102,6 +1102,7 @@ def _walk_for_models(
     is_inbox: bool = False,
     group_by_character: bool = False,
     read_failures: list[ReadFailure] | None = None,
+    boundary_is_product: bool = False,
 ):
     """Walk *folder*, indexing models and recursing per classification.
 
@@ -1115,6 +1116,18 @@ def _walk_for_models(
     shield the creator from the stale prune — an incomplete listing may have
     changed which folders were classified as models, so anything not rediscovered
     this run must not be assumed deleted (same protection as STUDIO-79).
+
+    ``boundary_is_product`` (STUDIO-377): ``creator_boundary`` means two different
+    things depending on the caller. Most callers pass the actual creator's own
+    folder, which can hold many unrelated products as direct children — gallery
+    walks must stop at the product/character folder below it, not climb all the
+    way to the creator (see :func:`_gallery_boundary`). A single-pack import
+    (#1087) instead passes the *pack's own* folder as ``creator_boundary``,
+    because the caller already knows that whole folder tree is one product —
+    there, the format-variant siblings inside it (e.g. "(supported)" next to
+    "(unsupported)") are meant to share the pack-root images, so the boundary
+    must NOT be narrowed further. Set True only where ``creator_boundary`` is
+    already scoped to one product, not a creator with several.
     """
     if not folder.is_dir():
         return
@@ -1194,7 +1207,8 @@ def _walk_for_models(
         if not boundary_children:
             _index_model(folder, creator, db, creator_boundary, character,
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
-                         layout_tags=layout_tags, is_inbox=is_inbox)
+                         layout_tags=layout_tags, is_inbox=is_inbox,
+                         boundary_is_product=boundary_is_product)
             return
 
         boundary_keys = {str(child) for child in boundary_children}
@@ -1212,6 +1226,7 @@ def _walk_for_models(
                 auto_signals=signals, last_scanned=last_scanned,
                 layout_tags=layout_tags, is_inbox=is_inbox,
                 excluded_stl_subtrees=boundary_children,
+                boundary_is_product=boundary_is_product,
             )
 
         # Only recurse into the independently qualifying boundaries. Other
@@ -1225,7 +1240,8 @@ def _walk_for_models(
         if has_direct_stls and name_parser.children_look_like_parts(child_names):
             _index_model(folder, creator, db, creator_boundary, character,
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
-                         layout_tags=layout_tags, is_inbox=is_inbox)
+                         layout_tags=layout_tags, is_inbox=is_inbox,
+                         boundary_is_product=boundary_is_product)
             return
 
     # --- Step 3: deepest fallback — STLs here, nothing below ---
@@ -1245,7 +1261,8 @@ def _walk_for_models(
     if not product_boundary_split and has_direct_stls and not any_child_stls:
         _index_model(folder, creator, db, creator_boundary, character,
                      stl_cache, auto_signals=signals, last_scanned=last_scanned,
-                     layout_tags=layout_tags, is_inbox=is_inbox)
+                     layout_tags=layout_tags, is_inbox=is_inbox,
+                     boundary_is_product=boundary_is_product)
         return
 
     # Not a leaf — recurse. Decide the variant-grouping "character" for each child by
@@ -1330,7 +1347,8 @@ def _walk_for_models(
                          rules=rules,
                          layout_tags=layout_tags, is_inbox=is_inbox,
                          group_by_character=group_by_character,
-                         read_failures=read_failures)
+                         read_failures=read_failures,
+                         boundary_is_product=boundary_is_product)
 
 
 def _index_model(
@@ -1345,6 +1363,7 @@ def _index_model(
     layout_tags: list[str] | None = None,
     is_inbox: bool = False,
     excluded_stl_subtrees: list[Path] | None = None,
+    boundary_is_product: bool = False,
 ):
     folder_path = str(folder)
 
@@ -1548,7 +1567,10 @@ def _index_model(
                     model.needs_review = True
 
         if not folder_unchanged:
-            gallery_boundary = _gallery_boundary(folder, creator_boundary)
+            gallery_boundary = (
+                (creator_boundary or folder) if boundary_is_product
+                else _gallery_boundary(folder, creator_boundary)
+            )
             try:
                 gallery_images = _collect_gallery_images(
                     folder,
@@ -2373,6 +2395,13 @@ def _inbox_scan(
                     rules=rules,
                     is_inbox=True,
                     read_failures=walk_failures,
+                    # `inbox` is already scoped to one product (the caller knows
+                    # this whole folder tree is a single pack, #1087) — its
+                    # format-variant siblings must still share the pack-root
+                    # images, so the gallery boundary must not be narrowed
+                    # further the way a real multi-product creator folder is
+                    # (STUDIO-377).
+                    boundary_is_product=True,
                 )
                 if not _cancelled():
                     _auto_link_sups_for_creator(_db, creator.id)
