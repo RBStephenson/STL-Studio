@@ -687,6 +687,43 @@ class TestImportApplyCleansUpNonStlFiles:
         # The whole inbox pack folder — STL, image, and the folder itself — is gone.
         assert not os.path.isdir(str(pack))
 
+    def test_3mf_other_file_moves_with_pack_not_left_behind(
+        self, client, db, tmp_path, write_mode,
+    ):
+        """Regression (#1156): .3mf is a STL_EXTENSIONS member (needed so a
+        lone-.3mf folder still counts as a model) but is filed as
+        other_files, not an STLFile row (see scanner._index_stl_files) — so
+        it's never in the reorganize engine's STL move manifest. The non-STL
+        cleanup pass used to skip anything in STL_EXTENSIONS on the
+        assumption "the STL engine already moved it" — true for .stl/.obj,
+        false for .3mf, so it fell through the gap between both systems and
+        was silently left behind in the inbox folder forever, never reaching
+        the destination at all (not even as a stale reference)."""
+        lib = _library(db, tmp_path / "library")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        creator = Creator(name="Abe3D"); db.add(creator); db.flush()
+        pack = tmp_path / "inbox" / "Bust"; pack.mkdir(parents=True)
+        f = pack / "head.stl"; f.write_bytes(b"solid\nendsolid\n")
+        threemf = pack / "project.3mf"; threemf.write_bytes(b"fake 3mf")
+        m = _inbox_model(db, pack, creator=creator, character="Joker", title="Bust", with_file=f)
+        m.other_files = [str(threemf).replace("\\", "/")]
+        db.commit()
+
+        status, body = _apply_and_wait(client, src)
+        assert status == 200, body
+        assert body["moved_models"] == 1
+
+        db.refresh(m)
+        assert not os.path.exists(str(f))
+        assert not os.path.exists(str(threemf))
+        assert len(m.other_files) == 1
+        moved = m.other_files[0]
+        assert os.path.exists(moved)
+        assert moved.startswith(m.folder_path)
+        # The whole inbox pack folder is gone — nothing left behind.
+        assert not os.path.isdir(str(pack))
+
     def test_gallery_image_lands_at_suffixed_destination_after_collision_retry(
         self, client, db, tmp_path, write_mode,
     ):

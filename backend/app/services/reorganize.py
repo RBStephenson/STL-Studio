@@ -80,8 +80,9 @@ class FileMove:
     # distinguish "gone" from "matches" without this flag, so the move is unsafe.
     missing_file: bool
     # "stl" repaths an STLFile row (stl_file_id set); "image" repaths one of
-    # the model's own image_paths/thumbnail_path/primary_image_path instead —
-    # see reorganize_apply._repath_db.
+    # the model's own image_paths/thumbnail_path/primary_image_path instead;
+    # "other" repaths one of the model's own other_files entries — see
+    # reorganize_apply._repath_db.
     kind: str = "stl"
 
 
@@ -626,6 +627,61 @@ def _attach_character_envelopes(entries: list[Entry]) -> None:
         owner.shared_files = shared
 
 
+def _dedupe_owned_paths(paths: list, is_owned) -> list[str]:
+    """Filter to paths ``is_owned`` accepts, deduped by identity key.
+
+    Shared by every non-stl file source (image_paths/thumbnail_path/
+    primary_image_path, other_files) that feeds into a model's move plan —
+    each is gathered from a different Model field but needs the exact same
+    ownership-boundary + de-dup treatment before becoming move candidates."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for p in paths:
+        if not is_owned(p):
+            continue
+        k = _key(p)
+        if k not in seen:
+            seen.add(k)
+            result.append(p)
+    return result
+
+
+def _append_non_stl_moves(
+    files: list[FileMove], candidates: list[str],
+    dest_name_counts: dict[str, int], proposed_dir: str, kind: str,
+) -> bool:
+    """Append one FileMove per still-existing candidate, sharing
+    dest_name_counts with the STL loop and every other non-stl kind so the
+    whole proposed_dir namespace disambiguates same-basename files together,
+    not just within one file kind (STUDIO-314). Returns whether any
+    candidate was a symlink, for the caller to fold into its own flag."""
+    found_symlink = False
+    for p in candidates:
+        size, mtime_ns, link, is_missing = _stat_file_cached(p)
+        if is_missing:
+            continue
+        found_symlink = found_symlink or link
+        dest_filename = os.path.basename(p)
+        dest_key = dest_filename.casefold()
+        count = dest_name_counts.get(dest_key, 0) + 1
+        dest_name_counts[dest_key] = count
+        if count > 1:
+            stem, ext = os.path.splitext(dest_filename)
+            dest_filename = f"{stem}-{count}{ext}"
+        files.append(FileMove(
+            stl_file_id=None,
+            current_path=_canon(p),
+            proposed_path=_canon(proposed_dir + "/" + dest_filename),
+            size_bytes=size,
+            mtime_ns=mtime_ns,
+            content_hash=None,
+            fingerprint_method="stat",
+            missing_file=False,
+            kind=kind,
+        ))
+    return found_symlink
+
+
 def _build_entry(
     m: Model,
     segments: list[str],
@@ -762,20 +818,20 @@ def _build_entry(
     spans_multiple_dirs = len(src_dirs) > 1
     source_directories = [src_dirs[key] for key in sorted(src_dirs)]
 
-    # Local gallery images move alongside the STLs. Scoped to images that live
-    # inside the model's OWN folder tree — a gallery image inherited from a
-    # shared parent folder (e.g. a character-level "renders/" dir referenced
+    # Local gallery images and other_files move alongside the STLs. Scoped to
+    # files that live inside the model's OWN folder tree — one inherited from
+    # a shared parent folder (e.g. a character-level "renders/" dir referenced
     # by several sibling variants) is deliberately left in place, since moving
     # it would break the path for every other model still pointing at it.
     # Missing/stale entries (the file no longer exists — #854/#855) are just
-    # skipped rather than treated as a blocker: a stale gallery path shouldn't
+    # skipped rather than treated as a blocker: a stale reference shouldn't
     # stop the model's STLs from being reorganized. Never counted toward
-    # spans_multiple_dirs — images commonly live in their own subfolder next
+    # spans_multiple_dirs — these commonly live in their own subfolder next
     # to the STLs, and that's not the ambiguous-source-directory case that
     # check exists to catch.
     cur_prefix = cur_key + "/"
 
-    def _owned_local_image(p: object) -> bool:
+    def _owned_local_file(p: object) -> bool:
         if not isinstance(p, str) or not p or "://" in p:
             return False
         k = _key(p)
@@ -791,47 +847,34 @@ def _build_entry(
             return False
         return True
 
-    seen_image_keys: set[str] = set()
-    image_candidates: list[str] = []
-    for p in [*(m.image_paths or []), m.thumbnail_path, m.primary_image_path]:
-        if _owned_local_image(p):
-            k = _key(p)
-            if k not in seen_image_keys:
-                seen_image_keys.add(k)
-                image_candidates.append(p)
+    # Same collapse risk as STL filenames above, and just as real: two files
+    # with the same basename in different subfolders (or differing only by
+    # case) both flatten to proposed_dir/<basename>. Apply forgives a
+    # non-stl FileExistsError by skipping the move (reorganize_apply
+    # .apply_manifest), so unlike an STL collision this wouldn't even fail
+    # loudly — the second file would just silently stay behind. Shares
+    # dest_name_counts with the STL loop above (and across image/other_files
+    # here) so the whole proposed_dir namespace is disambiguated together,
+    # not just within each file kind (STUDIO-314).
+    image_candidates = _dedupe_owned_paths(
+        [*(m.image_paths or []), m.thumbnail_path, m.primary_image_path], _owned_local_file,
+    )
+    is_symlink = is_symlink or _append_non_stl_moves(
+        files, image_candidates, dest_name_counts, proposed_dir, kind="image",
+    )
 
-    for p in image_candidates:
-        size, mtime_ns, link, is_missing = _stat_file_cached(p)
-        if is_missing:
-            continue
-        is_symlink = is_symlink or link
-        # Same collapse risk as STL filenames above, and just as real: two
-        # gallery images with the same basename in different subfolders (or
-        # differing only by case) both flatten to proposed_dir/<basename>.
-        # Apply forgives an image FileExistsError by skipping the move
-        # (reorganize_apply.apply_manifest), so unlike an STL collision this
-        # wouldn't even fail loudly — the second image would just silently
-        # stay behind. Shares dest_name_counts with the STL loop above so the
-        # whole proposed_dir namespace is disambiguated together, not just
-        # within each file kind (STUDIO-314).
-        dest_filename = os.path.basename(p)
-        dest_key = dest_filename.casefold()
-        count = dest_name_counts.get(dest_key, 0) + 1
-        dest_name_counts[dest_key] = count
-        if count > 1:
-            stem, ext = os.path.splitext(dest_filename)
-            dest_filename = f"{stem}-{count}{ext}"
-        files.append(FileMove(
-            stl_file_id=None,
-            current_path=_canon(p),
-            proposed_path=_canon(proposed_dir + "/" + dest_filename),
-            size_bytes=size,
-            mtime_ns=mtime_ns,
-            content_hash=None,
-            fingerprint_method="stat",
-            missing_file=False,
-            kind="image",
-        ))
+    # other_files (PDFs, READMEs, a .3mf project bundle — see
+    # scanner.PROJECT_BUNDLE_EXTENSIONS) never had a move-plan entry at all
+    # before this: only "stl" and "image" kinds existed, so any model with a
+    # non-empty other_files silently left those files behind at the old
+    # folder on every reorganize (#1156 follow-up — a real incident: adding a
+    # creator name to an inbox-imported pack left its .3mf stranded in the
+    # old inbox folder). Same collision-avoidance and hidden-dir/ownership
+    # scoping as the image loop above.
+    other_candidates = _dedupe_owned_paths(m.other_files or [], _owned_local_file)
+    is_symlink = is_symlink or _append_non_stl_moves(
+        files, other_candidates, dest_name_counts, proposed_dir, kind="other",
+    )
 
     # Path-keyed overrides this move invalidates (under the model's folder).
     pack_refs = [p for p in pack_paths if _key(p) == cur_key or _key(p).startswith(cur_key + "/")]

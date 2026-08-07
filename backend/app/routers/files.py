@@ -16,6 +16,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import Model as ModelDB, ScanRoot, STLFile
 from app.schemas import DownloadZipRequest
+from app.services import scanner
 from app.services.path_guard import assert_within_roots, is_within_roots
 from app.utils import like_escape
 
@@ -194,13 +195,19 @@ def serve_document(path: str):
     """Serve a non-STL, non-image pack file (PDF, TXT, ZIP, etc.) as a download.
 
     Restricted to configured scan roots — the same allowlist as /files/image.
-    Rejects STL and image extensions (those have dedicated endpoints). The
-    filename is taken from the path and set in the Content-Disposition header
-    so the browser downloads rather than navigating."""
+    Rejects image extensions and the STL-viewer formats (those have dedicated
+    endpoints) — except PROJECT_BUNDLE_EXTENSIONS (.3mf): a .3mf is never an
+    STLFile row (see scanner._index_stl_files), so a model's .3mf always
+    lives in other_files, and the "Other Files" UI always links here via
+    api.documentUrl regardless of extension. Rejecting it left every .3mf
+    download 400ing with no dedicated endpoint that would actually serve it
+    for that use case (#1156 follow-up). The filename is taken from the path
+    and set in the Content-Disposition header so the browser downloads
+    rather than navigating."""
     _ext = Path(path).suffix.lower()
     if _ext in ALLOWED_IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Use /files/image for image files")
-    if _ext in ALLOWED_STL_EXTENSIONS:
+    if _ext in ALLOWED_STL_EXTENSIONS - scanner.PROJECT_BUNDLE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Use /files/stl for STL files")
 
     try:

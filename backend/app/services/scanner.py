@@ -52,6 +52,16 @@ from app.utils import utcnow, utc_timestamp
 logger = logging.getLogger(__name__)
 
 STL_EXTENSIONS = {".stl", ".3mf", ".obj"}
+# Members of STL_EXTENSIONS that count as "this folder has printable content"
+# for leaf detection, but are a project/bundle format rather than a single
+# printable part — filed as other_files, never as their own STLFile row (see
+# _index_stl_files). Anything that checks STL_EXTENSIONS to mean "already
+# indexed/moved as tracked geometry" must subtract this set first — treating
+# it as an ordinary STL_EXTENSIONS member there silently drops the file: it's
+# not in the STL move manifest (not an STLFile row) and would be skipped by
+# the non-STL file mover too (imports.py) if that check doesn't know about
+# this carve-out, so it never gets moved to the destination at all.
+PROJECT_BUNDLE_EXTENSIONS = {".3mf"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 PREFERRED_IMAGE_DIRS = {
     "renders", "render", "images", "image", "photos", "photo",
@@ -2172,6 +2182,36 @@ def _index_stl_files(
         and stl.suffix.lower() in STL_EXTENSIONS
         and stl.suffix.lower() not in SLICER_EXTENSIONS
     ]
+    if not candidates:
+        return
+
+    # PROJECT_BUNDLE_EXTENSIONS (.3mf) stay in STL_EXTENSIONS (a lone .3mf
+    # folder must still be recognised as a model — see the comment there),
+    # but it's a project/bundle format, not a single printable part, so it's
+    # filed as other_files rather than getting its own STLFile row. Split it
+    # out before the STLFile loop below; merge (not overwrite) so a rescan
+    # doesn't drop a file the same folder already indexed under other_files
+    # for an unrelated reason.
+    other_candidates = [c for c in candidates if c.suffix.lower() in PROJECT_BUNDLE_EXTENSIONS]
+    candidates = [c for c in candidates if c.suffix.lower() not in PROJECT_BUNDLE_EXTENSIONS]
+    if other_candidates:
+        model.other_files = _merge_scan_gallery_paths(
+            existing=model.other_files or [],
+            discovered=[str(c) for c in other_candidates],
+            removed=[],
+            boundary=folder,
+        )
+        # Self-healing: a .3mf indexed as an STLFile row by a scan that ran
+        # before this behaviour changed would otherwise linger forever —
+        # _index_stl_files never revisits a path it's already seen (see the
+        # `existing` check below), so without this it'd show up as both a
+        # tracked file and an other_file until the row was cleaned up by hand.
+        other_paths = [str(c) for c in other_candidates]
+        (
+            db.query(STLFile)
+            .filter(STLFile.model_id == model.id, STLFile.path.in_(other_paths))
+            .delete(synchronize_session=False)
+        )
     if not candidates:
         return
 

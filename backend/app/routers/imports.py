@@ -481,7 +481,13 @@ def _move_non_stl_files(
 
     Called after the reorganize engine has already moved the STL files, so only
     non-tracked files remain. Images go into model.image_paths; everything else
-    into model.other_files."""
+    into model.other_files.
+
+    A PROJECT_BUNDLE_EXTENSIONS member (.3mf) is a STL_EXTENSIONS member that
+    is NOT reorganize-engine-tracked (see scanner._index_stl_files) — it's
+    never an STLFile row, so it's never in the STL move manifest either.
+    Skipping it here as "already moved by the reorganize engine" would leave
+    it behind at old_folder forever: neither system ever moves it (#1156)."""
     if not os.path.isdir(old_folder):
         return
 
@@ -494,7 +500,7 @@ def _move_non_stl_files(
             if filename.startswith("."):
                 continue
             ext = os.path.splitext(filename)[1].lower()
-            if ext in scanner.STL_EXTENSIONS:
+            if ext in scanner.STL_EXTENSIONS and ext not in scanner.PROJECT_BUNDLE_EXTENSIONS:
                 continue  # already moved by the reorganize engine
 
             src = Path(os.path.join(dirpath, filename)).resolve()

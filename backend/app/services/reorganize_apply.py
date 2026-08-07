@@ -541,6 +541,10 @@ def _repath_db(db: Session, selected: list[dict]) -> None:
                 if model is not None:
                     _repath_model_image(model, f["current_path"], f["proposed_path"])
                 continue
+            if f.get("kind") == "other":
+                if model is not None:
+                    _repath_model_other_file(model, f["current_path"], f["proposed_path"])
+                continue
             stl = db.get(STLFile, f["stl_file_id"])
             if stl is not None:
                 stl.path = _native_store(f["proposed_path"])
@@ -611,8 +615,7 @@ def _repath_character_assets(db: Session, entry: dict) -> None:
         for move in moves:
             old, new = move["current_path"], move["proposed_path"]
             _repath_model_image(model, old, new)
-            model.other_files = [_native_store(new) if _key(path) == _key(old) else path
-                                 for path in (model.other_files or [])]
+            _repath_model_other_file(model, old, new)
         model.image_manifest = None
         model.image_manifest_sig = None
 
@@ -640,6 +643,24 @@ def _repath_model_image(model: Model, old_path: str, new_path: str) -> None:
         model.removed_image_paths = [
             new_path if _key(p) == old_key else p
             for p in model.removed_image_paths
+        ]
+
+
+def _repath_model_other_file(model: Model, old_path: str, new_path: str) -> None:
+    """Point a moved other_files entry at its new location.
+
+    other_files has no removed-entries counterpart to image's
+    removed_image_paths (there's no "suppress this on rescan" concept for
+    it), so this is just the one list — but the exact-match rewrite pattern
+    is identical to _repath_model_image's, and used from four call sites
+    (apply, undo, and the character-asset variant of each), so it's
+    factored out the same way."""
+    old_key = _key(old_path)
+    new_path = _native_store(new_path)
+    if isinstance(model.other_files, list):
+        model.other_files = [
+            new_path if _key(p) == old_key else p
+            for p in model.other_files
         ]
 
 
@@ -890,8 +911,7 @@ def _repath_db_undo(
             )
             for model in query.all():
                 _repath_model_image(model, to, frm)
-                model.other_files = [_native_store(frm) if _key(path) == _key(to) else path
-                                     for path in (model.other_files or [])]
+                _repath_model_other_file(model, to, frm)
                 model.image_manifest = None
                 model.image_manifest_sig = None
             continue
@@ -899,6 +919,11 @@ def _repath_db_undo(
             model = db.get(Model, model_id) if model_id is not None else None
             if model is not None:
                 _repath_model_image(model, to, frm)
+            continue
+        if kind == "other":
+            model = db.get(Model, model_id) if model_id is not None else None
+            if model is not None:
+                _repath_model_other_file(model, to, frm)
             continue
 
         stl = _find_stl_by_path(db, to)
