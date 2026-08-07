@@ -463,6 +463,45 @@ class TestSafeMovePrimitive:
         assert dst.read_bytes() == b"payload"
         assert not stale_tmp.exists()
 
+    def test_cross_device_rolls_back_dest_when_unlink_fails(self, tmp_path, monkeypatch):
+        """A read-only *source* directory lets the EXDEV copy fully complete —
+        the destination is written and published — but then blocks the final
+        os.unlink(src). Previously that left a real, DB-invisible file sitting
+        at the destination while the source stayed put too: neither moved nor
+        not-moved, just duplicated. _safe_move must undo its own destination
+        write so a failed move is actually a no-op, matching what callers
+        (and the "DB unchanged" error message) already assume."""
+        src = tmp_path / "a" / "head.stl"
+        src.parent.mkdir(parents=True)
+        src.write_bytes(b"payload")
+        dst = tmp_path / "b" / "head.stl"
+
+        real_rename = os.rename
+
+        def fake_rename(a, b):
+            if str(b) == str(dst):
+                raise OSError(errno.EXDEV, "cross-device")
+            return real_rename(a, b)
+
+        real_unlink = os.unlink
+
+        def fake_unlink(path):
+            if str(path) == str(src):
+                raise PermissionError(errno.EACCES, "permission denied")
+            return real_unlink(path)
+
+        monkeypatch.setattr(os, "rename", fake_rename)
+        monkeypatch.setattr(os, "unlink", fake_unlink)
+
+        with pytest.raises(PermissionError):
+            _safe_move(str(src), str(dst))
+
+        # Rolled back: the destination write must not survive a failed move.
+        assert not dst.exists()
+        # Untouched: the source is still exactly where it was.
+        assert src.exists()
+        assert src.read_bytes() == b"payload"
+
 
 class TestCrashMidBatch:
     def test_partial_log_written_db_untouched(self, db, tmp_path, write_mode, client):

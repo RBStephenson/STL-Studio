@@ -227,7 +227,21 @@ def _safe_move(src: str, dst: str) -> None:
         os.unlink(tmp)
         raise OSError(f"size mismatch after cross-device copy of {src}")
     os.replace(tmp, dst_n)
-    os.unlink(src_n)
+    try:
+        os.unlink(src_n)
+    except OSError:
+        # The copy is fully published at dst_n, but the source survives (most
+        # commonly a read-only source directory denying the unlink) — undo the
+        # publish so a failed move is actually a no-op. Without this, the
+        # caller's "nothing moved" accounting (and the "DB unchanged" error it
+        # reports) is a lie: a real, DB-invisible duplicate is left sitting at
+        # the destination, which the next apply attempt then collides with —
+        # the mechanism behind a real duplicate-model/corruption incident.
+        try:
+            os.unlink(dst_n)
+        except OSError:
+            pass
+        raise
 
 
 class _UndoLog:
