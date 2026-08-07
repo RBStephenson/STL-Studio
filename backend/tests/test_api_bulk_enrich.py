@@ -36,6 +36,15 @@ class TestBulkEnrich:
         assert a.title == "Epic Set"
         assert b.title == "Epic Set"
 
+    def test_blank_title_clears_field(self, client, db):
+        """A title bulk-set by mistake (e.g. on a multi-model import pack)
+        must be explicitly clearable, not stuck forever."""
+        _, a, _, _ = _setup(db)
+        client.patch("/models/bulk/enrich", json={"ids": [a.id], "title": "Epic Set"})
+        client.patch("/models/bulk/enrich", json={"ids": [a.id], "title": "  "})
+        db.refresh(a)
+        assert a.title is None  # whitespace-only collapses to NULL
+
     def test_sets_notes_on_selected_models(self, client, db):
         _, a, b, c = _setup(db)
         r = client.patch("/models/bulk/enrich", json={"ids": [a.id, b.id], "notes": "From pack X"})
