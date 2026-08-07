@@ -1350,6 +1350,67 @@ def _walk_for_models(
                          read_failures=read_failures,
                          boundary_is_product=boundary_is_product)
 
+    # Two sibling branches (e.g. "Mult Color Filament" / "One Color Filament")
+    # can each independently reach the "leaf" strategy at some depth and each
+    # produce a child whose OWN folder name is the same identity-bearing
+    # string ("EchoMasteryTracker") — the leaf strategy has no memory of which
+    # branch it's under, so both get the identical character. Untouched, that
+    # collapses their destination folders onto one another at import/apply
+    # time (a real destination-collision incident: "Mult Color Filament"
+    # could never import because "One Color Filament" already claimed
+    # "EchoMasteryTracker"'s destination). Only run this once per top-level
+    # walk, scoped to what this walk just touched.
+    if is_creator_root:
+        _disambiguate_colliding_characters(db, creator.id, folder)
+
+
+def _disambiguate_colliding_characters(db: Session, creator_id: int, boundary: Path) -> None:
+    """Rename characters that collided across distinct branches of this walk.
+
+    Only a model whose character was assigned fresh at its OWN leaf level —
+    i.e. nobody grouped it with siblings, its character is simply its own
+    folder's name — is a candidate. That's deliberate: the "common"/"parent"
+    strategies also produce several models sharing one character with
+    different immediate parents (e.g. a product's "STL" and "Presupport"
+    variant folders correctly sharing the product's character) — that's
+    intentional grouping, not a collision, and must be left untouched. A
+    model whose character was inherited from an ancestor's grouping decision
+    never equals its own bare folder name, so that's the signal: only two
+    *independent* leaves — each carrying nothing but its own name, reached
+    via two different, unrelated parents — are a real collision.
+
+    Scoped to models under ``boundary`` only — a wider, whole-creator sweep
+    would risk renaming unrelated models from an earlier, separate scan that
+    happen to legitimately share a character (same product name used across
+    two different packs)."""
+    models = [
+        m for m in db.query(Model).filter(Model.creator_id == creator_id).all()
+        if m.folder_path and _is_within_boundary(m.folder_path, boundary)
+    ]
+    groups: dict[str, list[Model]] = {}
+    for m in models:
+        if m.character and m.character == Path(m.folder_path).name:
+            groups.setdefault(m.character, []).append(m)
+
+    changed = False
+    for character, group in groups.items():
+        if len(group) < 2:
+            continue
+        by_parent: dict[str, list[Model]] = {}
+        for m in group:
+            by_parent.setdefault(Path(m.folder_path).parent.name, []).append(m)
+        if len(by_parent) < 2:
+            continue  # one shared parent — an intentional grouped variant set
+        for parent_name, members in by_parent.items():
+            label = f"{parent_name} — {character}"
+            for m in members:
+                if m.name == m.character:
+                    m.name = label
+                m.character = label
+                changed = True
+    if changed:
+        db.commit()
+
 
 def _index_model(
     folder: Path,
