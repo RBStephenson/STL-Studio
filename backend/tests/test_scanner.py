@@ -781,6 +781,35 @@ class TestVariantGrouping:
         # No grouping partner → either None or its own unique key; never merged.
         assert models[0].character in (None, "Solo Dragon")
 
+    def test_sibling_variant_folders_with_identical_leaf_names_disambiguate(self, db, tmp_path):
+        """Real incident: two sibling top-level variant folders ("Mult Color
+        Filament" / "One Color Filament") each hold their own identically-named
+        per-part subfolders (EchoMasteryTracker/HealthTracker/RoundTracker).
+        The leaf strategy assigns character purely from the child's own folder
+        name, with no memory of which branch it came from, so both branches'
+        "EchoMasteryTracker" collided onto the same character/destination —
+        "Mult Color Filament" could never import because "One Color Filament"
+        had already claimed that destination. Each must disambiguate by its
+        own immediate parent folder name."""
+        creator_dir = tmp_path / "Malediction"
+        pack = creator_dir / "Malediction Trackers"
+        for variant in ("Mult Color Filament", "One Color Filament"):
+            for part in ("EchoMasteryTracker", "HealthTracker", "RoundTracker"):
+                _stl(pack / variant / part)
+        creator = make_creator(db, "Malediction")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {m.character for m in _models(db, creator)}
+        assert chars == {
+            "Mult Color Filament — EchoMasteryTracker",
+            "Mult Color Filament — HealthTracker",
+            "Mult Color Filament — RoundTracker",
+            "One Color Filament — EchoMasteryTracker",
+            "One Color Filament — HealthTracker",
+            "One Color Filament — RoundTracker",
+        }
+
     def test_pack_collapses_by_default(self, db, tmp_path):
         """By default a pack folder with a stray STL collapses into one model —
         splitting it into per-character models is an explicit, opt-in action
