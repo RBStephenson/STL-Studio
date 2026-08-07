@@ -2469,6 +2469,20 @@ def _inbox_scan(
                     grouping.regroup_creator(_db, creator.id)
                     grouping.prune_empty_groups(_db)
                     _db.commit()
+                    # A full scan-root run self-heals via _prune_stale_paths;
+                    # this single-pack path never did, so a model whose folder
+                    # got renamed/restructured/deleted out from under it (e.g.
+                    # re-flattening a pack after a prior scoped import) lingers
+                    # as is_inbox=True forever — Import Preview keeps grouping
+                    # it into the pack card (wrong file counts, a permanent
+                    # "already imported" flag) no matter what's actually on
+                    # disk now, since nothing else ever re-scans this exact
+                    # boundary to notice. Skip when this run had read failures
+                    # (STUDIO-79) — a transient listing error must not look
+                    # like a deleted folder.
+                    if not walk_failures:
+                        _prune_stale_paths(_db, [str(inbox)] if inbox.exists() else [])
+                        _db.commit()
             elif _has_stls(inbox, recurse=False):
                 # Flat layout: inbox root itself is the model (STLs directly inside)
                 creator = resolve_creator("_Inbox", _db)

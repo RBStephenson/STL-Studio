@@ -360,6 +360,41 @@ class TestSinglePackImport:
         r = client.get("/models?is_inbox=true")
         assert len(r.json()["items"]) == 1
 
+    def test_rescan_prunes_a_model_whose_folder_no_longer_exists(self, client, db):
+        """Real incident: a user restructured a pack between two Import
+        Preview scans (deleted a variant subfolder, flattened the rest into
+        the pack root). single_pack scans never revisit a folder that's
+        gone, so without pruning, that model lingers as is_inbox=True
+        forever — Import Preview keeps grouping it into the pack card
+        (wrong file counts, a permanently-stuck "already imported" banner)
+        no matter what's actually on disk, since a full library scan (the
+        only place pruning used to run) is never part of this flow."""
+        from app.models import Model
+        from app.services.scanner import scan_inbox_folder
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox = Path(tmpdir)
+            _make_stl_tree(inbox, {
+                "Variant A": {"a.stl": "solid a\nendsolid"},
+            })
+            scan_inbox_folder(tmpdir, db=db, single_pack=True)
+            assert db.query(Model).filter(Model.is_inbox == True).count() == 1  # noqa: E712
+
+            # Restructure: the old subfolder is gone, replaced by a file
+            # directly in the pack root.
+            import shutil
+            shutil.rmtree(inbox / "Variant A")
+            (inbox / "b.stl").write_text("solid b\nendsolid")
+
+            scan_inbox_folder(tmpdir, db=db, single_pack=True)
+
+            models = db.query(Model).filter(Model.is_inbox == True).all()  # noqa: E712
+            assert len(models) == 1
+            assert Path(models[0].folder_path) == inbox
+
+        r = client.get("/models?is_inbox=true")
+        assert len(r.json()["items"]) == 1
+
     def test_known_creator_name_resolves_directly_no_placeholder(self, client, db):
         """When the caller already knows the real creator (Import Preview's
         Creator field, typed or Fetch-populated before the user clicks
