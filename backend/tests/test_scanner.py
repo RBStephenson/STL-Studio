@@ -275,6 +275,66 @@ class TestGalleryImages:
 
         assert model.image_paths == [str(model_dir / "render.png"), remote, outside]
 
+    def test_scan_does_not_sweep_sibling_products_no_stl_images_into_gallery(
+        self, db, tmp_path,
+    ):
+        """STUDIO-377: a sibling product folder that (at scan time) has only
+        marketing images and no STL files yet must not have those images swept
+        into every OTHER model's gallery. This is exactly what happened with CA
+        3D Studios' "Darth Vader Samurai" and "Regina" — both had images
+        uploaded before their STLs were added, and a creator scan run during
+        that window pushed their whole galleries into unrelated sibling models,
+        because the old boundary reached all the way up to the creator root."""
+        creator_dir = tmp_path / "Creator"
+        _img(creator_dir / "ImageOnlyProduct", "cover.jpg")  # no STL yet
+        model_dir = creator_dir / "RealProduct"
+        _stl(model_dir)
+        _img(model_dir, "own.jpg")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        model = _models(db, creator)[0]
+        assert model.name == "RealProduct" or "RealProduct" in model.folder_path
+        assert model.image_paths == [str(model_dir / "own.jpg")]
+
+    def test_scan_does_not_sweep_loose_creator_root_image_into_gallery(
+        self, db, tmp_path,
+    ):
+        """STUDIO-377: a stray image dropped directly in the creator's own
+        folder (not inside any product folder) must not bleed into every
+        model's gallery under that creator — the real-world case was a loose
+        "RPG Pack - Names.jpg" reference image sitting at a creator's root,
+        which every model under that creator picked up on every scan."""
+        creator_dir = tmp_path / "Creator"
+        (creator_dir).mkdir(parents=True, exist_ok=True)
+        (creator_dir / "loose_reference.jpg").write_bytes(b"\x89PNG\r\n")
+        model_dir = creator_dir / "Knight"
+        _stl(model_dir)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        model = _models(db, creator)[0]
+        assert model.image_paths == []
+
+    def test_scan_still_shares_images_within_the_same_product_tree(self, db, tmp_path):
+        """The boundary tightening (STUDIO-377) must not break the legitimate
+        case it was designed to support: a product-level images folder shared
+        by a model nested one level deeper under the SAME product — e.g. CA 3D
+        Studios' "2B/2B - Images" shared by "2B/2B - 1_4" and "2B/2B - 1_6"."""
+        creator_dir = tmp_path / "Creator"
+        product_dir = creator_dir / "Product"
+        _img(product_dir / "Images", "shared.jpg")
+        model_dir = product_dir / "ModelFolder" / "STL"
+        _stl(model_dir)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        model = _models(db, creator)[0]
+        assert model.image_paths == [str(product_dir / "Images" / "shared.jpg")]
+
 
 # ---------------------------------------------------------------------------
 # Configurable ignore patterns (#31, Phase 1)
