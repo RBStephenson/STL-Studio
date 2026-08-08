@@ -51,6 +51,16 @@ def db(test_engine, monkeypatch):
     monkeypatch.setattr(db_module, "engine", test_engine)
     monkeypatch.setattr(db_module, "SessionLocal", Session)
     monkeypatch.setattr(main_module, "engine", test_engine)
+    # app.main itself opens sessions via a module-level `from app.database
+    # import SessionLocal` (_backfill_missing_variant_groups, _seed_tag_index,
+    # _apply_persisted_log_level, _apply_persistent_diagnostics — all startup
+    # lifespan steps) — that name was bound at import time, so patching
+    # app.database.SessionLocal alone doesn't reach it. Without this, every
+    # test using the `client` fixture silently ran those startup steps against
+    # a stray, disconnected in-memory DB with no tables, swallowed by their own
+    # try/except and logged as "Failed to backfill missing variant groups" /
+    # "no such table" noise on every single test (STUDIO-377 follow-up).
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
     # import_apply's background job (app/routers/imports.py) opens its own
     # session via a module-level `from app.database import SessionLocal` —
     # that name was bound at import time, so patching app.database.SessionLocal
