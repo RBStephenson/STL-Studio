@@ -14,9 +14,9 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "^4.1.10",
-    "electron": "^43.1.1",
+    "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
@@ -26,7 +26,10 @@
   },
   "overrides": {
     "minimatch@^10": {
-      "brace-expansion": "^5.0.8"
-    }
+      "brace-expansion": "^5.0.9"
+    },
+    "brace-expansion@^1.1.7": "^1.1.18",
+    "brace-expansion@^2.0.1": "^2.1.4",
+    "brace-expansion@^2.0.2": "^2.1.4"
   }
 }
