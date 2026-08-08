@@ -463,6 +463,126 @@ class TestSafeMovePrimitive:
         assert dst.read_bytes() == b"payload"
         assert not stale_tmp.exists()
 
+    def test_cross_device_rolls_back_dest_when_unlink_fails(self, tmp_path, monkeypatch):
+        """A read-only *source* directory lets the EXDEV copy fully complete —
+        the destination is written and published — but then blocks the final
+        os.unlink(src). Previously that left a real, DB-invisible file sitting
+        at the destination while the source stayed put too: neither moved nor
+        not-moved, just duplicated. _safe_move must undo its own destination
+        write so a failed move is actually a no-op, matching what callers
+        (and the "DB unchanged" error message) already assume."""
+        src = tmp_path / "a" / "head.stl"
+        src.parent.mkdir(parents=True)
+        src.write_bytes(b"payload")
+        dst = tmp_path / "b" / "head.stl"
+
+        real_rename = os.rename
+
+        def fake_rename(a, b):
+            if str(b) == str(dst):
+                raise OSError(errno.EXDEV, "cross-device")
+            return real_rename(a, b)
+
+        real_unlink = os.unlink
+
+        def fake_unlink(path):
+            if str(path) == str(src):
+                raise PermissionError(errno.EACCES, "permission denied")
+            return real_unlink(path)
+
+        monkeypatch.setattr(os, "rename", fake_rename)
+        monkeypatch.setattr(os, "unlink", fake_unlink)
+
+        with pytest.raises(PermissionError):
+            _safe_move(str(src), str(dst))
+
+        # Rolled back: the destination write must not survive a failed move.
+        assert not dst.exists()
+        # Untouched: the source is still exactly where it was.
+        assert src.exists()
+        assert src.read_bytes() == b"payload"
+
+
+class TestOtherFileMoves:
+    """A model's own other_files (PDFs, READMEs, a .3mf project bundle — see
+    scanner.PROJECT_BUNDLE_EXTENSIONS) must move alongside its STL files, the
+    same way TestImageMoves already covers gallery images. Real incident
+    (#1156 follow-up): reorganizing an inbox-imported pack to add a creator
+    name left its .3mf stranded in the old inbox folder — the manifest
+    builder never had a move-plan entry for other_files at all, so the file
+    just never made it into the move loop in the first place."""
+
+    def _seed_with_other_file(self, db, tmp_path):
+        from app.models import Creator
+        folder = tmp_path / "_inbox" / "Bust"
+        folder.mkdir(parents=True, exist_ok=True)
+        stl = folder / "head.stl"
+        stl.write_bytes(b"solid\nendsolid\n")
+        other = folder / "project.3mf"
+        other.write_bytes(b"fake 3mf")
+        creator = db.query(Creator).filter_by(name="Abe3D").first() or make_creator(db, name="Abe3D")
+        m = make_model(db, creator, name="Bust", character="Joker")
+        m.folder_path = str(folder).replace("\\", "/")
+        m.title = "Bust"
+        other_path = str(other).replace("\\", "/")
+        m.other_files = [other_path]
+        db.commit()
+        make_stl_file(db, m, filename="head.stl", path=str(stl).replace("\\", "/"))
+        db.commit()
+        return m, other_path
+
+    def test_other_file_moves_with_stl_and_repaths_model_field(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, other_path = self._seed_with_other_file(db, tmp_path)
+        mid = _preview(client)["manifest_id"]
+
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["moved_files"] == 2  # stl + other
+
+        db.refresh(m)
+        assert not os.path.exists(other_path)
+        assert len(m.other_files) == 1
+        assert os.path.exists(m.other_files[0])
+        assert m.other_files[0] != other_path
+        # The old import folder is now genuinely empty and gets pruned.
+        assert not os.path.isdir(os.path.dirname(other_path))
+
+    def test_shared_other_file_outside_model_folder_is_left_alone(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, _ = self._seed_with_other_file(db, tmp_path)
+        shared = tmp_path / "_inbox" / "shared-readme.txt"
+        shared.write_text("shared")
+        shared_path = str(shared).replace("\\", "/")
+        m.other_files = [*m.other_files, shared_path]
+        db.commit()
+
+        mid = _preview(client)["manifest_id"]
+        resp = _apply(client, mid, [m.id])
+        assert resp.status_code == 200, resp.text
+
+        assert shared.exists()
+        db.refresh(m)
+        assert shared_path in m.other_files
+
+    def test_undo_restores_other_file_and_model_field(self, client, db, tmp_path, write_mode):
+        _root(db, tmp_path)
+        m, other_path = self._seed_with_other_file(db, tmp_path)
+        mid = _preview(client)["manifest_id"]
+        _apply(client, mid, [m.id])
+        db.refresh(m)
+        moved = m.other_files[0]
+        assert os.path.exists(moved)
+
+        resp = client.post("/reorganize/undo", json={"manifest_id": mid})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["reversed_files"] == 2  # stl + other
+        assert not os.path.exists(moved)
+        assert os.path.exists(other_path)
+
+        db.refresh(m)
+        assert m.other_files == [_stored(other_path)]
+
 
 class TestCrashMidBatch:
     def test_partial_log_written_db_untouched(self, db, tmp_path, write_mode, client):

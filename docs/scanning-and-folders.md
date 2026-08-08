@@ -38,6 +38,9 @@ Key ideas:
 - A **model** is a folder containing the actual printable parts for one product
   or variant. A folder is only ever indexed as a model if its subtree contains
   3D files (`.stl` / `.3mf` / `.obj`) — render/preview-only folders are skipped.
+  A `.3mf` counts toward that check but isn't indexed as a printable part
+  itself — it lands in [Other Files](features.md) instead, since it's commonly
+  a slicer project bundling multiple parts rather than one printable piece.
   Slicer project and slice files (`.lys`, `.chitubox`, `.ctb`, `.photon`,
   `.pw0`/`.pwx`/`.pws`, `.fhd`) are never indexed, and any indexed by older
   versions are cleaned up after the next full scan.

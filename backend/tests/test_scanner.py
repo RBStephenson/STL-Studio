@@ -336,6 +336,89 @@ class TestGalleryImages:
         assert model.image_paths == [str(product_dir / "Images" / "shared.jpg")]
 
 
+class TestThreeMfOtherFiles:
+    """.3mf is a slicer project/bundle format, not a single printable part —
+    many creators do ship real geometry that way, so it must still count as
+    "this folder has printable content" for leaf detection (a lone .3mf
+    folder must still become a model), but it's filed as other_files rather
+    than getting its own STLFile row."""
+
+    def test_lone_3mf_folder_becomes_a_model_with_no_stl_rows(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Combo Print"
+        model_dir.mkdir(parents=True)
+        (model_dir / "AllParts_Colored.3mf").write_bytes(b"fake 3mf")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert len(models) == 1
+        model = models[0]
+        assert model.other_files == [str(model_dir / "AllParts_Colored.3mf")]
+        assert db.query(STLFile).filter(STLFile.model_id == model.id).count() == 0
+
+    def test_3mf_alongside_stl_files_splits_correctly(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Knight"
+        _stl(model_dir, "head.stl")
+        _stl(model_dir, "body.stl")
+        (model_dir / "project.3mf").write_bytes(b"fake 3mf")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        model = _models(db, creator)[0]
+        assert model.other_files == [str(model_dir / "project.3mf")]
+        stl_paths = {
+            f.path for f in db.query(STLFile).filter(STLFile.model_id == model.id)
+        }
+        assert stl_paths == {str(model_dir / "head.stl"), str(model_dir / "body.stl")}
+
+    def test_rescan_does_not_duplicate_3mf_in_other_files(self, db, tmp_path):
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Combo Print"
+        model_dir.mkdir(parents=True)
+        (model_dir / "AllParts_Colored.3mf").write_bytes(b"fake 3mf")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+        _walk(db, creator, creator_dir)
+
+        model = _models(db, creator)[0]
+        assert model.other_files == [str(model_dir / "AllParts_Colored.3mf")]
+
+    def test_rescan_heals_a_3mf_indexed_before_this_behaviour_existed(self, db, tmp_path):
+        """A .3mf indexed as an STLFile row by an older scan (before .3mf was
+        routed to other_files) must not linger forever — _index_stl_files
+        never revisits an already-known path, so without an explicit cleanup
+        it would show up as both a tracked file AND an other_file after this
+        change ships. A rescan must remove the stale row and fold the path
+        into other_files instead."""
+        from tests.conftest import make_stl_file
+
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Combo Print"
+        model_dir.mkdir(parents=True)
+        threemf = model_dir / "AllParts_Colored.3mf"
+        threemf.write_bytes(b"fake 3mf")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+        model = _models(db, creator)[0]
+        # Simulate the legacy state: pre-fix code indexed the .3mf as a
+        # tracked STLFile row instead of other_files.
+        make_stl_file(db, model, filename=threemf.name, path=str(threemf))
+        model.other_files = []
+        db.commit()
+
+        _walk(db, creator, creator_dir)
+        db.refresh(model)
+
+        assert model.other_files == [str(threemf)]
+        assert db.query(STLFile).filter(STLFile.model_id == model.id).count() == 0
+
+
 # ---------------------------------------------------------------------------
 # Configurable ignore patterns (#31, Phase 1)
 # ---------------------------------------------------------------------------
@@ -780,6 +863,35 @@ class TestVariantGrouping:
         assert len(models) == 1
         # No grouping partner → either None or its own unique key; never merged.
         assert models[0].character in (None, "Solo Dragon")
+
+    def test_sibling_variant_folders_with_identical_leaf_names_disambiguate(self, db, tmp_path):
+        """Real incident: two sibling top-level variant folders ("Mult Color
+        Filament" / "One Color Filament") each hold their own identically-named
+        per-part subfolders (EchoMasteryTracker/HealthTracker/RoundTracker).
+        The leaf strategy assigns character purely from the child's own folder
+        name, with no memory of which branch it came from, so both branches'
+        "EchoMasteryTracker" collided onto the same character/destination —
+        "Mult Color Filament" could never import because "One Color Filament"
+        had already claimed that destination. Each must disambiguate by its
+        own immediate parent folder name."""
+        creator_dir = tmp_path / "Malediction"
+        pack = creator_dir / "Malediction Trackers"
+        for variant in ("Mult Color Filament", "One Color Filament"):
+            for part in ("EchoMasteryTracker", "HealthTracker", "RoundTracker"):
+                _stl(pack / variant / part)
+        creator = make_creator(db, "Malediction")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {m.character for m in _models(db, creator)}
+        assert chars == {
+            "Mult Color Filament — EchoMasteryTracker",
+            "Mult Color Filament — HealthTracker",
+            "Mult Color Filament — RoundTracker",
+            "One Color Filament — EchoMasteryTracker",
+            "One Color Filament — HealthTracker",
+            "One Color Filament — RoundTracker",
+        }
 
     def test_pack_collapses_by_default(self, db, tmp_path):
         """By default a pack folder with a stray STL collapses into one model —

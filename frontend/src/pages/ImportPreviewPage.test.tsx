@@ -188,6 +188,35 @@ describe("ImportPreviewPage (#452 C2)", () => {
     );
   });
 
+  it("clears a stale bulk-set title when the field is emptied before reimporting", async () => {
+    // Regression: a Title already bulk-set on every model in the pack (e.g.
+    // from a prior import attempt that got blocked) must be explicitly
+    // clearable. bulkEnrich only touches fields present in the payload, and
+    // the old guard omitted the key whenever the box read blank — making
+    // "never touched it" and "cleared it" indistinguishable, so the stale
+    // value could never be undone through this form.
+    setup({ mapping: { source_path: "/src", library_id: 1 } });
+    vi.mocked(api.import.preview).mockResolvedValue({
+      source: "/src", library_id: null,
+      packs: [{ ...PACK, title: "Malediction Trackers" }],
+    });
+    await scan();
+    fireEvent.click(screen.getByLabelText("Expand"));
+
+    const titleInput = await screen.findByPlaceholderText("Title");
+    expect(titleInput).toHaveValue("Malediction Trackers");
+    fireEvent.change(titleInput, { target: { value: "" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(
+      () => expect(api.models.bulkEnrich).toHaveBeenCalledWith(
+        [1, 2], expect.objectContaining({ title: "" }),
+      ),
+      { timeout: _WAIT },
+    );
+  });
+
   it("Fetch populates fields from the storefront scrape (#458)", async () => {
     vi.mocked(api.scrape.fetchUrl).mockResolvedValue({
       title: "Scraped Title", description: null, source_url: "https://cults3d.com/x",

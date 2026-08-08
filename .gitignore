@@ -33,3 +33,4 @@ backend/.secret_key
 *.pem
 docker-compose.override.yml
 Dockerfile.local
+stl/

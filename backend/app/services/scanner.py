@@ -52,6 +52,16 @@ from app.utils import utcnow, utc_timestamp
 logger = logging.getLogger(__name__)
 
 STL_EXTENSIONS = {".stl", ".3mf", ".obj"}
+# Members of STL_EXTENSIONS that count as "this folder has printable content"
+# for leaf detection, but are a project/bundle format rather than a single
+# printable part — filed as other_files, never as their own STLFile row (see
+# _index_stl_files). Anything that checks STL_EXTENSIONS to mean "already
+# indexed/moved as tracked geometry" must subtract this set first — treating
+# it as an ordinary STL_EXTENSIONS member there silently drops the file: it's
+# not in the STL move manifest (not an STLFile row) and would be skipped by
+# the non-STL file mover too (imports.py) if that check doesn't know about
+# this carve-out, so it never gets moved to the destination at all.
+PROJECT_BUNDLE_EXTENSIONS = {".3mf"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 PREFERRED_IMAGE_DIRS = {
     "renders", "render", "images", "image", "photos", "photo",
@@ -1350,6 +1360,67 @@ def _walk_for_models(
                          read_failures=read_failures,
                          boundary_is_product=boundary_is_product)
 
+    # Two sibling branches (e.g. "Mult Color Filament" / "One Color Filament")
+    # can each independently reach the "leaf" strategy at some depth and each
+    # produce a child whose OWN folder name is the same identity-bearing
+    # string ("EchoMasteryTracker") — the leaf strategy has no memory of which
+    # branch it's under, so both get the identical character. Untouched, that
+    # collapses their destination folders onto one another at import/apply
+    # time (a real destination-collision incident: "Mult Color Filament"
+    # could never import because "One Color Filament" already claimed
+    # "EchoMasteryTracker"'s destination). Only run this once per top-level
+    # walk, scoped to what this walk just touched.
+    if is_creator_root:
+        _disambiguate_colliding_characters(db, creator.id, folder)
+
+
+def _disambiguate_colliding_characters(db: Session, creator_id: int, boundary: Path) -> None:
+    """Rename characters that collided across distinct branches of this walk.
+
+    Only a model whose character was assigned fresh at its OWN leaf level —
+    i.e. nobody grouped it with siblings, its character is simply its own
+    folder's name — is a candidate. That's deliberate: the "common"/"parent"
+    strategies also produce several models sharing one character with
+    different immediate parents (e.g. a product's "STL" and "Presupport"
+    variant folders correctly sharing the product's character) — that's
+    intentional grouping, not a collision, and must be left untouched. A
+    model whose character was inherited from an ancestor's grouping decision
+    never equals its own bare folder name, so that's the signal: only two
+    *independent* leaves — each carrying nothing but its own name, reached
+    via two different, unrelated parents — are a real collision.
+
+    Scoped to models under ``boundary`` only — a wider, whole-creator sweep
+    would risk renaming unrelated models from an earlier, separate scan that
+    happen to legitimately share a character (same product name used across
+    two different packs)."""
+    models = [
+        m for m in db.query(Model).filter(Model.creator_id == creator_id).all()
+        if m.folder_path and _is_within_boundary(m.folder_path, boundary)
+    ]
+    groups: dict[str, list[Model]] = {}
+    for m in models:
+        if m.character and m.character == Path(m.folder_path).name:
+            groups.setdefault(m.character, []).append(m)
+
+    changed = False
+    for character, group in groups.items():
+        if len(group) < 2:
+            continue
+        by_parent: dict[str, list[Model]] = {}
+        for m in group:
+            by_parent.setdefault(Path(m.folder_path).parent.name, []).append(m)
+        if len(by_parent) < 2:
+            continue  # one shared parent — an intentional grouped variant set
+        for parent_name, members in by_parent.items():
+            label = f"{parent_name} — {character}"
+            for m in members:
+                if m.name == m.character:
+                    m.name = label
+                m.character = label
+                changed = True
+    if changed:
+        db.commit()
+
 
 def _index_model(
     folder: Path,
@@ -2114,6 +2185,36 @@ def _index_stl_files(
     if not candidates:
         return
 
+    # PROJECT_BUNDLE_EXTENSIONS (.3mf) stay in STL_EXTENSIONS (a lone .3mf
+    # folder must still be recognised as a model — see the comment there),
+    # but it's a project/bundle format, not a single printable part, so it's
+    # filed as other_files rather than getting its own STLFile row. Split it
+    # out before the STLFile loop below; merge (not overwrite) so a rescan
+    # doesn't drop a file the same folder already indexed under other_files
+    # for an unrelated reason.
+    other_candidates = [c for c in candidates if c.suffix.lower() in PROJECT_BUNDLE_EXTENSIONS]
+    candidates = [c for c in candidates if c.suffix.lower() not in PROJECT_BUNDLE_EXTENSIONS]
+    if other_candidates:
+        model.other_files = _merge_scan_gallery_paths(
+            existing=model.other_files or [],
+            discovered=[str(c) for c in other_candidates],
+            removed=[],
+            boundary=folder,
+        )
+        # Self-healing: a .3mf indexed as an STLFile row by a scan that ran
+        # before this behaviour changed would otherwise linger forever —
+        # _index_stl_files never revisits a path it's already seen (see the
+        # `existing` check below), so without this it'd show up as both a
+        # tracked file and an other_file until the row was cleaned up by hand.
+        other_paths = [str(c) for c in other_candidates]
+        (
+            db.query(STLFile)
+            .filter(STLFile.model_id == model.id, STLFile.path.in_(other_paths))
+            .delete(synchronize_session=False)
+        )
+    if not candidates:
+        return
+
     # Find which of these are already indexed by exact path. A parent model's
     # rglob may have already claimed files that belong to a sub-folder model,
     # so we check the entire stl_files table, not just this model's rows.
@@ -2408,6 +2509,20 @@ def _inbox_scan(
                     grouping.regroup_creator(_db, creator.id)
                     grouping.prune_empty_groups(_db)
                     _db.commit()
+                    # A full scan-root run self-heals via _prune_stale_paths;
+                    # this single-pack path never did, so a model whose folder
+                    # got renamed/restructured/deleted out from under it (e.g.
+                    # re-flattening a pack after a prior scoped import) lingers
+                    # as is_inbox=True forever — Import Preview keeps grouping
+                    # it into the pack card (wrong file counts, a permanent
+                    # "already imported" flag) no matter what's actually on
+                    # disk now, since nothing else ever re-scans this exact
+                    # boundary to notice. Skip when this run had read failures
+                    # (STUDIO-79) — a transient listing error must not look
+                    # like a deleted folder.
+                    if not walk_failures:
+                        _prune_stale_paths(_db, [str(inbox)] if inbox.exists() else [])
+                        _db.commit()
             elif _has_stls(inbox, recurse=False):
                 # Flat layout: inbox root itself is the model (STLs directly inside)
                 creator = resolve_creator("_Inbox", _db)

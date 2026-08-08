@@ -67,6 +67,13 @@ export default function ImportPreviewPage() {
 
   // Per-card state, keyed by the pack's source path.
   const [fields, setFields] = useState<Record<string, CardFields>>({});
+  // Snapshot of each card's fields as first loaded from the pack — never
+  // mutated after that first population, unlike `fields` above. Lets
+  // importPack tell "user left this blank" apart from "user cleared a value
+  // that used to be here" — the latter must still reach the backend as an
+  // explicit clear, or a stale bulk-set title (e.g. from a previous failed
+  // import) can never be undone through this form.
+  const [initialFields, setInitialFields] = useState<Record<string, CardFields>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<Record<string, ImportStatus>>({});
   const [progress, setProgress] = useState<Record<string, { models: number; files: number }>>({});
@@ -131,6 +138,11 @@ export default function ImportPreviewPage() {
              file_count: contents.file_count }]
         : contents.entries;
       setFields((prev) => {
+        const next = { ...prev };
+        for (const c of cards) if (!(c.path in next)) next[c.path] = fieldsFromPack(packByPath.get(c.path));
+        return next;
+      });
+      setInitialFields((prev) => {
         const next = { ...prev };
         for (const c of cards) if (!(c.path in next)) next[c.path] = fieldsFromPack(packByPath.get(c.path));
         return next;
@@ -299,16 +311,22 @@ export default function ImportPreviewPage() {
         if (dlStart.started) await waitForDownloadImages(entry.path);
       }
       if (ids.length) {
+        const orig = initialFields[entry.path] ?? EMPTY_FIELDS;
         const enrich: {
           creator_name?: string; character?: string; title?: string;
           notes?: string; source_url?: string; source_site?: string;
         } = {};
         if (f.creator.trim()) enrich.creator_name = f.creator.trim();
         if (f.character.trim()) enrich.character = f.character.trim();
-        if (f.title.trim()) enrich.title = f.title.trim();
-        if (f.notes.trim()) enrich.notes = f.notes.trim();
-        if (f.sourceUrl.trim()) enrich.source_url = f.sourceUrl.trim();
-        if (f.sourceSite.trim()) enrich.source_site = f.sourceSite.trim();
+        // Send whenever there's something to say, including an explicit
+        // clear: a blank box is otherwise indistinguishable from
+        // "never touched", so a title bulk-set on a previous, since-blocked
+        // attempt could never be un-set through this form — clearing it and
+        // reimporting silently kept reusing the stale value forever.
+        if (f.title.trim() || orig.title.trim()) enrich.title = f.title.trim();
+        if (f.notes.trim() || orig.notes.trim()) enrich.notes = f.notes.trim();
+        if (f.sourceUrl.trim() || orig.sourceUrl.trim()) enrich.source_url = f.sourceUrl.trim();
+        if (f.sourceSite.trim() || orig.sourceSite.trim()) enrich.source_site = f.sourceSite.trim();
         if (Object.keys(enrich).length) await api.models.bulkEnrich(ids, enrich);
         if (f.tags.length) await api.models.bulkTag(ids, f.tags, []);
         // Collections need the post-ingest model ids, so they apply last (#458).

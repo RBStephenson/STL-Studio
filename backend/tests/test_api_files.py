@@ -152,6 +152,52 @@ class TestServeStl:
 
 
 # ---------------------------------------------------------------------------
+# /files/document
+# ---------------------------------------------------------------------------
+
+class TestServeDocument:
+    def test_rejects_image_extension(self, client):
+        resp = client.get("/files/document", params={"path": "/tmp/cover.jpg"})
+        assert resp.status_code == 400
+
+    def test_rejects_stl_extension(self, client):
+        """.stl/.obj have their own dedicated (cached, viewer-facing) endpoint."""
+        resp = client.get("/files/document", params={"path": "/tmp/model.stl"})
+        assert resp.status_code == 400
+        assert "files/stl" in resp.json()["detail"]
+
+    def test_serves_a_3mf_as_a_download(self, client, tmp_path, monkeypatch):
+        """Regression (#1156 follow-up): .3mf is a STL_EXTENSIONS member but,
+        per scanner.PROJECT_BUNDLE_EXTENSIONS, is never an STLFile row — a
+        model's .3mf always lives in other_files, and the "Other Files" UI
+        always links here (api.documentUrl) regardless of extension. Before
+        this fix, .3mf was rejected here too (it's a STL_EXTENSIONS member)
+        with no endpoint that would actually serve it for that use case, so
+        every .3mf "download" in the UI 400ed."""
+        import app.routers.files as files_module
+        monkeypatch.setattr(files_module, "_allowed_roots", lambda: [tmp_path])
+
+        threemf = tmp_path / "AllParts_Colored.3mf"
+        threemf.write_bytes(b"fake 3mf bytes")
+
+        resp = client.get("/files/document", params={"path": str(threemf)})
+        assert resp.status_code == 200
+        assert resp.content == b"fake 3mf bytes"
+        assert "AllParts_Colored.3mf" in resp.headers["content-disposition"]
+
+    def test_serves_a_generic_document(self, client, tmp_path, monkeypatch):
+        import app.routers.files as files_module
+        monkeypatch.setattr(files_module, "_allowed_roots", lambda: [tmp_path])
+
+        doc = tmp_path / "readme.txt"
+        doc.write_text("hello")
+
+        resp = client.get("/files/document", params={"path": str(doc)})
+        assert resp.status_code == 200
+        assert resp.content == b"hello"
+
+
+# ---------------------------------------------------------------------------
 # /files/image — cache headers (#185)
 # ---------------------------------------------------------------------------
 
