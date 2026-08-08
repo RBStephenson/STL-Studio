@@ -519,7 +519,10 @@ class TestSinglePackImport:
             scan_inbox_folder(tmpdir, db=db, single_pack=True)
 
         from app.models import Model
-        models = {m.folder_path.rsplit("/", 1)[-1]: m
+        # Path(...).name, not a manual rsplit("/") — folder_path uses the host's
+        # own separator, backslash on Windows, so splitting on "/" alone left the
+        # whole path as the dict key there instead of just the leaf folder name.
+        models = {Path(m.folder_path).name: m
                   for m in db.query(Model).filter(Model.is_inbox == True).all()}  # noqa: E712
         supported = models["Widget Team (supported)"]
         unsupported = models["Widget Team (unsupported)"]
