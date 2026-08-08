@@ -161,6 +161,27 @@ class TestRefreshModelGallery:
 
         assert m.image_paths == []
 
+    def test_does_not_sweep_sibling_product_images(self, db, tmp_path):
+        """STUDIO-377: refresh_model_gallery resolves its own creator boundary
+        independently of the full-scan walk, so it needs the same fix — a
+        sibling product folder's images (or a loose image at the creator root)
+        must not bleed into this model's gallery just because the resolved
+        boundary used to reach all the way up to the creator's top folder."""
+        _root(db, tmp_path)
+        m, folder = _model_with_folder(db, tmp_path, name="RealProduct")
+        (folder / "own.jpg").write_bytes(b"fake-jpg")
+
+        creator_root = folder.parent
+        (creator_root / "loose_reference.jpg").write_bytes(b"fake-jpg")
+        sibling_images = creator_root / "OtherProduct" / "Images"
+        sibling_images.mkdir(parents=True)
+        (sibling_images / "unrelated.jpg").write_bytes(b"fake-jpg")
+
+        refresh_model_gallery(db, m)
+        db.commit()
+
+        assert m.image_paths == [str(folder / "own.jpg")]
+
 
 class TestRefreshGalleryEndpoint:
     def test_refresh_endpoint_syncs_images(self, client, db, tmp_path):
