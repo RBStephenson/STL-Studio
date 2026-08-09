@@ -972,6 +972,46 @@ class TestSplitPack:
         assert check.query(PackOverride).filter(PackOverride.path == str(pack)).count() == 1
         check.close()
 
+    def test_split_pack_honours_root_group_by_character(self, db, tmp_path, monkeypatch):
+        """split_pack's re-walk must thread the owning root's group_by_character
+        flag through to _walk_for_models (STUDIO-297) — otherwise a pack under a
+        folder-grouped root loses that behavior until the next full scan.
+
+        "32mm" suffixes make the fixture discriminating: with the flag correctly
+        honoured, each split child's character is the RAW folder name (unnormalised,
+        per group_by_character semantics); with the flag silently dropped (the bug),
+        the default name-heuristic strips "32mm" via character_key instead.
+        """
+        from sqlalchemy.orm import sessionmaker
+        from app.models import ScanRoot
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Sinister Six"
+        for char in ("Electro 32mm", "Sandman 32mm", "Spiderman 32mm"):
+            _stl(pack / char)
+
+        setup = Session()
+        setup.add(ScanRoot(path=str(tmp_path), layout="{creator}", enabled=True, group_by_character=True))
+        creator = Creator(name="Creator")
+        setup.add(creator); setup.flush()
+        creator_id = creator.id
+        collapsed = Model(name="Sinister Six", folder_path=str(pack), creator_id=creator_id)
+        setup.add(collapsed); setup.flush()
+        collapsed_id = collapsed.id
+        setup.add(STLFile(model_id=collapsed_id, path=str(pack / "x.stl"), filename="x.stl"))
+        setup.commit(); setup.close()
+
+        result = scanner.split_pack(collapsed_id)
+
+        assert result["ok"] is True
+        assert result["created"] == 3
+        check = Session()
+        chars = {m.character for m in check.query(Model).filter(Model.creator_id == creator_id)}
+        assert chars == {"Electro 32mm", "Sandman 32mm", "Spiderman 32mm"}
+        check.close()
+
     def test_split_pack_reports_error_on_unreadable_child(self, db, tmp_path, monkeypatch):
         """A child folder that fails to list (drive hiccup, permission blip)
         must come back as a clean {"ok": False, ...} the caller can show, not
