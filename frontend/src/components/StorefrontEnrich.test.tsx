@@ -73,7 +73,7 @@ describe("StorefrontEnrich – apply result counts", () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   it("reports deep + shallow counts after apply", async () => {
-    vi.stubGlobal("fetch", mockFetch({ ok: true, applied: 3, enriched_deep: 2, fallback_shallow: 1 }));
+    vi.stubGlobal("fetch", mockFetch({ ok: true, applied: 3, enriched_deep: 2, fallback_shallow: 1, errors: 0 }));
     render(<StorefrontEnrich creatorId={5} creatorName="Acme" onDone={() => {}} />);
 
     await runAndApply();
@@ -85,7 +85,7 @@ describe("StorefrontEnrich – apply result counts", () => {
   });
 
   it("omits the shallow note when everything enriched deeply", async () => {
-    vi.stubGlobal("fetch", mockFetch({ ok: true, applied: 1, enriched_deep: 1, fallback_shallow: 0 }));
+    vi.stubGlobal("fetch", mockFetch({ ok: true, applied: 1, enriched_deep: 1, fallback_shallow: 0, errors: 0 }));
     render(<StorefrontEnrich creatorId={5} creatorName="Acme" onDone={() => {}} />);
 
     await runAndApply();
@@ -93,6 +93,34 @@ describe("StorefrontEnrich – apply result counts", () => {
     const banner = await screen.findByText(/Applied to 1 model/i);
     expect(banner).toHaveTextContent("1 fully enriched");
     expect(banner).not.toHaveTextContent("basic");
+    expect(banner).not.toHaveTextContent("failed to apply");
+  });
+
+  it("surfaces a partial-failure count when the server reports apply errors", async () => {
+    vi.stubGlobal("fetch", mockFetch({ ok: true, applied: 2, enriched_deep: 2, fallback_shallow: 0, errors: 1 }));
+    render(<StorefrontEnrich creatorId={5} creatorName="Acme" onDone={() => {}} />);
+
+    await runAndApply();
+
+    const banner = await screen.findByText(/Applied to 2 models/i);
+    expect(banner).toHaveTextContent("1 model failed to apply");
+  });
+
+  it("shows the server's error detail when apply fails outright", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/enrich/storefront/match")) {
+        return { ok: true, json: async () => [MATCH] } as Response;
+      }
+      if (url.includes("/enrich/storefront/apply")) {
+        return { ok: false, json: async () => ({ detail: "Database locked" }) } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+    render(<StorefrontEnrich creatorId={5} creatorName="Acme" onDone={() => {}} />);
+
+    await runAndApply();
+
+    expect(await screen.findByText("Database locked")).toBeInTheDocument();
   });
 });
 
