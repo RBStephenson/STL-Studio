@@ -946,12 +946,14 @@ def split_pack(model_id: int) -> dict:
             # Recover the layout tags for the pack's path so split children keep
             # the same above-creator auto-tags a normal scan would assign.
             pack_layout_tags: list[str] = []
+            root_group_by_character = False
             for r in db.query(ScanRoot).filter(ScanRoot.enabled == True).all():
                 try:
                     pack.relative_to(Path(r.path))
                 except ValueError:
                     continue
                 pack_layout_tags = layout.tags_for_path(pack, Path(r.path), layout.roles_for(r.layout))
+                root_group_by_character = r.group_by_character
                 break
 
             before = db.query(func.count(Model.id)).filter(Model.creator_id == creator_id).scalar() or 0
@@ -966,6 +968,7 @@ def split_pack(model_id: int) -> dict:
                 last_scanned=None,
                 rules=rules,
                 layout_tags=pack_layout_tags,
+                group_by_character=root_group_by_character,
                 read_failures=walk_failures,
             )
             _report_read_failures(walk_failures)
