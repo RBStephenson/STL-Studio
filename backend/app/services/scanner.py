@@ -2098,68 +2098,6 @@ def refresh_model_gallery(db: Session, model: Model) -> None:
         model.primary_image_path = None
 
 
-def _find_thumbnail(model: Model, leaf: Path, boundary: Path,
-                    stl_cache: dict[str, bool] | None = None):
-    """
-    Walk upward from leaf to creator boundary looking for an image.
-
-    Priority at each level:
-      1. PREFERRED-named subdirs (renders, images, …) — rglob for nested layouts
-      2. Direct image files in the folder itself
-      3. Any other subdir that doesn't contain STLs (i.e. not a model folder)
-    """
-    PREFERRED = {
-        "renders", "render", "images", "image", "photos", "photo",
-        "preview", "previews", "pics", "pictures", "gallery",
-    }
-
-    def _has_stls_cached(d: Path) -> bool:
-        key = str(d)
-        if stl_cache is not None:
-            if key not in stl_cache:
-                stl_cache[key] = _has_stls(d, recurse=True)
-            return stl_cache[key]
-        return _has_stls(d, recurse=True)
-
-    def first_image(folder: Path) -> Path | None:
-        try:
-            children = list(folder.iterdir())
-        except PermissionError:
-            return None
-        subdirs = [c for c in children if c.is_dir() and not _is_hidden(c.name)]
-
-        # 1. PREFERRED subdirs first — rglob to handle nested layouts (e.g. Renders/Color/)
-        for sub in sorted(subdirs):
-            if sub.name.lower() in PREFERRED:
-                for img in sorted(sub.rglob("*")):
-                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS and not _has_hidden_ancestor(img, sub):
-                        return img
-
-        # 2. Direct image files at this level
-        for f in sorted(children):
-            if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS:
-                return f
-
-        # 3. Any other subdir that isn't a model folder (no STLs inside)
-        for sub in sorted(subdirs):
-            if sub.name.lower() not in PREFERRED and not _has_stls_cached(sub):
-                for img in sorted(sub.rglob("*")):
-                    if img.is_file() and img.suffix.lower() in IMAGE_EXTENSIONS and not _has_hidden_ancestor(img, sub):
-                        return img
-
-        return None
-
-    current = leaf
-    while True:
-        found = first_image(current)
-        if found:
-            model.thumbnail_path = str(found)
-            return
-        if current == boundary or current.parent == current:
-            break
-        current = current.parent
-
-
 def _index_stl_files(
     model: Model,
     folder: Path,
