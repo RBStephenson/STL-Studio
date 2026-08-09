@@ -24,6 +24,7 @@ interface ApplyResult {
   applied: number;
   enriched_deep: number;
   fallback_shallow: number;
+  errors: number;
 }
 
 // Deep fields previewed on demand from /scrape/fetch (a subset of ScrapePreview).
@@ -247,7 +248,10 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items }),
       });
-      if (!r.ok) throw new Error("Apply failed");
+      if (!r.ok) {
+        const e = await r.json();
+        throw new Error(e.detail ?? "Apply failed");
+      }
       setResult(await r.json());
       setDone(true);
       // A shallow fallback is worth seeing, so linger longer when some occurred.
@@ -274,7 +278,7 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
         <RefreshEnrich creatorId={creatorId} scopeLabel={creatorName} compact />
       </div>
       <p className="text-xs text-gray-500">
-        Paste {creatorName}'s profile URL from MyMiniFactory, Gumroad, or Cults3D.
+        Paste {creatorName}'s profile URL from MyMiniFactory, Gumroad, Cults3D, or Loot Studios.
         We'll match their products to your local models and pull full metadata in bulk —
         descriptions, tags, category, license, and thumbnails — including across variant groups.
         Already matched some? Use <span className="text-gray-400">Refresh</span> to re-pull the
@@ -314,6 +318,11 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
                 {result.fallback_shallow > 0 && (
                   <>, {result.fallback_shallow} basic <span className="text-emerald-600">(couldn't fetch full detail)</span></>
                 )}.
+                {result.errors > 0 && (
+                  <span className="text-amber-400">
+                    {" "}{result.errors} model{result.errors === 1 ? "" : "s"} failed to apply — check the logs.
+                  </span>
+                )}
               </span>
             : <span>Applied! Models updated.</span>}
         </p>
