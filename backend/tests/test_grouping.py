@@ -222,7 +222,20 @@ class TestHashEvidence:
 
         evidence = grouping.hash_evidence(ids, hashes)
 
-        assert len(evidence) == len(ids) - 1
+        # Every pairwise edge within the bucket is proposed (STUDIO-300), not
+        # just edges from the first member.
+        n = len(ids)
+        assert len(evidence) == n * (n - 1) // 2
+
+    def test_hash_bucket_proposes_every_pair_not_just_from_first_member(self):
+        # STUDIO-300: a star-from-first pattern only ever offers (bucket[0],
+        # other) edges, so a boundary rejection on the first pairing can strand
+        # later members from each other. Pairwise coverage means every pair in
+        # a bucket is proposed regardless of which one is first.
+        evidence = grouping.hash_evidence([1, 2, 3], {1: {"h"}, 2: {"h"}, 3: {"h"}})
+
+        pairs = {(e.a, e.b) for e in evidence}
+        assert pairs == {(1, 2), (1, 3), (2, 3)}
 
     def test_hash_over_the_bucket_cap_produces_no_evidence(self):
         # A ubiquitous part (shared base, support raft) must not chain unrelated
