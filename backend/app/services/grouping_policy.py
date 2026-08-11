@@ -46,6 +46,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Container, Iterable, Mapping, Sequence
+from itertools import combinations
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 
@@ -263,10 +264,15 @@ def hierarchy_evidence(contexts: Mapping[int, ProductContext]) -> list[Evidence]
     so models excluded upstream (manual groups, `no_group`, "off" subtrees) can
     never appear in the output.
 
-    Each key's bucket fans out from its first member, matching the shape the
-    union-find has always been offered. Bucket order follows `contexts`
-    iteration order; making that ordering deterministic is STUDIO-248's job, not
-    this function's, since changing it changes which merges win at boundaries.
+    Each key's bucket fans out from its first member (kept as a star pattern
+    deliberately, not switched to pairwise like `hash_evidence` — STUDIO-300
+    considered it, but a hierarchy bucket's members all share the identical
+    `product_key` by construction, so this function can never actually reject
+    a same-bucket pair; pairwise here would only add an uncapped O(k²) cost
+    for a creator with many same-key variants, with no correctness upside).
+    Bucket order follows `contexts` iteration order; making that ordering
+    deterministic is STUDIO-248's job, not this function's, since changing it
+    changes which merges win at boundaries.
     """
     index: dict[str, list[int]] = defaultdict(list)
     for mid, context in contexts.items():
@@ -293,16 +299,25 @@ def hash_evidence(ids: Sequence[int], hashes: Mapping[int, set[str]]) -> list[Ev
     PYTHONHASHSEED between processes — cannot leak into the order edges are
     proposed, and therefore cannot change which merges win at a boundary
     (STUDIO-248).
+
+    Every pairwise edge within a bucket is proposed, not just edges from the
+    first member (STUDIO-300). Structural hardening, not a fix for an observed
+    loss: given this pipeline's ordering (hierarchy always resolves same-key
+    pairs before this function runs), a star-from-first pattern was checked
+    exhaustively and never found to drop a reachable merge — but a future
+    reorder or a partial-compatibility boundary check could make it reachable,
+    and buckets are capped at `_HASH_BUCKET_CAP` so the O(k²) pair count stays
+    small regardless.
     """
     index: dict[str, list[int]] = defaultdict(list)
     for mid in ids:
         for file_hash in sorted(hashes.get(mid, ())):
             index[file_hash].append(mid)
     return [
-        Evidence(kind=SignalKind.HASH, a=bucket[0], b=other)
+        Evidence(kind=SignalKind.HASH, a=a, b=b)
         for bucket in index.values()
         if 2 <= len(bucket) <= _HASH_BUCKET_CAP
-        for other in bucket[1:]
+        for a, b in combinations(bucket, 2)
     ]
 
 
@@ -377,6 +392,13 @@ def name_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evidence]
 
     The weakest signal and the baseline when no content signal exists.
     Side-effect free; keyless models simply never appear in a bucket.
+
+    Fans out from the bucket's first member, kept as a star pattern
+    deliberately (STUDIO-300 considered switching to pairwise like
+    `hash_evidence`, but a name-key bucket has no size cap — a creator with
+    hundreds of variants of one popular character is a real shape — so
+    pairwise's uncapped O(k²) cost isn't worth paying for a correctness gain
+    that a full enumeration of this pipeline's reachable states never found).
     """
     index: dict[str, list[int]] = defaultdict(list)
     for mid in ids:
