@@ -179,6 +179,23 @@ class TestPartsDetection:
         sig = parse("Barbarian Warrior 28mm")
         assert not sig.is_parts
 
+    @pytest.mark.parametrize("name", [
+        "Supported STL", "Supported LYS", "Unsupported", "Pre-Supported",
+        "Pre Supported STL", "STL Unsupported", "presupported",
+    ])
+    def test_presupported_pack_folder_names_are_parts(self, name):
+        # STUDIO-371: multi-word pre-supported pack format folders
+        sig = parse(name)
+        assert sig.is_parts
+
+    def test_presupported_product_name_not_parts(self):
+        # STUDIO-371 regression guard: "supported" as a substring of a real
+        # product name must NOT be reclassified as a parts bucket — the
+        # pattern is anchored to the whole folder name, not a substring search.
+        sig = parse("Tifa Pre-Supported 75mm")
+        assert not sig.is_parts
+        assert sig.is_product
+
 
 class TestChildrenLookLikeParts:
     def test_majority_parts(self):

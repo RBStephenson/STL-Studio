@@ -1192,7 +1192,33 @@ def _walk_for_models(
         parent_names=parent_names,
     )
     product_boundary_split = False
-    if not is_creator_root and signals.is_product and has_any_stls:
+
+    # STUDIO-371: a pre-supported pack layout puts every STL one level down in
+    # named part/format subfolders ("STL", "Supported STL", "Supported LYS")
+    # and leaves the product's own folder with no direct STLs and no name
+    # signal of its own. Without this, such a folder falls through Step 1/2/3
+    # untouched and recursion visits each part subfolder independently, where
+    # Step 3 (STLs here, nothing below) indexes it as its own phantom model.
+    #
+    # Promote the folder to a product boundary here ONLY when a STL-bearing
+    # child is *positively* recognised as a parts folder (name_parser.is_parts
+    # on the child's own name) — never on a low-confidence/no-signal fallback.
+    # A plain character-name grouping folder (e.g. "Alien Hives" holding
+    # "AH - Carnivorex", "AH - Ravenous", ...) has no such child, so this does
+    # not fire there; those children keep recursing and resolve independently,
+    # one model per character, exactly as before.
+    # Direct (non-recursive) STLs only: a parts-named *wrapper* that holds no
+    # files of its own and only reaches STLs through a further nested folder
+    # (e.g. "Cloud Strife/STL/Bust") must NOT promote its parent — the real
+    # product boundary is deeper, and recursion already finds it correctly.
+    # Only a parts folder that directly contains the STLs (the actual
+    # pre-supported pack shape: "AH - Carnivorex/STL/*.stl") qualifies.
+    has_parts_child_with_stls = not has_direct_stls and any(
+        name_parser.parse(d.name).is_parts and _has_stls(d, recurse=False)
+        for d in child_dirs
+    )
+
+    if not is_creator_root and has_any_stls and (signals.is_product or has_parts_child_with_stls):
         # A product-like ancestor may also contain a nested variant/product that
         # carries its own signals (Alternative, V2, another scale/type, etc.).
         # Treat those children as ownership boundaries instead of letting this
