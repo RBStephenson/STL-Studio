@@ -665,6 +665,90 @@ class TestNestedProductBoundaries:
         assert {f.filename for f in by_path[product].stl_files} == {"standard.stl"}
 
 
+class TestPresupportedPackBoundary:
+    """STUDIO-371: a pre-supported pack layout puts every STL one level down in
+    named format subfolders ("STL", "Supported STL") and leaves the product's
+    own folder with no direct STLs and no name signal — the real
+    'One Page Rules / Alien Hives / AH - Carnivorex' layout from the ticket."""
+
+    def _product(self, creator_dir: Path, name: str) -> Path:
+        product = creator_dir / "Alien Hives" / name
+        _stl(product / "STL", name="body.stl")
+        _stl(product / "Supported STL", name="body_supported.stl")
+        (product / "Supported LYS").mkdir(parents=True, exist_ok=True)
+        (product / "Supported LYS" / "body.lys").write_bytes(b"lychee")
+        return product
+
+    def test_product_with_no_direct_stls_resolves_to_one_model(self, db, tmp_path):
+        creator_dir = tmp_path / "OPR"
+        product = self._product(creator_dir, "AH - Carnivorex")
+        creator = make_creator(db, "OPR")
+
+        _walk(db, creator, creator_dir)
+
+        by_path = {Path(m.folder_path) for m in _models(db, creator)}
+        assert by_path == {product}
+        model = _models(db, creator)[0]
+        assert {f.filename for f in model.stl_files} == {"body.stl", "body_supported.stl"}
+
+    def test_sibling_part_subfolders_do_not_become_phantom_models(self, db, tmp_path):
+        creator_dir = tmp_path / "OPR"
+        product = self._product(creator_dir, "AH - Carnivorex")
+        creator = make_creator(db, "OPR")
+
+        _walk(db, creator, creator_dir)
+
+        by_path = {Path(m.folder_path) for m in _models(db, creator)}
+        assert product / "STL" not in by_path
+        assert product / "Supported STL" not in by_path
+        assert product / "Supported LYS" not in by_path
+
+    def test_real_product_sibling_still_splits_off(self, db, tmp_path):
+        """Bases is a genuine sub-product (its own scale signal) sitting next
+        to the format subfolders — it must still resolve as its own model,
+        not get folded into the parent or dropped."""
+        creator_dir = tmp_path / "OPR"
+        product = self._product(creator_dir, "AH - Carnivorex")
+        bases = product / "Bases 120mm (Oval+Rectangle)"
+        _stl(bases, name="oval.stl")
+        creator = make_creator(db, "OPR")
+
+        _walk(db, creator, creator_dir)
+
+        by_path = {Path(m.folder_path) for m in _models(db, creator)}
+        assert by_path == {product, bases}
+
+    def test_grouping_folder_without_signal_still_resolves_one_model_per_character(
+        self, db, tmp_path,
+    ):
+        """The discriminating case: an intermediate folder with no name signal
+        and no direct STLs (like 'Alien Hives') must NOT be swept up into this
+        promotion just because it recurses into folders holding STLs — only a
+        folder whose STL-bearing child is *itself* a recognised parts folder
+        qualifies. A plain character-name child must keep resolving on its own."""
+        creator_dir = tmp_path / "OPR"
+        carnivorex = self._product(creator_dir, "AH - Carnivorex")
+        ravenous = self._product(creator_dir, "AH - Ravenous")
+        creator = make_creator(db, "OPR")
+
+        _walk(db, creator, creator_dir)
+
+        by_path = {Path(m.folder_path) for m in _models(db, creator)}
+        assert by_path == {carnivorex, ravenous}
+        assert (creator_dir / "Alien Hives") not in by_path
+
+    def test_rescan_converges_without_duplicating(self, db, tmp_path):
+        creator_dir = tmp_path / "OPR"
+        product = self._product(creator_dir, "AH - Carnivorex")
+        creator = make_creator(db, "OPR")
+
+        _walk(db, creator, creator_dir)
+        _walk(db, creator, creator_dir)
+
+        by_path = [Path(m.folder_path) for m in _models(db, creator)]
+        assert by_path == [product]
+
+
 # ---------------------------------------------------------------------------
 # Configurable folder layouts — layout {tag} levels become model auto-tags
 # ---------------------------------------------------------------------------
@@ -2272,6 +2356,23 @@ class TestStructuralLeafNaming:
         assert names == {"Goblin"}  # both variants named after the product
         assert "supported" not in names and "unsupported" not in names
 
+    def test_multiple_part_siblings_collapse_to_one_model(self, db, tmp_path):
+        # STUDIO-371: before the boundary fix, "STL" and "Supported STL" each
+        # independently qualified as their own leaf model (both cosmetically
+        # renamed to the character), producing duplicate-looking rows. They
+        # must now collapse into the single product-folder model.
+        creator_dir = tmp_path / "Creator"
+        product = creator_dir / "Auron"
+        _stl(product / "STL", name="a.stl")
+        _stl(product / "Supported STL", name="b.stl")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert [Path(m.folder_path) for m in models] == [product]
+        assert {f.filename for f in models[0].stl_files} == {"a.stl", "b.stl"}
+
     def test_nonstructural_leaf_name_unchanged(self, db, tmp_path):
         creator_dir = tmp_path / "Creator"
         _stl(creator_dir / "Dragon Bust", name="d.stl")
@@ -2516,13 +2617,17 @@ class TestStructuralNameHealing:
     every rescan, so parser improvements always reach existing rows."""
 
     def _one_leaf_model(self, db, creator, creator_dir):
-        # Two structural-variant leaves under one character → each is its own
-        # model, named after the character via the #641 leaf-naming.
+        # A structural-variant leaf under a plain character folder — no direct
+        # STLs of its own, everything lives in "STL" — named after the
+        # character via the #641 leaf-naming. Prior to STUDIO-371 this shape
+        # (with a "Supported STL" sibling added) produced two separate rows
+        # both cosmetically named "Auron"; the boundary fix collapses it to
+        # the one row STUDIO-371 requires, which is what these name-healing
+        # tests need — a single mutable model to test refresh behavior on.
         _stl(creator_dir / "Auron" / "STL")
-        _stl(creator_dir / "Auron" / "Supported STL")
         _walk(db, creator, creator_dir)
         models = _models(db, creator)
-        assert len(models) == 2
+        assert len(models) == 1
         assert all(m.name == "Auron" for m in models), [m.name for m in models]
         return models
 
