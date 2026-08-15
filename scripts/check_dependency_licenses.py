@@ -49,15 +49,32 @@ def _node_entries(payload: Any) -> list[tuple[str, str]]:
 
 
 def validate_inventory(
-    entries: list[tuple[str, str]], allowed: set[str], ignored_packages: set[str]
+    entries: list[tuple[str, str]],
+    allowed: set[str],
+    ignored_packages: set[str],
+    exceptions: dict[str, str] | None = None,
 ) -> list[str]:
-    """Return policy violations for an already parsed package/license inventory."""
+    """Return policy violations for an already parsed package/license inventory.
+
+    `exceptions` maps a package name to the *exact* license string it's
+    accepted with (e.g. pymupdf's AGPL-3.0, disclosed via NOTICE — STUDIO-330).
+    The package name is matched case-insensitively — verified that pip-licenses
+    reports a package's distribution name with inconsistent casing across
+    environments ("PyMuPDF" locally vs. "pymupdf" in CI for the same install)
+    — but the license string itself is matched exactly, not name-only: a
+    version bump that changes the license string still fails the check on
+    purpose, rather than silently riding through on a stale exception.
+    """
+    exceptions_ci = {k.lower(): v for k, v in (exceptions or {}).items()}
     violations: list[str] = []
     for package, license_name in entries:
         if package in ignored_packages:
             continue
-        if license_name not in allowed:
-            violations.append(f"{package}: {license_name or '<missing>'}")
+        if license_name in allowed:
+            continue
+        if exceptions_ci.get(package.lower()) == license_name:
+            continue
+        violations.append(f"{package}: {license_name or '<missing>'}")
     return sorted(violations)
 
 
@@ -75,12 +92,25 @@ def main() -> int:
     ignored = set(policy.get("ignored_private_packages", []))
     if not allowed or not all(isinstance(value, str) for value in allowed | ignored):
         raise ValueError("license policy requires non-empty string allowlists")
+    exceptions = policy.get("package_license_exceptions", {})
+    if not isinstance(exceptions, dict) or not all(
+        isinstance(k, str) and isinstance(v, dict) and isinstance(v.get("license"), str)
+        for k, v in exceptions.items()
+    ):
+        raise ValueError(
+            "package_license_exceptions must map package name to an object with a string 'license'"
+        )
+    exception_licenses = {k: v["license"] for k, v in exceptions.items()}
 
     violations: list[str] = []
     for path in args.pip:
-        violations.extend(validate_inventory(_pip_entries(_load_json(path)), allowed, ignored))
+        violations.extend(
+            validate_inventory(_pip_entries(_load_json(path)), allowed, ignored, exception_licenses)
+        )
     for path in args.node:
-        violations.extend(validate_inventory(_node_entries(_load_json(path)), allowed, ignored))
+        violations.extend(
+            validate_inventory(_node_entries(_load_json(path)), allowed, ignored, exception_licenses)
+        )
 
     if violations:
         print("Dependency license policy violations:")

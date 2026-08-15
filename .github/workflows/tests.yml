@@ -41,7 +41,7 @@ jobs:
       - name: Ruff (repo-root scripts)
         run: |
           pip install ruff==0.15.20
-          ruff check scripts/smoke_boot.py scripts/test_smoke_boot.py scripts/smoke_installer.py scripts/test_smoke_installer.py scripts/check_npm_audit.py scripts/test_check_npm_audit.py
+          ruff check scripts/smoke_boot.py scripts/test_smoke_boot.py scripts/smoke_installer.py scripts/test_smoke_installer.py scripts/check_npm_audit.py scripts/test_check_npm_audit.py scripts/check_dependency_licenses.py scripts/test_dependency_licenses.py
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -110,8 +110,11 @@ jobs:
 
       # scripts/smoke_boot.py's poll/timeout/crash logic (STUDIO-102) — repo-root
       # tooling, not part of the backend package, run separately from the above.
+      # test_dependency_licenses.py (STUDIO-333) covers the policy script the
+      # separate Dependency Audit job invokes — added here since it existed
+      # but was never actually wired into CI before this change.
       - name: Run smoke_boot tests
-        run: pytest -v scripts/test_smoke_boot.py scripts/test_smoke_installer.py scripts/test_check_npm_audit.py
+        run: pytest -v scripts/test_smoke_boot.py scripts/test_smoke_installer.py scripts/test_check_npm_audit.py scripts/test_dependency_licenses.py
 
   vitest:
     runs-on: ubuntu-latest

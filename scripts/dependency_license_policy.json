@@ -34,5 +34,11 @@
   "ignored_private_packages": [
     "stl-studio",
     "stl-studio-desktop"
-  ]
+  ],
+  "package_license_exceptions": {
+    "pymupdf": {
+      "license": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
+      "reason": "AGPL-3.0 accepted with disclosure — see repo NOTICE (STUDIO-330). Matched by exact license string: a pymupdf version bump that changes this string must break the build until re-reviewed."
+    }
+  }
 }

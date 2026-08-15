@@ -626,6 +626,9 @@ class AppSettingsRead(BaseModel):
     # Collections page: give every card the same box size (the one cover art
     # already uses) instead of a compact box for collections with no cover.
     collections_uniform_size: bool = True
+    # Paint Shelf: import paint colors from a swatch-chart upload (STUDIO-329/333).
+    # Default off; both extraction endpoints are also gated server-side.
+    paint_swatch_import_enabled: bool = False
 
 
 class AppSettingsUpdate(BaseModel):
@@ -675,6 +678,7 @@ class AppSettingsUpdate(BaseModel):
     auto_update_enabled: Optional[bool] = None
     allow_prerelease_updates: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
+    paint_swatch_import_enabled: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod

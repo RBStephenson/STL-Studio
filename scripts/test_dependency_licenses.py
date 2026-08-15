@@ -18,6 +18,31 @@ def test_validate_inventory_reports_unknown_and_missing_licenses_sorted():
     ]
 
 
+def test_validate_inventory_accepts_a_package_license_exception():
+    entries = [("pymupdf", "AGPL-3.0")]
+
+    assert validate_inventory(entries, {"MIT"}, set(), {"pymupdf": "AGPL-3.0"}) == []
+
+
+def test_validate_inventory_exception_requires_exact_license_match():
+    """A pymupdf version bump that changes its license string must still
+    fail — the exception is not a name-only allowlist."""
+    entries = [("pymupdf", "GPL-3.0-only")]
+
+    assert validate_inventory(entries, {"MIT"}, set(), {"pymupdf": "AGPL-3.0"}) == [
+        "pymupdf: GPL-3.0-only",
+    ]
+
+
+def test_validate_inventory_exception_package_name_is_case_insensitive():
+    """pip-licenses has been observed reporting a package's distribution name
+    with different casing across environments ("PyMuPDF" vs "pymupdf" for
+    the same install) — the exception must match regardless."""
+    entries = [("PyMuPDF", "AGPL-3.0")]
+
+    assert validate_inventory(entries, {"MIT"}, set(), {"pymupdf": "AGPL-3.0"}) == []
+
+
 def test_pip_entries_require_expected_fields():
     with pytest.raises(ValueError, match="Name and License"):
         _pip_entries([{"Name": "example"}])

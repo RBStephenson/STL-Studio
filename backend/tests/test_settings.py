@@ -43,6 +43,7 @@ DEFAULTS = {
     "auto_update_enabled": True,
     "allow_prerelease_updates": False,
     "collections_uniform_size": True,
+    "paint_swatch_import_enabled": False,
 }
 
 

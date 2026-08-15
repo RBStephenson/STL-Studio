@@ -688,6 +688,60 @@ class ForcedPaintCreate(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+# --- Paint Shelf swatch-chart import (STUDIO-329/333) ----------------------
+
+class ExtractedSwatch(BaseModel):
+    """One suggestion read off an uploaded swatch chart, pre-review by the
+    user — not yet a Paint row."""
+    name: str
+    code: Optional[str] = None
+    hex: str
+
+
+class ExtractColorsResponse(BaseModel):
+    """`unsupported_reason` is set only when no extraction path could handle
+    the upload at all (not a PDF, or a PDF with neither real vector swatches
+    nor swatch-sized embedded images — most likely a photo/scanned page,
+    which needs vision-based localization not yet built). It is left unset
+    when an extraction path ran but genuinely found zero real swatches — an
+    empty `swatches` list is itself a valid, non-error result in that case."""
+    swatches: list[ExtractedSwatch] = []
+    unsupported_reason: Optional[str] = None
+
+
+class BulkImportItem(BaseModel):
+    """One user-reviewed/edited suggestion to import as a Paint. `code`
+    absent/blank falls back to `name` server-side (some charts, e.g. Army
+    Painter's, carry no paint codes at all) — same precedent as
+    ForcedPaintCreate/force_add_paint. `finish` defaults to "matte" since a
+    swatch chart carries no finish information."""
+    name: str = Field(min_length=1)
+    code: Optional[str] = None
+    hex: Optional[str] = Field(None, pattern=HEX_PATTERN)
+    finish: Finish = "matte"
+    owned: bool = True
+
+    model_config = {"extra": "forbid"}
+
+
+class BulkImportRequest(BaseModel):
+    paint_line_id: int
+    items: list[BulkImportItem] = Field(min_length=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class BulkImportSkip(BaseModel):
+    name: str
+    code: str
+    reason: str
+
+
+class BulkImportResult(BaseModel):
+    created: list[PaintRead] = []
+    skipped: list[BulkImportSkip] = []
+
+
 # --- Categories & series ---------------------------------------------------
 
 class CategoryCreate(BaseModel):
