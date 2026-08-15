@@ -742,6 +742,18 @@ export interface BulkImportResult {
   skipped: BulkImportSkip[];
 }
 
+export interface BulkDeletePaintsSkip {
+  id: number;
+  name: string;
+  code: string;
+  reason: string;
+}
+
+export interface BulkDeletePaintsResult {
+  deleted: number;
+  skipped: BulkDeletePaintsSkip[];
+}
+
 // AI draft-generation job status (#524/#492). When `status === "done"` the
 // candidate `draft` (proposed tabs), validator `flags`, and `unresolved` paints
 // are populated for the review UI to diff before the user accepts.

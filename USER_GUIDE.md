@@ -124,7 +124,10 @@ group at once.
 ### Painting
 
 - **Paint Shelf** (always on) is your paint inventory — track what you own,
-  import/export CSV in PaintRack format.
+  import/export CSV in PaintRack format. Check the boxes on rows you want gone
+  (or the header checkbox for everything on the page) and use **Delete
+  selected** to clean up in bulk — handy after an accidental double-import. A
+  paint used by a guide is skipped instead of deleted.
 - Turn on **Settings → Painting → Swatch Chart Import** to unlock **Import
   from Chart** on the Paint Shelf: upload a manufacturer swatch-chart PDF, a
   photo of your paint rack, or a scanned chart, and it reads off each

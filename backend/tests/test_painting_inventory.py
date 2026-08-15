@@ -185,6 +185,71 @@ class TestPaintCRUD:
         assert client.delete(f"/painting/paints/{paint['id']}").status_code == 409
 
 
+class TestBulkDeletePaints:
+    """STUDIO-382: bulk delete, e.g. undoing an accidental double chart-import."""
+
+    def _bulk_delete(self, client, ids):
+        return client.request("DELETE", "/painting/paints/bulk", json={"ids": ids})
+
+    def test_deletes_multiple(self, client, line):
+        a = mk_paint(client, line["id"], code="001", name="A").json()
+        b = mk_paint(client, line["id"], code="002", name="B").json()
+
+        r = self._bulk_delete(client, [a["id"], b["id"]])
+        assert r.status_code == 200
+        assert r.json() == {"deleted": 2, "skipped": []}
+        assert client.get(f"/painting/paints/{a['id']}").status_code == 404
+        assert client.get(f"/painting/paints/{b['id']}").status_code == 404
+
+    def test_skips_guide_referenced_paint_without_aborting_batch(self, client, db, line):
+        from app.painting.models import Guide, GuidePhase, GuideStep, GuideSwatch, GuideTab
+
+        referenced = mk_paint(client, line["id"], code="001", name="Referenced").json()
+        free = mk_paint(client, line["id"], code="002", name="Free").json()
+
+        guide = Guide(slug="g", title="G")
+        db.add(guide)
+        db.flush()
+        tab = GuideTab(guide_id=guide.id, name="Skin")
+        db.add(tab)
+        db.flush()
+        phase = GuidePhase(tab_id=tab.id, label="Base")
+        db.add(phase)
+        db.flush()
+        step = GuideStep(phase_id=phase.id, title="Prime")
+        db.add(step)
+        db.flush()
+        db.add(GuideSwatch(step_id=step.id, paint_id=referenced["id"]))
+        db.commit()
+
+        r = self._bulk_delete(client, [referenced["id"], free["id"]])
+        assert r.status_code == 200
+        body = r.json()
+        assert body["deleted"] == 1
+        assert len(body["skipped"]) == 1
+        assert body["skipped"][0]["id"] == referenced["id"]
+        assert body["skipped"][0]["reason"] == (
+            "Used by a guide — mark it owned=false instead of deleting"
+        )
+        # The referenced paint survives; the free one is gone.
+        assert client.get(f"/painting/paints/{referenced['id']}").status_code == 200
+        assert client.get(f"/painting/paints/{free['id']}").status_code == 404
+
+    def test_unknown_ids_are_ignored_not_errored(self, client, line):
+        paint = mk_paint(client, line["id"]).json()
+        r = self._bulk_delete(client, [paint["id"], 999999])
+        assert r.status_code == 200
+        assert r.json() == {"deleted": 1, "skipped": []}
+
+    def test_all_ids_unknown_returns_404(self, client):
+        r = self._bulk_delete(client, [999999])
+        assert r.status_code == 404
+
+    def test_empty_ids_rejected_422(self, client):
+        r = self._bulk_delete(client, [])
+        assert r.status_code == 422
+
+
 class TestMatchableDerivation:
     @pytest.mark.parametrize("finish,expected", [
         ("matte", True), ("satin", True), ("gloss", True),

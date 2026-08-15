@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import PaintShelfPage, { ColorChip } from "./PaintShelfPage";
+import { ConfirmProvider } from "../context/ConfirmContext";
 
 // vi.mock factories are hoisted above module-level consts, so the fixture
 // data they reference must be hoisted too.
@@ -45,6 +46,7 @@ vi.mock("../api/client", async (importOriginal) => {
           create: vi.fn(),
           update: vi.fn(),
           delete: vi.fn(),
+          bulkDelete: vi.fn(),
           extractColors: vi.fn(),
           bulkImport: vi.fn(),
         },
@@ -65,9 +67,11 @@ vi.mock("../context/AppSettingsContext", () => ({
 
 function renderPage() {
   return render(
-    <MemoryRouter>
-      <PaintShelfPage />
-    </MemoryRouter>
+    <ConfirmProvider>
+      <MemoryRouter>
+        <PaintShelfPage />
+      </MemoryRouter>
+    </ConfirmProvider>
   );
 }
 
@@ -323,9 +327,10 @@ describe("PaintShelfPage - PaintRack CSV import (#242)", () => {
     vi.mocked(api.painting.inventory.importConfirm).mockResolvedValue({
       ok: true, applied: { added: 1, changed: 1, removed: 1 },
     });
-    await screen.findByTestId("import-diff-modal");
+    const modal = await screen.findByTestId("import-diff-modal");
 
-    await userEvent.click(screen.getByRole("checkbox"));
+    // Scoped to the modal — the underlying table now has its own row/select-all checkboxes (STUDIO-382).
+    await userEvent.click(within(modal).getByRole("checkbox"));
     await userEvent.click(screen.getByRole("button", { name: /apply import/i }));
 
     await waitFor(() => {
@@ -590,5 +595,81 @@ describe("PaintShelfPage - swatch chart import (STUDIO-334)", () => {
       expect(screen.queryByTestId("swatch-import-modal")).toBeNull();
       expect(api.painting.paints.bulkImport).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("PaintShelfPage - bulk delete (STUDIO-382)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("shows a selection bar once a row is checked, and select-all-on-page selects both", async () => {
+    renderPage();
+    await screen.findByText("Coal Black");
+
+    expect(screen.queryByText(/selected/)).toBeNull();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Coal Black" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select all on page" }));
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+    // Toggling select-all again clears both.
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select all on page" }));
+    expect(screen.queryByText(/selected/)).toBeNull();
+  });
+
+  it("deletes the selected paints after confirming, reporting skipped ones, and refetches", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.painting.paints.bulkDelete).mockResolvedValue({
+      deleted: 1,
+      skipped: [{ id: 2, name: "Mystery Mix", code: "S18", reason: "Used by a guide — mark it owned=false instead of deleting" }],
+    });
+    renderPage();
+    await screen.findByText("Coal Black");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select all on page" }));
+    await userEvent.click(screen.getByRole("button", { name: /delete selected/i }));
+
+    // Real ConfirmProvider dialog.
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Delete 2 paints?");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(api.painting.paints.bulkDelete).toHaveBeenCalledWith([1, 2]);
+    });
+    expect(toastMock).toHaveBeenCalledWith(
+      expect.stringContaining("Deleted 1 paint, 1 skipped (used by a guide)"), "success"
+    );
+    // Selection clears and the list refetches after a successful bulk delete.
+    expect(screen.queryByText(/selected/)).toBeNull();
+    await waitFor(() => expect(api.painting.paints.list).toHaveBeenCalledTimes(2));
+  });
+
+  it("cancel on the confirm dialog does not delete anything", async () => {
+    const { api } = await import("../api/client");
+    renderPage();
+    await screen.findByText("Coal Black");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Coal Black" }));
+    await userEvent.click(screen.getByRole("button", { name: /delete selected/i }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(api.painting.paints.bulkDelete).not.toHaveBeenCalled();
+    expect(screen.getByText("1 selected")).toBeInTheDocument(); // selection untouched
+  });
+
+  it("clears the selection when a filter changes", async () => {
+    renderPage();
+    await screen.findByText("Coal Black");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Coal Black" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Finish" }), "wash");
+    await waitFor(() => expect(screen.queryByText(/selected/)).toBeNull());
   });
 });

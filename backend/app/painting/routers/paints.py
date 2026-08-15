@@ -19,6 +19,7 @@ from app.models import AppSetting
 from app.painting.models import Paint, PaintBrand, PaintLine
 from app.painting.schemas import (
     BrandCreate, BrandRead,
+    BulkDeletePaintsRequest, BulkDeletePaintsResult, BulkDeletePaintsSkip,
     BulkImportRequest, BulkImportResult, BulkImportSkip,
     ExtractColorsResponse, ExtractedSwatch,
     ForcedPaintCreate,
@@ -287,6 +288,45 @@ def update_paint(paint_id: int, body: PaintUpdate, db: Session = Depends(get_db)
     db.commit()
     db.refresh(paint)
     return paint
+
+
+@router.delete("/paints/bulk", response_model=BulkDeletePaintsResult)
+def bulk_delete_paints(body: BulkDeletePaintsRequest, db: Session = Depends(get_db)):
+    """Delete multiple paints at once (STUDIO-382) — e.g. undoing an accidental
+    double chart-import without clicking delete on every row.
+
+    Partial success, same precedent as bulk-import: a paint referenced by a
+    guide is skipped with a reason (the same 409 guard single-delete enforces)
+    instead of aborting the whole batch. Ids that don't match any paint are
+    silently ignored — the caller's selection may already be stale."""
+    from app.painting.models import GuideMixComponent, GuideSwatch
+
+    paints = db.query(Paint).filter(Paint.id.in_(body.ids)).all()
+    if not paints:
+        raise HTTPException(status_code=404, detail="No matching paints found")
+
+    found_ids = [p.id for p in paints]
+    referenced_ids = {
+        row[0] for row in
+        db.query(GuideSwatch.paint_id).filter(GuideSwatch.paint_id.in_(found_ids)).all()
+    } | {
+        row[0] for row in
+        db.query(GuideMixComponent.paint_id).filter(GuideMixComponent.paint_id.in_(found_ids)).all()
+    }
+
+    skipped: list[BulkDeletePaintsSkip] = []
+    deleted = 0
+    for paint in paints:
+        if paint.id in referenced_ids:
+            skipped.append(BulkDeletePaintsSkip(
+                id=paint.id, name=paint.name, code=paint.code,
+                reason="Used by a guide — mark it owned=false instead of deleting",
+            ))
+        else:
+            db.delete(paint)
+            deleted += 1
+    db.commit()
+    return BulkDeletePaintsResult(deleted=deleted, skipped=skipped)
 
 
 @router.delete("/paints/{paint_id}")

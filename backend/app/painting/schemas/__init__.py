@@ -742,6 +742,24 @@ class BulkImportResult(BaseModel):
     skipped: list[BulkImportSkip] = []
 
 
+class BulkDeletePaintsRequest(BaseModel):
+    ids: list[int] = Field(min_length=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class BulkDeletePaintsSkip(BaseModel):
+    id: int
+    name: str
+    code: str
+    reason: str
+
+
+class BulkDeletePaintsResult(BaseModel):
+    deleted: int
+    skipped: list[BulkDeletePaintsSkip] = []
+
+
 # --- Categories & series ---------------------------------------------------
 
 class CategoryCreate(BaseModel):

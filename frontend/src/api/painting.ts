@@ -1,6 +1,7 @@
 import { request, ApiError, BASE, downloadPdf, stampQuery, triggerBlobDownload } from "./base";
 import type { SeriesExportOptions, StampOptions } from "./base";
 import type {
+  BulkDeletePaintsResult,
   BulkImportRequest,
   BulkImportResult,
   ColorMatchResult,
@@ -97,6 +98,15 @@ export const paintingApi = {
       }),
     delete: (id: number) =>
       request<{ ok: boolean }>(`/painting/paints/${id}`, { method: "DELETE" }),
+    // Delete multiple paints at once (STUDIO-382) — e.g. undoing an accidental
+    // double chart-import. Partial success: a guide-referenced paint is
+    // skipped, not a reason to abort the whole batch.
+    bulkDelete: (ids: number[]) =>
+      request<BulkDeletePaintsResult>("/painting/paints/bulk", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      }),
     // Force-add an off-shelf paint during guide import (#417): lands in the
     // synthetic 'Imported / Uncategorized' line, known-but-not-owned.
     forceAdd: (name: string, hex: string | null) =>
