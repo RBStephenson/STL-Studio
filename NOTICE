@@ -1,0 +1,29 @@
+This project is licensed under the MIT License (see LICENSE), with one
+exception described below.
+
+## PyMuPDF (AGPL-3.0)
+
+`backend/requirements.txt` depends on PyMuPDF, which Artifex Software
+dual-licenses under the GNU Affero General Public License v3.0 (AGPL-3.0) or
+a separate commercial license. This project uses the AGPL-3.0 option.
+
+The MIT License above grants broad permission to reuse, modify, and
+redistribute this codebase, including in closed-source derivatives. That
+permission does NOT extend to any module that imports PyMuPDF (`fitz`) —
+those modules carry PyMuPDF's own AGPL-3.0 obligations, most notably that
+any application incorporating them must make its own complete source
+available, under AGPL-3.0, to every user who interacts with it (including
+over a network).
+
+As of this writing, the module(s) affected are:
+
+- `backend/app/painting/services/swatch_extract.py` (Paint Shelf swatch-chart
+  import, STUDIO-329/331) — added by STUDIO-331; not yet present at the time
+  this NOTICE was written by STUDIO-330.
+
+If you fork this project and remove or avoid depending on PyMuPDF, the
+AGPL-3.0 obligation does not apply to your fork and the MIT License governs
+the whole codebase as normal.
+
+Full license text: https://github.com/pymupdf/PyMuPDF/blob/main/COPYING
+Artifex's commercial licensing option: https://artifex.com/licensing
