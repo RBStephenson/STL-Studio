@@ -20,6 +20,8 @@ As of this writing, the module(s) affected are:
 - `backend/app/painting/services/swatch_extract.py` (Paint Shelf swatch-chart
   import, STUDIO-329/331) — added by STUDIO-331; not yet present at the time
   this NOTICE was written by STUDIO-330.
+- `backend/app/painting/services/swatch_extract_vision.py` (Paint Shelf
+  embedded-raster-swatch import, STUDIO-329/332) — added by STUDIO-332.
 
 If you fork this project and remove or avoid depending on PyMuPDF, the
 AGPL-3.0 obligation does not apply to your fork and the MIT License governs
