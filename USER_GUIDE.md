@@ -125,6 +125,13 @@ group at once.
 
 - **Paint Shelf** (always on) is your paint inventory — track what you own,
   import/export CSV in PaintRack format.
+- Turn on **Settings → Painting → Swatch Chart Import** to unlock **Import
+  from Chart** on the Paint Shelf: upload a manufacturer swatch-chart PDF and
+  it reads off each paint's name, code, and color. Review and edit any
+  suggestion (or remove it) before picking a Paint Line and importing —
+  nothing is added to your shelf until you confirm. Photo/scanned-page charts
+  aren't supported yet; only PDFs with real vector swatches or embedded
+  swatch images can be read automatically.
 - **Color-Match Studio** takes a reference photo and suggests a shadow →
   mid → highlight ramp from your own shelf, plus glaze/wash ideas — every
   suggestion is a starting point to eyeball, not an auto-apply.

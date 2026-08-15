@@ -1,4 +1,4 @@
-import { Paintbrush } from "lucide-react";
+import { Paintbrush, Upload } from "lucide-react";
 import { useAppSettings } from "../../context/AppSettingsContext";
 import ThemeEditor from "../../components/guide/ThemeEditor";
 import { GuideTheme } from "../../api/client";
@@ -15,6 +15,16 @@ export default function PaintingTab() {
     try {
       await update({ painting_guides_enabled: next });
       flash(next ? "Painting Guides enabled" : "Painting Guides disabled", "ok");
+    } catch (e) {
+      flash(errMsg(e) || "Could not update setting", "err");
+    }
+  };
+
+  const toggleSwatchImport = async () => {
+    const next = !settings.paint_swatch_import_enabled;
+    try {
+      await update({ paint_swatch_import_enabled: next });
+      flash(next ? "Swatch Chart Import enabled" : "Swatch Chart Import disabled", "ok");
     } catch (e) {
       flash(errMsg(e) || "Could not update setting", "err");
     }
@@ -53,7 +63,7 @@ export default function PaintingTab() {
       </section>
 
       {settings.painting_guides_enabled && (
-        <section>
+        <section className="mb-8">
           <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1">
             Default Guide Theme
           </h2>
@@ -66,6 +76,26 @@ export default function PaintingTab() {
           />
         </section>
       )}
+
+      <section>
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-1 flex items-center gap-1.5">
+          <Upload size={14} /> Swatch Chart Import
+        </h2>
+        <p className="text-xs text-text-muted mb-4">
+          Adds an <strong className="text-text-secondary-alt">Import from Chart</strong> button to the{" "}
+          <strong className="text-text-secondary-alt">Paint Shelf</strong> — upload a manufacturer swatch-chart
+          PDF and review its colors before bulk-adding them to your shelf.
+        </p>
+        <label className="flex items-center gap-3 bg-panel border border-border-subtle rounded-lg px-4 py-3 cursor-pointer select-none self-start">
+          <input
+            type="checkbox"
+            checked={settings.paint_swatch_import_enabled}
+            onChange={toggleSwatchImport}
+            className="h-4 w-4 accent-indigo-500"
+          />
+          <span className="text-sm text-text-primary-alt">Enable Swatch Chart Import</span>
+        </label>
+      </section>
     </div>
   );
 }

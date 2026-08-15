@@ -40,5 +40,6 @@ export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
   auto_update_enabled: true,
   allow_prerelease_updates: false,
   collections_uniform_size: true,
+  paint_swatch_import_enabled: false,
   ...over,
 });

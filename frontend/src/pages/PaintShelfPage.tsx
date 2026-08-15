@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback, useRef, FormEvent } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { Palette, Plus, Search, Pencil, Trash2, X, Upload, Download, Pipette } from "lucide-react";
 import {
-  api, ImportDiff, Paint, PaintBrand, PaintCreate, PaintFinish, PAINT_FINISHES,
+  Palette, Plus, Search, Pencil, Trash2, X, Upload, Download, Pipette, FileUp,
+} from "lucide-react";
+import {
+  api, ExtractedSwatch, ImportDiff, Paint, PaintBrand, PaintCreate, PaintFinish, PAINT_FINISHES,
 } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
 import HelpLink from "../components/HelpLink";
 import ErrorState from "../components/ErrorState";
@@ -140,8 +143,158 @@ function PaintForm({ brands, initial, onSubmit, onCancel, busy, error }: {
   );
 }
 
+/** One extracted swatch, editable client-side before it's bulk-added. `key` is a
+ * client-only React/removal identity, independent of anything server-side. */
+interface SwatchRow {
+  key: number;
+  name: string;
+  code: string;
+  hex: string;
+}
+
+/**
+ * Review/edit modal for a chart-extraction result (STUDIO-334). Nothing is
+ * written until Import — mirrors the CSV import-diff modal's
+ * review-before-commit shape.
+ */
+function SwatchImportModal({
+  brands, rows, onChangeRows, lineId, onChangeLineId, onCancel, onSubmit, busy, error,
+}: {
+  brands: PaintBrand[];
+  rows: SwatchRow[];
+  onChangeRows: (rows: SwatchRow[]) => void;
+  lineId: string;
+  onChangeLineId: (id: string) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+  busy: boolean;
+  error?: string | null;
+}) {
+  const lineOptions = brands.flatMap((b) =>
+    b.lines.map((l) => ({ id: l.id, label: `${b.name} — ${l.name}` }))
+  );
+
+  const updateRow = (key: number, patch: Partial<SwatchRow>) => {
+    onChangeRows(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  };
+  const removeRow = (key: number) => {
+    onChangeRows(rows.filter((r) => r.key !== key));
+  };
+
+  const inputCls = "bg-panel border border-border rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-accent-start w-full";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" data-testid="swatch-import-modal">
+      <div className="bg-panel border border-border rounded-lg w-full max-w-3xl max-h-[85vh] flex flex-col">
+        <div className="px-5 py-4 border-b border-border-subtle flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">Review swatch import</h2>
+          <button onClick={onCancel} className="text-text-secondary-alt hover:text-text-primary-alt2">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto flex-1">
+          {error && (
+            <p role="alert" className="text-sm text-rose-400 bg-rose-950/30 border border-rose-900/50 rounded px-3 py-2 mb-3">
+              {error}
+            </p>
+          )}
+          <p className="text-sm text-text-secondary mb-3">
+            {rows.length} suggestion{rows.length === 1 ? "" : "s"} found. Edit or remove any before importing —
+            nothing is added to the shelf until you confirm.
+          </p>
+          <label className="flex flex-col gap-1 text-xs text-text-secondary-alt mb-4 max-w-xs">
+            Paint line
+            <select
+              required
+              aria-label="Paint line"
+              value={lineId}
+              onChange={(e) => onChangeLineId(e.target.value)}
+              className={inputCls}
+            >
+              <option value="">Select a line…</option>
+              {lineOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          </label>
+
+          {rows.length === 0 ? (
+            <p className="text-sm text-text-muted">All suggestions removed — nothing left to import.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-text-secondary-alt uppercase tracking-wider border-b border-border-subtle">
+                  <th className="py-1.5 pr-2">Name</th>
+                  <th className="py-1.5 pr-2 w-24">Code</th>
+                  <th className="py-1.5 pr-2 w-32">Color</th>
+                  <th className="py-1.5 w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.key} className="border-b border-border-subtle last:border-0">
+                    <td className="py-1.5 pr-2">
+                      <input
+                        aria-label="Name"
+                        value={r.name}
+                        onChange={(e) => updateRow(r.key, { name: e.target.value })}
+                        className={inputCls}
+                      />
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <input
+                        aria-label="Code"
+                        value={r.code}
+                        onChange={(e) => updateRow(r.key, { code: e.target.value })}
+                        className={inputCls}
+                      />
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="color"
+                          aria-label="Color"
+                          value={/^#[0-9a-fA-F]{6}$/.test(r.hex) ? r.hex : "#808080"}
+                          onChange={(e) => updateRow(r.key, { hex: e.target.value })}
+                          className="h-7 w-8 bg-panel border border-border rounded cursor-pointer p-0.5 shrink-0"
+                        />
+                        <input
+                          aria-label="Hex"
+                          value={r.hex}
+                          onChange={(e) => updateRow(r.key, { hex: e.target.value })}
+                          className={`${inputCls} font-mono`}
+                        />
+                      </div>
+                    </td>
+                    <td className="py-1.5">
+                      <button onClick={() => removeRow(r.key)} title="Remove" className="p-1 rounded text-text-secondary hover:text-red-300 hover:bg-panel-secondary">
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t border-border-subtle flex justify-end gap-2">
+          <button onClick={onCancel} className="text-sm text-text-secondary hover:text-text-primary-alt px-3 py-1.5">
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={busy || rows.length === 0 || !lineId}
+            className="bg-accent-end hover:bg-accent-start disabled:opacity-50 text-white text-sm px-4 py-1.5 rounded transition-colors"
+          >
+            {busy ? "Importing…" : `Import ${rows.length} paint${rows.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PaintShelfPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { settings } = useAppSettings();
   const { toast } = useToast();
 
   // Filter state lives in the URL, mirroring the Library's conventions.
@@ -209,6 +362,64 @@ export default function PaintShelfPage() {
       toast(errMsg(e) || "Import failed — nothing was changed.", "error");
     } finally {
       setImporting(false);
+    }
+  };
+
+  // Swatch-chart import (STUDIO-334, gated on paint_swatch_import_enabled).
+  const swatchFileInputRef = useRef<HTMLInputElement>(null);
+  const swatchRowKeyRef = useRef(0);
+  const [swatchExtracting, setSwatchExtracting] = useState(false);
+  const [swatchRows, setSwatchRows] = useState<SwatchRow[] | null>(null); // non-null = modal open
+  const [swatchLineId, setSwatchLineId] = useState("");
+  const [swatchImporting, setSwatchImporting] = useState(false);
+  const [swatchError, setSwatchError] = useState<string | null>(null);
+
+  const toSwatchRows = (swatches: ExtractedSwatch[]): SwatchRow[] =>
+    swatches.map((s) => ({ key: swatchRowKeyRef.current++, name: s.name, code: s.code ?? "", hex: s.hex }));
+
+  const startSwatchImport = async (file: File) => {
+    setSwatchExtracting(true);
+    try {
+      const res = await api.painting.paints.extractColors(file);
+      if (res.unsupported_reason) {
+        toast(res.unsupported_reason, "error");
+      } else if (res.swatches.length === 0) {
+        toast("No swatches found in this chart.", "error");
+      } else {
+        setSwatchLineId("");
+        setSwatchError(null);
+        setSwatchRows(toSwatchRows(res.swatches));
+      }
+    } catch (e) {
+      toast(errMsg(e) || "Could not read that chart.", "error");
+    } finally {
+      setSwatchExtracting(false);
+    }
+  };
+
+  const confirmSwatchImport = async () => {
+    if (!swatchRows || !swatchLineId) return;
+    setSwatchImporting(true);
+    setSwatchError(null);
+    try {
+      const result = await api.painting.paints.bulkImport({
+        paint_line_id: Number(swatchLineId),
+        items: swatchRows.map((r) => ({
+          name: r.name.trim(),
+          code: r.code.trim() || undefined,
+          hex: r.hex.trim() || undefined,
+          finish: "matte",
+          owned: true,
+        })),
+      });
+      const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : "";
+      toast(`Imported ${result.created.length} paint${result.created.length === 1 ? "" : "s"}${skippedNote}.`, "success");
+      setSwatchRows(null);
+      fetchPaints();
+    } catch (e) {
+      setSwatchError(errMsg(e) || "Could not import these paints.");
+    } finally {
+      setSwatchImporting(false);
     }
   };
 
@@ -343,6 +554,30 @@ export default function PaintShelfPage() {
           >
             <Download size={15} /> Export CSV
           </button>
+          {settings.paint_swatch_import_enabled && (
+            <>
+              <input
+                ref={swatchFileInputRef}
+                type="file"
+                accept=".pdf,image/*"
+                className="hidden"
+                data-testid="swatch-file-input"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) startSwatchImport(f);
+                  e.target.value = ""; // allow re-selecting the same file
+                }}
+              />
+              <button
+                onClick={() => swatchFileInputRef.current?.click()}
+                disabled={swatchExtracting}
+                title="Upload a manufacturer swatch-chart PDF — you'll review the colors before anything is added"
+                className="flex items-center gap-1.5 bg-panel-secondary hover:bg-panel-secondary border border-border text-text-primary-alt text-sm px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+              >
+                <FileUp size={15} /> {swatchExtracting ? "Reading chart…" : "Import from Chart"}
+              </button>
+            </>
+          )}
           <button
             onClick={() => setFormMode(formMode === "add" ? "hidden" : "add")}
             className="flex items-center gap-1.5 bg-accent-end hover:bg-accent-start text-white text-sm px-3 py-1.5 rounded transition-colors"
@@ -623,6 +858,21 @@ export default function PaintShelfPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Swatch-chart import review modal — nothing is added until Import */}
+      {swatchRows && (
+        <SwatchImportModal
+          brands={brands}
+          rows={swatchRows}
+          onChangeRows={setSwatchRows}
+          lineId={swatchLineId}
+          onChangeLineId={setSwatchLineId}
+          onCancel={() => setSwatchRows(null)}
+          onSubmit={confirmSwatchImport}
+          busy={swatchImporting}
+          error={swatchError}
+        />
       )}
     </div>
   );

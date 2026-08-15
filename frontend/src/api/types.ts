@@ -308,6 +308,9 @@ export interface AppSettings {
   // Collections page: every card gets the same box size (the one cover art
   // already uses) instead of a compact box for collections with no cover.
   collections_uniform_size: boolean;
+  // Paint Shelf: import paint suggestions from an uploaded swatch-chart PDF
+  // (STUDIO-329/333/334). Off by default; toggled on the Painting tab.
+  paint_swatch_import_enabled: boolean;
 }
 
 export interface SystemInfo {
@@ -693,6 +696,50 @@ export interface ColorMatchRegion {
 export interface ColorMatchResult {
   regions: ColorMatchRegion[];
   caveat: string;
+}
+
+// Swatch-chart import (STUDIO-329/331/332/333/334): read paint suggestions
+// off an uploaded PDF chart, let the user review/edit them, then bulk-add.
+
+/** One suggestion read off a chart, pre-review — not yet a Paint row. */
+export interface ExtractedSwatch {
+  name: string;
+  code: string | null;
+  hex: string;
+}
+
+export interface ExtractColorsResponse {
+  swatches: ExtractedSwatch[];
+  // Set only when no extraction path could handle the upload at all (not a
+  // PDF, or a PDF with no vector swatches or swatch-sized embedded images —
+  // most likely a photo/scanned page). Unset with an empty `swatches` list
+  // is itself a valid "found nothing" result, not an error.
+  unsupported_reason: string | null;
+}
+
+/** One user-reviewed/edited suggestion to import as a Paint. */
+export interface BulkImportItem {
+  name: string;
+  code?: string | null;
+  hex?: string | null;
+  finish?: PaintFinish;
+  owned?: boolean;
+}
+
+export interface BulkImportRequest {
+  paint_line_id: number;
+  items: BulkImportItem[];
+}
+
+export interface BulkImportSkip {
+  name: string;
+  code: string;
+  reason: string;
+}
+
+export interface BulkImportResult {
+  created: Paint[];
+  skipped: BulkImportSkip[];
 }
 
 // AI draft-generation job status (#524/#492). When `status === "done"` the

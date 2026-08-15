@@ -1,7 +1,10 @@
 import { request, ApiError, BASE, downloadPdf, stampQuery, triggerBlobDownload } from "./base";
 import type { SeriesExportOptions, StampOptions } from "./base";
 import type {
+  BulkImportRequest,
+  BulkImportResult,
   ColorMatchResult,
+  ExtractColorsResponse,
   Guide,
   GuideCreateInput,
   GuideDraftStatus,
@@ -101,6 +104,23 @@ export const paintingApi = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, hex }),
+      }),
+    // Swatch-chart import (STUDIO-329/333/334, gated on paint_swatch_import_enabled).
+    // Read suggestions off an uploaded chart PDF — nothing is persisted yet.
+    extractColors: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return request<ExtractColorsResponse>("/painting/paints/extract-colors", {
+        method: "POST",
+        body: form,
+      });
+    },
+    // Create paints from a user-reviewed/edited list of swatch suggestions.
+    bulkImport: (body: BulkImportRequest) =>
+      request<BulkImportResult>("/painting/paints/bulk-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       }),
   },
   guides: {
