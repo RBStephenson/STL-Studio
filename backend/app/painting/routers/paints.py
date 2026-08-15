@@ -5,7 +5,11 @@ create/update schemas don't expose it. Paint codes are validated against the
 owning line's `code_pattern` on create/update (#244, spec §6.2).
 
 Swatch-chart import (STUDIO-329/333) adds `extract-colors` and `bulk-import`,
-both gated by the `paint_swatch_import_enabled` app setting.
+both gated by the `paint_swatch_import_enabled` app setting. `extract-colors`
+dispatches across three extraction tiers, cheapest/most-deterministic first:
+vector PDF swatches (STUDIO-331) -> embedded-raster PDF swatch images
+(STUDIO-332) -> a photo or image-only PDF page (STUDIO-381), the only tier
+where Claude vision has to locate swatches, not just read them.
 """
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session, joinedload
@@ -22,8 +26,9 @@ from app.painting.schemas import (
     PaintCreate, PaintList, PaintRead, PaintUpdate,
     derive_matchable,
 )
-from app.painting.services import swatch_extract, swatch_extract_vision
+from app.painting.services import swatch_extract, swatch_extract_photo, swatch_extract_vision
 from app.painting.services.generation import GenerationError, MissingApiKeyError
+from app.painting.services.swatch_extract import ExtractionResult
 
 # Synthetic shelf location for paints force-added during guide import (#417).
 _IMPORTED_BRAND = "Imported"
@@ -34,15 +39,13 @@ router = APIRouter()
 
 _SWATCH_IMPORT_ENABLED_KEY = "paint_swatch_import_enabled"
 
-_UNSUPPORTED_NOT_A_PDF = (
-    "This file isn't a PDF swatch chart. Photo/scanned-page import isn't "
-    "available yet — add these paints manually for now."
-)
-_UNSUPPORTED_NO_SWATCHES_FOUND = (
-    "This PDF doesn't look like a swatch chart we can read automatically "
-    "(no vector swatches or embedded swatch images found) — it may be a "
-    "scanned/photographed page, which isn't supported yet. Add these paints "
-    "manually for now."
+# Reached only when every extraction tier — vector, embedded-raster vision,
+# and photo/scan vision (STUDIO-381) — either doesn't apply or genuinely
+# can't decode the upload at all. A tier that runs and finds zero real
+# swatches is a legitimate empty result, not this.
+_UNSUPPORTED_UNREADABLE = (
+    "This doesn't look like a PDF swatch chart or a readable image — add "
+    "these paints manually for now."
 )
 
 
@@ -311,16 +314,30 @@ def delete_paint(paint_id: int, db: Session = Depends(get_db)):
 # Swatch-chart import (STUDIO-329/333)
 # ---------------------------------------------------------------------------
 
+def _run_vision_extraction(fn, *args) -> ExtractionResult:
+    """Call one of the AI-backed extraction tiers, mapping their two failure
+    modes to the HTTP codes both STUDIO-332 and STUDIO-381 share: no usable
+    AI key configured (503, a config problem) vs. the AI request itself
+    failing (502, an upstream problem)."""
+    try:
+        return fn(*args)
+    except MissingApiKeyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except GenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.post("/paints/extract-colors", response_model=ExtractColorsResponse)
 async def extract_colors(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Read paint-color suggestions off an uploaded swatch-chart PDF.
+    """Read paint-color suggestions off an uploaded swatch chart.
 
-    Dispatch: vector swatches (STUDIO-331, deterministic) first; if the PDF
-    has none, embedded-raster-swatch images (STUDIO-332, PDF structure +
-    vision OCR) next. A photo or scanned-page upload — no PDF structure to
-    lean on at all — isn't supported yet (STUDIO-381); see
-    ExtractColorsResponse's docstring for exactly when `unsupported_reason`
-    is set vs. a legitimate empty result.
+    Dispatch, cheapest/most-deterministic first: vector PDF swatches
+    (STUDIO-331) -> embedded-raster PDF swatch images (STUDIO-332) -> a photo
+    or image-only PDF page (STUDIO-381), where Claude vision has to locate
+    swatches, not just read them. See ExtractColorsResponse's docstring for
+    exactly when `unsupported_reason` is set vs. a legitimate empty result —
+    the photo/scan tier is the last resort, so `unsupported_reason` now fires
+    only when even that tier can't decode the upload at all.
     """
     _require_swatch_import_enabled(db)
     raw = await file.read()
@@ -329,23 +346,28 @@ async def extract_colors(file: UploadFile = File(...), db: Session = Depends(get
         vector_result = swatch_extract.extract_vector_swatches(raw)
     except RuntimeError:
         # fitz raises RuntimeError (or a subclass, e.g. FileDataError /
-        # EmptyFileError) for anything it can't parse as a PDF at all.
-        return ExtractColorsResponse(unsupported_reason=_UNSUPPORTED_NOT_A_PDF)
+        # EmptyFileError) for anything it can't parse as a PDF at all — try
+        # it as a photo instead of assuming it's unreadable.
+        photo_result = _run_vision_extraction(swatch_extract_photo.extract_photo_swatches, db, raw)
+        if photo_result.needs_fallback:
+            return ExtractColorsResponse(unsupported_reason=_UNSUPPORTED_UNREADABLE)
+        return ExtractColorsResponse(swatches=_to_extracted(photo_result.swatches))
+
     if vector_result.swatches:
         return ExtractColorsResponse(swatches=_to_extracted(vector_result.swatches))
     if not vector_result.needs_fallback:
         return ExtractColorsResponse(swatches=[])
 
-    try:
-        vision_result = swatch_extract_vision.extract_embedded_raster_swatches(db, raw)
-    except MissingApiKeyError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except GenerationError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    vision_result = _run_vision_extraction(swatch_extract_vision.extract_embedded_raster_swatches, db, raw)
+    if not vision_result.needs_fallback:
+        return ExtractColorsResponse(swatches=_to_extracted(vision_result.swatches))
 
-    if vision_result.needs_fallback:
-        return ExtractColorsResponse(unsupported_reason=_UNSUPPORTED_NO_SWATCHES_FOUND)
-    return ExtractColorsResponse(swatches=_to_extracted(vision_result.swatches))
+    # No vector swatches and no swatch-sized embedded images either — an
+    # image-only page (scanned/photographed), STUDIO-381's job.
+    photo_result = _run_vision_extraction(swatch_extract_photo.extract_pdf_page_photos, db, raw)
+    if photo_result.needs_fallback:
+        return ExtractColorsResponse(unsupported_reason=_UNSUPPORTED_UNREADABLE)
+    return ExtractColorsResponse(swatches=_to_extracted(photo_result.swatches))
 
 
 def _to_extracted(swatches) -> list[ExtractedSwatch]:
