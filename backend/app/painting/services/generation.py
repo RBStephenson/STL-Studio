@@ -66,32 +66,33 @@ def _model(db: Session) -> str:
 
 
 @dataclass
-class GuidesConfig:
-    """Resolved AI Guide Drafts endpoint (model/key/effort). A dataclass (not a
-    tuple) so the secret ``api_key`` field stays isolated under static
-    analysis — see ``_OrganizeConfig`` in app/routers/models.py for why."""
+class AnthropicApiConfig:
+    """Resolved Anthropic endpoint (model/key/effort) for a feature that reuses
+    the named-AiApiConfig selection mechanism. A dataclass (not a tuple) so the
+    secret ``api_key`` field stays isolated under static analysis — see
+    ``_OrganizeConfig`` in app/routers/models.py for why."""
     model: str
     api_key: str
     effort: str
 
 
-def load_guides_config(db: Session) -> GuidesConfig:
-    """Resolve the AI Guide Drafts endpoint. Raises MissingApiKeyError (a
-    GenerationError) if nothing usable is configured — callers surface that as
-    a 503, or as the job's error state.
+def resolve_anthropic_config(
+    db: Session, *, setting_key: str, feature_label: str
+) -> AnthropicApiConfig:
+    """Resolve an Anthropic endpoint from a named AiApiConfig setting, falling
+    back to the legacy global ``ai_api_key`` / ``ai_model`` / ``ai_effort``
+    settings when none is assigned. Raises MissingApiKeyError (a
+    GenerationError) if nothing usable is configured.
 
-    Driven by a named AiApiConfig assigned via the ``ai_guides_api`` setting
-    (the "Use API" selector in Settings → AI & Integrations → AI Functions).
-    Falls back to the legacy global ``ai_api_key`` / ``ai_model`` / ``ai_effort``
-    settings when no config is assigned, for installs that predate named
-    configs. Guide drafts are Anthropic-only today — the whole prompt/response
-    pipeline assumes the Messages API — so only an Anthropic config applies.
+    Shared by every feature that reuses the "Use API" selector pattern
+    (Settings → AI & Integrations → AI Functions) — e.g. Guide Drafts'
+    ``ai_guides_api`` and Paint Shelf's swatch-chart vision fallback
+    (STUDIO-332) reusing the same setting. Feature-specific enable gates
+    (like Guide Drafts' ``ai_guides_enabled``) are the caller's job, not
+    this resolver's — a feature that has no enable flag of its own, or a
+    different one, should not have to satisfy an unrelated feature's gate.
     """
-    enabled_row = db.get(AppSetting, "ai_guides_enabled")
-    if not enabled_row or not bool(enabled_row.value):
-        raise MissingApiKeyError("AI Guide Drafts is not enabled.")
-
-    api_row = db.get(AppSetting, "ai_guides_api")
+    api_row = db.get(AppSetting, setting_key)
     config_id = api_row.value if api_row else None
     if config_id:
         from app.models import AiApiConfig
@@ -99,27 +100,47 @@ def load_guides_config(db: Session) -> GuidesConfig:
         cfg = db.get(AiApiConfig, int(config_id))
         if not cfg:
             raise MissingApiKeyError(
-                "The AI API assigned to Guide Drafts no longer exists — reselect one in Settings."
+                f"The AI API assigned to {feature_label} no longer exists — reselect one in Settings."
             )
         if cfg.api_type != "anthropic":
             raise MissingApiKeyError(
-                "AI Guide Drafts requires an Anthropic API — reselect one in Settings."
+                f"{feature_label} requires an Anthropic API — reselect one in Settings."
             )
         key = secrets.get_ai_api_config_key(db, cfg.id)
         if not key:
             raise MissingApiKeyError("No API key is configured for the assigned AI API.")
         effort = cfg.effort if cfg.effort in _EFFORT_THINKING_BUDGET else "low"
-        return GuidesConfig(model=cfg.model or DEFAULT_MODEL, api_key=key, effort=effort)
+        return AnthropicApiConfig(model=cfg.model or DEFAULT_MODEL, api_key=key, effort=effort)
 
     # Legacy fallback: standalone ai_api_key_enc / ai_model / ai_effort settings.
     key = secrets.get_ai_api_key(db)
     if not key:
         raise MissingApiKeyError("No AI API key is configured.")
-    return GuidesConfig(model=_model(db), api_key=key, effort=_effort(db))
+    return AnthropicApiConfig(model=_model(db), api_key=key, effort=_effort(db))
 
 
-def _text_from_response(resp) -> str:
-    """Concatenate the text blocks of an Anthropic messages response."""
+def load_guides_config(db: Session) -> AnthropicApiConfig:
+    """Resolve the AI Guide Drafts endpoint. Raises MissingApiKeyError (a
+    GenerationError) if Guide Drafts isn't enabled or nothing usable is
+    configured — callers surface that as a 503, or as the job's error state.
+
+    Driven by a named AiApiConfig assigned via the ``ai_guides_api`` setting.
+    Guide drafts are Anthropic-only today — the whole prompt/response pipeline
+    assumes the Messages API — so only an Anthropic config applies.
+    """
+    enabled_row = db.get(AppSetting, "ai_guides_enabled")
+    if not enabled_row or not bool(enabled_row.value):
+        raise MissingApiKeyError("AI Guide Drafts is not enabled.")
+    return resolve_anthropic_config(
+        db, setting_key="ai_guides_api", feature_label="AI Guide Drafts"
+    )
+
+
+def text_from_response(resp) -> str:
+    """Concatenate the text blocks of an Anthropic messages response.
+
+    Shared with any feature that parses a Claude Messages API reply — e.g.
+    Paint Shelf's swatch-chart vision fallback (STUDIO-332)."""
     parts = []
     for block in getattr(resp, "content", []) or []:
         if getattr(block, "type", None) == "text":
@@ -127,9 +148,9 @@ def _text_from_response(resp) -> str:
     return "".join(parts).strip()
 
 
-def _parse_json_object(text: str) -> dict:
+def parse_json_object(text: str) -> dict:
     """Parse the model's reply into a JSON object, tolerating code fences and
-    incidental surrounding prose."""
+    incidental surrounding prose. Shared, see `text_from_response`."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         # Strip a ```json … ``` fence.
@@ -209,7 +230,7 @@ def generate_guide_draft(db: Session, guide: Guide) -> GuideDraft:
             "Try lowering the generation effort or simplifying the figure, then retry."
         )
 
-    data = _parse_json_object(_text_from_response(resp))
+    data = parse_json_object(text_from_response(resp))
     try:
         return GuideDraft.model_validate(data)
     except ValidationError as exc:
