@@ -137,6 +137,13 @@ _PARTS_EXACT: set[str] = {
 _PARTS_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bpart[s]?\b",        re.I),
     re.compile(r"\bextra[s]?\b",       re.I),
+    # Pre-supported pack layouts (STUDIO-371): "Supported STL", "Unsupported",
+    # "Pre-Supported LYS", etc. — the format-prep folder, not the product name.
+    # Anchored to the WHOLE folder name (not a bare substring search) so a real
+    # product like "Tifa Pre-Supported 75mm" keeps its product identity instead
+    # of being reclassified as a parts bucket.
+    re.compile(r"^(un|pre[-\s]?)?supported([-\s]+(stl|lys|files?))?$", re.I),
+    re.compile(r"^(stl|lys)[-\s]+(un|pre[-\s]?)?supported$",           re.I),
     re.compile(r"^extra[_\s]parte[s]?$", re.I),
     re.compile(r"^part[_\s]extra[s]?$",  re.I),
 ]
