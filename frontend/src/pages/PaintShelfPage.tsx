@@ -8,6 +8,7 @@ import {
 } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
+import { useConfirm } from "../context/ConfirmContext";
 import HelpLink from "../components/HelpLink";
 import ErrorState from "../components/ErrorState";
 import EmptyState from "../components/EmptyState";
@@ -296,6 +297,7 @@ export default function PaintShelfPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { settings } = useAppSettings();
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   // Filter state lives in the URL, mirroring the Library's conventions.
   const page = Number(searchParams.get("page") ?? 1);
@@ -326,6 +328,11 @@ export default function PaintShelfPage() {
     setFormModeRaw(mode);
   };
   const [busy, setBusy] = useState(false);
+  // Bulk-select (STUDIO-382) — a set of ids on the current page, cleared
+  // whenever the filters/page change since a selected row may scroll out
+  // of view entirely.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const fetchIdRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // The add/edit form renders at the top of the page; clicking Edit on a
@@ -450,6 +457,7 @@ export default function PaintShelfPage() {
     }
   }, [page, q, brandId, lineId, finish, ownedParam]);
   useEffect(() => { fetchPaints(); }, [fetchPaints]);
+  useEffect(() => { setSelectedIds(new Set()); }, [page, q, brandId, lineId, finish, ownedParam]);
 
   const lineById = new Map(
     brands.flatMap((b) => b.lines.map((l) => [l.id, { brand: b.name, line: l.name }] as const))
@@ -497,6 +505,53 @@ export default function PaintShelfPage() {
       fetchPaints();
     } catch (e) {
       toast(errMsg(e) || "Could not delete the paint.", "error");
+    }
+  };
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const allOnPageSelected = paints.length > 0 && paints.every((p) => selectedIds.has(p.id));
+  const toggleSelectAllOnPage = () => {
+    setSelectedIds((prev) => {
+      if (allOnPageSelected) {
+        const next = new Set(prev);
+        paints.forEach((p) => next.delete(p.id));
+        return next;
+      }
+      const next = new Set(prev);
+      paints.forEach((p) => next.add(p.id));
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    const n = selectedIds.size;
+    const ok = await confirm({
+      title: `Delete ${n} paint${n === 1 ? "" : "s"}?`,
+      message: `This permanently removes ${n} paint${n === 1 ? "" : "s"} from the shelf. Any paint used by a guide is skipped instead of deleted.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBulkDeleting(true);
+    try {
+      const result = await api.painting.paints.bulkDelete(Array.from(selectedIds));
+      const skippedNote = result.skipped.length > 0
+        ? `, ${result.skipped.length} skipped (used by a guide)`
+        : "";
+      toast(`Deleted ${result.deleted} paint${result.deleted === 1 ? "" : "s"}${skippedNote}.`, "success");
+      setSelectedIds(new Set());
+      fetchPaints();
+    } catch (e) {
+      toast(errMsg(e) || "Could not delete the selected paints.", "error");
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -669,6 +724,25 @@ export default function PaintShelfPage() {
         <ErrorState title="Couldn't load the paint shelf" message={listError} onRetry={fetchPaints} />
       )}
 
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 bg-panel border border-border-subtle rounded-lg px-4 py-2.5 mb-3">
+          <span className="text-sm text-text-primary-alt2">{selectedIds.size} selected</span>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-xs text-text-secondary-alt hover:text-text-primary-alt2"
+          >
+            Clear
+          </button>
+          <button
+            onClick={deleteSelected}
+            disabled={bulkDeleting}
+            className="flex items-center gap-1.5 ml-auto bg-red-950/60 border border-red-700/70 text-red-400 hover:bg-red-900/60 hover:text-red-200 disabled:opacity-50 text-sm px-3 py-1.5 rounded transition-colors"
+          >
+            <Trash2 size={13} /> {bulkDeleting ? "Deleting…" : "Delete selected"}
+          </button>
+        </div>
+      )}
+
       {!listError && !loading && paints.length === 0 && (
         (() => {
           const filtered = q || brandId || lineId || finish || ownedParam;
@@ -692,6 +766,17 @@ export default function PaintShelfPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-text-secondary-alt uppercase tracking-wider border-b border-border-subtle">
+              <th className="px-4 py-2.5 w-8">
+                {!loading && paints.length > 0 && (
+                  <input
+                    type="checkbox"
+                    aria-label="Select all on page"
+                    checked={allOnPageSelected}
+                    onChange={toggleSelectAllOnPage}
+                    className="h-4 w-4 accent-indigo-500"
+                  />
+                )}
+              </th>
               <th className="px-4 py-2.5 w-10"></th>
               <th className="px-2 py-2.5">Code</th>
               <th className="px-2 py-2.5">Name</th>
@@ -705,6 +790,7 @@ export default function PaintShelfPage() {
             {loading ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i} className="relative border-b border-border-subtle last:border-0">
+                  <td className="px-4 py-2" />
                   <td className="px-4 py-2"><SkeletonBlock className="h-5 w-5 rounded-full" /></td>
                   <td className="px-2 py-2"><SkeletonBlock className="h-3 w-12" /></td>
                   <td className="px-2 py-2"><SkeletonBlock className="h-3 w-24" /></td>
@@ -718,6 +804,15 @@ export default function PaintShelfPage() {
               const lineInfo = lineById.get(p.paint_line_id);
               return (
                 <tr key={p.id} className="border-b border-border-subtle last:border-0 hover:bg-panel-secondary/50 group">
+                  <td className="px-4 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${p.name}`}
+                      checked={selectedIds.has(p.id)}
+                      onChange={() => toggleSelected(p.id)}
+                      className="h-4 w-4 accent-indigo-500"
+                    />
+                  </td>
                   <td className="px-4 py-2"><ColorChip hex={p.hex} /></td>
                   <td className="px-2 py-2 font-mono text-xs text-text-secondary">{p.code}</td>
                   <td className="px-2 py-2 text-text-primary-alt">{p.name}</td>
