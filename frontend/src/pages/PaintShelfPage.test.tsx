@@ -45,14 +45,22 @@ vi.mock("../api/client", async (importOriginal) => {
           create: vi.fn(),
           update: vi.fn(),
           delete: vi.fn(),
+          extractColors: vi.fn(),
+          bulkImport: vi.fn(),
         },
       },
     },
   };
 });
 
+const toastMock = vi.fn();
 vi.mock("../context/ToastContext", () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: toastMock }),
+}));
+
+let appSettings = { paint_swatch_import_enabled: false };
+vi.mock("../context/AppSettingsContext", () => ({
+  useAppSettings: () => ({ settings: appSettings }),
 }));
 
 function renderPage() {
@@ -358,5 +366,229 @@ describe("PaintShelfPage - PaintRack CSV import (#242)", () => {
 
     expect(screen.queryByTestId("import-diff-modal")).toBeNull();
     expect(api.painting.inventory.importConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("PaintShelfPage - swatch chart import (STUDIO-334)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    appSettings = { paint_swatch_import_enabled: false };
+  });
+
+  it("hides the Import from Chart button when the flag is off", async () => {
+    renderPage();
+    await screen.findByText("Coal Black");
+    expect(screen.queryByRole("button", { name: /import from chart/i })).toBeNull();
+  });
+
+  describe("with the flag on", () => {
+    beforeEach(() => {
+      appSettings = { paint_swatch_import_enabled: true };
+    });
+
+    function uploadFile() {
+      const file = new File(["%PDF-1.4"], "chart.pdf", { type: "application/pdf" });
+      return userEvent.upload(screen.getByTestId("swatch-file-input"), file);
+    }
+
+    it("shows the Import from Chart button", async () => {
+      renderPage();
+      await screen.findByText("Coal Black");
+      expect(screen.getByRole("button", { name: /import from chart/i })).toBeInTheDocument();
+    });
+
+    it("opens a review modal with the extracted swatches on upload", async () => {
+      const { api } = await import("../api/client");
+      vi.mocked(api.painting.paints.extractColors).mockResolvedValue({
+        swatches: [
+          { name: "Mahogany", code: "004", hex: "#4E3C39" },
+          { name: "Scarab Green", code: null, hex: "#1D3B40" },
+        ],
+        unsupported_reason: null,
+      });
+      renderPage();
+      await screen.findByText("Coal Black");
+
+      await uploadFile();
+
+      expect(await screen.findByTestId("swatch-import-modal")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("Mahogany")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("004")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("Scarab Green")).toBeInTheDocument();
+      expect(api.painting.paints.bulkImport).not.toHaveBeenCalled();
+    });
+
+    it("toasts and does not open a modal when the chart isn't supported", async () => {
+      const { api } = await import("../api/client");
+      vi.mocked(api.painting.paints.extractColors).mockResolvedValue({
+        swatches: [],
+        unsupported_reason: "This file isn't a PDF swatch chart.",
+      });
+      renderPage();
+      await screen.findByText("Coal Black");
+
+      await uploadFile();
+
+      await waitFor(() => {
+        expect(toastMock).toHaveBeenCalledWith("This file isn't a PDF swatch chart.", "error");
+      });
+      expect(screen.queryByTestId("swatch-import-modal")).toBeNull();
+    });
+
+    it("toasts when extraction genuinely finds zero swatches", async () => {
+      const { api } = await import("../api/client");
+      vi.mocked(api.painting.paints.extractColors).mockResolvedValue({
+        swatches: [], unsupported_reason: null,
+      });
+      renderPage();
+      await screen.findByText("Coal Black");
+
+      await uploadFile();
+
+      await waitFor(() => {
+        expect(toastMock).toHaveBeenCalledWith("No swatches found in this chart.", "error");
+      });
+      expect(screen.queryByTestId("swatch-import-modal")).toBeNull();
+    });
+
+    it("lets a row be edited and removed before import", async () => {
+      const { api } = await import("../api/client");
+      vi.mocked(api.painting.paints.extractColors).mockResolvedValue({
+        swatches: [
+          { name: "Mahogany", code: "004", hex: "#4E3C39" },
+          { name: "Scarab Green", code: "007", hex: "#1D3B40" },
+        ],
+        unsupported_reason: null,
+      });
+      renderPage();
+      await screen.findByText("Coal Black");
+      await uploadFile();
+      await screen.findByTestId("swatch-import-modal");
+
+      const nameInput = screen.getByDisplayValue("Mahogany");
+      await userEvent.clear(nameInput);
+      await userEvent.type(nameInput, "Mahogany Brown");
+      expect(screen.getByDisplayValue("Mahogany Brown")).toBeInTheDocument();
+
+      expect(screen.getByText("2 suggestions found. Edit or remove any before importing —", { exact: false }))
+        .toBeInTheDocument();
+      await userEvent.click(screen.getAllByTitle("Remove")[1]);
+      expect(screen.queryByDisplayValue("Scarab Green")).toBeNull();
+      expect(screen.getByText("1 suggestion found. Edit or remove any before importing —", { exact: false }))
+        .toBeInTheDocument();
+      expect(api.painting.paints.bulkImport).not.toHaveBeenCalled();
+    });
+
+    it("bulk-imports the edited rows against the selected line and refreshes the shelf", async () => {
+      const { api } = await import("../api/client");
+      vi.mocked(api.painting.paints.extractColors).mockResolvedValue({
+        swatches: [{ name: "Mahogany", code: "004", hex: "#4E3C39" }],
+        unsupported_reason: null,
+      });
+      vi.mocked(api.painting.paints.bulkImport).mockResolvedValue({
+        created: [PAINTS[0]], skipped: [],
+      });
+      renderPage();
+      await screen.findByText("Coal Black");
+      await uploadFile();
+      await screen.findByTestId("swatch-import-modal");
+
+      // Import is disabled until a paint line is chosen.
+      expect(screen.getByRole("button", { name: /import 1 paint/i })).toBeDisabled();
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Paint line" }), "10");
+      await userEvent.click(screen.getByRole("button", { name: /import 1 paint/i }));
+
+      await waitFor(() => {
+        expect(api.painting.paints.bulkImport).toHaveBeenCalledWith({
+          paint_line_id: 10,
+          items: [{ name: "Mahogany", code: "004", hex: "#4E3C39", finish: "matte", owned: true }],
+        });
+      });
+      expect(toastMock).toHaveBeenCalledWith("Imported 1 paint.", "success");
+      expect(screen.queryByTestId("swatch-import-modal")).toBeNull();
+      // fetchPaints() re-runs after a successful import.
+      expect(api.painting.paints.list).toHaveBeenCalledTimes(2);
+    });
+
+    it("sends blank code/hex as undefined, not empty strings, so one bad row can't 422 the whole batch", async () => {
+      const { api } = await import("../api/client");
+      vi.mocked(api.painting.paints.extractColors).mockResolvedValue({
+        swatches: [{ name: "No Code Or Hex", code: null, hex: "" }],
+        unsupported_reason: null,
+      });
+      vi.mocked(api.painting.paints.bulkImport).mockResolvedValue({ created: [], skipped: [] });
+      renderPage();
+      await screen.findByText("Coal Black");
+      await uploadFile();
+      await screen.findByTestId("swatch-import-modal");
+
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Paint line" }), "10");
+      await userEvent.click(screen.getByRole("button", { name: /import 1 paint/i }));
+
+      await waitFor(() => {
+        expect(api.painting.paints.bulkImport).toHaveBeenCalledWith({
+          paint_line_id: 10,
+          items: [{ name: "No Code Or Hex", code: undefined, hex: undefined, finish: "matte", owned: true }],
+        });
+      });
+    });
+
+    it("includes the skipped count in the success toast when some rows were skipped", async () => {
+      const { api } = await import("../api/client");
+      vi.mocked(api.painting.paints.extractColors).mockResolvedValue({
+        swatches: [{ name: "Mahogany", code: "004", hex: "#4E3C39" }],
+        unsupported_reason: null,
+      });
+      vi.mocked(api.painting.paints.bulkImport).mockResolvedValue({
+        created: [],
+        skipped: [{ name: "Mahogany", code: "004", reason: "Paint code '004' already exists in this line" }],
+      });
+      renderPage();
+      await screen.findByText("Coal Black");
+      await uploadFile();
+      await screen.findByTestId("swatch-import-modal");
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Paint line" }), "10");
+      await userEvent.click(screen.getByRole("button", { name: /import 1 paint/i }));
+
+      await waitFor(() => {
+        expect(toastMock).toHaveBeenCalledWith("Imported 0 paints, 1 skipped.", "success");
+      });
+    });
+
+    it("shows an inline error on bulk-import failure without losing the reviewed rows", async () => {
+      const { api } = await import("../api/client");
+      vi.mocked(api.painting.paints.extractColors).mockResolvedValue({
+        swatches: [{ name: "Mahogany", code: "004", hex: "#4E3C39" }],
+        unsupported_reason: null,
+      });
+      vi.mocked(api.painting.paints.bulkImport).mockRejectedValueOnce(new Error("Line 10 not found"));
+      renderPage();
+      await screen.findByText("Coal Black");
+      await uploadFile();
+      await screen.findByTestId("swatch-import-modal");
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Paint line" }), "10");
+      await userEvent.click(screen.getByRole("button", { name: /import 1 paint/i }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Line 10 not found");
+      expect(screen.getByTestId("swatch-import-modal")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("Mahogany")).toBeInTheDocument();
+    });
+
+    it("cancel closes the modal without importing", async () => {
+      const { api } = await import("../api/client");
+      vi.mocked(api.painting.paints.extractColors).mockResolvedValue({
+        swatches: [{ name: "Mahogany", code: "004", hex: "#4E3C39" }],
+        unsupported_reason: null,
+      });
+      renderPage();
+      await screen.findByText("Coal Black");
+      await uploadFile();
+      await screen.findByTestId("swatch-import-modal");
+
+      await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+      expect(screen.queryByTestId("swatch-import-modal")).toBeNull();
+      expect(api.painting.paints.bulkImport).not.toHaveBeenCalled();
+    });
   });
 });
