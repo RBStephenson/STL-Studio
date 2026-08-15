@@ -8,10 +8,11 @@
 [![Latest release](https://img.shields.io/github/v/release/RBStephenson/STL-Studio?display_name=tag&sort=semver)](https://github.com/RBStephenson/STL-Studio/releases/latest)
 [![License](https://img.shields.io/github/license/RBStephenson/STL-Studio)](LICENSE)
 
-Local web app for cataloguing, browsing, and managing an STL file library.
+Free, open source, and self-hosted: a home base for a 3D print library that's gotten out of hand. Search, tag, group variants, and actually find that one file again instead of digging through nested folders.
 
 📖 **User documentation:** the **[STL Studio Wiki](https://github.com/RBStephenson/STL-Studio/wiki)** is the canonical user guide.
 🗺️ **What's coming next:** [ROADMAP.md](ROADMAP.md)
+🤝 **Contributing:** issues and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
 [Getting Started](https://github.com/RBStephenson/STL-Studio/wiki/Getting-Started) ·
@@ -21,6 +22,10 @@ Local web app for cataloguing, browsing, and managing an STL file library.
 
 > The wiki is generated from the in-repo [`docs/`](docs/README.md) folder. The
 > in-app **Help** page is maintained separately for concise, contextual guidance.
+
+Built because I had too many STL files and no good way to keep track of them.
+It's grown from a personal fix into something other makers, painters, and
+hobbyists use too.
 
 ## Installation
 
