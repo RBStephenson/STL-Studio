@@ -699,12 +699,12 @@ class ExtractedSwatch(BaseModel):
 
 
 class ExtractColorsResponse(BaseModel):
-    """`unsupported_reason` is set only when no extraction path could handle
-    the upload at all (not a PDF, or a PDF with neither real vector swatches
-    nor swatch-sized embedded images — most likely a photo/scanned page,
-    which needs vision-based localization not yet built). It is left unset
-    when an extraction path ran but genuinely found zero real swatches — an
-    empty `swatches` list is itself a valid, non-error result in that case."""
+    """`unsupported_reason` is set only when every extraction tier — vector,
+    embedded-raster vision, and the photo/scan vision fallback (STUDIO-381,
+    the last resort) — genuinely can't decode the upload at all (not a PDF
+    and not a readable image). It is left unset when a tier ran but found
+    zero real swatches — an empty `swatches` list is itself a valid,
+    non-error result in that case."""
     swatches: list[ExtractedSwatch] = []
     unsupported_reason: Optional[str] = None
 

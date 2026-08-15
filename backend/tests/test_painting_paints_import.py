@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw
 
 from app.models import AppSetting
 from app.painting.models import PaintBrand, PaintLine
+from app.painting.services import swatch_extract_photo as photo
 from app.painting.services import swatch_extract_vision as vision
 from app.services import secrets
 
@@ -90,6 +91,35 @@ def _empty_pdf_bytes() -> bytes:
     return data
 
 
+# ---------------------------------------------------------------------------
+# Image fixture builder + fake client (photo/scan path — STUDIO-381)
+# ---------------------------------------------------------------------------
+
+
+def _photo_bytes() -> bytes:
+    im = Image.new("RGB", (200, 200), (240, 240, 240))
+    ImageDraw.Draw(im).rectangle([20, 20, 100, 100], fill=(29, 59, 64))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _fake_photo_client(swatches: list):
+    """Returns a fixed {"swatches": [...]} payload regardless of image
+    content — dispatch-level tests only care that the photo tier ran and
+    what it reported, not the localization call itself (see
+    test_painting_swatch_extract_photo.py for that)."""
+    class _Client:
+        def __init__(self, *a, **k):
+            self.messages = types.SimpleNamespace(create=self._create)
+
+        def _create(self, **kw):
+            block = types.SimpleNamespace(type="text", text=json.dumps({"swatches": swatches}))
+            return types.SimpleNamespace(content=[block])
+
+    return _Client
+
+
 def _fake_vision_client(name_lookup: dict):
     class _Client:
         def __init__(self, *a, **k):
@@ -160,7 +190,10 @@ class TestExtractColorsDispatch:
         assert body["unsupported_reason"] is None
         assert body["swatches"] == [{"name": "Scarab Green", "code": None, "hex": "#1D3B40"}]
 
-    def test_not_a_pdf_returns_unsupported_reason(self, client, db):
+    def test_unreadable_upload_returns_unsupported_reason(self, client, db):
+        """Garbage bytes fail to decode as a PDF *and* as an image — the
+        photo tier (STUDIO-381) never even needs an AI key to conclude that,
+        since it checks decodability before resolving one."""
         _enable_import(db)
         r = client.post(
             "/painting/paints/extract-colors",
@@ -171,13 +204,56 @@ class TestExtractColorsDispatch:
         assert body["swatches"] == []
         assert body["unsupported_reason"] is not None
 
-    def test_pdf_with_no_swatches_at_all_returns_unsupported_reason(self, client, db):
+    def test_photo_upload_extracts_swatches_via_the_photo_tier(self, client, db, monkeypatch):
+        """A real (non-PDF) image upload — a photo of a paint rack — routes
+        straight to the photo/scan tier (STUDIO-381), not an immediate
+        unsupported_reason."""
         _enable_import(db)
+        secrets.set_ai_api_key(db, "sk-test")
+        monkeypatch.setattr(photo, "Anthropic", _fake_photo_client(
+            [{"name": "Rack Photo Swatch", "bbox_pct": [0.1, 0.1, 0.5, 0.5]}]
+        ))
+        r = client.post(
+            "/painting/paints/extract-colors",
+            files={"file": ("rack.png", _photo_bytes(), "image/png")},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["unsupported_reason"] is None
+        assert body["swatches"][0]["name"] == "Rack Photo Swatch"
+
+    def test_pdf_with_no_vector_or_embedded_swatches_falls_back_to_photo_tier(self, client, db, monkeypatch):
+        """A blank/scanned PDF page has no vector swatches and no
+        swatch-sized embedded images either — it now falls through to the
+        photo/scan tier (STUDIO-381) instead of an immediate
+        unsupported_reason."""
+        _enable_import(db)
+        secrets.set_ai_api_key(db, "sk-test")
+        monkeypatch.setattr(photo, "Anthropic", _fake_photo_client(
+            [{"name": "Found On Scanned Page", "bbox_pct": [0.1, 0.1, 0.5, 0.5]}]
+        ))
+        r = _upload(client, _empty_pdf_bytes())
+        assert r.status_code == 200
+        body = r.json()
+        assert body["unsupported_reason"] is None
+        assert body["swatches"][0]["name"] == "Found On Scanned Page"
+
+    def test_photo_tier_finds_zero_real_swatches_is_a_clean_empty_result(self, client, db, monkeypatch):
+        _enable_import(db)
+        secrets.set_ai_api_key(db, "sk-test")
+        monkeypatch.setattr(photo, "Anthropic", _fake_photo_client([]))
         r = _upload(client, _empty_pdf_bytes())
         assert r.status_code == 200
         body = r.json()
         assert body["swatches"] == []
-        assert body["unsupported_reason"] is not None
+        assert body["unsupported_reason"] is None
+
+    def test_pdf_with_no_swatches_and_no_ai_key_maps_to_503(self, client, db):
+        """The photo/scan tier (STUDIO-381) needs an AI key too — a blank
+        page can't be concluded 'unsupported' without actually trying it."""
+        _enable_import(db)
+        r = _upload(client, _empty_pdf_bytes())
+        assert r.status_code == 503
 
     def test_vision_finds_zero_real_swatches_is_a_clean_empty_result(self, client, db, monkeypatch):
         """Embedded images were found (routes into the vision path) but every
