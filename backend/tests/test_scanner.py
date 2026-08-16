@@ -516,17 +516,17 @@ class TestTagRules:
         _stl(creator_dir / "Aztec Warrior" / "STL")
         creator = make_creator(db, "Creator")
 
-        name_parser.set_tag_rules([(re.compile(r"\bAztec\b", re.I), "civ")])
-        try:
-            _walk(db, creator, creator_dir)
-        finally:
-            name_parser.set_tag_rules(None)
+        rules = scanner.ScanRules(
+            parser_rules=name_parser.ParserRules(
+                tag_rules=((re.compile(r"\bAztec\b", re.I), "civ"),),
+            )
+        )
+        _walk(db, creator, creator_dir, rules=rules)
 
         m = next(m for m in _models(db, creator) if "Aztec" in m.folder_path)
         assert "civ" in (m.auto_tags or [])
 
     def test_no_rules_leaves_auto_tags_unchanged(self, db, tmp_path):
-        name_parser.set_tag_rules(None)
         creator_dir = tmp_path / "Creator"
         _stl(creator_dir / "Aztec Warrior" / "STL")
         creator = make_creator(db, "Creator")
@@ -551,7 +551,6 @@ class TestPartsNames:
         _stl(creator_dir / "Golem" / "Bust")
         creator = make_creator(db, "A")
 
-        name_parser.set_parts_names(None)
         _walk(db, creator, creator_dir)
 
         assert any("Bust" in _rel(m, creator_dir) for m in _models(db, creator))
@@ -564,22 +563,18 @@ class TestPartsNames:
         _stl(creator_dir / "Golem" / "Bust")
         creator = make_creator(db, "B")
 
-        name_parser.set_parts_names(frozenset({"bust"}))
-        try:
-            _walk(db, creator, creator_dir)
-        finally:
-            name_parser.set_parts_names(None)
+        rules = scanner.ScanRules(
+            parser_rules=name_parser.ParserRules(parts_names=frozenset({"bust"}))
+        )
+        _walk(db, creator, creator_dir, rules=rules)
 
         paths = {_rel(m, creator_dir) for m in _models(db, creator)}
         assert paths == {"Golem"}
 
     def test_is_structural_folder_honors_user_names(self):
-        name_parser.set_parts_names(frozenset({"sprues"}))
-        try:
-            assert name_parser.is_structural_folder("Sprues") is True
-        finally:
-            name_parser.set_parts_names(None)
-        # cleared → no longer structural
+        rules = name_parser.ParserRules(parts_names=frozenset({"sprues"}))
+        assert name_parser.is_structural_folder("Sprues", rules) is True
+        # omitted → built-ins only, no longer structural
         assert name_parser.is_structural_folder("Sprues") is False
 
 
@@ -3164,11 +3159,12 @@ class TestScanRules:
     _ignore_matcher module globals."""
 
     def test_defaults_are_inert(self):
-        """An empty context must mean 'no overrides, no ignore patterns' — the
-        state a fresh scan starts from."""
+        """An empty context must mean 'no overrides, no ignore patterns, no user
+        parser rules' — the state a fresh scan starts from."""
         rules = scanner.ScanRules()
         assert rules.pack_overrides == frozenset()
         assert rules.ignore.patterns == ()
+        assert rules.parser_rules == name_parser.ParserRules()
 
     def test_is_immutable(self):
         """Frozen so the four parallel creator workers share read-only state by
@@ -3192,6 +3188,31 @@ class TestScanRules:
         rules = scanner.ScanRules.load(db)
         assert rules.pack_overrides == frozenset()
         assert rules.ignore.patterns == ()
+        assert rules.parser_rules == name_parser.ParserRules()
+
+    def test_load_reads_tag_rules_and_parts_names(self, db):
+        """STUDIO-363: ScanRules.load() must populate parser_rules itself —
+        no side effect on name_parser module state."""
+        from app.models import AppSetting
+
+        db.add(AppSetting(
+            key="scan_tag_rules",
+            value=[{"keyword": "Aztec", "tag": "civ"}],
+        ))
+        db.add(AppSetting(key="scan_parts_names", value=["sprues"]))
+        db.commit()
+
+        rules = scanner.ScanRules.load(db)
+
+        assert rules.parser_rules.parts_names == frozenset({"sprues"})
+        assert len(rules.parser_rules.tag_rules) == 1
+        pattern, tag = rules.parser_rules.tag_rules[0]
+        assert tag == "civ"
+        assert pattern.search("Aztec Warrior")
+
+        # A caller that never received this ScanRules still sees built-ins only —
+        # ScanRules.load() must not have leaked state into name_parser globally.
+        assert name_parser.is_structural_folder("Sprues") is False
 
     def test_walk_requires_rules(self, db, tmp_path):
         """Required, not defaulted: omitting them would silently walk with no

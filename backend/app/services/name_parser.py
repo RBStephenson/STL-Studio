@@ -33,6 +33,33 @@ class NameSignals:
         return list(dict.fromkeys(self.scales + self.types + self.modifiers))
 
 
+@dataclass(frozen=True)
+class ParserRules:
+    """User-configured tag-inference and parts/structural folder rules for one
+    scan run (STUDIO-363, follow-up to STUDIO-231's ``ScanRules``).
+
+    Threaded explicitly by callers rather than held as module state, so
+    ``parse()``/``parse_folder()``/``is_structural_folder()`` give identical
+    results for identical inputs regardless of what ran before them in the
+    process. Callers outside a scan (``product_context``, ``grouping_policy``)
+    omit it and get built-ins only, which is the pure/side-effect-free
+    contract those modules already advertise.
+
+    * ``tag_rules`` — extra (pattern, tag) pairs merged into type detection.
+      These ADD tags only — they do not feed ``_strip_signal_tokens`` /
+      ``character_key``, so a tag rule never changes how products group.
+    * ``parts_names`` — extra lower-cased folder names treated like the
+      built-in ``_PARTS_EXACT``/``_STRUCTURAL_EXACT`` sets: never a product
+      boundary, never a variant-grouping character.
+    """
+
+    tag_rules: tuple[tuple[re.Pattern, str], ...] = ()
+    parts_names: frozenset[str] = frozenset()
+
+
+_DEFAULT_RULES = ParserRules()
+
+
 # ---------------------------------------------------------------------------
 # Scale patterns
 # ---------------------------------------------------------------------------
@@ -84,20 +111,6 @@ _TYPES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bsupport[-\s]?free\b",           re.I), "support-free"),
 ]
 
-# User-configured tag-inference rules (#31, Phase 2): extra (pattern, tag) pairs
-# loaded from app_settings and merged into type detection at scan time. Module
-# global, set once per scan run by the scanner (mirrors its override loading);
-# default empty so non-scan callers see only the built-in rules. These ADD tags
-# only — they do not feed _strip_signal_tokens / character_key, so a tag rule
-# never changes how products group.
-_user_type_rules: tuple[tuple[re.Pattern, str], ...] = ()
-
-
-def set_tag_rules(rules: list[tuple[re.Pattern, str]] | None) -> None:
-    """Replace the active user tag-inference rules. Pass None/empty to clear."""
-    global _user_type_rules
-    _user_type_rules = tuple(rules or ())
-
 # ---------------------------------------------------------------------------
 # Modifier keywords
 # ---------------------------------------------------------------------------
@@ -148,38 +161,25 @@ _PARTS_PATTERNS: list[re.Pattern] = [
     re.compile(r"^part[_\s]extra[s]?$",  re.I),
 ]
 
-# User-configured extra parts/structural folder names (#31, Phase 3): exact,
-# lower-cased folder names that should be treated like the built-in _PARTS_EXACT
-# / _STRUCTURAL_EXACT sets — never a product boundary, never a variant-grouping
-# character. Module global set once per scan run by the scanner; empty by
-# default so non-scan callers see only the built-ins.
-_user_parts_names: frozenset[str] = frozenset()
-
-
-def set_parts_names(names: frozenset[str] | set[str] | None) -> None:
-    """Replace the active user parts/structural folder names (lower-cased)."""
-    global _user_parts_names
-    _user_parts_names = frozenset(n.lower() for n in names) if names else frozenset()
-
-
-def _is_parts_name(low: str) -> bool:
+def _is_parts_name(low: str, rules: ParserRules) -> bool:
     """Built-in OR user-configured parts folder name (exact, already lower)."""
-    return low in _PARTS_EXACT or low in _user_parts_names
+    return low in _PARTS_EXACT or low in rules.parts_names
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def parse(name: str) -> NameSignals:
+def parse(name: str, rules: ParserRules | None = None) -> NameSignals:
     """Analyse a single name string and return detected signals."""
-    return _parse_text(name)
+    return _parse_text(name, rules or _DEFAULT_RULES)
 
 
 def parse_folder(
     folder_path: str,
     filenames: list[str] | None = None,
     parent_names: list[str] | None = None,
+    rules: ParserRules | None = None,
 ) -> NameSignals:
     """
     Analyse a folder holistically:
@@ -188,27 +188,28 @@ def parse_folder(
       - parent folder names up to creator boundary (inherited scale)
     Returns a merged NameSignals with the best signals found.
     """
+    rules = rules or _DEFAULT_RULES
     folder_name = Path(folder_path).name
-    primary = _parse_text(folder_name)
+    primary = _parse_text(folder_name, rules)
 
     # Merge signals from file names
     if filenames:
         for fname in filenames:
             stem = Path(fname).stem
-            child = _parse_text(stem)
+            child = _parse_text(stem, rules)
             _merge_into(primary, child)
 
     # Merge signals from parent folders (lower priority — don't override
     # is_product/is_parts already set by the folder name itself)
     if parent_names:
         for pname in parent_names:
-            parent_sig = _parse_text(pname)
+            parent_sig = _parse_text(pname, rules)
             _merge_into(primary, parent_sig, scales_only=True)
 
     # Recalculate is_product / confidence after merging
     has_product_signal = bool(primary.scales or primary.types or primary.modifiers)
     lower = folder_name.lower().strip()
-    is_parts_exact = _is_parts_name(lower)
+    is_parts_exact = _is_parts_name(lower, rules)
     is_parts_pattern = any(p.search(lower) for p in _PARTS_PATTERNS)
 
     if is_parts_exact or is_parts_pattern:
@@ -230,12 +231,14 @@ def parse_folder(
     return primary
 
 
-def children_look_like_parts(child_names: list[str]) -> bool:
+def children_look_like_parts(
+    child_names: list[str], rules: ParserRules | None = None
+) -> bool:
     if not child_names:
         return False
     parts_count = sum(
         1 for n in child_names
-        if parse(n).is_parts or parse(n).confidence < 0.25
+        if parse(n, rules).is_parts or parse(n, rules).confidence < 0.25
     )
     return parts_count / len(child_names) >= 0.6
 
@@ -392,7 +395,7 @@ def is_container_folder(name: str) -> bool:
     return name.lower().strip() in _CONTAINER_EXACT
 
 
-def is_generic_name(name: str) -> bool:
+def is_generic_name(name: str, rules: ParserRules | None = None) -> bool:
     """True if `name` has no product identity of its own — every token is a
     parts/structural word ("Bases", "Base Supported", "Parts").
 
@@ -400,7 +403,7 @@ def is_generic_name(name: str) -> bool:
     release/product. Deliberately reuses is_structural_folder so the two stay in
     agreement; the distinction is only *where* the answer is applied.
     """
-    return bool(name.strip()) and is_structural_folder(name)
+    return bool(name.strip()) and is_structural_folder(name, rules)
 
 
 def qualifier_from_folder(folder_name: str) -> str:
@@ -613,7 +616,7 @@ def _strip_creator_suffix(key: str, creator_name: str) -> str:
     return stripped if stripped else key
 
 
-def is_structural_folder(name: str) -> bool:
+def is_structural_folder(name: str, rules: ParserRules | None = None) -> bool:
     """True if `name` is a structural/variant descriptor, not a character name.
 
     Catches support-status (presupport/supported/unsupported…), container folders
@@ -621,8 +624,9 @@ def is_structural_folder(name: str) -> bool:
     scale/type tokens (e.g. "75mm", "Bust", "1-10 Scale Split", and sized base
     folders like "Bases 25mm-32mm (Round+Square)").
     """
+    rules = rules or _DEFAULT_RULES
     low = name.lower().strip()
-    if low in _STRUCTURAL_EXACT or _is_parts_name(low):
+    if low in _STRUCTURAL_EXACT or _is_parts_name(low, rules):
         return True
     cleaned = re.sub(r"[\s_\-]+", "", _strip_signal_tokens(name)).lower()
     if cleaned in {"", "scale", "scalesplit", "split", "miniature", "mini"}:
@@ -660,7 +664,7 @@ def is_structural_folder(name: str) -> bool:
     tokens = [t for t in re.split(r"[\s_\-+()\[\]/,]+", low) if t]
     return bool(tokens) and all(
         t in _STRUCTURAL_EXACT
-        or _is_parts_name(t)
+        or _is_parts_name(t, rules)
         or t in _EXTRA
         or re.fullmatch(r"\d+mm", t)            # any mm scale, incl. unlisted sizes
         or not _strip_signal_tokens(t)
@@ -672,7 +676,7 @@ def is_structural_folder(name: str) -> bool:
 # Internals
 # ---------------------------------------------------------------------------
 
-def _parse_text(text: str) -> NameSignals:
+def _parse_text(text: str, rules: ParserRules) -> NameSignals:
     sig = NameSignals()
     lower = text.lower().strip()
 
@@ -699,7 +703,7 @@ def _parse_text(text: str) -> NameSignals:
             sig.types.append(tag)
 
     # User tag-inference rules (#31) — additive, after the built-ins.
-    for pattern, tag in _user_type_rules:
+    for pattern, tag in rules.tag_rules:
         if pattern.search(text) and tag not in sig.types:
             sig.types.append(tag)
 
@@ -708,7 +712,7 @@ def _parse_text(text: str) -> NameSignals:
             sig.modifiers.append(tag)
 
     has_signal = bool(sig.scales or sig.types or sig.modifiers)
-    is_parts_exact = _is_parts_name(lower)
+    is_parts_exact = _is_parts_name(lower, rules)
     is_parts_pattern = any(p.search(lower) for p in _PARTS_PATTERNS)
 
     if is_parts_exact or is_parts_pattern:

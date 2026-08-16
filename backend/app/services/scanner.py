@@ -163,27 +163,28 @@ class ScanRules:
       makes an opt-in split durable across rescans.
     * ``ignore`` — configurable folder/file ignore patterns (#31). The walk skips
       any folder it matches.
+    * ``parser_rules`` — the user's tag-inference and parts/structural folder
+      rules (#31), threaded into every ``name_parser`` call the walk makes
+      (STUDIO-363). Previously pushed into ``name_parser`` as module-level
+      global state by this classmethod as a side effect; now just another
+      field on this immutable, explicitly-passed context.
     """
 
     pack_overrides: frozenset[str] = frozenset()
     ignore: IgnoreMatcher = IgnoreMatcher(())
+    parser_rules: name_parser.ParserRules = name_parser.ParserRules()
 
     @classmethod
     def load(cls, db: Session) -> "ScanRules":
-        """Read this run's rules from the database.
-
-        Also pushes the user's tag-inference rules and parts/structural folder
-        names into the name parser (#31). Those remain module-level state owned by
-        ``services/name_parser``, so this constructor is NOT free of side effects
-        despite returning a value — it both builds the scanner's rules and mutates
-        another module. Removing that half is tracked as STUDIO-363; it was left
-        out of STUDIO-231 to keep the scanner-global removal reviewable on its own.
-        """
-        name_parser.set_tag_rules([(r.pattern, r.tag) for r in load_tag_rules(db)])
-        name_parser.set_parts_names(load_parts_names(db))
+        """Read this run's rules from the database. Free of side effects — the
+        returned value is the only thing this constructor produces."""
         return cls(
             pack_overrides=frozenset(row[0] for row in db.query(PackOverride.path)),
             ignore=load_ignore_matcher(db),
+            parser_rules=name_parser.ParserRules(
+                tag_rules=tuple((r.pattern, r.tag) for r in load_tag_rules(db)),
+                parts_names=load_parts_names(db),
+            ),
         )
 
 
@@ -1190,6 +1191,7 @@ def _walk_for_models(
         str(folder),
         filenames=filenames,
         parent_names=parent_names,
+        rules=rules.parser_rules,
     )
     product_boundary_split = False
 
@@ -1214,7 +1216,7 @@ def _walk_for_models(
     # Only a parts folder that directly contains the STLs (the actual
     # pre-supported pack shape: "AH - Carnivorex/STL/*.stl") qualifies.
     has_parts_child_with_stls = not has_direct_stls and any(
-        name_parser.parse(d.name).is_parts and _has_stls(d, recurse=False)
+        name_parser.parse(d.name, rules.parser_rules).is_parts and _has_stls(d, recurse=False)
         for d in child_dirs
     )
 
@@ -1239,6 +1241,7 @@ def _walk_for_models(
                 child_filenames = []
             child_signals = name_parser.parse_folder(
                 str(child), filenames=child_filenames, parent_names=None,
+                rules=rules.parser_rules,
             )
             if child_signals.is_product or _is_nested_variant_boundary(child.name):
                 boundary_children.append(child)
@@ -1247,7 +1250,8 @@ def _walk_for_models(
             _index_model(folder, creator, db, creator_boundary, character,
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
                          layout_tags=layout_tags, is_inbox=is_inbox,
-                         boundary_is_product=boundary_is_product)
+                         boundary_is_product=boundary_is_product,
+                         parser_rules=rules.parser_rules)
             return
 
         boundary_keys = {str(child) for child in boundary_children}
@@ -1266,6 +1270,7 @@ def _walk_for_models(
                 layout_tags=layout_tags, is_inbox=is_inbox,
                 excluded_stl_subtrees=boundary_children,
                 boundary_is_product=boundary_is_product,
+                parser_rules=rules.parser_rules,
             )
 
         # Only recurse into the independently qualifying boundaries. Other
@@ -1276,11 +1281,12 @@ def _walk_for_models(
     # --- Step 2: has STLs + children look like parts ---
     if not product_boundary_split and not is_creator_root and has_any_stls:
         child_names = [d.name for d in child_dirs]
-        if has_direct_stls and name_parser.children_look_like_parts(child_names):
+        if has_direct_stls and name_parser.children_look_like_parts(child_names, rules.parser_rules):
             _index_model(folder, creator, db, creator_boundary, character,
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
                          layout_tags=layout_tags, is_inbox=is_inbox,
-                         boundary_is_product=boundary_is_product)
+                         boundary_is_product=boundary_is_product,
+                         parser_rules=rules.parser_rules)
             return
 
     # --- Step 3: deepest fallback — STLs here, nothing below ---
@@ -1301,7 +1307,8 @@ def _walk_for_models(
         _index_model(folder, creator, db, creator_boundary, character,
                      stl_cache, auto_signals=signals, last_scanned=last_scanned,
                      layout_tags=layout_tags, is_inbox=is_inbox,
-                     boundary_is_product=boundary_is_product)
+                     boundary_is_product=boundary_is_product,
+                     parser_rules=rules.parser_rules)
         return
 
     # Not a leaf — recurse. Decide the variant-grouping "character" for each child by
@@ -1314,8 +1321,8 @@ def _walk_for_models(
     # buckets, which never carry product identity).
     keys: dict[str, str] = {}
     for c in child_dirs:
-        if (name_parser.parse(c.name).is_parts
-                or name_parser.is_structural_folder(c.name)
+        if (name_parser.parse(c.name, rules.parser_rules).is_parts
+                or name_parser.is_structural_folder(c.name, rules.parser_rules)
                 or _is_nested_variant_boundary(c.name)):
             continue
         keys[c.name] = name_parser.character_key(c.name, creator.name)
@@ -1331,7 +1338,7 @@ def _walk_for_models(
     own_character = character
     if (not is_creator_root
             and not signals.is_parts
-            and not name_parser.is_structural_folder(folder.name)
+            and not name_parser.is_structural_folder(folder.name, rules.parser_rules)
             and not _is_nested_variant_boundary(folder.name)
             and name_parser.character_key(folder.name, creator.name)):
         own_character = folder.name
@@ -1464,6 +1471,7 @@ def _index_model(
     is_inbox: bool = False,
     excluded_stl_subtrees: list[Path] | None = None,
     boundary_is_product: bool = False,
+    parser_rules: name_parser.ParserRules = name_parser.ParserRules(),
 ):
     folder_path = str(folder)
 
@@ -1570,7 +1578,7 @@ def _index_model(
         # subtrees. Preferring the character named "RPG Bases/RPG Bases Supported"
         # after an unrelated sibling release (STUDIO-289). The character remains the
         # fallback for layouts where no ancestor qualifies.
-        if (name_parser.is_structural_folder(folder.name)
+        if (name_parser.is_structural_folder(folder.name, parser_rules)
                 or _is_nested_variant_boundary(folder.name)):
             product = None
             top_level = None          # last ancestor before the creator boundary
@@ -1580,7 +1588,7 @@ def _index_model(
                 if name_parser.is_container_folder(anc.name):
                     continue
                 top_level = anc.name
-                if not name_parser.is_structural_folder(anc.name):
+                if not name_parser.is_structural_folder(anc.name, parser_rules):
                     product = anc.name
                     break
             # No ancestor reads as a product by its words alone. A folder sitting
@@ -1598,7 +1606,7 @@ def _index_model(
         # "Bases" in one variant group. Qualify it with the owning release/product
         # instead. Only fires when the derived name is generic, so a correctly
         # derived name ("Gridrunner") never enters this branch. (STUDIO-287)
-        if name_parser.is_generic_name(clean_name):
+        if name_parser.is_generic_name(clean_name, parser_rules):
             for anc in folder.parents:
                 if anc == creator_boundary or anc == anc.parent:
                     break
@@ -2503,6 +2511,7 @@ def _inbox_scan(
                     character=None,
                     stl_cache={},
                     is_inbox=True,
+                    parser_rules=rules.parser_rules,
                 )
             else:
                 # Creator-structure layout: each immediate subdir with STLs is a creator
