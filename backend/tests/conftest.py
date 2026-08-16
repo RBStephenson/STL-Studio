@@ -111,6 +111,18 @@ def set_reorganize_enabled(db, enabled: bool) -> None:
     db.commit()
 
 
+def set_installer_enabled(db, enabled: bool) -> None:
+    """Set the `installer_enabled` feature-flag app-setting for tests
+    (STUDIO-101/387)."""
+    from app.models import AppSetting
+    row = db.get(AppSetting, "installer_enabled")
+    if row is None:
+        db.add(AppSetting(key="installer_enabled", value=enabled))
+    else:
+        row.value = enabled
+    db.commit()
+
+
 def make_model(
     db,
     creator: Creator,
