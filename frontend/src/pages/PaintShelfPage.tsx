@@ -4,7 +4,7 @@ import {
   Palette, Plus, Search, Pencil, Trash2, X, Upload, Download, Pipette, FileUp,
 } from "lucide-react";
 import {
-  api, ExtractedSwatch, ImportDiff, Paint, PaintBrand, PaintCreate, PaintFinish, PAINT_FINISHES,
+  api, ImportDiff, Paint, PaintBrand, PaintCreate, PaintFinish, PAINT_FINISHES, SwatchColorMatch, SwatchMatchCandidate,
 } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
@@ -144,37 +144,37 @@ function PaintForm({ brands, initial, onSubmit, onCancel, busy, error }: {
   );
 }
 
-/** One extracted swatch, editable client-side before it's bulk-added. `key` is a
- * client-only React/removal identity, independent of anything server-side. */
+/** One extracted swatch matched against the shelf by name (STUDIO-383). `key`
+ * is a client-only React/removal identity, independent of anything
+ * server-side. `selectedPaintId` is the paint this row will set the color
+ * on — auto-set when there's exactly one candidate, null when there's no
+ * match or an ambiguous match still needs picking. */
 interface SwatchRow {
   key: number;
   name: string;
   code: string;
   hex: string;
+  candidates: SwatchMatchCandidate[];
+  selectedPaintId: number | null;
 }
 
 /**
- * Review/edit modal for a chart-extraction result (STUDIO-334). Nothing is
- * written until Import — mirrors the CSV import-diff modal's
- * review-before-commit shape.
+ * Review modal for a chart-extraction result (STUDIO-383). Each swatch is
+ * matched to an existing shelf paint by name — nothing new is created here,
+ * confirming just fills in the matched paint's color. Mirrors the CSV
+ * import-diff modal's review-before-commit shape.
  */
 function SwatchImportModal({
-  brands, rows, onChangeRows, lineId, onChangeLineId, onCancel, onSubmit, busy, error,
+  rows, onChangeRows, lineById, onCancel, onSubmit, busy, error,
 }: {
-  brands: PaintBrand[];
   rows: SwatchRow[];
   onChangeRows: (rows: SwatchRow[]) => void;
-  lineId: string;
-  onChangeLineId: (id: string) => void;
+  lineById: Map<number, { brand: string; line: string }>;
   onCancel: () => void;
   onSubmit: () => void;
   busy: boolean;
   error?: string | null;
 }) {
-  const lineOptions = brands.flatMap((b) =>
-    b.lines.map((l) => ({ id: l.id, label: `${b.name} — ${l.name}` }))
-  );
-
   const updateRow = (key: number, patch: Partial<SwatchRow>) => {
     onChangeRows(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   };
@@ -182,13 +182,19 @@ function SwatchImportModal({
     onChangeRows(rows.filter((r) => r.key !== key));
   };
 
+  const candidateLabel = (c: SwatchMatchCandidate) => {
+    const info = lineById.get(c.paint_line_id);
+    return `${info ? `${info.brand} — ${info.line} — ` : ""}${c.name} (${c.code})`;
+  };
+
   const inputCls = "bg-panel border border-border rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-accent-start w-full";
+  const resolvedCount = rows.filter((r) => r.selectedPaintId != null).length;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" data-testid="swatch-import-modal">
       <div className="bg-panel border border-border rounded-lg w-full max-w-3xl max-h-[85vh] flex flex-col">
         <div className="px-5 py-4 border-b border-border-subtle flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Review swatch import</h2>
+          <h2 className="text-lg font-semibold text-white">Review swatch matches</h2>
           <button onClick={onCancel} className="text-text-secondary-alt hover:text-text-primary-alt2">
             <X size={18} />
           </button>
@@ -200,53 +206,27 @@ function SwatchImportModal({
             </p>
           )}
           <p className="text-sm text-text-secondary mb-3">
-            {rows.length} suggestion{rows.length === 1 ? "" : "s"} found. Edit or remove any before importing —
-            nothing is added to the shelf until you confirm.
+            {rows.length} swatch{rows.length === 1 ? "" : "es"} found, matched to your shelf by name — nothing
+            new is created. Pick a paint where a name matches more than one, or remove/skip rows with no match.
           </p>
-          <label className="flex flex-col gap-1 text-xs text-text-secondary-alt mb-4 max-w-xs">
-            Paint line
-            <select
-              required
-              aria-label="Paint line"
-              value={lineId}
-              onChange={(e) => onChangeLineId(e.target.value)}
-              className={inputCls}
-            >
-              <option value="">Select a line…</option>
-              {lineOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
-          </label>
 
           {rows.length === 0 ? (
-            <p className="text-sm text-text-muted">All suggestions removed — nothing left to import.</p>
+            <p className="text-sm text-text-muted">All suggestions removed — nothing left to apply.</p>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-text-secondary-alt uppercase tracking-wider border-b border-border-subtle">
-                  <th className="py-1.5 pr-2">Name</th>
-                  <th className="py-1.5 pr-2 w-24">Code</th>
-                  <th className="py-1.5 pr-2 w-32">Color</th>
+                  <th className="py-1.5 pr-2">Chart name</th>
+                  <th className="py-1.5 pr-2 w-28">Color</th>
+                  <th className="py-1.5 pr-2">Matched paint</th>
                   <th className="py-1.5 w-8"></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.key} className="border-b border-border-subtle last:border-0">
-                    <td className="py-1.5 pr-2">
-                      <input
-                        aria-label="Name"
-                        value={r.name}
-                        onChange={(e) => updateRow(r.key, { name: e.target.value })}
-                        className={inputCls}
-                      />
-                    </td>
-                    <td className="py-1.5 pr-2">
-                      <input
-                        aria-label="Code"
-                        value={r.code}
-                        onChange={(e) => updateRow(r.key, { code: e.target.value })}
-                        className={inputCls}
-                      />
+                  <tr key={r.key} className={`border-b border-border-subtle last:border-0 ${r.candidates.length === 0 ? "opacity-50" : ""}`}>
+                    <td className="py-1.5 pr-2 text-text-primary-alt">
+                      {r.name}{r.code && <span className="text-text-muted font-mono text-xs"> ({r.code})</span>}
                     </td>
                     <td className="py-1.5 pr-2">
                       <div className="flex items-center gap-1">
@@ -265,6 +245,25 @@ function SwatchImportModal({
                         />
                       </div>
                     </td>
+                    <td className="py-1.5 pr-2">
+                      {r.candidates.length === 0 ? (
+                        <span className="text-xs text-rose-400">No match on the shelf</span>
+                      ) : r.candidates.length === 1 ? (
+                        <span className="text-xs text-emerald-400">{candidateLabel(r.candidates[0])}</span>
+                      ) : (
+                        <select
+                          aria-label={`Matched paint for ${r.name}`}
+                          value={r.selectedPaintId ?? ""}
+                          onChange={(e) => updateRow(r.key, { selectedPaintId: e.target.value ? Number(e.target.value) : null })}
+                          className={inputCls}
+                        >
+                          <option value="">Pick a match…</option>
+                          {r.candidates.map((c) => (
+                            <option key={c.paint_id} value={c.paint_id}>{candidateLabel(c)}</option>
+                          ))}
+                        </select>
+                      )}
+                    </td>
                     <td className="py-1.5">
                       <button onClick={() => removeRow(r.key)} title="Remove" className="p-1 rounded text-text-secondary hover:text-red-300 hover:bg-panel-secondary">
                         <Trash2 size={13} />
@@ -282,10 +281,10 @@ function SwatchImportModal({
           </button>
           <button
             onClick={onSubmit}
-            disabled={busy || rows.length === 0 || !lineId}
+            disabled={busy || resolvedCount === 0}
             className="bg-accent-end hover:bg-accent-start disabled:opacity-50 text-white text-sm px-4 py-1.5 rounded transition-colors"
           >
-            {busy ? "Importing…" : `Import ${rows.length} paint${rows.length === 1 ? "" : "s"}`}
+            {busy ? "Setting colors…" : `Set ${resolvedCount} color${resolvedCount === 1 ? "" : "s"}`}
           </button>
         </div>
       </div>
@@ -377,12 +376,18 @@ export default function PaintShelfPage() {
   const swatchRowKeyRef = useRef(0);
   const [swatchExtracting, setSwatchExtracting] = useState(false);
   const [swatchRows, setSwatchRows] = useState<SwatchRow[] | null>(null); // non-null = modal open
-  const [swatchLineId, setSwatchLineId] = useState("");
   const [swatchImporting, setSwatchImporting] = useState(false);
   const [swatchError, setSwatchError] = useState<string | null>(null);
 
-  const toSwatchRows = (swatches: ExtractedSwatch[]): SwatchRow[] =>
-    swatches.map((s) => ({ key: swatchRowKeyRef.current++, name: s.name, code: s.code ?? "", hex: s.hex }));
+  const toSwatchRows = (matches: SwatchColorMatch[]): SwatchRow[] =>
+    matches.map((m) => ({
+      key: swatchRowKeyRef.current++,
+      name: m.name,
+      code: m.code ?? "",
+      hex: m.hex,
+      candidates: m.candidates,
+      selectedPaintId: m.candidates.length === 1 ? m.candidates[0].paint_id : null,
+    }));
 
   const startSwatchImport = async (file: File) => {
     setSwatchExtracting(true);
@@ -393,9 +398,9 @@ export default function PaintShelfPage() {
       } else if (res.swatches.length === 0) {
         toast("No swatches found in this chart.", "error");
       } else {
-        setSwatchLineId("");
+        const matchRes = await api.painting.paints.matchColors(res.swatches);
         setSwatchError(null);
-        setSwatchRows(toSwatchRows(res.swatches));
+        setSwatchRows(toSwatchRows(matchRes.matches));
       }
     } catch (e) {
       toast(errMsg(e) || "Could not read that chart.", "error");
@@ -405,26 +410,20 @@ export default function PaintShelfPage() {
   };
 
   const confirmSwatchImport = async () => {
-    if (!swatchRows || !swatchLineId) return;
+    if (!swatchRows) return;
+    const items = swatchRows
+      .filter((r): r is SwatchRow & { selectedPaintId: number } => r.selectedPaintId != null)
+      .map((r) => ({ paint_id: r.selectedPaintId, hex: r.hex.trim() }));
+    if (items.length === 0) return;
     setSwatchImporting(true);
     setSwatchError(null);
     try {
-      const result = await api.painting.paints.bulkImport({
-        paint_line_id: Number(swatchLineId),
-        items: swatchRows.map((r) => ({
-          name: r.name.trim(),
-          code: r.code.trim() || undefined,
-          hex: r.hex.trim() || undefined,
-          finish: "matte",
-          owned: true,
-        })),
-      });
-      const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : "";
-      toast(`Imported ${result.created.length} paint${result.created.length === 1 ? "" : "s"}${skippedNote}.`, "success");
+      const result = await api.painting.paints.bulkSetColors(items);
+      toast(`Set color for ${result.updated} paint${result.updated === 1 ? "" : "s"}.`, "success");
       setSwatchRows(null);
       fetchPaints();
     } catch (e) {
-      setSwatchError(errMsg(e) || "Could not import these paints.");
+      setSwatchError(errMsg(e) || "Could not set these colors.");
     } finally {
       setSwatchImporting(false);
     }
@@ -955,14 +954,12 @@ export default function PaintShelfPage() {
         </div>
       )}
 
-      {/* Swatch-chart import review modal — nothing is added until Import */}
+      {/* Swatch-chart match review modal — nothing is set until confirmed */}
       {swatchRows && (
         <SwatchImportModal
-          brands={brands}
           rows={swatchRows}
           onChangeRows={setSwatchRows}
-          lineId={swatchLineId}
-          onChangeLineId={setSwatchLineId}
+          lineById={lineById}
           onCancel={() => setSwatchRows(null)}
           onSubmit={confirmSwatchImport}
           busy={swatchImporting}

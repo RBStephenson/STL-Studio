@@ -392,3 +392,150 @@ class TestBulkImport:
             "items": [{"name": "Coal Black", "code": "009"}],
         })
         assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# match-colors / bulk-set-colors (STUDIO-383)
+# ---------------------------------------------------------------------------
+
+
+def _make_paint(db, line, **over):
+    from app.painting.models import Paint
+    from app.painting.schemas import derive_matchable
+
+    body = {"code": "009", "name": "Coal Black", "hex": None, "finish": "matte", **over}
+    paint = Paint(
+        paint_line_id=line.id,
+        code=body["code"], name=body["name"], hex=body["hex"], finish=body["finish"],
+        matchable=derive_matchable(body["finish"]), owned=True,
+    )
+    db.add(paint)
+    db.commit()
+    db.refresh(paint)
+    return paint
+
+
+class TestMatchColorsFlag:
+    def test_403_when_flag_off(self, client, db):
+        r = client.post("/painting/paints/match-colors", json={
+            "swatches": [{"name": "Coal Black", "code": "009", "hex": "#199933"}],
+        })
+        assert r.status_code == 403
+
+
+class TestMatchColors:
+    def test_exact_match_case_insensitive(self, client, db):
+        _enable_import(db)
+        line = _make_line(db)
+        paint = _make_paint(db, line, name="Coal Black")
+
+        r = client.post("/painting/paints/match-colors", json={
+            "swatches": [{"name": "coal black", "code": "009", "hex": "#199933"}],
+        })
+        assert r.status_code == 200
+        matches = r.json()["matches"]
+        assert len(matches) == 1
+        assert len(matches[0]["candidates"]) == 1
+        assert matches[0]["candidates"][0]["paint_id"] == paint.id
+
+    def test_no_existing_paint_returns_empty_candidates(self, client, db):
+        _enable_import(db)
+        r = client.post("/painting/paints/match-colors", json={
+            "swatches": [{"name": "Ghost Color", "code": None, "hex": "#199933"}],
+        })
+        assert r.status_code == 200
+        assert r.json()["matches"][0]["candidates"] == []
+
+    def test_same_name_across_lines_returns_all_candidates(self, client, db):
+        _enable_import(db)
+        line_a = _make_line(db)
+        line_b = PaintLine(brand_id=line_a.brand_id, name="Pro Acryl Metallics")
+        db.add(line_b)
+        db.commit()
+        p1 = _make_paint(db, line_a, name="Coal Black", code="009")
+        p2 = _make_paint(db, line_b, name="Coal Black", code="M09")
+
+        r = client.post("/painting/paints/match-colors", json={
+            "swatches": [{"name": "Coal Black", "code": None, "hex": "#199933"}],
+        })
+        candidate_ids = {c["paint_id"] for c in r.json()["matches"][0]["candidates"]}
+        assert candidate_ids == {p1.id, p2.id}
+
+    def test_whitespace_trimmed_before_matching(self, client, db):
+        _enable_import(db)
+        line = _make_line(db)
+        paint = _make_paint(db, line, name="Coal Black")
+
+        r = client.post("/painting/paints/match-colors", json={
+            "swatches": [{"name": "  Coal Black  ", "code": None, "hex": "#199933"}],
+        })
+        assert r.json()["matches"][0]["candidates"][0]["paint_id"] == paint.id
+
+    def test_response_is_positional_to_request(self, client, db):
+        _enable_import(db)
+        line = _make_line(db)
+        _make_paint(db, line, name="Coal Black")
+
+        r = client.post("/painting/paints/match-colors", json={
+            "swatches": [
+                {"name": "Ghost Color", "code": None, "hex": "#111111"},
+                {"name": "Coal Black", "code": None, "hex": "#199933"},
+            ],
+        })
+        matches = r.json()["matches"]
+        assert matches[0]["name"] == "Ghost Color"
+        assert matches[0]["candidates"] == []
+        assert matches[1]["name"] == "Coal Black"
+        assert len(matches[1]["candidates"]) == 1
+
+
+class TestBulkSetColorsFlag:
+    def test_403_when_flag_off(self, client, db):
+        line = _make_line(db)
+        paint = _make_paint(db, line)
+        r = client.post("/painting/paints/bulk-set-colors", json={
+            "items": [{"paint_id": paint.id, "hex": "#199933"}],
+        })
+        assert r.status_code == 403
+
+
+class TestBulkSetColors:
+    def test_sets_hex_on_existing_paint(self, client, db):
+        _enable_import(db)
+        line = _make_line(db)
+        paint = _make_paint(db, line, hex=None)
+
+        r = client.post("/painting/paints/bulk-set-colors", json={
+            "items": [{"paint_id": paint.id, "hex": "#199933"}],
+        })
+        assert r.status_code == 200
+        assert r.json() == {"updated": 1}
+        assert client.get(f"/painting/paints/{paint.id}").json()["hex"] == "#199933"
+
+    def test_unknown_id_silently_skipped(self, client, db):
+        _enable_import(db)
+        line = _make_line(db)
+        paint = _make_paint(db, line, hex=None)
+
+        r = client.post("/painting/paints/bulk-set-colors", json={
+            "items": [
+                {"paint_id": paint.id, "hex": "#199933"},
+                {"paint_id": 999999, "hex": "#111111"},
+            ],
+        })
+        assert r.status_code == 200
+        assert r.json() == {"updated": 1}
+
+    def test_empty_items_rejected_422(self, client, db):
+        _enable_import(db)
+        r = client.post("/painting/paints/bulk-set-colors", json={"items": []})
+        assert r.status_code == 422
+
+    def test_bad_hex_rejected_422(self, client, db):
+        _enable_import(db)
+        line = _make_line(db)
+        paint = _make_paint(db, line)
+        r = client.post("/painting/paints/bulk-set-colors", json={
+            "items": [{"paint_id": paint.id, "hex": "not-a-hex"}],
+        })
+        assert r.status_code == 422

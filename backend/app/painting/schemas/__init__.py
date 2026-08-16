@@ -760,6 +760,57 @@ class BulkDeletePaintsResult(BaseModel):
     skipped: list[BulkDeletePaintsSkip] = []
 
 
+class SwatchMatchCandidate(BaseModel):
+    """An existing shelf paint whose name matches an extracted swatch's name
+    (case-insensitive, exact). Brand/line labels aren't included — the
+    frontend already has `brands` loaded and can derive them from
+    `paint_line_id`. Named distinctly from Color-Match Studio's own
+    `ColorMatchCandidate` (a different feature, sampled-region paint
+    suggestions) to avoid a same-name class collision in this module."""
+    paint_id: int
+    paint_line_id: int
+    name: str
+    code: str
+    hex: Optional[str] = None
+
+
+class MatchColorsRequest(BaseModel):
+    swatches: list[ExtractedSwatch] = Field(min_length=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class SwatchColorMatch(BaseModel):
+    """One extracted swatch paired with its match candidates. Positional —
+    `matches[i]` in the response corresponds to `swatches[i]` in the request.
+    Empty `candidates` means no existing paint shares this name."""
+    name: str
+    code: Optional[str] = None
+    hex: str
+    candidates: list[SwatchMatchCandidate] = []
+
+
+class MatchColorsResponse(BaseModel):
+    matches: list[SwatchColorMatch]
+
+
+class SetColorItem(BaseModel):
+    paint_id: int
+    hex: str = Field(pattern=HEX_PATTERN)
+
+    model_config = {"extra": "forbid"}
+
+
+class BulkSetColorsRequest(BaseModel):
+    items: list[SetColorItem] = Field(min_length=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class BulkSetColorsResult(BaseModel):
+    updated: int
+
+
 # --- Categories & series ---------------------------------------------------
 
 class CategoryCreate(BaseModel):
