@@ -52,6 +52,32 @@ describe("LibraryTab reorganize feature flag", () => {
   });
 });
 
+describe("LibraryTab installer feature flag (STUDIO-389)", () => {
+  beforeEach(() => {
+    settings = mkSettings();
+    vi.clearAllMocks();
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
+  });
+
+  it("renders the STL Installer toggle reflecting the current flag state", () => {
+    settings = mkSettings({ installer_enabled: false });
+    const { unmount } = renderTab();
+    expect(screen.getByRole("checkbox", { name: /enable stl installer/i })).not.toBeChecked();
+    unmount();
+
+    settings = mkSettings({ installer_enabled: true });
+    renderTab();
+    expect(screen.getByRole("checkbox", { name: /enable stl installer/i })).toBeChecked();
+  });
+
+  it("toggling the flag on persists installer_enabled=true", async () => {
+    settings = mkSettings({ installer_enabled: false });
+    renderTab();
+    await userEvent.click(screen.getByRole("checkbox", { name: /enable stl installer/i }));
+    expect(updateMock).toHaveBeenCalledWith({ installer_enabled: true });
+  });
+});
+
 describe("LibraryTab hierarchy variant grouping setting", () => {
   beforeEach(() => {
     settings = mkSettings();

@@ -5,6 +5,7 @@ import type {
   ImportApplyStart,
   ImportApplyStatus,
   ImportPreview,
+  InstallResult,
   SourceContents,
   SourceMapping,
 } from "./types";
@@ -45,4 +46,10 @@ export const importApi = {
       body: JSON.stringify({ pack_path: packPath, image_urls: imageUrls }),
     }),
   downloadImagesStatus: () => request<DownloadImagesStatus>("/import/download-images/status"),
+  install: (source: string, libraryId: number, creator: string, character: string) =>
+    request<InstallResult>("/import/install", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, library_id: libraryId, creator, character }),
+    }),
 };

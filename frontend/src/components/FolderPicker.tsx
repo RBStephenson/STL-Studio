@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, Folder, HardDrive, ArrowUp, Check, Loader2, AlertCircle } from "lucide-react";
+import { X, Folder, HardDrive, ArrowUp, Check, Loader2, AlertCircle, FileArchive } from "lucide-react";
 import { api, DirListing } from "../api/client";
 
 interface Props {
@@ -7,9 +7,13 @@ interface Props {
   onClose: () => void;
   mode?: string; // passed to /scan/browse — "inbox" uses bootstrap allowlist
   initialPath?: string;
+  // Comma-separated extensions (e.g. "zip") to also list as selectable file
+  // entries alongside folders — a single click on a file entry selects it
+  // immediately, unlike a folder which navigates in (STUDIO-389).
+  fileExtensions?: string;
 }
 
-export default function FolderPicker({ onSelect, onClose, mode, initialPath }: Props) {
+export default function FolderPicker({ onSelect, onClose, mode, initialPath, fileExtensions }: Props) {
   const [listing, setListing] = useState<DirListing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,11 +22,11 @@ export default function FolderPicker({ onSelect, onClose, mode, initialPath }: P
     setLoading(true);
     setError(null);
     api.scan
-      .browse(path, mode)
+      .browse(path, mode, fileExtensions)
       .then(setListing)
       .catch(() => setError("Can't open that folder (permission denied or unavailable)."))
       .finally(() => setLoading(false));
-  }, [mode]);
+  }, [mode, fileExtensions]);
 
   useEffect(() => { browse(initialPath); }, [browse, initialPath]);
 
@@ -35,7 +39,7 @@ export default function FolderPicker({ onSelect, onClose, mode, initialPath }: P
       <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-          <h2 className="font-semibold text-gray-100">Choose a folder</h2>
+          <h2 className="font-semibold text-gray-100">{fileExtensions ? "Choose a folder or file" : "Choose a folder"}</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300">
             <X size={18} />
           </button>
@@ -77,13 +81,15 @@ export default function FolderPicker({ onSelect, onClose, mode, initialPath }: P
               {listing?.entries.map((e) => (
                 <button
                   key={e.path}
-                  onClick={() => browse(e.path)}
+                  onClick={() => (e.is_dir ? browse(e.path) : onSelect(e.path))}
                   className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-gray-800 text-left text-sm text-gray-200 transition-colors"
                 >
                   {atDriveList ? (
                     <HardDrive size={15} className="text-indigo-400 shrink-0" />
-                  ) : (
+                  ) : e.is_dir ? (
                     <Folder size={15} className="text-indigo-400 shrink-0" />
+                  ) : (
+                    <FileArchive size={15} className="text-amber-400 shrink-0" />
                   )}
                   <span className="truncate font-mono">{e.name}</span>
                 </button>
@@ -95,7 +101,9 @@ export default function FolderPicker({ onSelect, onClose, mode, initialPath }: P
         {/* Footer */}
         <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-gray-800">
           <span className="text-xs text-gray-600">
-            Navigate into the folder you want, then select it.
+            {fileExtensions
+              ? "Click a file to select it, or navigate into a folder and select it below."
+              : "Navigate into the folder you want, then select it."}
           </span>
           <div className="flex gap-2">
             <button onClick={onClose} className="px-4 py-2 rounded bg-gray-800 hover:bg-gray-700 text-sm text-gray-300">

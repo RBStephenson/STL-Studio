@@ -532,6 +532,25 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             </div>
           </label>
         </div>
+
+        <label className="flex items-start gap-3 cursor-pointer select-none mb-4 mt-4">
+          <input
+            type="checkbox"
+            checked={settings.installer_enabled}
+            onChange={() => update({ installer_enabled: !settings.installer_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-text-primary-alt2">Enable STL Installer (Experimental)</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              Off by default. When on, "Install" appears in the nav so you can extract a
+              ZIP or copy a folder straight into a library as{" "}
+              <code className="text-text-secondary">creator/character</code>, skipping the
+              manual download→extract→move→scan flow. A read-only deployment (e.g. Docker
+              mounts) still can't write regardless.
+            </p>
+          </div>
+        </label>
       </section>
 
       </div>

@@ -30,6 +30,7 @@ export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
   reorganize_slugify: true,
   reorganize_slugify_filenames: false,
   reorganize_enabled: false,
+  installer_enabled: false,
   reorganize_package_mode_enabled: false,
   reorganize_ai_suggestions_enabled: false,
   hierarchy_variant_grouping_enabled: false,

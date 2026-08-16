@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Box, FolderOpen, Users, LayoutGrid, EyeOff, Eye, AlertTriangle, Settings, Printer, HelpCircle, Paintbrush, Palette, Tag, Inbox } from "lucide-react";
+import { Box, FolderOpen, Users, LayoutGrid, EyeOff, Eye, AlertTriangle, Settings, Printer, HelpCircle, Paintbrush, Palette, Tag, Inbox, PackagePlus } from "lucide-react";
 import { useNSFW } from "../context/NSFWContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { api } from "../api/client";
@@ -38,6 +38,9 @@ export default function Navbar() {
     { to: "/queue",       label: "Queue",       icon: Printer,       badge: queueCount },
     { to: "/triage",      label: "Triage",      icon: AlertTriangle, badge: reviewCount },
     { to: "/import",      label: "Import",      icon: Inbox,         badge: null },
+    ...(appSettings.installer_enabled ? [
+      { to: "/install", label: "Install", icon: PackagePlus, badge: null },
+    ] : []),
     // Paint Shelf is standalone paint inventory — always available (#516).
     // Only Guides (and future AI) gate on the painting-guides flag.
     ...(appSettings.painting_guides_enabled ? [

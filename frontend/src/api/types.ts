@@ -180,6 +180,14 @@ export interface SourceMapping {
   library_id: number;
 }
 
+export interface InstallResult {
+  dest: string;
+  creator_id: number;
+  creator: string;
+  file_count: number;
+  total_bytes: number;
+}
+
 export interface ImportApplyIneligible {
   model_id: number;
   proposed_dir: string;
@@ -287,6 +295,9 @@ export interface AppSettings {
   // Feature flag: gates the Reorganize Library feature end-to-end (UI + the
   // destructive apply/undo writes). Off by default; toggled on the Library tab.
   reorganize_enabled: boolean;
+  // Feature flag: gates the STL Installer end-to-end (UI + POST /import/install).
+  // Off by default; toggled on the Library tab (STUDIO-101/387/389).
+  installer_enabled: boolean;
   // Preserve complete release/package subtrees beneath the normalized
   // creator/character prefix. Off by default.
   reorganize_package_mode_enabled: boolean;
@@ -997,6 +1008,7 @@ export interface GuideImportResult {
 export interface DirEntry {
   name: string;
   path: string;
+  is_dir: boolean;
 }
 
 export interface DirListing {

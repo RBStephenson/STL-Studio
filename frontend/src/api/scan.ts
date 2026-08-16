@@ -7,10 +7,11 @@ export const scanApi = {
     request<ScanStatus>(`/scan/creator/${creatorId}`, { method: "POST" }),
   cancel: () => request<{ ok: boolean }>("/scan/cancel", { method: "POST" }),
   status: () => request<ScanStatus>("/scan/status"),
-  browse: (path?: string, mode?: string) => {
+  browse: (path?: string, mode?: string, fileExtensions?: string) => {
     const params = new URLSearchParams();
     if (path) params.set("path", path);
     if (mode) params.set("mode", mode);
+    if (fileExtensions) params.set("file_extensions", fileExtensions);
     const qs = params.toString();
     return request<DirListing>(`/scan/browse${qs ? `?${qs}` : ""}`);
   },

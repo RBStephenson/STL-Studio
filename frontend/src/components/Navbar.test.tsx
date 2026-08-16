@@ -63,6 +63,30 @@ describe("Navbar – painting nav gating (#180/#181)", () => {
   });
 });
 
+describe("Navbar – installer nav gating (STUDIO-389)", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("hides Install when the installer flag is disabled", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ installer_enabled: false }));
+
+    renderNavbar();
+
+    expect(await screen.findByText("Import")).toBeInTheDocument();
+    expect(screen.queryByText("Install")).toBeNull();
+  });
+
+  it("shows Install linking to /install when the installer flag is enabled", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ installer_enabled: true }));
+
+    renderNavbar();
+
+    expect(await screen.findByText("Install")).toBeInTheDocument();
+    expect(screen.getByText("Install").closest("a")).toHaveAttribute("href", "/install");
+  });
+});
+
 describe("Navbar – badge counts stay fresh (#543)", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
