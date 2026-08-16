@@ -63,12 +63,21 @@ def _bootstrap_roots() -> list[Path]:
 
 
 @router.get("/browse")
-def browse_dirs(path: str = "", mode: str = "", db: Session = Depends(get_db)):
+def browse_dirs(path: str = "", mode: str = "", file_extensions: str = "", db: Session = Depends(get_db)):
     """List sub-directories for the Settings folder picker.
 
     With no path: Windows returns available drive letters; other OSes start at
     the user's home directory. Otherwise returns the immediate sub-folders of
-    `path`, plus its parent (for an "up" button). Directories only — never files.
+    `path`, plus its parent (for an "up" button). Directories only by default.
+
+    ``file_extensions`` (STUDIO-389): a comma-separated list (e.g. "zip") of
+    extensions to also include as selectable file entries alongside folders —
+    for the STL Installer's zip-or-folder source picker, so a specific archive
+    can be selected through the same allowlist-guarded, deployment-agnostic
+    browser rather than a platform-specific native file dialog (Electron-only,
+    would not work in the Docker/web deployment this app also serves). Every
+    entry carries ``is_dir`` so the frontend can tell "navigate into" from
+    "select this" without inferring it from the name.
 
     Browsing is always restricted to an allowlist: the configured scan roots
     once any exist, otherwise a small bootstrap set of safe top-level locations
@@ -89,6 +98,8 @@ def browse_dirs(path: str = "", mode: str = "", db: Session = Depends(get_db)):
     # Windows, home + mounts on Unix), same as the first-run picker.
     allowlist = _bootstrap_roots() if mode == "inbox" else (roots + _bootstrap_roots())
 
+    exts = {e.strip().lower().lstrip(".") for e in file_extensions.split(",") if e.strip()}
+
     # Top level — drive list on Windows, home dir elsewhere.
     if not path:
         if system == "Windows":
@@ -97,7 +108,7 @@ def browse_dirs(path: str = "", mode: str = "", db: Session = Depends(get_db)):
                 "path": "",
                 "parent": None,
                 "is_drive_list": True,
-                "entries": [{"name": d, "path": d} for d in drives],
+                "entries": [{"name": d, "path": d, "is_dir": True} for d in drives],
             }
         path = str(Path.home())
 
@@ -117,11 +128,14 @@ def browse_dirs(path: str = "", mode: str = "", db: Session = Depends(get_db)):
     try:
         entries = sorted(
             (
-                {"name": d.name, "path": str(d)}
-                for d in p.iterdir()
-                if d.is_dir() and not d.name.startswith(".")
+                {"name": e.name, "path": str(e), "is_dir": e.is_dir()}
+                for e in p.iterdir()
+                if not e.name.startswith(".")
+                and (e.is_dir() or (exts and e.is_file() and e.suffix.lower().lstrip(".") in exts))
             ),
-            key=lambda e: e["name"].lower(),
+            # Folders first, then files, each alphabetically — matches how a
+            # picker wants to present "navigate into" ahead of "select this".
+            key=lambda e: (e["is_dir"] is False, e["name"].lower()),
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied for this folder")

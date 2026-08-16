@@ -23,6 +23,7 @@ import ColorMatchStudioPage from "./pages/ColorMatchStudioPage";
 import ReorganizePage from "./pages/ReorganizePage";
 import ImportPage from "./pages/ImportPage";
 import ImportPreviewPage from "./pages/ImportPreviewPage";
+import InstallPage from "./pages/InstallPage";
 import BackToTop from "./components/BackToTop";
 import StorageRecoveryMonitor from "./components/StorageRecoveryMonitor";
 
@@ -32,6 +33,13 @@ import StorageRecoveryMonitor from "./components/StorageRecoveryMonitor";
 function ReorganizeRoute() {
   const { settings } = useAppSettings();
   return settings.reorganize_enabled ? <ReorganizePage /> : <Navigate to="/" replace />;
+}
+
+// STL Installer (STUDIO-101/389) is gated the same way — flag off means the
+// page is unreachable even by direct URL, not just hidden from the nav.
+function InstallRoute() {
+  const { settings } = useAppSettings();
+  return settings.installer_enabled ? <InstallPage /> : <Navigate to="/" replace />;
 }
 
 export default function App() {
@@ -53,6 +61,7 @@ export default function App() {
           <Route path="/reorganize" element={<ReorganizeRoute />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/import/preview" element={<ImportPreviewPage />} />
+          <Route path="/install" element={<InstallRoute />} />
           <Route path="/tags" element={<TagsPage />} />
           <Route path="/painting/guides" element={<GuidesPage />} />
           <Route path="/painting/guides/new" element={<GuideWizardPage />} />

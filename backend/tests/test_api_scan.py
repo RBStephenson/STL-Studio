@@ -56,6 +56,79 @@ class TestBrowse:
         nested = client.get("/scan/browse", params={"path": entry_path}).json()
         assert [e["name"] for e in nested["entries"]] == ["Model"]
 
+    def test_every_entry_carries_is_dir(self, client, tmp_path):
+        (tmp_path / "Alpha").mkdir()
+
+        resp = client.get("/scan/browse", params={"path": str(tmp_path)})
+        assert all(e["is_dir"] is True for e in resp.json()["entries"])
+
+
+class TestBrowseFileExtensions:
+    """STUDIO-389: the STL Installer's zip-or-folder source picker needs
+    specific files (not just directories) selectable through this same
+    allowlist-guarded browser, rather than a platform-specific native file
+    dialog (Electron-only, wouldn't work in the Docker/web deployment)."""
+    pytestmark = pytest.mark.usefixtures("bootstrap_under_tmp")
+
+    def test_default_omits_files_entirely(self, client, tmp_path):
+        (tmp_path / "Alpha").mkdir()
+        (tmp_path / "zarana.zip").write_bytes(b"PK")
+
+        resp = client.get("/scan/browse", params={"path": str(tmp_path)})
+        names = [e["name"] for e in resp.json()["entries"]]
+        assert names == ["Alpha"]
+
+    def test_matching_extension_included_alongside_folders(self, client, tmp_path):
+        (tmp_path / "Alpha").mkdir()
+        (tmp_path / "zarana.zip").write_bytes(b"PK")
+        (tmp_path / "readme.txt").write_text("x")
+
+        resp = client.get(
+            "/scan/browse", params={"path": str(tmp_path), "file_extensions": "zip"}
+        )
+        entries = resp.json()["entries"]
+        assert [(e["name"], e["is_dir"]) for e in entries] == [
+            ("Alpha", True), ("zarana.zip", False),
+        ]
+
+    def test_extension_match_is_case_insensitive(self, client, tmp_path):
+        (tmp_path / "ZARANA.ZIP").write_bytes(b"PK")
+
+        resp = client.get(
+            "/scan/browse", params={"path": str(tmp_path), "file_extensions": "zip"}
+        )
+        names = [e["name"] for e in resp.json()["entries"]]
+        assert names == ["ZARANA.ZIP"]
+
+    def test_leading_dot_in_filter_is_tolerated(self, client, tmp_path):
+        (tmp_path / "zarana.zip").write_bytes(b"PK")
+
+        resp = client.get(
+            "/scan/browse", params={"path": str(tmp_path), "file_extensions": ".zip"}
+        )
+        names = [e["name"] for e in resp.json()["entries"]]
+        assert names == ["zarana.zip"]
+
+    def test_hidden_files_still_excluded(self, client, tmp_path):
+        (tmp_path / ".hidden.zip").write_bytes(b"PK")
+
+        resp = client.get(
+            "/scan/browse", params={"path": str(tmp_path), "file_extensions": "zip"}
+        )
+        assert resp.json()["entries"] == []
+
+    def test_drive_list_entries_are_dirs(self, client, monkeypatch):
+        """Windows top-level drive-list response also carries is_dir so the
+        frontend picker's click handler doesn't need a special case for it."""
+        from app.routers import scan
+        monkeypatch.setattr(scan.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(scan.os.path, "exists", lambda p: p == "C:\\")
+
+        resp = client.get("/scan/browse", params={"file_extensions": "zip"})
+        data = resp.json()
+        assert data["is_drive_list"] is True
+        assert all(e["is_dir"] is True for e in data["entries"])
+
 
 class TestBrowseBootstrapRestriction:
     """With no scan roots configured, browsing is still limited to the
