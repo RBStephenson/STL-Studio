@@ -402,6 +402,25 @@ class SourceMappingSet(BaseModel):
     library_id: int
 
 
+class InstallRequest(BaseModel):
+    """POST /import/install (STUDIO-101/387). ``creator`` is a plain name —
+    an existing one picked from a dropdown or a new one typed in both submit
+    the same string; the endpoint resolves-or-creates it (case-insensitive,
+    same as the scanner)."""
+    source: str
+    library_id: int
+    creator: str
+    character: str
+
+
+class InstallResponse(BaseModel):
+    dest: str
+    creator_id: int
+    creator: str
+    file_count: int
+    total_bytes: int
+
+
 class ImportPreviewPack(BaseModel):
     """One pack card in the import preview — a top-level source subfolder (#451)."""
     name: str
@@ -629,6 +648,10 @@ class AppSettingsRead(BaseModel):
     # Paint Shelf: import paint colors from a swatch-chart upload (STUDIO-329/333).
     # Default off; both extraction endpoints are also gated server-side.
     paint_swatch_import_enabled: bool = False
+    # STL Installer: extract a ZIP/folder into scan_root/creator/character
+    # (STUDIO-101/386/387). Default off; POST /import/install is also gated
+    # server-side.
+    installer_enabled: bool = False
 
 
 class AppSettingsUpdate(BaseModel):
@@ -679,6 +702,7 @@ class AppSettingsUpdate(BaseModel):
     allow_prerelease_updates: Optional[bool] = None
     collections_uniform_size: Optional[bool] = None
     paint_swatch_import_enabled: Optional[bool] = None
+    installer_enabled: Optional[bool] = None
 
     @field_validator("scan_ignore_patterns", "scan_parts_names")
     @classmethod

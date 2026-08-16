@@ -19,7 +19,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
-from app.models import ImportSourceMapping, Model, ScanRoot, STLFile
+from app.models import AppSetting, ImportSourceMapping, Model, ScanRoot, STLFile
 from app.routers.reorganize import _build_and_persist, _slugify_all, _slugify_filenames
 from app.routers.scan import _bootstrap_roots, _configured_roots
 from app.schemas import (
@@ -27,14 +27,18 @@ from app.schemas import (
     ImportApplyIneligible, ImportApplyRequest, ImportApplyResponse,
     ImportApplyStart, ImportApplyStatus,
     ImportPreviewPack, ImportPreviewResponse, InboxScanRequest,
+    InstallRequest, InstallResponse,
     SourceContentsEntry, SourceContentsResponse,
     SourceMappingRead, SourceMappingSet,
 )
-from app.services import reorganize_apply, scanner, write_lock
+from app.services import installer, layout, reorganize_apply, scanner, write_lock
 from app.services.job_runner import JobHandle, JobState, runner
 from app.services.path_guard import assert_within_roots
 from app.services.reorganize_apply import ApplyError
+from app.services.scanner import resolve_creator
 from app.services.thumbnails import IMAGE_EXTS, fetch_image_bytes
+
+_INSTALLER_ENABLED_KEY = "installer_enabled"
 
 # Single global job key — an import-apply's real mutual exclusion comes from
 # the write lock apply_manifest already holds; this just lets one apply be
@@ -353,6 +357,104 @@ def set_source_mapping(body: SourceMappingSet, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(mapping)
     return mapping
+
+
+def _require_installer_enabled(db: Session) -> None:
+    row = db.get(AppSetting, _INSTALLER_ENABLED_KEY)
+    if not row or not bool(row.value):
+        raise HTTPException(status_code=403, detail="The STL Installer is not enabled")
+
+
+@router.post("/install", response_model=InstallResponse)
+def install_from_source(body: InstallRequest, db: Session = Depends(get_db)):
+    """Extract a ZIP or copy a folder into scan_root/creator/character
+    (STUDIO-101/387), synchronously — typical packs finish in seconds; a
+    pack at the 20 GiB cap takes roughly a minute and a half (measured
+    against a real 5.4 GiB, 67-file pack at ~27s). Confirmed with Brent
+    2026-08-16: synchronous over job-tracked, since the ticket's own
+    "returns the destination path and a summary" wording already assumes a
+    direct response and typical packs are comfortably fast.
+
+    ``timeout=0.0`` on the write lock means a concurrent scan/reorganize
+    makes this 409 immediately rather than queue and wait — same precedent
+    reorganize's own apply/undo endpoints use.
+    """
+    _require_installer_enabled(db)
+
+    source = body.source.strip()
+    creator_name = body.creator.strip()
+    character = body.character.strip()
+    if not source:
+        raise HTTPException(status_code=400, detail="source is required")
+    if not creator_name:
+        raise HTTPException(status_code=400, detail="creator is required")
+    if not character:
+        raise HTTPException(status_code=400, detail="character is required")
+
+    source_real = os.path.realpath(source)
+    try:
+        assert_within_roots(source_real, _allowed_bases(db))
+    except ValueError:
+        raise HTTPException(
+            status_code=403, detail="Source path is outside the allowed browse locations."
+        )
+
+    library = db.query(ScanRoot).filter(ScanRoot.id == body.library_id).first()
+    if not library:
+        raise HTTPException(status_code=404, detail="Library not found")
+    if not library.is_writable:
+        raise HTTPException(status_code=400, detail="Destination is not a writable library.")
+    # The installer only knows scan_root/creator/character. A non-default
+    # layout (e.g. {tag}/{creator}) puts the creator level somewhere the
+    # installer doesn't know how to reach without a tag value this endpoint
+    # doesn't collect — reject rather than silently write to the wrong path.
+    if layout.roles_for(library.layout) != [layout.CREATOR]:
+        raise HTTPException(
+            status_code=400,
+            detail="Installer only supports libraries using the default folder layout.",
+        )
+
+    # Checked against the raw input before resolve_creator commits anything,
+    # so a creator/character containing a path-traversal segment never lands
+    # a stray Creator row in the DB just because the later, real check inside
+    # installer.install() would also have caught it.
+    try:
+        assert_within_roots(Path(library.path) / creator_name / character, [library.path])
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    # Resolved/created eagerly and committed before the filesystem write: a
+    # bare Creator row with no models yet is already a normal, harmless shape
+    # in this app (the same one POST /creators produces), so there's nothing
+    # to roll back if the install itself fails below. Uses creator.name (the
+    # resolved casing) rather than the raw input, so an existing creator's
+    # on-disk folder convention is respected even if the caller typed
+    # different casing.
+    creator = resolve_creator(creator_name, db)
+    db.commit()
+
+    try:
+        with write_lock.library_write("install"):
+            result = installer.install(source_real, library.path, creator.name, character)
+    except write_lock.LibraryBusy as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except installer.DestinationExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except installer.InstallSizeExceededError as e:
+        raise HTTPException(status_code=413, detail=str(e))
+    except (installer.InvalidArchiveError, installer.UnsupportedSourceError, installer.EmptySourceError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        # path_guard rejecting creator/character escaping the destination root.
+        raise HTTPException(status_code=403, detail=str(e))
+
+    return InstallResponse(
+        dest=str(result.dest),
+        creator_id=creator.id,
+        creator=creator.name,
+        file_count=result.file_count,
+        total_bytes=result.total_bytes,
+    )
 
 
 async def _download_images_async(handle: JobHandle, pack_dir_str: str, urls: list[str]) -> int:
