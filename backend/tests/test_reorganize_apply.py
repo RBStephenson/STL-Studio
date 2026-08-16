@@ -448,7 +448,7 @@ class TestSafeMovePrimitive:
         src.write_bytes(b"payload")
         dst = tmp_path / "b" / "head.stl"
         dst.parent.mkdir(parents=True)
-        stale_tmp = tmp_path / "b" / "head.stl.reorgtmp"
+        stale_tmp = tmp_path / "b" / "head.stl.safecopytmp"
         stale_tmp.write_bytes(b"leftover from a crashed run")
 
         real_rename = os.rename
