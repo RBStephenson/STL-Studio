@@ -12,8 +12,10 @@ whole batch succeeds, so a partial move never leaves the catalog half-rewritten.
 
 Move safety:
   - never overwrite an existing non-source destination;
-  - cross-device (EXDEV) moves go copy → fsync → verify-size → atomic os.replace →
-    unlink-source, not a bare rename;
+  - cross-device (EXDEV) moves use ``app.services.safe_copy.copy_verified`` (copy →
+    fsync → verify-size → atomic os.replace) then unlink the source, not a bare
+    rename — the verified-copy step is shared with the STL Installer (STUDIO-385),
+    which needs the same guarantee but doesn't always unlink the source;
   - case-only renames use a temp-name dance (case-insensitive filesystems treat
     ``Foo`` and ``foo`` as the same entry);
   - moves run deepest-source-first so a destination nested under another source is
@@ -27,7 +29,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AppSetting, Model, PackOverride, ReorganizeManifest, ScanRoot, STLFile
 from app.services import write_lock
+from app.services.safe_copy import copy_verified
 from app.utils import utcnow
 
 _log = logging.getLogger(__name__)
@@ -207,26 +209,10 @@ def _safe_move(src: str, dst: str) -> None:
     except OSError as e:
         if e.errno != errno.EXDEV:
             raise
-    # Cross-device: copy to a temp sibling, fsync, verify, atomic swap, unlink src.
-    tmp = dst_n + ".reorgtmp"
-    # Same crash-leftover concern as above — a stale tmp from an earlier
-    # interrupted EXDEV copy would otherwise later surface as a bogus
-    # "destination already exists" once treated as real debris (STUDIO-314).
-    if os.path.exists(tmp):
-        os.unlink(tmp)
-    shutil.copyfile(src_n, tmp)
-    # copyfile() alone leaves tmp with a fresh mtime — the undo log records the
-    # source's pre-move (size, mtime_ns) fingerprint, and undo re-stats the
-    # destination against that recorded value to detect drift. Without
-    # preserving mtime here, every cross-device move would look "drifted" to
-    # undo and be skipped, even though nothing actually changed (STUDIO-312).
-    shutil.copystat(src_n, tmp)
-    with open(tmp, "rb") as fh:
-        os.fsync(fh.fileno())
-    if os.path.getsize(tmp) != os.path.getsize(src_n):
-        os.unlink(tmp)
-        raise OSError(f"size mismatch after cross-device copy of {src}")
-    os.replace(tmp, dst_n)
+    # Cross-device: verified copy (STUDIO-385 — the fsync/verify/atomic-replace
+    # dance, including its own stale-tmp-debris handling, lives in safe_copy
+    # now), then unlink src to complete the move.
+    copy_verified(src_n, dst_n)
     try:
         os.unlink(src_n)
     except OSError:
