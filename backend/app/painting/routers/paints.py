@@ -10,6 +10,12 @@ dispatches across three extraction tiers, cheapest/most-deterministic first:
 vector PDF swatches (STUDIO-331) -> embedded-raster PDF swatch images
 (STUDIO-332) -> a photo or image-only PDF page (STUDIO-381), the only tier
 where Claude vision has to locate swatches, not just read them.
+
+`match-colors`/`bulk-set-colors` (STUDIO-383) are the flow the Paint Shelf UI
+actually uses today: match each extracted swatch to an existing paint by
+name and fill in `hex`, rather than creating a new paint via `bulk-import`.
+`bulk-import`/line-selection stay in place (tested, unused by the current UI)
+in case a from-scratch import is needed later.
 """
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session, joinedload
@@ -21,10 +27,13 @@ from app.painting.schemas import (
     BrandCreate, BrandRead,
     BulkDeletePaintsRequest, BulkDeletePaintsResult, BulkDeletePaintsSkip,
     BulkImportRequest, BulkImportResult, BulkImportSkip,
+    BulkSetColorsRequest, BulkSetColorsResult,
     ExtractColorsResponse, ExtractedSwatch,
     ForcedPaintCreate,
+    MatchColorsRequest, MatchColorsResponse,
     PaintLineCreate, PaintLineRead, PaintLineUpdate,
     PaintCreate, PaintList, PaintRead, PaintUpdate,
+    SwatchColorMatch, SwatchMatchCandidate,
     derive_matchable,
 )
 from app.painting.services import swatch_extract, swatch_extract_photo, swatch_extract_vision
@@ -470,3 +479,57 @@ def bulk_import_paints(body: BulkImportRequest, db: Session = Depends(get_db)):
     for paint in created:
         db.refresh(paint)
     return BulkImportResult(created=created, skipped=skipped)
+
+
+@router.post("/paints/match-colors", response_model=MatchColorsResponse)
+def match_colors(body: MatchColorsRequest, db: Session = Depends(get_db)):
+    """Match extracted swatches to existing shelf paints by name (STUDIO-383).
+
+    Real PaintRack CSV exports carry brand/line/name/code but no color — the
+    swatch chart is the color source. Matching by name means the user never
+    picks a line: each swatch is looked up (case-insensitive, exact) against
+    every paint already on the shelf. Response is positional — `matches[i]`
+    corresponds to `body.swatches[i]` — so the caller doesn't need paints to
+    carry any identity beyond list order."""
+    _require_swatch_import_enabled(db)
+
+    matches: list[SwatchColorMatch] = []
+    for swatch in body.swatches:
+        candidates = (
+            db.query(Paint)
+            .filter(Paint.name.ilike(swatch.name.strip()))
+            .order_by(Paint.id)
+            .all()
+        )
+        matches.append(SwatchColorMatch(
+            name=swatch.name, code=swatch.code, hex=swatch.hex,
+            candidates=[
+                SwatchMatchCandidate(
+                    paint_id=c.id, paint_line_id=c.paint_line_id,
+                    name=c.name, code=c.code, hex=c.hex,
+                )
+                for c in candidates
+            ],
+        ))
+    return MatchColorsResponse(matches=matches)
+
+
+@router.post("/paints/bulk-set-colors", response_model=BulkSetColorsResult)
+def bulk_set_colors(body: BulkSetColorsRequest, db: Session = Depends(get_db)):
+    """Apply matched swatch colors directly (STUDIO-383) — no line/collision
+    logic needed since every id already names an existing paint. Unknown ids
+    are silently skipped, same precedent as bulk-delete's stale-selection
+    handling."""
+    _require_swatch_import_enabled(db)
+
+    ids = [item.paint_id for item in body.items]
+    paints = {p.id: p for p in db.query(Paint).filter(Paint.id.in_(ids)).all()}
+    updated = 0
+    for item in body.items:
+        paint = paints.get(item.paint_id)
+        if paint is None:
+            continue
+        paint.hex = item.hex
+        updated += 1
+    db.commit()
+    return BulkSetColorsResult(updated=updated)

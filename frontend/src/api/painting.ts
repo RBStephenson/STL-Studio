@@ -4,8 +4,10 @@ import type {
   BulkDeletePaintsResult,
   BulkImportRequest,
   BulkImportResult,
+  BulkSetColorsResult,
   ColorMatchResult,
   ExtractColorsResponse,
+  ExtractedSwatch,
   Guide,
   GuideCreateInput,
   GuideDraftStatus,
@@ -14,6 +16,7 @@ import type {
   GuideUpdateInput,
   GuideValidationResult,
   ImportDiff,
+  MatchColorsResponse,
   Paint,
   PaintBrand,
   PaintCreate,
@@ -21,6 +24,7 @@ import type {
   PaintList,
   PaintOverrideInput,
   ReferenceImage,
+  SetColorItem,
 } from "./types";
 
 export const paintingApi = {
@@ -126,11 +130,29 @@ export const paintingApi = {
       });
     },
     // Create paints from a user-reviewed/edited list of swatch suggestions.
+    // Unused by the current Paint Shelf UI (STUDIO-383 replaced it with
+    // match-colors/bulkSetColors below) but left in place for a from-scratch
+    // import if that's ever needed again.
     bulkImport: (body: BulkImportRequest) =>
       request<BulkImportResult>("/painting/paints/bulk-import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+      }),
+    // Match extracted swatches to existing shelf paints by name (STUDIO-383)
+    // — the flow "Import from Chart" actually uses: fill in a missing color
+    // rather than create a new paint.
+    matchColors: (swatches: ExtractedSwatch[]) =>
+      request<MatchColorsResponse>("/painting/paints/match-colors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ swatches }),
+      }),
+    bulkSetColors: (items: SetColorItem[]) =>
+      request<BulkSetColorsResult>("/painting/paints/bulk-set-colors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
       }),
   },
   guides: {

@@ -131,11 +131,14 @@ group at once.
 - Turn on **Settings → Painting → Swatch Chart Import** to unlock **Import
   from Chart** on the Paint Shelf: upload a manufacturer swatch-chart PDF, a
   photo of your paint rack, or a scanned chart, and it reads off each
-  paint's name and color (codes only come from PDFs that carry them). Review
-  and edit any suggestion (or remove it) before picking a Paint Line and
-  importing — nothing is added to your shelf until you confirm. A photo or
-  scan is read less precisely than a clean vector PDF chart — double-check
-  the colors it picks up before importing.
+  paint's name and color (codes only come from PDFs that carry them). Each
+  swatch is matched by name to a paint already on your shelf (typically one
+  you already have from a PaintRack CSV import, which carries no color of its
+  own) — importing just fills in that paint's color, it doesn't create a new
+  one. Pick a match yourself when a name hits more than one paint; a swatch
+  with no match is shown but skipped. Nothing is applied until you confirm. A
+  photo or scan is read less precisely than a clean vector PDF chart —
+  double-check the colors it picks up before applying.
 - **Color-Match Studio** takes a reference photo and suggests a shadow →
   mid → highlight ramp from your own shelf, plus glaze/wash ideas — every
   suggestion is a starting point to eyeball, not an auto-apply.

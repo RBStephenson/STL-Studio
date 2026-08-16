@@ -754,6 +754,35 @@ export interface BulkDeletePaintsResult {
   skipped: BulkDeletePaintsSkip[];
 }
 
+// STUDIO-383: match extracted swatches to existing shelf paints by name.
+export interface SwatchMatchCandidate {
+  paint_id: number;
+  paint_line_id: number;
+  name: string;
+  code: string;
+  hex?: string | null;
+}
+
+export interface SwatchColorMatch {
+  name: string;
+  code?: string | null;
+  hex: string;
+  candidates: SwatchMatchCandidate[];
+}
+
+export interface MatchColorsResponse {
+  matches: SwatchColorMatch[];
+}
+
+export interface SetColorItem {
+  paint_id: number;
+  hex: string;
+}
+
+export interface BulkSetColorsResult {
+  updated: number;
+}
+
 // AI draft-generation job status (#524/#492). When `status === "done"` the
 // candidate `draft` (proposed tabs), validator `flags`, and `unresolved` paints
 // are populated for the review UI to diff before the user accepts.
