@@ -103,6 +103,24 @@ class TestBasicExtraction:
         assert result.swatches[0].hex != "#FFFFFF"
         assert result.swatches[0].hex == "#1A9933"
 
+    def test_topmost_fill_wins_over_stacked_opaque_underlayer(self):
+        """Regression: the real Speedpaint "Practical Naming Chart" draws a
+        shared gray template shape *underneath* the real color, both fully
+        opaque and the exact same rect (unlike Hues.pdf's halo, which is
+        white and a different size). The topmost (last-drawn) fill is what's
+        actually visible and must win, not whichever fill happens to be
+        listed first."""
+        doc, page = _new_page()
+        page.draw_circle((100, 100), 28, fill=(0.61, 0.62, 0.62), color=None)  # template gray, drawn first
+        page.draw_circle((100, 100), 28, fill=(0.39, 0.19, 0.54), color=None)  # real color, drawn on top
+        _insert_label(page, 100, 100, ["Purple Swarm"])
+
+        result = extract_vector_swatches(_pdf_bytes(doc))
+
+        assert len(result.swatches) == 1
+        assert result.swatches[0].hex != "#9C9E9E"
+        assert result.swatches[0].hex == "#63308A"
+
     def test_swatch_without_code_still_extracts_name(self):
         doc, page = _new_page()
         _draw_swatch(page, 100, 100, 28, (0.2, 0.3, 0.8))

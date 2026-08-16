@@ -9,6 +9,12 @@ the epic originally assumed. This module handles that pattern generically
 (cluster filled shapes sharing a center, pick the non-white fill) rather than
 assuming rectangles or exactly one shape per swatch.
 
+Verified 2026-08-16 against the real Army Painter Speedpaint "Practical
+Naming Chart": its swatches stack a shared gray template shape *underneath*
+the real color, both fully opaque and the same rect, so picking a cluster's
+*topmost* (last-drawn) non-white fill rather than its first is what actually
+matches the visible color (see `_cluster_hex`).
+
 Charts with no real vector swatches — scanned/photographed pages, or (per
 the real Army Painter "Practical Colour Name Chart" fixture investigated for
 STUDIO-332) swatches that are themselves small embedded raster images with
@@ -207,15 +213,21 @@ def _cluster_bbox(cluster: list[_ShapeInfo]) -> fitz.Rect:
 
 
 def _cluster_hex(cluster: list[_ShapeInfo]) -> str:
-    """The cluster's real swatch color: the non-white fill, if any.
+    """The cluster's real swatch color: the topmost non-white fill, if any.
 
-    A halo+color-circle pair always has exactly one near-white member; a
-    single-shape swatch has none. "First non-white fill, else first fill" is
-    correct for both without needing to know which pattern applies up front.
+    A halo+color-circle pair (Hues.pdf) always has exactly one near-white
+    member, so "first" vs "last" non-white doesn't matter there. But the real
+    Speedpaint "Practical Naming Chart" draws a shared gray template swatch
+    *underneath* the real color, both fully opaque and the exact same rect —
+    picking the first (bottom, hidden) non-white fill returned that template
+    gray for ~2/3 of its swatches instead of the real color. Shapes are
+    already in paint order (from `page.get_drawings()`), so the *last*
+    non-white fill is what's actually visible: later opaque layers occlude
+    earlier ones at the same position.
     """
-    for shape in cluster:
-        if not _is_near_white(shape.fill):
-            return _to_hex(shape.fill)
+    non_white = [shape for shape in cluster if not _is_near_white(shape.fill)]
+    if non_white:
+        return _to_hex(non_white[-1].fill)
     return _to_hex(cluster[0].fill)
 
 
