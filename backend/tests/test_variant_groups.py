@@ -153,6 +153,54 @@ class TestStartupBackfill:
         assert db.get(Model, solo.id).variant_group_id is None
         assert db.get(Model, pinned.id).variant_group_id is None
 
+    def test_boot_scan_boot_cycle_is_stable(self, db, monkeypatch):
+        """STUDIO-367 regression: the boot backfill and a scan's regroup must
+        agree on membership, so repeating boot -> scan -> boot never drops or
+        recreates a group under a different id.
+
+        The models here reproduce the ticket's own evidence exactly: bare
+        size-number names ("20"/"25") under one `character` envelope ("Trays
+        Full"), which the name-based scan signal alone could never regroup
+        because a size-only name resolves to no product identity at all —
+        that gap is what let the two paths disagree before the CHARACTER
+        signal was added.
+        """
+        from sqlalchemy.orm import sessionmaker
+        import app.main as main_module
+        from app.services import grouping
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(main_module, "SessionLocal", Session)
+
+        creator = make_creator(db)
+        a = make_model(db, creator, name="20", character="Trays Full")
+        b = make_model(db, creator, name="25", character="Trays Full")
+        db.commit()
+
+        # boot 1: backfill creates the group (no scan has run yet).
+        main_module._backfill_missing_variant_groups()
+        db.expire_all()
+        group_after_boot_1 = db.query(VariantGroup).filter_by(label="Trays Full").one()
+        members_after_boot_1 = {m.id for m in group_after_boot_1.models}
+        assert members_after_boot_1 == {a.id, b.id}
+
+        # scan: must reproduce the same membership, not wipe it.
+        grouping.regroup_creator(db, creator.id)
+        db.commit()
+        db.expire_all()
+        group_after_scan = db.query(VariantGroup).filter_by(label="Trays Full").one()
+        assert {m.id for m in group_after_scan.models} == members_after_boot_1
+        assert group_after_scan.reason == "shared character label: Trays Full"
+
+        # boot 2: variant_group_id is already set, so the backfill must be a
+        # true no-op — no new group, same membership.
+        created = main_module._backfill_missing_variant_groups()
+        db.expire_all()
+        assert created == 0
+        groups = db.query(VariantGroup).filter_by(creator_id=creator.id).all()
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == members_after_boot_1
+
 
 # ---------------------------------------------------------------------------
 # set_grouping_strategy() only regroups creators under the target path (#650)

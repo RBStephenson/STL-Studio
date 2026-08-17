@@ -11,10 +11,10 @@ The pipeline runs in four stages, each pure and independently testable:
   1. eligibility   — `select_eligible` decides which models grouping may touch,
      rejecting excluded models, manual-group members, `no_group` pins and `off`
      subtrees (STUDIO-241).
-  2. evidence      — `hierarchy_evidence`, `hash_evidence`, `filename_evidence`
-     and `name_evidence` propose `Evidence` edges from candidate data, while
-     `product_boundaries` builds the hierarchy anti-merge constraints
-     (STUDIO-244, STUDIO-245).
+  2. evidence      — `hierarchy_evidence`, `hash_evidence`, `filename_evidence`,
+     `name_evidence` and `character_evidence` propose `Evidence` edges from
+     candidate data, while `product_boundaries` builds the hierarchy anti-merge
+     constraints (STUDIO-244, STUDIO-245, STUDIO-367).
   3. clustering    — `_apply_evidence` offers edges to a constrained union-find
      and records the merges that actually happened in an `EvidenceLedger`;
      `build_clusters` turns components into member lists (STUDIO-242).
@@ -32,7 +32,7 @@ Four invariants hold across all of it:
   (STUDIO-242).
 * **Signal ORDER is load-bearing.** An earlier merge can make a later edge
   redundant or push it across a boundary, so callers must offer evidence in the
-  order hierarchy → hash → filename → name.
+  order hierarchy → hash → filename → name → character.
 * **Output is deterministic.** `order_candidates` sorts candidates by
   `(folder_path, name, id)` and every later stage iterates that one list; hashes
   are visited sorted so a `set[str]`'s PYTHONHASHSEED ordering cannot decide a
@@ -47,7 +47,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from collections.abc import Container, Iterable, Mapping, Sequence
 from itertools import combinations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 
 from app.services import name_parser
@@ -90,6 +90,7 @@ class SignalKind(Enum):
     HIERARCHY = "hierarchy"
     FILENAME = "filename"
     NAME = "name"
+    CHARACTER = "character"
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,15 @@ SIGNAL_POLICY: dict[SignalKind, SignalPolicy] = {
     SignalKind.HIERARCHY: SignalPolicy(1, 0.85, "same product hierarchy"),
     SignalKind.FILENAME: SignalPolicy(2, 0.7, "shared STL file names"),
     SignalKind.NAME: SignalPolicy(3, 0.6, "name: {label}"),
+    # Weakest and last: the scanner-assigned `character` envelope is the same
+    # field the legacy startup backfill (`main.py::_backfill_missing_variant_groups`)
+    # bucketed on, but unlike the backfill this signal is filtered through
+    # character_key/is_structural_folder like every other signal (STUDIO-367).
+    # Its purpose is to let a scan reproduce what the backfill would have
+    # proposed for models whose own `name` carries no product identity (e.g. a
+    # pack folder named only by size, "20"/"25"/"30"), so the two paths agree
+    # instead of oscillating.
+    SignalKind.CHARACTER: SignalPolicy(4, 0.6, "shared character label: {label}"),
 }
 
 
@@ -390,7 +400,7 @@ def name_keys(
 def name_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evidence]:
     """Propose NAME edges between models sharing a `character_key`.
 
-    The weakest signal and the baseline when no content signal exists.
+    The weakest content signal and the baseline when no content signal exists.
     Side-effect free; keyless models simply never appear in a bucket.
 
     Fans out from the bucket's first member, kept as a star pattern
@@ -407,6 +417,53 @@ def name_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evidence]
             index[key].append(mid)
     return [
         Evidence(kind=SignalKind.NAME, a=bucket[0], b=other)
+        for bucket in index.values()
+        if len(bucket) >= 2
+        for other in bucket[1:]
+    ]
+
+
+def character_keys(
+    ids: Sequence[int], characters: Mapping[int, str], creator_name: str | None
+) -> dict[int, str]:
+    """Resolve each model's `character_key` from its scanner-assigned `character`.
+
+    Same normalisation as `name_keys`, applied to a different field: `character`
+    is the product envelope the scanner assigned while walking the creator tree,
+    which can carry identity a model's own `name` lacks entirely — e.g. a pack
+    folder named only by size ("20", "25") under a `character='Trays Full'`
+    parent. Models with no character, or one `character_key` reduces to nothing
+    (a pure structural/variant label), are simply omitted (STUDIO-367).
+    """
+    keys: dict[int, str] = {}
+    for mid in ids:
+        character = characters.get(mid)
+        if not character:
+            continue
+        key = name_parser.character_key(character, creator_name)
+        if key:
+            keys[mid] = key
+    return keys
+
+
+def character_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evidence]:
+    """Propose CHARACTER edges between models sharing a `character_key`.
+
+    The weakest signal, run last. Side-effect free; keyless models never appear
+    in a bucket. Fans out from the bucket's first member — same star-pattern
+    reasoning as `name_evidence`: a character shared across many size/variant
+    siblings under one product is a real, unbounded shape, and this pipeline's
+    ordering never makes a star pattern here reachable-but-wrong (STUDIO-300's
+    exhaustive check applies equally to this signal, which follows the same
+    "resolve key, bucket, fan out" shape as NAME).
+    """
+    index: dict[str, list[int]] = defaultdict(list)
+    for mid in ids:
+        key = keys.get(mid)
+        if key:
+            index[key].append(mid)
+    return [
+        Evidence(kind=SignalKind.CHARACTER, a=bucket[0], b=other)
         for bucket in index.values()
         if len(bucket) >= 2
         for other in bucket[1:]
@@ -443,7 +500,10 @@ class CandidateFacts:
     """Per-model facts the proposal stage needs, free of ORM objects (STUDIO-246).
 
     `names` and `keys` cover every eligible candidate; `contexts` is populated
-    only when hierarchy grouping is enabled. `explicit_reps` holds the models a
+    only when hierarchy grouping is enabled. `characters` and `character_keys`
+    (STUDIO-367) cover the scanner-assigned `character` field the same way
+    `names`/`keys` cover a model's own name — a separate source of product
+    identity a name-only check can miss. `explicit_reps` holds the models a
     user has pinned as their group's representative, which outranks any
     positional default.
     """
@@ -452,6 +512,8 @@ class CandidateFacts:
     keys: Mapping[int, str]
     contexts: Mapping[int, ProductContext]
     explicit_reps: frozenset[int]
+    characters: Mapping[int, str] = field(default_factory=dict)
+    character_keys: Mapping[int, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -491,9 +553,19 @@ def _has_product_identity(members: Sequence[int], facts: CandidateFacts) -> bool
     "unsupported", "STL") has no product identity. Those only ever cluster by
     filename or hash, and grouping them under a junk label is what produced the
     duplicate "supported" groups in #639.
+
+    Checks the `character` envelope alongside `name` (STUDIO-367): a model
+    whose own name is a bare size/variant descriptor ("20") has no name-based
+    identity, but its scanner-assigned `character` ("Trays Full") can still be
+    a real product — the same two-part check (non-empty key, and the raw label
+    isn't itself all-structural) applies to either field independently.
     """
     return any(
-        facts.keys.get(mid) and not name_parser.is_structural_folder(facts.names[mid])
+        (facts.keys.get(mid) and not name_parser.is_structural_folder(facts.names[mid]))
+        or (
+            facts.character_keys.get(mid)
+            and not name_parser.is_structural_folder(facts.characters[mid])
+        )
         for mid in members
     )
 
@@ -509,10 +581,14 @@ def _most_common(values: Sequence[str]) -> str:
 
 
 def select_label(members: Sequence[int], facts: CandidateFacts) -> str:
-    """Label a cluster: hierarchy label, else most common name key, else a name.
+    """Label a cluster: hierarchy label, name key, character key, else a name.
 
-    Preference order is unchanged from the original `_label_for`; only tie
-    resolution is now defined (see `_most_common`).
+    Preference order is unchanged from the original `_label_for` except for the
+    character-key fallback (STUDIO-367), inserted ahead of the raw-name last
+    resort: a cluster formed purely by CHARACTER evidence has no name key by
+    definition (that's why NAME didn't already form it), so without this step
+    its label would be a bare, meaningless size/variant string like "20". Tie
+    resolution is defined by `_most_common`.
     """
     hierarchy_labels = [
         facts.contexts[mid].display_label
@@ -524,6 +600,11 @@ def select_label(members: Sequence[int], facts: CandidateFacts) -> str:
     member_keys = [facts.keys[mid] for mid in members if mid in facts.keys]
     if member_keys:
         return _most_common(member_keys)
+    character_member_keys = [
+        facts.character_keys[mid] for mid in members if mid in facts.character_keys
+    ]
+    if character_member_keys:
+        return _most_common(character_member_keys)
     return facts.names[members[0]]
 
 

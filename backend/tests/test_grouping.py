@@ -46,6 +46,7 @@ class TestSignalPolicy:
             SignalKind.HIERARCHY,
             SignalKind.FILENAME,
             SignalKind.NAME,
+            SignalKind.CHARACTER,
         ]
 
     def test_precedence_values_are_distinct(self):
@@ -59,6 +60,7 @@ class TestSignalPolicy:
             (SignalKind.HIERARCHY, 0.85),
             (SignalKind.FILENAME, 0.7),
             (SignalKind.NAME, 0.6),
+            (SignalKind.CHARACTER, 0.6),
         ],
     )
     def test_confidence_values_are_stable(self, kind, confidence):
@@ -71,6 +73,7 @@ class TestSignalPolicy:
             (SignalKind.HIERARCHY, "same product hierarchy"),
             (SignalKind.FILENAME, "shared STL file names"),
             (SignalKind.NAME, "name: Goblin"),
+            (SignalKind.CHARACTER, "shared character label: Goblin"),
         ],
     )
     def test_reason_templates_render_the_documented_text(self, kind, reason):
@@ -394,6 +397,65 @@ class TestNameEvidence:
         assert len(grouping.name_evidence(ids, keys)) == len(ids) - 1
 
 
+class TestCharacterKeys:
+    """Pure character-key resolution from the `character` field (STUDIO-367)."""
+
+    def test_strips_the_creator_name_from_the_key(self):
+        keys = grouping.character_keys(
+            [1, 2],
+            {1: "Goblin Supported", 2: "Goblin Unsupported"},
+            "Some Creator",
+        )
+
+        assert keys == {1: "Goblin", 2: "Goblin"}
+
+    def test_matches_name_parser_for_the_same_inputs(self):
+        characters = {1: "Ada Wong Bust", 2: "Leon Kennedy"}
+
+        keys = grouping.character_keys([1, 2], characters, "Creator")
+
+        assert keys == {
+            mid: name_parser.character_key(c, "Creator") for mid, c in characters.items()
+        }
+
+    def test_models_without_a_character_are_omitted(self):
+        keys = grouping.character_keys([1], {}, "Creator")
+
+        assert keys == {}
+
+    def test_structural_only_character_yields_no_key(self):
+        keys = grouping.character_keys([1], {1: "Supported"}, None)
+
+        assert keys == {}
+
+    def test_only_supplied_ids_are_resolved(self):
+        keys = grouping.character_keys([1], {1: "Goblin King", 2: "Goblin Queen"}, None)
+
+        assert set(keys) == {1}
+
+
+class TestCharacterEvidence:
+    """Pure CHARACTER edge generation (STUDIO-367)."""
+
+    def test_shared_key_produces_evidence(self):
+        evidence = grouping.character_evidence([1, 2], {1: "trays full", 2: "trays full"})
+
+        assert [(e.kind, e.a, e.b) for e in evidence] == [(SignalKind.CHARACTER, 1, 2)]
+
+    def test_distinct_keys_produce_no_evidence(self):
+        assert grouping.character_evidence([1, 2], {1: "trays full", 2: "goblin"}) == []
+
+    def test_keyless_models_produce_no_evidence(self):
+        assert grouping.character_evidence([1, 2], {}) == []
+
+    def test_bucket_fans_out_from_its_first_member(self):
+        keys = {1: "trays full", 2: "trays full", 3: "trays full"}
+
+        evidence = grouping.character_evidence([1, 2, 3], keys)
+
+        assert [(e.a, e.b) for e in evidence] == [(1, 2), (1, 3)]
+
+
 def _facts(names, keys=None, contexts=None, explicit_reps=()):
     """CandidateFacts with sensible defaults; keys default to the names."""
     return grouping.CandidateFacts(
@@ -523,6 +585,46 @@ class TestProposeGroups:
         proposals = grouping.propose_groups([1, 2], uf, ledger, _facts(names, keys={}))
 
         assert proposals == []
+
+    def test_character_identity_is_enough_when_names_carry_none(self):
+        # Bare size folders ("20"/"25") have no name-based product identity at
+        # all, but the shared `character` envelope ("Trays Full") does
+        # (STUDIO-367) — mirrors what the legacy startup backfill grouped.
+        names = {1: "20", 2: "25"}
+        characters = {1: "Trays Full", 2: "Trays Full"}
+        facts = grouping.CandidateFacts(
+            names=names,
+            keys={},
+            contexts={},
+            explicit_reps=frozenset(),
+            characters=characters,
+            character_keys={1: "Trays Full", 2: "Trays Full"},
+        )
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.CHARACTER, 1, 2)])
+
+        proposals = grouping.propose_groups([1, 2], uf, ledger, facts)
+
+        assert len(proposals) == 1
+        assert proposals[0].reason == "shared character label: Trays Full"
+        assert proposals[0].confidence == 0.6
+
+    def test_structural_character_cannot_supply_product_identity(self):
+        # A cluster whose only "identity" is a structural character label
+        # ("Supported") is exactly the junk-label case #639 already guards
+        # against for names — the same guard must hold for characters.
+        names = {1: "20", 2: "25"}
+        characters = {1: "Supported", 2: "Supported"}
+        facts = grouping.CandidateFacts(
+            names=names,
+            keys={},
+            contexts={},
+            explicit_reps=frozenset(),
+            characters=characters,
+            character_keys={},  # character_keys() already omits structural labels
+        )
+        uf, ledger = _merged([1, 2], [grouping.Evidence(SignalKind.HASH, 1, 2)])
+
+        assert grouping.propose_groups([1, 2], uf, ledger, facts) == []
 
     def test_proposal_carries_the_merging_signals_reason_and_confidence(self):
         names = {1: "Goblin A", 2: "Goblin B"}
@@ -969,6 +1071,62 @@ class TestNameSignal:
         _run(db, creator)
 
         assert _groups(db, creator) == []
+
+
+class TestCharacterSignal:
+    """Scan-time reproduction of the legacy startup backfill's grouping,
+    through the same character_key/is_structural_folder filtering every other
+    signal uses (STUDIO-367)."""
+
+    def test_shared_character_groups_bare_number_names(self, db):
+        # The exact evidence shape from the STUDIO-367 ticket: sized pack
+        # folders named only "20"/"25"/"30"/"40" under one character envelope.
+        creator = make_creator(db)
+        a = make_model(db, creator, name="20", character="Trays Full")
+        b = make_model(db, creator, name="25", character="Trays Full")
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+        assert groups[0].reason == "shared character label: Trays Full"
+        assert groups[0].confidence == 0.6
+
+    def test_distinct_characters_stay_separate(self, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="20a", character="Trays Full")
+        make_model(db, creator, name="20b", character="FDM Full Trays")
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+
+    def test_structural_character_does_not_group(self, db):
+        creator = make_creator(db)
+        make_model(db, creator, name="20", character="Supported")
+        make_model(db, creator, name="25", character="Supported")
+        db.flush()
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+
+    def test_name_signal_takes_precedence_when_both_apply(self, db):
+        # A stronger signal already explains the merge, so CHARACTER's weaker
+        # reason must not overwrite it even though both would form the cluster.
+        creator = make_creator(db)
+        make_model(db, creator, name="Goblin Supported", character="Trays Full")
+        make_model(db, creator, name="Goblin Unsupported", character="Trays Full")
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert groups[0].reason == "name: Goblin"
 
 
 class TestFilenameSignal:
