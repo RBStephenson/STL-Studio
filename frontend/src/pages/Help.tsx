@@ -902,6 +902,12 @@ const SECTIONS: Section[] = [
           scale tags like <code>1:6</code> or <code>75mm</code>.
         </p>
         <p>
+          The <strong>Scan root</strong> selector defaults to all configured roots. Choose
+          one root to limit the preview, Apply, and Undo refreshes to that library.
+          Changing roots discards selections and unresolved field overrides from the
+          previous plan so they cannot leak into the new scope.
+        </p>
+        <p>
           The page shows whether <strong>directory slugify</strong> is on or off and
           links to <strong>Settings → Library</strong> to change it. When it is on,
           destination folders are lowercased and hyphenated. When it is off, they keep
