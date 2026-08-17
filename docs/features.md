@@ -817,6 +817,11 @@ Destination templates support `{creator}`, `{character}`, `{scale}`, and
 or `75mm`; if a template uses `{scale}` and a model has no detected scale, that
 row is marked unclassifiable until you resolve it.
 
+The **Scan root** selector defaults to all configured roots. Choose one root to
+limit the preview, Apply, and Undo refreshes to that library. Changing roots
+clears selections and unresolved field overrides from the previous plan before
+building the newly scoped preview.
+
 The destination template and a **"Lowercase, hyphenated directory names"**
 toggle live in **Settings → Library → Reorganize** — both are saved server-side,
 so they're shared with manual [creator](#creators--per-creator-rescan) folder

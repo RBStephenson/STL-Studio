@@ -10,6 +10,7 @@ import type {
   ReorganizeOverride,
   ReorganizeApplyResult,
   ReorganizeCollisionKind,
+  ScanRoot,
 } from "../api/client";
 import ReorganizeStatsBar from "../components/reorganize/ReorganizeStatsBar";
 
@@ -185,7 +186,26 @@ export default function ReorganizePage() {
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [applyErr, setApplyErr] = useState<string | null>(null);
   const [lastApply, setLastApply] = useState<ReorganizeApplyResult | null>(null);
+  const [scanRoots, setScanRoots] = useState<ScanRoot[]>([]);
+  const [scanRootsLoading, setScanRootsLoading] = useState(true);
+  const [scanRootsError, setScanRootsError] = useState(false);
+  const [rootId, setRootId] = useState<number | undefined>();
   const { toast } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+    api.scan.roots()
+      .then((roots) => {
+        if (!cancelled) setScanRoots(roots);
+      })
+      .catch(() => {
+        if (!cancelled) setScanRootsError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setScanRootsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // Scanning is a deliberate, user-triggered action (STUDIO-155) — nothing
   // fetches until the user clicks Build/Retry/Rebuild. `runToken` bumps on
@@ -205,6 +225,21 @@ export default function ReorganizePage() {
 
   const hasOverrides = Object.keys(overrides).length > 0;
 
+  const changeRoot = (value: string) => {
+    setRootId(value ? Number(value) : undefined);
+    setPreview(null);
+    setError(null);
+    setOverrides({});
+    setSelected(new Set());
+    setExpanded(new Set());
+    setCreatorFilter("all");
+    setLastApply(null);
+    setApplyMsg(null);
+    setApplyErr(null);
+    setTabRaw("all");
+    setPage(1);
+  };
+
   useEffect(() => {
     if (!started) return;
     let cancelled = false;
@@ -212,8 +247,8 @@ export default function ReorganizePage() {
     const t = setTimeout(async () => {
       try {
         const data = hasOverrides
-          ? await api.reorganize.previewWithOverrides({ template, overrides })
-          : await api.reorganize.preview(template);
+          ? await api.reorganize.previewWithOverrides({ template, root_id: rootId, overrides })
+          : await api.reorganize.preview(template, rootId);
         if (!cancelled && !cancelledRef.current) {
           setPreview(data); setError(null);
           toast("Reorganize plan ready.", "success");
@@ -229,7 +264,7 @@ export default function ReorganizePage() {
     }, DEBOUNCE_MS);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, template, overrides, hasOverrides, runToken]);
+  }, [started, template, rootId, overrides, hasOverrides, runToken]);
 
   const creatorOptions = useMemo(() => {
     const creators = new Map<string, string>();
@@ -382,7 +417,7 @@ export default function ReorganizePage() {
       setApplyMsg(`Moved ${res.moved_files} file(s) across ${res.moved_models} model(s).`);
       setSelected(new Set());
       // Files are now in their new homes — re-preview reflects reality.
-      const fresh = await api.reorganize.preview(template);
+      const fresh = await api.reorganize.preview(template, rootId);
       setPreview(fresh); setOverrides({});
     } catch (e) {
       setApplyErr(e instanceof ApiError ? e.message : "Apply failed");
@@ -399,7 +434,7 @@ export default function ReorganizePage() {
       const skip = res.skipped.length ? `, ${res.skipped.length} skipped` : "";
       setApplyMsg(`Reversed ${res.reversed_files} file(s)${skip}.`);
       setLastApply(null);
-      const fresh = await api.reorganize.preview(template);
+      const fresh = await api.reorganize.preview(template, rootId);
       setPreview(fresh);
     } catch (e) {
       setApplyErr(e instanceof ApiError ? e.message : "Undo failed");
@@ -418,8 +453,34 @@ export default function ReorganizePage() {
         </p>
       </div>
 
-      {/* Template editor */}
+      {/* Scope and template editor */}
       <div className="space-y-2">
+        <label htmlFor="reorganize-scan-root" className="block text-sm text-text-primary-alt2">
+          Scan root
+        </label>
+        <select
+          id="reorganize-scan-root"
+          aria-label="Scan root"
+          value={rootId ?? ""}
+          onChange={(e) => changeRoot(e.target.value)}
+          disabled={scanRootsLoading || busy}
+          className="w-full bg-panel border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-start disabled:opacity-60"
+        >
+          <option value="">All scan roots</option>
+          {scanRoots.map((root) => (
+            <option key={root.id} value={root.id}>
+              {root.name ? `${root.name} (${root.path})` : root.path}{root.enabled ? "" : " (disabled)"}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-text-secondary-alt">
+          Build against every configured scan root or limit the plan to one root.
+        </p>
+        {scanRootsError && (
+          <p className="text-xs text-amber-400">
+            Scan roots could not be loaded. Reorganize will continue using all scan roots.
+          </p>
+        )}
         <label className="flex items-center gap-2 text-sm text-text-primary-alt2">
           Destination template
           {loading && preview && (

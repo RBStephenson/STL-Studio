@@ -13,6 +13,9 @@ vi.mock("../api/client", () => {
   return {
     ApiError,
     api: {
+      scan: {
+        roots: vi.fn(),
+      },
       reorganize: {
         preview: vi.fn(),
         previewWithOverrides: vi.fn(),
@@ -44,6 +47,32 @@ const reorg = api.reorganize as unknown as {
   undo: ReturnType<typeof vi.fn>;
   aiSuggest: ReturnType<typeof vi.fn>;
 };
+const scan = api.scan as unknown as {
+  roots: ReturnType<typeof vi.fn>;
+};
+
+const ROOTS = [
+  {
+    id: 7,
+    path: "C:/STL Library",
+    enabled: true,
+    layout: "{creator}",
+    last_scanned: null,
+    name: "Main Library",
+    is_writable: true,
+    group_by_character: false,
+  },
+  {
+    id: 9,
+    path: "D:/Archive",
+    enabled: false,
+    layout: "{creator}",
+    last_scanned: null,
+    name: null,
+    is_writable: false,
+    group_by_character: false,
+  },
+];
 
 function entry(over: Record<string, unknown>) {
   return {
@@ -89,6 +118,7 @@ beforeEach(() => {
   aiSuggestionsEnabled = false;
   packageModeEnabled = false;
   slugifyEnabled = true;
+  scan.roots.mockReturnValue(new Promise(() => {}));
   reorg.preview.mockResolvedValue(previewFixture());
 });
 
@@ -99,6 +129,82 @@ function buildPlan() {
 }
 
 describe("ReorganizePage", () => {
+  it("builds a plan for the selected scan root", async () => {
+    scan.roots.mockResolvedValue(ROOTS);
+    render(<ReorganizePage />);
+
+    const rootSelect = await screen.findByRole("combobox", { name: "Scan root" });
+    await waitFor(() => expect(rootSelect).toBeEnabled());
+    expect(rootSelect).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Main Library (C:/STL Library)" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "D:/Archive (disabled)" })).toBeInTheDocument();
+
+    fireEvent.change(rootSelect, { target: { value: "7" } });
+    buildPlan();
+
+    await waitFor(() =>
+      expect(reorg.preview).toHaveBeenCalledWith("{creator}/{character}/{title}", 7),
+    );
+  });
+
+  it("keeps all-roots preview available when scan roots fail to load", async () => {
+    scan.roots.mockRejectedValue(new Error("offline"));
+    render(<ReorganizePage />);
+
+    expect(await screen.findByText(/Scan roots could not be loaded/)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Scan root" })).toBeEnabled();
+    buildPlan();
+
+    await waitFor(() =>
+      expect(reorg.preview).toHaveBeenCalledWith("{creator}/{character}/{title}", undefined),
+    );
+  });
+
+  it("keeps the selected root when overrides rebuild the preview", async () => {
+    scan.roots.mockResolvedValue(ROOTS);
+    reorg.previewWithOverrides.mockResolvedValue(previewFixture());
+    render(<ReorganizePage />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Scan root" }), {
+      target: { value: "7" },
+    });
+    buildPlan();
+    await screen.findByText("Mystery");
+    fireEvent.click(screen.getByText("Mystery"));
+    fireEvent.change(await screen.findByLabelText("character for Mystery"), {
+      target: { value: "Harley" },
+    });
+
+    await waitFor(() =>
+      expect(reorg.previewWithOverrides).toHaveBeenCalledWith(expect.objectContaining({
+        root_id: 7,
+        overrides: { 2: { character: "Harley" } },
+      })),
+    );
+  });
+
+  it("clears stale plan state before rebuilding for another root", async () => {
+    scan.roots.mockResolvedValue(ROOTS);
+    reorg.previewWithOverrides.mockResolvedValue(previewFixture());
+    render(<ReorganizePage />);
+    buildPlan();
+    const checkbox = await screen.findByLabelText("Select Joker Bust");
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByText("Mystery"));
+    fireEvent.change(await screen.findByLabelText("character for Mystery"), {
+      target: { value: "Harley" },
+    });
+    await waitFor(() => expect(reorg.previewWithOverrides).toHaveBeenCalled());
+
+    fireEvent.change(await screen.findByRole("combobox", { name: "Scan root" }), {
+      target: { value: "7" },
+    });
+
+    expect(screen.queryByLabelText("Select Joker Bust")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(reorg.preview).toHaveBeenLastCalledWith("{creator}/{character}/{title}", 7),
+    );
+  });
+
   it("surfaces slugify and empty-source cleanup before building a plan", () => {
     render(<ReorganizePage />);
 
@@ -179,6 +285,33 @@ describe("ReorganizePage", () => {
       expect(reorg.apply).toHaveBeenCalledWith("deadbeef", [1]),
     );
     expect(await screen.findByText(/Moved 3 file/)).toBeInTheDocument();
+  });
+
+  it("keeps the selected root after apply and undo refreshes", async () => {
+    scan.roots.mockResolvedValue(ROOTS);
+    reorg.apply.mockResolvedValue({
+      manifest_id: "deadbeef", moved_files: 3, moved_models: 1, undo_log: "/x.log",
+    });
+    reorg.undo.mockResolvedValue({ reversed_files: 3, skipped: [] });
+    render(<ReorganizePage />);
+    const rootSelect = await screen.findByRole("combobox", { name: "Scan root" });
+    await waitFor(() => expect(rootSelect).toBeEnabled());
+    fireEvent.change(rootSelect, { target: { value: "7" } });
+    buildPlan();
+
+    fireEvent.click(await screen.findByLabelText("Select Joker Bust"));
+    fireEvent.click(screen.getByRole("button", { name: /Apply 1/ }));
+
+    await waitFor(() =>
+      expect(reorg.preview).toHaveBeenLastCalledWith("{creator}/{character}/{title}", 7),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Undo last apply" }));
+
+    await waitFor(() => expect(reorg.undo).toHaveBeenCalledWith("deadbeef"));
+    await waitFor(() => {
+      expect(reorg.preview).toHaveBeenCalledTimes(3);
+      expect(reorg.preview).toHaveBeenLastCalledWith("{creator}/{character}/{title}", 7);
+    });
   });
 
   it("shows resolve inputs only on an ineligible row, once expanded", async () => {
