@@ -47,6 +47,8 @@ from app.services.grouping_policy import (
     SignalPolicy,
     assert_policies_complete,
     build_clusters,
+    character_evidence,
+    character_keys,
     filename_evidence,
     hash_evidence,
     hierarchy_evidence,
@@ -81,6 +83,8 @@ __all__ = [
     "SubtreeStrategy",
     "assert_policies_complete",
     "build_clusters",
+    "character_evidence",
+    "character_keys",
     "filename_evidence",
     "hash_evidence",
     "hierarchy_evidence",
@@ -208,12 +212,23 @@ def regroup_creator(db: Session, creator_id: int) -> None:
     keys = name_keys(ids, names, creator_name)
     _apply_evidence(uf, ledger, name_evidence(ids, keys))
 
+    # --- signal 4: character label (weakest, STUDIO-367) ---
+    # Reconciles this pipeline with the legacy startup backfill
+    # (`main.py::_backfill_missing_variant_groups`), which buckets on the same
+    # `character` field: once a scan can reproduce what the backfill proposes,
+    # neither path keeps wiping what the other created.
+    characters = {mid: by_id[mid].character for mid in ids if by_id[mid].character}
+    char_keys = character_keys(ids, characters, creator_name)
+    _apply_evidence(uf, ledger, character_evidence(ids, char_keys))
+
     # --- propose groups (pure) ---
     facts = CandidateFacts(
         names=names,
         keys=keys,
         contexts=contexts,
         explicit_reps=frozenset(mid for mid in ids if by_id[mid].is_group_rep),
+        characters=characters,
+        character_keys=char_keys,
     )
     proposals = propose_groups(ids, uf, ledger, facts)
 
