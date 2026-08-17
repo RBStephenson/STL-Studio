@@ -726,6 +726,12 @@ def _creator_dirs_by_name(name: str, db: Session) -> list[tuple[Path, list[str]]
 
     Used as a fallback when _creator_dirs_for returns nothing (zero indexed
     models yet). Enables per-creator rescan to bootstrap a brand-new creator.
+
+    Matching is deliberately case-insensitive on every platform (STUDIO-298),
+    including case-sensitive hosts where ``Abe3D/`` and ``abe3d/`` can coexist.
+    Return every case variant because they are one creator and a targeted rescan
+    must walk all of them before pruning undiscovered models. This differs from
+    model-folder identity, which follows the host-sensitive ``_normpath`` rule.
     """
     results: list[tuple[Path, list[str], bool]] = []
     for root in db.query(ScanRoot).filter(ScanRoot.enabled == True).all():
