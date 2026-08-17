@@ -13,6 +13,8 @@ const openPath = vi.fn().mockResolvedValue("");
 const openExternal = vi.fn().mockResolvedValue(undefined);
 const requestSingleInstanceLock = vi.fn().mockReturnValue(true);
 const onHeadersReceived = vi.fn();
+const setPermissionCheckHandler = vi.fn();
+const setPermissionRequestHandler = vi.fn();
 const appOn = vi.fn();
 const whenReadyCallbacks: Array<() => Promise<void>> = [];
 
@@ -82,7 +84,13 @@ vi.mock("electron", () => ({
   dialog: { showErrorBox, showMessageBox },
   ipcMain: { handle: vi.fn() },
   screen: { getAllDisplays: vi.fn().mockReturnValue([]) },
-  session: { defaultSession: { webRequest: { onHeadersReceived } } },
+  session: {
+    defaultSession: {
+      webRequest: { onHeadersReceived },
+      setPermissionCheckHandler,
+      setPermissionRequestHandler,
+    },
+  },
   shell: { openPath, openExternal },
 }));
 
@@ -148,6 +156,29 @@ describe("main.ts wiring", () => {
     expect(onHeadersReceived).toHaveBeenCalledOnce();
     const order = onHeadersReceived.mock.invocationCallOrder[0] ?? Infinity;
     expect(order).toBeLessThan(bootBackendAndLoad.mock.invocationCallOrder[0] ?? -Infinity);
+  });
+
+  it("denies all Chromium permission checks and requests before boot (STUDIO-260)", async () => {
+    await loadMain();
+
+    const checkHandler = setPermissionCheckHandler.mock.calls[0]?.[0] as () => boolean;
+    expect(checkHandler()).toBe(false);
+
+    const requestHandler = setPermissionRequestHandler.mock.calls[0]?.[0] as (
+      webContents: unknown,
+      permission: string,
+      callback: (allowed: boolean) => void,
+    ) => void;
+    const callback = vi.fn();
+    requestHandler(undefined, "media", callback);
+    expect(callback).toHaveBeenCalledWith(false);
+
+    expect(setPermissionCheckHandler.mock.invocationCallOrder[0]).toBeLessThan(
+      bootBackendAndLoad.mock.invocationCallOrder[0] ?? -Infinity,
+    );
+    expect(setPermissionRequestHandler.mock.invocationCallOrder[0]).toBeLessThan(
+      bootBackendAndLoad.mock.invocationCallOrder[0] ?? -Infinity,
+    );
   });
 
   it("quits immediately when the single-instance lock is denied", async () => {

@@ -296,6 +296,10 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     startupLog(`ready userData=${app.getPath("userData")}`);
+    // STL Studio does not use Chromium permissions. Deny every check and
+    // request unless a future feature explicitly introduces an allowlist.
+    session.defaultSession.setPermissionCheckHandler(() => false);
+    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
     // Before any window exists, so no response can reach a renderer unpoliced.
     registerCspHandler(session.defaultSession);
     installApplicationMenu();
