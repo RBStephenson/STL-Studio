@@ -13,6 +13,7 @@
 import { join } from "node:path";
 
 import { Menu, app, BrowserWindow, dialog, ipcMain, screen, session, shell } from "electron";
+import type { MessageBoxOptions } from "electron";
 import { autoUpdater } from "electron-updater";
 
 import { createAppController } from "./appController";
@@ -165,6 +166,54 @@ registerProcessFailureHandlers(process, failureUi);
 
 startupLog("main-loaded");
 
+async function openLogsFolder(): Promise<void> {
+  try {
+    const error = await shell.openPath(logDir);
+    if (error) {
+      dialog.showErrorBox("Could not open logs folder", `${error}\n\n${logDir}`);
+    }
+  } catch (error) {
+    dialog.showErrorBox("Could not open logs folder", `${String(error)}\n\n${logDir}`);
+  }
+}
+
+function showAboutDialog(): void {
+  let backendPort = "not running";
+  const currentUrl = mainWindow?.webContents.getURL();
+  if (currentUrl) {
+    try {
+      const parsed = new URL(currentUrl);
+      if (
+        parsed.protocol === "http:"
+        && ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
+        && parsed.port
+      ) {
+        backendPort = parsed.port;
+      }
+    } catch {
+      // A file or placeholder URL has no backend port to report.
+    }
+  }
+
+  const options: MessageBoxOptions = {
+    type: "info",
+    buttons: ["OK"],
+    title: "About STL Studio",
+    message: `STL Studio ${app.getVersion()}`,
+    detail: [
+      `Electron: ${process.versions.electron ?? "unknown"}`,
+      `Chromium: ${process.versions.chrome ?? "unknown"}`,
+      `User data: ${userDataDir}`,
+      `Backend port: ${backendPort}`,
+    ].join("\n"),
+  };
+  if (mainWindow) {
+    void dialog.showMessageBox(mainWindow, options);
+  } else {
+    void dialog.showMessageBox(options);
+  }
+}
+
 /** Install our custom application menu (no Edit menu). Navigation acts on the
  *  focused window, so this is built once and never needs rebuilding. */
 function installApplicationMenu(): void {
@@ -177,6 +226,10 @@ function installApplicationMenu(): void {
           if (mainWindow) void appController.regenerateEncryptionKey(mainWindow);
         },
         onCheckForUpdates: () => appController.checkForUpdatesManually(),
+        onOpenLogsFolder: () => {
+          void openLogsFolder();
+        },
+        onShowAbout: showAboutDialog,
       }),
     ),
   );

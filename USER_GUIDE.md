@@ -33,6 +33,11 @@ There is no supported prebuilt macOS build — use Docker on a Mac.
    collection — models appear as they're found, and you can keep using the
    app while it runs.
 
+The installed desktop app's **Help** menu includes **Open Logs Folder** and
+**About STL Studio**. These remain available when the backend fails to start, so
+you can retrieve support logs and report the exact app version without reaching
+the Settings page.
+
 Your catalog database lives in your user-data folder and survives updates:
 
 | OS | Location |
