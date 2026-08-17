@@ -1429,6 +1429,57 @@ class TestSortByCreator:
         assert body["next_id"] == models[11].id
 
 
+class TestDeterministicSortTiebreakers:
+    SORTS_WITH_ASCENDING_ID_TIEBREAK = (
+        "name",
+        "rating",
+        "creator",
+        "queue",
+        "queued_at",
+        "printed_at",
+    )
+
+    def _seed_exact_ties(self, db):
+        creator = make_creator(db, "Same Creator")
+        models = [
+            make_model(
+                db,
+                creator,
+                name=f"Same Model {index}",
+                character="Same Character",
+            )
+            for index in range(3)
+        ]
+        for model in models:
+            model.name = "Same Model"
+        commit_all(db)
+        return models
+
+    @pytest.mark.parametrize("sort", SORTS_WITH_ASCENDING_ID_TIEBREAK)
+    def test_exact_ties_are_stable_across_page_boundaries(self, client, db, sort):
+        models = self._seed_exact_ties(db)
+
+        page_ids = [
+            client.get(
+                f"/models?sort={sort}&group_variants=false&page={page}&page_size=1"
+            ).json()["items"][0]["id"]
+            for page in range(1, 4)
+        ]
+
+        assert page_ids == [model.id for model in models]
+
+    @pytest.mark.parametrize("sort", SORTS_WITH_ASCENDING_ID_TIEBREAK)
+    def test_neighbors_follow_the_same_order_for_exact_ties(self, client, db, sort):
+        models = self._seed_exact_ties(db)
+
+        resp = client.get(
+            f"/models/{models[1].id}/neighbors?sort={sort}&group_variants=false"
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"prev_id": models[0].id, "next_id": models[2].id}
+
+
 # ---------------------------------------------------------------------------
 # Bulk group assignment (#374) — rename / merge / split / ungroup primitive
 # ---------------------------------------------------------------------------
