@@ -862,6 +862,33 @@ def _cleanup_stale_source_dirs(db: Session, src: str, force_remove_root: bool = 
         logger.exception("Stale-dir cleanup after import failed (non-fatal)")
 
 
+def _run_import_cleanup_job(
+    handle: JobHandle,
+    manifest_id: str,
+    ineligible: list[ImportApplyIneligible],
+    all_old_to_new: dict[str, str],
+) -> None:
+    """Finish an all-ineligible import without blocking the request thread."""
+    db = SessionLocal()
+    try:
+        handle.update(message="Cleaning up")
+        _cleanup_non_stl_folders(all_old_to_new, db)
+        final = ImportApplyResponse(
+            manifest_id=manifest_id,
+            moved_models=0,
+            moved_files=0,
+            skipped=len(ineligible),
+            ineligible=ineligible,
+        )
+        handle.update(
+            state=JobState.DONE,
+            message="done: 0 models, 0 files",
+            result=final.model_dump(mode="json"),
+        )
+    finally:
+        db.close()
+
+
 def _run_import_apply_job(
     handle: JobHandle,
     manifest_id: str,
@@ -1028,10 +1055,10 @@ def _run_import_apply_job(
 def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
     """Batch-move the ingested inbox packs under a source into their mapped
     library (#453). Builds a manifest scoped to those inbox models (destination
-    = mapped library via the source→library mapping); when there's anything to
-    move, the actual apply + cleanup runs as a background job — poll
-    GET /import/apply/status for progress and the eventual result. Everything
-    the job does is identical to the old synchronous body: drift verification
+    = mapped library via the source→library mapping); when there is filesystem
+    movement or cleanup to perform, it runs as a background job. Poll
+    GET /import/apply/status for progress and the eventual result. For eligible
+    models, the job performs the old synchronous body: drift verification
     + crash-safe undo log, is_inbox cleared on move (#324), then non-STL files
     (images, PDFs, etc.) moved and the old pack folder removed."""
     if not body.source.strip():
@@ -1100,11 +1127,14 @@ def import_apply(body: ImportApplyRequest, db: Session = Depends(get_db)):
     if not eligible_ids:
         # No STLs to move, but still clean up non-STL files (gallery images, etc.)
         # that were downloaded into the import folder before eligibility was checked.
-        _cleanup_non_stl_folders(all_old_to_new, db)
-        return ImportApplyStart(started=False, result=ImportApplyResponse(
-            manifest_id=resp.manifest_id, moved_models=0, moved_files=0,
-            skipped=len(ineligible), ineligible=ineligible,
-        ))
+        handle = runner.start(
+            _IMPORT_APPLY_KEY, _run_import_cleanup_job, single_flight=True,
+            manifest_id=resp.manifest_id, ineligible=ineligible,
+            all_old_to_new=all_old_to_new,
+        )
+        if handle is None:
+            raise HTTPException(status_code=409, detail="An import is already in progress.")
+        return ImportApplyStart(started=True)
 
     handle = runner.start(
         _IMPORT_APPLY_KEY, _run_import_apply_job, single_flight=True,

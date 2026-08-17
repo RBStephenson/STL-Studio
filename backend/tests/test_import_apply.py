@@ -6,10 +6,12 @@ Apply now runs as a background job (STUDIO-XX): POST returns immediately with
 /import/apply/status. ``_apply_and_wait`` below posts and blocks on the shared
 job runner so tests stay deterministic instead of polling on a wall clock."""
 import os
+import threading
 
 import pytest
 
 from app.models import Creator, ImportSourceMapping, Model, ScanRoot, STLFile
+from app.routers import imports as imports_router
 from app.routers.imports import _IMPORT_APPLY_KEY
 from app.services import reorganize
 from app.services.job_runner import runner
@@ -95,6 +97,41 @@ class TestMappedDestination:
 
 
 class TestImportApplyReporting:
+    def test_all_ineligible_cleanup_runs_in_background(
+        self, client, db, tmp_path, monkeypatch,
+    ):
+        lib = _library(db, tmp_path / "lib")
+        src = os.path.realpath(str(tmp_path / "inbox"))
+        db.add(ImportSourceMapping(source_path=src, library_id=lib.id))
+        db.commit()
+        _inbox_model(db, os.path.join(src, "loose"))
+
+        cleanup_started = threading.Event()
+        release_cleanup = threading.Event()
+
+        def delayed_cleanup(old_to_new, job_db):
+            cleanup_started.set()
+            assert release_cleanup.wait(timeout=5), "cleanup test worker was not released"
+
+        monkeypatch.setattr(imports_router, "_cleanup_non_stl_folders", delayed_cleanup)
+
+        try:
+            response = client.post("/import/apply", json={"source": src})
+            assert response.status_code == 200
+            assert response.json() == {"started": True, "result": None}
+            assert cleanup_started.wait(timeout=1), "cleanup job did not start"
+            assert client.get("/import/apply/status").json()["running"] is True
+        finally:
+            release_cleanup.set()
+            assert runner.wait(_IMPORT_APPLY_KEY, timeout=10), "cleanup job did not finish"
+
+        status = client.get("/import/apply/status").json()
+        assert status["running"] is False
+        assert status["error"] is None
+        assert status["result"]["moved_models"] == 0
+        assert status["result"]["moved_files"] == 0
+        assert status["result"]["skipped"] == 1
+
     def test_reports_ineligible_without_moving(self, client, db, tmp_path):
         lib = _library(db, tmp_path / "lib")
         src = os.path.realpath(str(tmp_path / "inbox"))
