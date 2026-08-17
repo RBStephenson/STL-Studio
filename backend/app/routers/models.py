@@ -144,19 +144,25 @@ def _order_cols(sort: str) -> tuple:
             Model.queue_position.is_(None),
             Model.queue_position.asc(),
             Model.queued_at.asc(),
+            Model.id.asc(),
         )
     elif sort == "queued_at":
-        return (Model.queued_at.asc(),)
+        return (Model.queued_at.asc(), Model.id.asc())
     elif sort == "printed_at":
-        return (Model.printed_at.desc(),)
+        return (Model.printed_at.desc(), Model.id.asc())
     elif sort == "added":
         # Newest first; id breaks ties within a scan batch (#170).
         return (Model.created_at.desc(), Model.id.desc())
     elif sort == "rating":
         # Highest-rated first; unrated (NULL) sinks to the bottom, then name (#167).
-        return (Model.user_rating.is_(None), Model.user_rating.desc(), Model.name)
+        return (
+            Model.user_rating.is_(None),
+            Model.user_rating.desc(),
+            Model.name,
+            Model.id.asc(),
+        )
     else:
-        return (Model.character, Model.name)
+        return (Model.character, Model.name, Model.id.asc())
 
 
 def _sort_order_cols(sort: str) -> tuple:
@@ -166,7 +172,13 @@ def _sort_order_cols(sort: str) -> tuple:
     column list into a LAG/LEAD `over(order_by=...)` window instead of
     duplicating the sort-key logic (#86)."""
     if sort == "creator":
-        return (Creator.name.is_(None), Creator.name, Model.character, Model.name)
+        return (
+            Creator.name.is_(None),
+            Creator.name,
+            Model.character,
+            Model.name,
+            Model.id.asc(),
+        )
     return _order_cols(sort)
 
 
