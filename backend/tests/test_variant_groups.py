@@ -307,3 +307,36 @@ class TestSetGroupingStrategyScope:
         assert regroups == [creator_a.id], (
             f"Underscore wildcard leaked into sibling path; got {regroups}"
         )
+
+    def test_prefix_sibling_is_excluded_for_both_separator_styles(self, client, db):
+        cases = [
+            ("/lib/STL", "/lib/STL/Deep/Model", "/lib/STLBackup/Model"),
+            (r"C:\lib\STL", r"C:\lib\STL\Deep\Model", r"C:\lib\STLBackup\Model"),
+        ]
+
+        for index, (target, descendant_path, sibling_path) in enumerate(cases):
+            exact = make_creator(db, f"Exact{index}")
+            descendant = make_creator(db, f"Descendant{index}")
+            sibling = make_creator(db, f"Sibling{index}")
+            self._make_model_at(db, exact, target)
+            self._make_model_at(db, descendant, descendant_path)
+            self._make_model_at(db, sibling, sibling_path)
+            db.commit()
+
+            regroups: list[int] = []
+
+            import app.services.grouping as grouping_mod
+
+            with patch.object(
+                grouping_mod,
+                "regroup_creator",
+                side_effect=lambda _db, creator_id, calls=regroups: calls.append(creator_id),
+            ):
+                resp = client.post(
+                    "/models/grouping-strategy",
+                    json={"path": target, "strategy": "off"},
+                )
+
+            assert resp.status_code == 200
+            assert set(regroups) == {exact.id, descendant.id}
+            assert sibling.id not in regroups
