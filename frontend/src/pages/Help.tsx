@@ -902,6 +902,12 @@ const SECTIONS: Section[] = [
           scale tags like <code>1:6</code> or <code>75mm</code>.
         </p>
         <p>
+          The page shows whether <strong>directory slugify</strong> is on or off and
+          links to <strong>Settings → Library</strong> to change it. When it is on,
+          destination folders are lowercased and hyphenated. When it is off, they keep
+          their original casing and spacing.
+        </p>
+        <p>
           For creator packages that contain nested releases such as an{" "}
           <code>Alternate</code> folder, enable <strong>Preserve release package
           structure</strong> under <strong>Settings → Library</strong>. This default-off
@@ -943,7 +949,8 @@ const SECTIONS: Section[] = [
             then click <strong>Apply</strong>. The app verifies each file's size and
             modification time against the preview fingerprint first — if anything
             drifted on disk, the whole batch aborts safely. All moves complete before
-            the catalog is updated.
+            the catalog is updated. Source folders left empty by the selected moves
+            are removed only after a successful apply.
           </li>
           <li>
             <strong>Undo.</strong> After a successful apply, an{" "}

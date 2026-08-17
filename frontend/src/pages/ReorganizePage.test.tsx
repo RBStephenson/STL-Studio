@@ -26,10 +26,12 @@ vi.mock("../api/client", () => {
 
 let aiSuggestionsEnabled = false;
 let packageModeEnabled = false;
+let slugifyEnabled = true;
 vi.mock("../context/AppSettingsContext", () => ({
   useAppSettings: () => ({ settings: {
     reorganize_ai_suggestions_enabled: aiSuggestionsEnabled,
     reorganize_package_mode_enabled: packageModeEnabled,
+    reorganize_slugify: slugifyEnabled,
   } }),
 }));
 
@@ -86,6 +88,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   aiSuggestionsEnabled = false;
   packageModeEnabled = false;
+  slugifyEnabled = true;
   reorg.preview.mockResolvedValue(previewFixture());
 });
 
@@ -96,6 +99,29 @@ function buildPlan() {
 }
 
 describe("ReorganizePage", () => {
+  it("surfaces slugify and empty-source cleanup before building a plan", () => {
+    render(<ReorganizePage />);
+
+    expect(screen.getByText(/Directory slugify is on/)).toHaveTextContent(
+      "destination folders are lowercased and hyphenated",
+    );
+    expect(screen.getByRole("link", { name: "Change in Settings" })).toHaveAttribute(
+      "href",
+      "/settings#library",
+    );
+    expect(screen.getByText(/source folders left empty by the selected moves are removed/))
+      .toBeInTheDocument();
+  });
+
+  it("explains when directory slugify is off", () => {
+    slugifyEnabled = false;
+    render(<ReorganizePage />);
+
+    expect(screen.getByText(/Directory slugify is off/)).toHaveTextContent(
+      "destination folders keep their original casing and spacing",
+    );
+  });
+
   it("explains how package mode changes the destination", () => {
     packageModeEnabled = true;
     render(<ReorganizePage />);
