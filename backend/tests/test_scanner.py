@@ -1899,6 +1899,36 @@ class TestCreatorDirsByName:
         results = scanner._creator_dirs_by_name("abe3d", db)
         assert any(p == creator_dir for p, *_ in results)
 
+    def test_returns_all_case_variant_directories(self, db, tmp_path, monkeypatch):
+        """Case-sensitive hosts may contain both spellings of one creator."""
+        from app.models import ScanRoot
+
+        class CaseSensitiveDir:
+            def __init__(self, path: str):
+                self.path = path
+                self.name = path.rsplit("/", 1)[-1]
+
+            def exists(self) -> bool:
+                return True
+
+        upper = CaseSensitiveDir("/library/Abe3D")
+        lower = CaseSensitiveDir("/library/abe3d")
+        root = ScanRoot(path=str(tmp_path), layout="{creator}", enabled=True)
+        db.add(root)
+        db.commit()
+        monkeypatch.setattr(
+            scanner.layout,
+            "iter_creator_dirs",
+            lambda *_args: [(upper, []), (lower, [])],
+        )
+
+        results = scanner._creator_dirs_by_name("Abe3D", db)
+
+        assert [directory.path for directory, *_ in results] == [
+            "/library/Abe3D",
+            "/library/abe3d",
+        ]
+
     def test_no_match_returns_empty(self, db, tmp_path):
         """Returns an empty list when no creator folder matches the name."""
         from app.models import ScanRoot
