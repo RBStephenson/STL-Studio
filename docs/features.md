@@ -821,7 +821,8 @@ The destination template and a **"Lowercase, hyphenated directory names"**
 toggle live in **Settings → Library → Reorganize** — both are saved server-side,
 so they're shared with manual [creator](#creators--per-creator-rescan) folder
 creation and the model detail [unorganized indicator](#model-detail), not just
-this page. The toggle is on by default: every segment renders slug-style (e.g.
+this page. The Reorganize page shows the current toggle state beside the template
+and links back to this setting. The toggle is on by default: every segment renders slug-style (e.g.
 `abe-3d` instead of `Abe 3D`), matching how imported folders are named. Turn it
 off to keep each segment's original casing and spacing.
 

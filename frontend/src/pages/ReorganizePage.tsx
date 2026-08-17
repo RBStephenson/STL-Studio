@@ -441,6 +441,20 @@ export default function ReorganizePage() {
           <code className="text-indigo-400">{"{scale}"}</code>{" "}
           <code className="text-indigo-400">{"{title}"}</code> — separate levels with <code>/</code>.
         </div>
+        <div className="rounded-lg border border-border-subtle bg-panel/60 px-3 py-2 text-xs text-text-secondary-alt space-y-1">
+          <p>
+            Directory slugify is {settings.reorganize_slugify ? "on" : "off"}: destination
+            folders {settings.reorganize_slugify
+              ? "are lowercased and hyphenated"
+              : "keep their original casing and spacing"}.{" "}
+            <a href="/settings#library" className="text-indigo-400 hover:text-indigo-300 underline">
+              Change in Settings
+            </a>
+          </p>
+          <p>
+            After a successful apply, source folders left empty by the selected moves are removed.
+          </p>
+        </div>
         {settings.reorganize_package_mode_enabled && (
           <div className="text-xs text-indigo-300">
             Package preservation is on: Reorganize uses the creator/character prefix
