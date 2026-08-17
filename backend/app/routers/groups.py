@@ -297,17 +297,21 @@ def set_grouping_strategy(body: GroupingStrategyBody, db: Session = Depends(get_
     # Re-group only the creators that actually have models under this subtree so
     # the strategy takes effect now rather than at the next scan.
     path_prefix = body.path.rstrip("/\\")
-    affected = (
-        db.query(Model.creator_id)
+    candidates = (
+        db.query(Model.creator_id, Model.folder_path)
         .filter(
             Model.creator_id != None,  # noqa: E711
             (Model.folder_path == body.path)
             | Model.folder_path.like(like_escape(path_prefix) + "%", escape="\\"),
         )
-        .distinct()
         .all()
     )
-    for (creator_id,) in affected:
+    affected_creator_ids = {
+        creator_id
+        for creator_id, folder_path in candidates
+        if grouping_strategy.is_within(folder_path, body.path)
+    }
+    for creator_id in sorted(affected_creator_ids):
         grouping.regroup_creator(db, creator_id)
     db.commit()
     return {"ok": True, "path": body.path, "strategy": body.strategy}
