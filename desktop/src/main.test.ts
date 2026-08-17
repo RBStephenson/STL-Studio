@@ -28,6 +28,7 @@ class FakeWebContents extends EventEmitter {
   };
   reload = vi.fn();
   setWindowOpenHandler = vi.fn();
+  getURL = vi.fn().mockReturnValue("http://127.0.0.1:5555/library");
 }
 
 class FakeBrowserWindow extends EventEmitter {
@@ -304,6 +305,75 @@ describe("main.ts wiring", () => {
     const checkItem = helpMenu.submenu.find((item: { label?: string }) => item.label?.startsWith("Check"));
     checkItem.click();
     expect(checkForUpdatesManually).toHaveBeenCalled();
+  });
+
+  it("opens the logs folder from the Help menu without the backend", async () => {
+    await loadMain();
+    const template = buildFromTemplate.mock.calls[0][0];
+    const helpMenu = template.find((item: { label?: string }) => item.label === "Help");
+    const openLogsItem = helpMenu.submenu.find(
+      (item: { label?: string }) => item.label === "Open Logs Folder",
+    );
+
+    openLogsItem.click();
+    await vi.waitFor(() => expect(openPath).toHaveBeenCalledWith(join("/userdata", "logs")));
+  });
+
+  it("reports an error when the logs folder cannot be opened", async () => {
+    openPath.mockResolvedValueOnce("Access denied");
+    await loadMain();
+    const template = buildFromTemplate.mock.calls[0][0];
+    const helpMenu = template.find((item: { label?: string }) => item.label === "Help");
+    const openLogsItem = helpMenu.submenu.find(
+      (item: { label?: string }) => item.label === "Open Logs Folder",
+    );
+
+    openLogsItem.click();
+    await vi.waitFor(() => {
+      expect(showErrorBox).toHaveBeenCalledWith(
+        "Could not open logs folder",
+        expect.stringContaining("Access denied"),
+      );
+    });
+  });
+
+  it("shows desktop versions, paths, and the running backend port in About", async () => {
+    await loadMain();
+    const template = buildFromTemplate.mock.calls[0][0];
+    const helpMenu = template.find((item: { label?: string }) => item.label === "Help");
+    const aboutItem = helpMenu.submenu.find(
+      (item: { label?: string }) => item.label === "About STL Studio",
+    );
+
+    aboutItem.click();
+
+    expect(showMessageBox).toHaveBeenCalledWith(
+      FakeBrowserWindow.instances[0],
+      expect.objectContaining({
+        title: "About STL Studio",
+        message: "STL Studio 1.2.3",
+        detail: expect.stringMatching(
+          /Electron: .+\nChromium: .+\nUser data: \/userdata\nBackend port: 5555/,
+        ),
+      }),
+    );
+  });
+
+  it("reports that the backend is not running when About opens on a local page", async () => {
+    await loadMain();
+    FakeBrowserWindow.instances[0].webContents.getURL.mockReturnValue("file:///placeholder.html");
+    const template = buildFromTemplate.mock.calls[0][0];
+    const helpMenu = template.find((item: { label?: string }) => item.label === "Help");
+    const aboutItem = helpMenu.submenu.find(
+      (item: { label?: string }) => item.label === "About STL Studio",
+    );
+
+    aboutItem.click();
+
+    expect(showMessageBox).toHaveBeenCalledWith(
+      FakeBrowserWindow.instances[0],
+      expect.objectContaining({ detail: expect.stringContaining("Backend port: not running") }),
+    );
   });
 
   it("routes the window's context-menu event through buildContextMenuTemplate and popup", async () => {

@@ -115,8 +115,44 @@ describe("buildApplicationMenuTemplate", () => {
     const t = buildApplicationMenuTemplate(nav, { isMac: false, onCheckForUpdates });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const help = (t.find((i) => i.label === "Help") as any).submenu as any[];
-    expect(help[0].label).toBe("Check for Updates...");
-    help[0].click();
+    const checkForUpdates = help.find((item) => item.label === "Check for Updates...");
+    checkForUpdates.click();
     expect(onCheckForUpdates).toHaveBeenCalledOnce();
+  });
+
+  it("always includes desktop support actions when the updater is unavailable", () => {
+    const { nav } = makeNav();
+    const t = buildApplicationMenuTemplate(nav, { isMac: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const help = (t.find((i) => i.label === "Help") as any).submenu as any[];
+
+    expect(labels(help)).toEqual([
+      "Open Logs Folder",
+      "About STL Studio",
+      "separator",
+      "Check for Updates...",
+    ]);
+    expect(help.find((item) => item.label === "Check for Updates...")).toMatchObject({
+      enabled: false,
+    });
+  });
+
+  it("wires the desktop support actions from the Help menu", () => {
+    const { nav } = makeNav();
+    const onOpenLogsFolder = vi.fn();
+    const onShowAbout = vi.fn();
+    const t = buildApplicationMenuTemplate(nav, {
+      isMac: false,
+      onOpenLogsFolder,
+      onShowAbout,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const help = (t.find((i) => i.label === "Help") as any).submenu as any[];
+
+    help.find((item) => item.label === "Open Logs Folder").click();
+    help.find((item) => item.label === "About STL Studio").click();
+
+    expect(onOpenLogsFolder).toHaveBeenCalledOnce();
+    expect(onShowAbout).toHaveBeenCalledOnce();
   });
 });

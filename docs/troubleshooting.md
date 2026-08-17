@@ -269,7 +269,10 @@ usually what identifies the cause.
 
 Enable **Persistent support logs** under **Settings → Preferences**, then open
 **Help → About & support**. **Download logs** works in both Electron and Docker and
-produces a sanitized ZIP. Electron also provides **Open logs folder**.
+produces a sanitized ZIP. In the installed desktop app, **Help → Open Logs Folder**
+opens the log directory directly even if the backend or Settings page is unavailable.
+Use **Help → About STL Studio** to copy the exact app and runtime versions when
+reporting a problem.
 
 Docker stores the same backend files under `/data/logs`; with the standard Compose
 file that is the host's `./data/logs` directory. For a live terminal stream, use

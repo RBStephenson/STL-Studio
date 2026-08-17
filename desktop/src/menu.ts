@@ -67,7 +67,13 @@ export function buildContextMenuTemplate(
  */
 export function buildApplicationMenuTemplate(
   nav: NavTarget,
-  opts: { isMac: boolean; onRegenerateKey?: () => void; onCheckForUpdates?: () => void },
+  opts: {
+    isMac: boolean;
+    onRegenerateKey?: () => void;
+    onCheckForUpdates?: () => void;
+    onOpenLogsFolder?: () => void;
+    onShowAbout?: () => void;
+  },
 ): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
 
@@ -124,6 +130,9 @@ export function buildApplicationMenuTemplate(
   template.push({
     label: "Help",
     submenu: [
+      { label: "Open Logs Folder", click: () => opts.onOpenLogsFolder?.() },
+      { label: "About STL Studio", click: () => opts.onShowAbout?.() },
+      { type: "separator" },
       {
         label: "Check for Updates...",
         enabled: Boolean(opts.onCheckForUpdates),
