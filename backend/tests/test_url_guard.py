@@ -66,6 +66,62 @@ def test_public_ip_literals_allowed(host):
     assert_public_url(f"https://{host}/path")   # does not raise
 
 
+# --- allow_private mode (STUDIO-262: local AI endpoints) ------------------
+
+@pytest.mark.parametrize("host", [
+    "127.0.0.1",            # loopback
+    "10.0.0.5",              # RFC1918 (LAN Ollama box)
+    "192.168.1.10",          # RFC1918
+    "172.16.9.9",             # RFC1918
+    "[::1]",                 # IPv6 loopback
+    "[fc00::1]",              # IPv6 unique-local
+    "[::ffff:127.0.0.1]",    # IPv4-mapped loopback
+])
+def test_allow_private_permits_loopback_and_private(host):
+    assert_public_url(f"http://{host}:11434/", allow_private=True)   # does not raise
+
+
+@pytest.mark.parametrize("host", [
+    "169.254.169.254",   # link-local — cloud metadata endpoint
+    "0.0.0.0",            # unspecified
+    "[fe80::1]",          # IPv6 link-local
+    "224.0.0.1",          # multicast
+])
+def test_allow_private_still_blocks_link_local_and_friends(host):
+    with pytest.raises(SSRFError):
+        assert_public_url(f"http://{host}/", allow_private=True)
+
+
+def test_allow_private_still_rejects_bad_scheme():
+    with pytest.raises(SSRFError):
+        assert_public_url("file:///etc/passwd", allow_private=True)
+
+
+@pytest.mark.anyio
+async def test_allow_private_hook_permits_loopback():
+    # Must not raise.
+    await url_guard._reject_unsafe_requests_allow_private(httpx.Request("GET", "http://127.0.0.1:11434/"))
+
+
+@pytest.mark.anyio
+async def test_allow_private_hook_still_blocks_link_local():
+    with pytest.raises(SSRFError):
+        await url_guard._reject_unsafe_requests_allow_private(
+            httpx.Request("GET", "http://169.254.169.254/")
+        )
+
+
+def test_guarded_client_allow_private_uses_the_allow_private_hook():
+    client = guarded_async_client(allow_private=True)
+    try:
+        hooks = client.event_hooks["request"]
+        assert url_guard._reject_unsafe_requests_allow_private in hooks
+        assert url_guard._reject_private_requests not in hooks
+    finally:
+        import anyio
+        anyio.run(client.aclose)
+
+
 # --- DNS resolution -------------------------------------------------------
 
 def test_hostname_resolving_to_private_rejected(monkeypatch):

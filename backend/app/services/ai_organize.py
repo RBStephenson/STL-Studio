@@ -20,6 +20,8 @@ from typing import Any, Callable
 import httpx
 from anthropic import Anthropic  # module symbol so tests can monkeypatch it
 
+from app.services.url_guard import assert_public_url
+
 _log = logging.getLogger(__name__)
 
 # Fallback request timeout (seconds) when a caller doesn't specify one. The
@@ -1069,6 +1071,7 @@ def _llm_refine_openai(
         return LlmOutcome(status="error", detail=detail)
 
     try:
+        assert_public_url(endpoint, allow_private=True)
         resp = httpx.post(endpoint, json=payload, headers=headers, timeout=timeout)
     except httpx.RequestError as exc:
         return _request_error(exc)

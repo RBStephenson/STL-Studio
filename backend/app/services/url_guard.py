@@ -39,14 +39,29 @@ class SSRFError(httpx.RequestError):
 _ALLOWED_SCHEMES = ("http", "https")
 
 
-def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
+def _is_blocked_ip(ip: ipaddress._BaseAddress, *, allow_private: bool = False) -> bool:
     """True if `ip` is anything other than a routable public address.
 
     IPv4-mapped IPv6 (``::ffff:127.0.0.1``) is unwrapped first so an embedded
-    private v4 address can't slip through the v6 checks."""
+    private v4 address can't slip through the v6 checks.
+
+    With ``allow_private=True`` (for user-configured local AI endpoints —
+    Ollama/LM Studio typically listen on loopback or a LAN address), private
+    and loopback addresses are permitted, but link-local (which covers the
+    ``169.254.169.254`` cloud metadata address), multicast, reserved, and
+    unspecified addresses are still blocked. IPv6 loopback (``::1``) is
+    exempted from the reserved check specifically — stdlib's ``is_reserved``
+    classifies it as reserved *and* loopback simultaneously."""
     mapped = getattr(ip, "ipv4_mapped", None)
     if mapped is not None:
         ip = mapped
+    if allow_private:
+        return (
+            ip.is_link_local
+            or ip.is_multicast
+            or ip.is_unspecified
+            or (ip.is_reserved and not ip.is_loopback)
+        )
     return (
         ip.is_private
         or ip.is_loopback
@@ -71,10 +86,14 @@ def _resolve_ips(host: str, port: int | None) -> list[ipaddress._BaseAddress]:
     return [ipaddress.ip_address(info[4][0]) for info in infos]
 
 
-def assert_public_url(url: str) -> None:
+def assert_public_url(url: str, *, allow_private: bool = False) -> None:
     """Raise SSRFError unless `url` is an http(s) URL whose host resolves only to
-    public addresses. All resolved addresses must be public — one private answer
-    is enough to reject, so a multi-record host can't smuggle an internal IP."""
+    safe addresses. All resolved addresses must pass — one bad answer is enough
+    to reject, so a multi-record host can't smuggle an internal IP.
+
+    ``allow_private=True`` permits loopback/private-network targets (for
+    user-configured local AI endpoints) while still blocking link-local
+    (cloud metadata), multicast, reserved, and unspecified addresses."""
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
     if scheme not in _ALLOWED_SCHEMES:
@@ -84,7 +103,7 @@ def assert_public_url(url: str) -> None:
         raise SSRFError("URL has no host")
     port = parsed.port or (443 if scheme == "https" else 80)
     for ip in _resolve_ips(host, port):
-        if _is_blocked_ip(ip):
+        if _is_blocked_ip(ip, allow_private=allow_private):
             raise SSRFError(f"URL host {host!r} resolves to a non-public address")
 
 
@@ -94,22 +113,32 @@ async def _reject_private_requests(request: httpx.Request) -> None:
     assert_public_url(str(request.url))
 
 
+async def _reject_unsafe_requests_allow_private(request: httpx.Request) -> None:
+    """Same as `_reject_private_requests` but permits loopback/private hosts,
+    for clients that talk to user-configured local AI endpoints."""
+    assert_public_url(str(request.url), allow_private=True)
+
+
 def _system_ssl_context() -> ssl.SSLContext:
     """Return an SSL context backed by the operating system certificate store."""
     return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
-def guarded_async_client(**kwargs) -> httpx.AsyncClient:
+def guarded_async_client(*, allow_private: bool = False, **kwargs) -> httpx.AsyncClient:
     """An ``httpx.AsyncClient`` that runs `assert_public_url` on every outgoing
     request (including redirect hops). Merges the SSRF hook with any request
     hooks the caller passes so nothing is silently dropped.
 
     Uses the operating system trust store by default because desktop Windows
     installs may trust certificates that certifi does not.
+
+    ``allow_private=True`` permits loopback/private targets, for clients that
+    talk to user-configured local AI endpoints.
     """
     hooks = dict(kwargs.pop("event_hooks", None) or {})
     request_hooks = list(hooks.get("request", []))
-    request_hooks.append(_reject_private_requests)
+    hook = _reject_unsafe_requests_allow_private if allow_private else _reject_private_requests
+    request_hooks.append(hook)
     hooks["request"] = request_hooks
     kwargs.setdefault("verify", _system_ssl_context())
     return httpx.AsyncClient(event_hooks=hooks, **kwargs)
