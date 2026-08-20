@@ -7,9 +7,19 @@ to resubmit through the existing /reorganize/preview overrides path.
 """
 import json
 
+import pytest
+
 import app.services.ai_organize as ai
 from app.models import Model, ScanRoot
 from tests.conftest import make_creator, make_model, make_stl_file
+
+
+@pytest.fixture(autouse=True)
+def _bypass_url_guard(monkeypatch):
+    """These tests exercise suggestion parsing/batching against a fictitious
+    `x` hostname, not real DNS. The STUDIO-262 SSRF guard itself is covered
+    by test_url_guard.py and test_studio_262_ai_endpoint_ssrf.py."""
+    monkeypatch.setattr(ai, "assert_public_url", lambda *a, **k: None)
 
 
 def _fake_openai_post(content: dict, captured_request: dict | None = None):

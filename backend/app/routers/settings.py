@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.config import RESTART_REQUIRED_KEYS, settings
 from app.database import get_db
 from app.models import AppSetting, AiApiConfig, ScanRoot
+from app.services.url_guard import SSRFError, assert_public_url
 from app.schemas import (
     AiApiConfigCreate,
     AiApiConfigRead,
@@ -379,6 +380,10 @@ def get_organize_models(url: str = Query(""), db: Session = Depends(get_db)):
 
     base = url.rstrip("/")
     try:
+        assert_public_url(base, allow_private=True)
+    except SSRFError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
         r = httpx.get(f"{base}/v1/models", headers=headers, timeout=10)
         if r.status_code == 200:
             data = r.json()
@@ -504,6 +509,10 @@ def get_ai_api_config_models(config_id: int, db: Session = Depends(get_db)):
 
     base = c.url.rstrip("/")
     timeout = c.request_timeout
+    try:
+        assert_public_url(base, allow_private=True)
+    except SSRFError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     try:
         r = httpx.get(f"{base}/v1/models", headers=headers, timeout=timeout)
         if r.status_code == 200:

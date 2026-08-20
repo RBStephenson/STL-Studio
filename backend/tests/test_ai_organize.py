@@ -14,6 +14,15 @@ from app.models import Model, STLFile
 from app.routers.models import _normalize_type
 
 
+@pytest.fixture(autouse=True)
+def _bypass_url_guard(monkeypatch):
+    """These tests exercise ai_organize's request/parsing/batching logic
+    against a fictitious `ollama` hostname, not real DNS. The STUDIO-262 SSRF
+    guard itself is covered by test_url_guard.py and
+    test_studio_262_ai_endpoint_ssrf.py."""
+    monkeypatch.setattr(ai, "assert_public_url", lambda *a, **k: None)
+
+
 class _ListHandler(logging.Handler):
     """Collects formatted log records in a list."""
     def __init__(self):
