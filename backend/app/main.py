@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings as app_settings
 from app.database import Base, engine, SessionLocal
+from app.services import origin_guard
 from app.routers import (
     models, tags, groups, print_queue, thumbnails,
     scan, files, collections, scrape, enrich, database, settings, reorganize, imports, cults,
@@ -412,28 +412,14 @@ async def lifespan(app: FastAPI):
 # "Trusted" is localhost by default, plus any hostnames in TRUSTED_HOSTS. A
 # reverse-proxy deployment on a custom domain (e.g. stl.pagden.us) sets that so
 # its own writes are allowed, without weakening the guard for anyone else.
+#
+# The trust-check helpers themselves live in app.services.origin_guard (not
+# here) so that files.py's read-side guard (STUDIO-263) can reuse them without
+# a circular import — this module imports the routers.
 
-_LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
+_origin_is_trusted = origin_guard.origin_is_trusted
+_host_is_trusted = origin_guard.host_is_trusted
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-
-
-def _is_trusted_hostname(hostname: str | None) -> bool:
-    if hostname is None:
-        return False
-    h = hostname.lower()
-    return h in _LOCAL_HOSTNAMES or h in app_settings.trusted_host_list
-
-
-def _origin_is_trusted(origin: str) -> bool:
-    return _is_trusted_hostname(urlsplit(origin).hostname)
-
-
-def _host_is_trusted(host: str) -> bool:
-    # Host is "name[:port]" or "[v6addr][:port]" — parse as a netloc.
-    try:
-        return _is_trusted_hostname(urlsplit(f"//{host}").hostname)
-    except ValueError:
-        return False
 
 
 async def _block_cross_origin_writes(request, call_next):

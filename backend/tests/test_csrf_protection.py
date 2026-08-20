@@ -60,6 +60,64 @@ def test_cross_origin_get_is_not_blocked(client):
 
 
 # ---------------------------------------------------------------------------
+# STUDIO-263 — raw-byte file endpoints ARE guarded on GET, unlike ordinary
+# JSON reads above. CORS doesn't stop a cross-origin <img>/<a>/redirect from
+# rendering or downloading these, so they need the same Origin/Host check the
+# write guard uses.
+# ---------------------------------------------------------------------------
+
+def test_cross_origin_get_image_is_rejected(client):
+    r = client.get("/files/image", params={"path": "x.png"}, headers=EVIL_ORIGIN)
+    assert r.status_code == 403
+    assert "Cross-origin" in r.json()["detail"]
+
+
+def test_cross_origin_get_stl_is_rejected(client):
+    r = client.get("/files/stl", params={"path": "x.stl"}, headers=EVIL_ORIGIN)
+    assert r.status_code == 403
+    assert "Cross-origin" in r.json()["detail"]
+
+
+def test_cross_origin_get_document_is_rejected(client):
+    r = client.get("/files/document", params={"path": "x.pdf"}, headers=EVIL_ORIGIN)
+    assert r.status_code == 403
+    assert "Cross-origin" in r.json()["detail"]
+
+
+def test_get_image_without_origin_is_allowed_through_guard(client):
+    # No Origin header (curl, direct navigation, same-origin <img>) — passes
+    # the read guard; the 403 below comes from path_guard rejecting an
+    # unregistered path, not from origin_guard, proving the request got past
+    # the cross-origin check.
+    r = client.get("/files/image", params={"path": "x.png"})
+    assert r.status_code == 403
+    assert r.json()["detail"] == "Path not allowed"
+
+
+def test_get_image_local_origin_is_allowed_through_guard(client):
+    r = client.get(
+        "/files/image", params={"path": "x.png"}, headers={"Origin": "http://localhost:3000"},
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"] == "Path not allowed"
+
+
+def test_get_image_rebind_host_is_rejected(client):
+    r = client.get(
+        "/files/image", params={"path": "x.png"}, headers={"Host": "rebind.evil.example"},
+    )
+    assert r.status_code == 403
+    assert "Host" in r.json()["detail"]
+
+
+def test_get_browse_images_is_not_blocked_by_the_read_guard(client):
+    # /browse-images is a JSON listing, not a raw-byte endpoint — same "left to
+    # CORS" reasoning as other JSON GETs, deliberately not guarded here.
+    r = client.get("/files/browse-images", headers=EVIL_ORIGIN)
+    assert r.status_code != 403
+
+
+# ---------------------------------------------------------------------------
 # open-folder is no longer a GET (side effect on GET = <img>-tag triggerable)
 # ---------------------------------------------------------------------------
 

@@ -9,7 +9,7 @@ import platform
 import subprocess
 import zipfile
 from pathlib import Path
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.config import settings
@@ -17,6 +17,7 @@ from app.database import get_db
 from app.models import Model as ModelDB, ScanRoot, STLFile
 from app.schemas import DownloadZipRequest
 from app.services import scanner
+from app.services.origin_guard import host_is_trusted, origin_is_trusted
 from app.services.path_guard import assert_within_roots, is_within_roots
 from app.utils import like_escape
 
@@ -137,7 +138,29 @@ def _is_safe_path(p: Path) -> bool:
     return is_within_roots(p, _allowed_roots())
 
 
-@router.get("/image")
+def _require_trusted_read(request: Request) -> None:
+    """Guard the raw-byte file endpoints (image/stl/document) against
+    cross-origin reads (STUDIO-263).
+
+    Unlike ordinary JSON GET endpoints — where CORS already prevents a
+    cross-origin page's JS from reading the response, so the write-request
+    guard in app.main deliberately leaves GET alone (see
+    test_cross_origin_get_is_not_blocked) — these three endpoints return raw
+    file bytes. A malicious page can render/download them via `<img>`, an
+    `<a>` navigation, or a redirect without ever needing to read the response
+    body, which CORS does nothing to stop. Same trust rule as the write guard:
+    an absent Origin (curl, direct navigation, same-origin `<img>`) is
+    trusted; a present-but-untrusted Origin, or an untrusted Host (DNS
+    rebinding), is rejected.
+    """
+    origin = request.headers.get("origin")
+    if origin is not None and not origin_is_trusted(origin):
+        raise HTTPException(status_code=403, detail="Cross-origin request blocked")
+    if not host_is_trusted(request.headers.get("host", "")):
+        raise HTTPException(status_code=403, detail="Request Host not allowed")
+
+
+@router.get("/image", dependencies=[Depends(_require_trusted_read)])
 def serve_image(path: str, v: str | None = None):
     if Path(path).suffix.lower() not in ALLOWED_IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Not an image file")
@@ -163,7 +186,7 @@ def serve_image(path: str, v: str | None = None):
     return FileResponse(p, headers={"Cache-Control": cache_control})
 
 
-@router.get("/stl")
+@router.get("/stl", dependencies=[Depends(_require_trusted_read)])
 def serve_stl(path: str, v: str | None = None):
     """Serve an STL/3MF/OBJ file, preferring a local cached copy (#304).
 
@@ -190,7 +213,7 @@ def serve_stl(path: str, v: str | None = None):
                         headers={"Cache-Control": cache_control})
 
 
-@router.get("/document")
+@router.get("/document", dependencies=[Depends(_require_trusted_read)])
 def serve_document(path: str):
     """Serve a non-STL, non-image pack file (PDF, TXT, ZIP, etc.) as a download.
 
