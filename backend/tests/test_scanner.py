@@ -335,6 +335,46 @@ class TestGalleryImages:
         model = _models(db, creator)[0]
         assert model.image_paths == [str(product_dir / "Images" / "shared.jpg")]
 
+    def test_images_cache_avoids_rewalking_the_shared_boundary_per_sibling(
+        self, db, tmp_path, monkeypatch,
+    ):
+        """STUDIO-299: sibling variant models sharing a character boundary each
+        walk from their own leaf up to that boundary — without a shared
+        images_cache, the boundary folder's own image subdir gets re-walked
+        once per sibling instead of once per scan."""
+        creator_dir = tmp_path / "Creator"
+        character_dir = creator_dir / "Character"
+        _img(character_dir / "Renders", "shared.jpg")
+        _stl(character_dir / "VariantA")
+        _stl(character_dir / "VariantB")
+        creator = make_creator(db, "Creator")
+
+        calls: list[Path] = []
+        real = scanner._image_files_recursive
+
+        def _counting(folder):
+            calls.append(folder)
+            return real(folder)
+
+        monkeypatch.setattr(scanner, "_image_files_recursive", _counting)
+
+        scanner._walk_for_models(
+            folder=creator_dir, creator=creator, db=db,
+            creator_boundary=creator_dir, character=None,
+            stl_cache={}, last_scanned=None, rules=scanner.ScanRules(),
+            images_cache={},
+        )
+
+        models = {_rel(m, creator_dir): m for m in _models(db, creator)}
+        shared = str(character_dir / "Renders" / "shared.jpg")
+        assert models[str(Path("Character") / "VariantA")].image_paths == [shared]
+        assert models[str(Path("Character") / "VariantB")].image_paths == [shared]
+
+        renders_calls = [c for c in calls if c == character_dir / "Renders"]
+        assert len(renders_calls) == 1, (
+            f"expected the shared boundary's image dir to be walked once, got {len(renders_calls)}"
+        )
+
 
 class TestThreeMfOtherFiles:
     """.3mf is a slicer project/bundle format, not a single printable part —

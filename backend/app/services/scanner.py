@@ -855,6 +855,7 @@ def _creator_scan(job: JobHandle, creator_id: int):
                     layout_tags=layout_tags,
                     group_by_character=grp_by_char,
                     read_failures=walk_failures,
+                    images_cache={},
                 )
             _report_read_failures(walk_failures)
 
@@ -977,6 +978,7 @@ def split_pack(model_id: int) -> dict:
                 layout_tags=pack_layout_tags,
                 group_by_character=root_group_by_character,
                 read_failures=walk_failures,
+                images_cache={},
             )
             _report_read_failures(walk_failures)
             db.commit()
@@ -1056,6 +1058,7 @@ def _scan_root(root: ScanRoot, db: Session, rules: ScanRules) -> set[int]:
                 layout_tags=layout_tags,
                 group_by_character=root.group_by_character,
                 read_failures=walk_failures,
+                images_cache={},
             )
             if walk_failures:
                 # The walk finished, but on an incomplete view of the disk. Treat it
@@ -1123,6 +1126,7 @@ def _walk_for_models(
     group_by_character: bool = False,
     read_failures: list[ReadFailure] | None = None,
     boundary_is_product: bool = False,
+    images_cache: dict[str, list[Path]] | None = None,
 ):
     """Walk *folder*, indexing models and recursing per classification.
 
@@ -1257,7 +1261,7 @@ def _walk_for_models(
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
                          layout_tags=layout_tags, is_inbox=is_inbox,
                          boundary_is_product=boundary_is_product,
-                         parser_rules=rules.parser_rules)
+                         parser_rules=rules.parser_rules, images_cache=images_cache)
             return
 
         boundary_keys = {str(child) for child in boundary_children}
@@ -1277,6 +1281,7 @@ def _walk_for_models(
                 excluded_stl_subtrees=boundary_children,
                 boundary_is_product=boundary_is_product,
                 parser_rules=rules.parser_rules,
+                images_cache=images_cache,
             )
 
         # Only recurse into the independently qualifying boundaries. Other
@@ -1292,7 +1297,7 @@ def _walk_for_models(
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
                          layout_tags=layout_tags, is_inbox=is_inbox,
                          boundary_is_product=boundary_is_product,
-                         parser_rules=rules.parser_rules)
+                         parser_rules=rules.parser_rules, images_cache=images_cache)
             return
 
     # --- Step 3: deepest fallback — STLs here, nothing below ---
@@ -1314,7 +1319,7 @@ def _walk_for_models(
                      stl_cache, auto_signals=signals, last_scanned=last_scanned,
                      layout_tags=layout_tags, is_inbox=is_inbox,
                      boundary_is_product=boundary_is_product,
-                     parser_rules=rules.parser_rules)
+                     parser_rules=rules.parser_rules, images_cache=images_cache)
         return
 
     # Not a leaf — recurse. Decide the variant-grouping "character" for each child by
@@ -1400,7 +1405,8 @@ def _walk_for_models(
                          layout_tags=layout_tags, is_inbox=is_inbox,
                          group_by_character=group_by_character,
                          read_failures=read_failures,
-                         boundary_is_product=boundary_is_product)
+                         boundary_is_product=boundary_is_product,
+                         images_cache=images_cache)
 
     # Two sibling branches (e.g. "Mult Color Filament" / "One Color Filament")
     # can each independently reach the "leaf" strategy at some depth and each
@@ -1478,6 +1484,7 @@ def _index_model(
     excluded_stl_subtrees: list[Path] | None = None,
     boundary_is_product: bool = False,
     parser_rules: name_parser.ParserRules = name_parser.ParserRules(),
+    images_cache: dict[str, list[Path]] | None = None,
 ):
     folder_path = str(folder)
 
@@ -1690,6 +1697,7 @@ def _index_model(
                     folder,
                     boundary=gallery_boundary,
                     stl_cache=stl_cache,
+                    images_cache=images_cache,
                 )
             except OSError:
                 # A transient read failure (drive hiccup, permission blip) —
@@ -1987,7 +1995,8 @@ def _gallery_boundary(folder: Path, creator_boundary: Path | None) -> Path:
 
 
 def _collect_gallery_images(leaf: Path, boundary: Path,
-                            stl_cache: dict[str, bool] | None = None) -> list[Path]:
+                            stl_cache: dict[str, bool] | None = None,
+                            images_cache: dict[str, list[Path]] | None = None) -> list[Path]:
     """
     Walk upward from leaf to creator boundary looking for gallery images.
 
@@ -2001,6 +2010,13 @@ def _collect_gallery_images(leaf: Path, boundary: Path,
     image_paths (dropping anything not rediscovered) must catch this and skip
     that merge rather than trust a possibly-incomplete listing as if it were
     a confirmed-empty one.
+
+    ``images_cache``, when supplied, memoizes ``images_at(folder)`` by folder
+    path (STUDIO-299) — sibling variant models sharing a character/creator
+    boundary each walk from their own leaf up to the same boundary, so without
+    this the shared ancestor folders get re-listed and re-walked once per
+    sibling instead of once per walk. Same shape/lifetime as ``stl_cache``: a
+    fresh dict per creator/pack walk, threaded down by the caller.
     """
     def _has_stls_cached(d: Path) -> bool:
         key = str(d)
@@ -2011,6 +2027,9 @@ def _collect_gallery_images(leaf: Path, boundary: Path,
         return _has_stls(d, recurse=True)
 
     def images_at(folder: Path) -> list[Path]:
+        key = str(folder)
+        if images_cache is not None and key in images_cache:
+            return images_cache[key]
         children = list(folder.iterdir())
         subdirs = [c for c in children if c.is_dir() and not _is_hidden(c.name)]
         found: list[Path] = []
@@ -2039,6 +2058,8 @@ def _collect_gallery_images(leaf: Path, boundary: Path,
                 continue
             found.extend(_image_files_recursive(sub))
 
+        if images_cache is not None:
+            images_cache[key] = found
         return found
 
     images: list[Path] = []
@@ -2484,6 +2505,7 @@ def _inbox_scan(
                     # further the way a real multi-product creator folder is
                     # (STUDIO-377).
                     boundary_is_product=True,
+                    images_cache={},
                 )
                 if not _cancelled():
                     _auto_link_sups_for_creator(_db, creator.id)
@@ -2548,6 +2570,7 @@ def _inbox_scan(
                         rules=rules,
                         is_inbox=True,
                         read_failures=walk_failures,
+                        images_cache={},
                     )
 
             _report_read_failures(walk_failures)
