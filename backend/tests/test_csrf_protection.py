@@ -112,9 +112,16 @@ def test_get_image_rebind_host_is_rejected(client):
 
 def test_get_browse_images_is_not_blocked_by_the_read_guard(client):
     # /browse-images is a JSON listing, not a raw-byte endpoint — same "left to
-    # CORS" reasoning as other JSON GETs, deliberately not guarded here.
+    # CORS" reasoning as other JSON GETs, deliberately not guarded here. With
+    # no `path` given it may still 403 from its own allowlist logic (e.g. on
+    # Linux CI, Path.home() isn't a registered scan root) — that's unrelated
+    # to the cross-origin check, so assert on the specific guard details
+    # rather than raw status code (same idiom as test_open_folder_is_post).
     r = client.get("/files/browse-images", headers=EVIL_ORIGIN)
-    assert r.status_code != 403
+    if r.status_code == 403:
+        assert r.json()["detail"] not in (
+            "Cross-origin request blocked", "Request Host not allowed",
+        )
 
 
 # ---------------------------------------------------------------------------
