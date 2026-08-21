@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DEFAULT_WINDOW_BOUNDS,
+  DEFAULT_ZOOM_FACTOR,
   boundsIntersectAnyDisplay,
   readWindowState,
   saveWindowState,
@@ -37,6 +38,7 @@ describe("readWindowState", () => {
     expect(state).toEqual({
       bounds: DEFAULT_WINDOW_BOUNDS,
       isMaximized: false,
+      zoomFactor: DEFAULT_ZOOM_FACTOR,
     });
   });
 
@@ -48,7 +50,26 @@ describe("readWindowState", () => {
     expect(state.bounds).toEqual(DEFAULT_WINDOW_BOUNDS);
   });
 
-  it("restores valid bounds and maximized state", () => {
+  it("restores valid bounds, maximized state, and zoom factor", () => {
+    const dir = makeUserDataDir();
+    writeFileSync(
+      windowStatePath(dir),
+      JSON.stringify({
+        bounds: { x: 50, y: 60, width: 1400, height: 900 },
+        isMaximized: true,
+        zoomFactor: 1.5,
+      }),
+      "utf8",
+    );
+
+    expect(readWindowState(dir, displays)).toEqual({
+      bounds: { x: 50, y: 60, width: 1400, height: 900 },
+      isMaximized: true,
+      zoomFactor: 1.5,
+    });
+  });
+
+  it("loads state files saved before zoomFactor existed, defaulting it", () => {
     const dir = makeUserDataDir();
     writeFileSync(
       windowStatePath(dir),
@@ -62,16 +83,38 @@ describe("readWindowState", () => {
     expect(readWindowState(dir, displays)).toEqual({
       bounds: { x: 50, y: 60, width: 1400, height: 900 },
       isMaximized: true,
+      zoomFactor: DEFAULT_ZOOM_FACTOR,
     });
   });
 
-  it("falls back when saved bounds are offscreen", () => {
+  it.each([
+    ["too small", 0.1],
+    ["too large", 10],
+    ["non-numeric", "1.5" as unknown as number],
+    ["NaN", Number.NaN],
+  ])("falls back to the default zoom factor when it is %s", (_label, zoomFactor) => {
+    const dir = makeUserDataDir();
+    writeFileSync(
+      windowStatePath(dir),
+      JSON.stringify({
+        bounds: { x: 50, y: 60, width: 1400, height: 900 },
+        isMaximized: false,
+        zoomFactor,
+      }),
+      "utf8",
+    );
+
+    expect(readWindowState(dir, displays).zoomFactor).toBe(DEFAULT_ZOOM_FACTOR);
+  });
+
+  it("falls back on bounds but keeps a valid zoom factor when saved bounds are offscreen", () => {
     const dir = makeUserDataDir();
     writeFileSync(
       windowStatePath(dir),
       JSON.stringify({
         bounds: { x: 5000, y: 5000, width: 900, height: 700 },
         isMaximized: false,
+        zoomFactor: 1.25,
       }),
       "utf8",
     );
@@ -80,6 +123,7 @@ describe("readWindowState", () => {
     expect(state).toEqual({
       bounds: DEFAULT_WINDOW_BOUNDS,
       isMaximized: false,
+      zoomFactor: 1.25,
     });
   });
 });
@@ -91,11 +135,13 @@ describe("saveWindowState", () => {
     saveWindowState(dir, {
       bounds: { x: 12.4, y: 45.6, width: 1280.2, height: 800.8 },
       isMaximized: true,
+      zoomFactor: 1.5,
     });
 
     expect(JSON.parse(readFileSync(windowStatePath(dir), "utf8"))).toEqual({
       bounds: { x: 12, y: 46, width: 1280, height: 801 },
       isMaximized: true,
+      zoomFactor: 1.5,
     });
   });
 
@@ -105,9 +151,26 @@ describe("saveWindowState", () => {
     saveWindowState(dir, {
       bounds: { width: 100, height: 100 },
       isMaximized: false,
+      zoomFactor: DEFAULT_ZOOM_FACTOR,
     });
 
     expect(() => readFileSync(windowStatePath(dir), "utf8")).toThrow();
+  });
+
+  it("clamps an out-of-range zoom factor to the default instead of discarding the write", () => {
+    const dir = makeUserDataDir();
+
+    saveWindowState(dir, {
+      bounds: { width: 1280, height: 800 },
+      isMaximized: false,
+      zoomFactor: 99,
+    });
+
+    expect(JSON.parse(readFileSync(windowStatePath(dir), "utf8"))).toEqual({
+      bounds: { width: 1280, height: 800 },
+      isMaximized: false,
+      zoomFactor: DEFAULT_ZOOM_FACTOR,
+    });
   });
 });
 
