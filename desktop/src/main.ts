@@ -319,7 +319,11 @@ function createWindow(): BrowserWindow {
 
   const windowStatePersister = createWindowStatePersister({
     userDataDir,
-    getState: () => ({ bounds: win.getNormalBounds(), isMaximized: win.isMaximized() }),
+    getState: () => ({
+      bounds: win.getNormalBounds(),
+      isMaximized: win.isMaximized(),
+      zoomFactor: win.webContents.zoomFactor,
+    }),
     delayMs: WINDOW_STATE_SAVE_DELAY_MS,
     onError: (error) => console.warn("Failed to save window state", error),
   });
@@ -327,6 +331,22 @@ function createWindow(): BrowserWindow {
   win.on("resize", () => windowStatePersister.schedule());
   win.on("move", () => windowStatePersister.schedule());
   win.on("close", () => windowStatePersister.flush());
+
+  // Covers zoom changed via mouse wheel + ctrl. Menu/keyboard-shortcut zoom
+  // (the resetZoom/zoomIn/zoomOut roles) has no equivalent event, but doesn't
+  // need one: getState() above reads webContents.zoomFactor lazily at write
+  // time, so resize/move/close already capture it however it last changed.
+  win.webContents.on("zoom-changed", () => windowStatePersister.schedule());
+
+  // The backend runs on a different (random) port every launch, so Chromium's
+  // built-in per-origin zoom memory never carries over — the saved zoom has
+  // to be reapplied by hand after every load. did-finish-load covers the
+  // splash page, the first backend load, the retry-backend path, and a
+  // window re-create on activate, without threading zoom through
+  // appController's narrower BrowserWindowLike interface.
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.setZoomFactor(savedState.zoomFactor);
+  });
 
   return win;
 }

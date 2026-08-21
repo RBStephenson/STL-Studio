@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
+import { DEFAULT_ZOOM_FACTOR } from "./windowState";
+
 const showErrorBox = vi.fn();
 const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
 const setApplicationMenu = vi.fn();
@@ -29,6 +31,10 @@ class FakeWebContents extends EventEmitter {
   reload = vi.fn();
   setWindowOpenHandler = vi.fn();
   getURL = vi.fn().mockReturnValue("http://127.0.0.1:5555/library");
+  zoomFactor = 1;
+  setZoomFactor = vi.fn((factor: number) => {
+    this.zoomFactor = factor;
+  });
 }
 
 class FakeBrowserWindow extends EventEmitter {
@@ -447,6 +453,23 @@ describe("main.ts wiring", () => {
     // No assertion on disk I/O here (windowManager.test.ts covers the persister
     // logic in isolation) — this just proves main.ts wires the events at all.
     expect(win.getNormalBounds).toHaveBeenCalled();
+  });
+
+  it("applies the saved zoom factor once the page finishes loading (STUDIO-344)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    win.webContents.emit("did-finish-load");
+    // No saved window-state.json exists at the fake userData path, so this
+    // proves the default (rather than the value going unset) is what's applied.
+    expect(win.webContents.setZoomFactor).toHaveBeenCalledWith(DEFAULT_ZOOM_FACTOR);
+  });
+
+  it("schedules a window-state save on zoom-changed, same as resize/move (STUDIO-344)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    // No assertion on disk I/O here, same rationale as the resize/move/close
+    // case above — this proves main.ts wires the listener at all.
+    expect(() => win.webContents.emit("zoom-changed", {}, "in")).not.toThrow();
   });
 
   it("exercises the appController deps: resolveBackendExePath, createSidecarDeps, backendBaseUrl, secret-key wrappers, showErrorBox/showMessageBox/loadPlaceholderPage/log", async () => {

@@ -109,7 +109,7 @@ describe("createWindowStatePersister", () => {
 
   it("debounces schedule() calls into a single delayed save", () => {
     const save = vi.fn();
-    const state = { bounds: { width: 1280, height: 800 }, isMaximized: false };
+    const state = { bounds: { width: 1280, height: 800 }, isMaximized: false, zoomFactor: 1 };
     const persister = createWindowStatePersister({
       userDataDir: "/userdata",
       getState: () => state,
@@ -128,9 +128,24 @@ describe("createWindowStatePersister", () => {
     expect(save).toHaveBeenCalledWith("/userdata", state);
   });
 
+  it("carries zoomFactor through the same debounced save as bounds/isMaximized", () => {
+    const save = vi.fn();
+    const state = { bounds: { width: 1280, height: 800 }, isMaximized: false, zoomFactor: 1.75 };
+    const persister = createWindowStatePersister({
+      userDataDir: "/userdata",
+      getState: () => state,
+      delayMs: 250,
+      save,
+    });
+
+    persister.schedule();
+    vi.advanceTimersByTime(250);
+    expect(save).toHaveBeenCalledWith("/userdata", expect.objectContaining({ zoomFactor: 1.75 }));
+  });
+
   it("flush() saves immediately and cancels any pending timer", () => {
     const save = vi.fn();
-    const state = { bounds: { width: 1280, height: 800 }, isMaximized: true };
+    const state = { bounds: { width: 1280, height: 800 }, isMaximized: true, zoomFactor: 1.5 };
     const persister = createWindowStatePersister({
       userDataDir: "/userdata",
       getState: () => state,
@@ -150,7 +165,7 @@ describe("createWindowStatePersister", () => {
     const save = vi.fn();
     const persister = createWindowStatePersister({
       userDataDir: "/userdata",
-      getState: () => ({ bounds: { width: 800, height: 600 }, isMaximized: false }),
+      getState: () => ({ bounds: { width: 800, height: 600 }, isMaximized: false, zoomFactor: 1 }),
       delayMs: 250,
       save,
     });
@@ -165,7 +180,7 @@ describe("createWindowStatePersister", () => {
     });
     const persister = createWindowStatePersister({
       userDataDir: "/userdata",
-      getState: () => ({ bounds: { width: 800, height: 600 }, isMaximized: false }),
+      getState: () => ({ bounds: { width: 800, height: 600 }, isMaximized: false, zoomFactor: 1 }),
       delayMs: 250,
       save,
       onError,
