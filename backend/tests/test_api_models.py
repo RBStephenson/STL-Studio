@@ -1318,6 +1318,45 @@ class TestExcludeFilters:
         resp = client.get(f"/models/{first.id}/neighbors?exclude_printed=true")
         assert resp.json()["next_id"] == last.id
 
+    def test_neighbors_honor_support_status_filter(self, client, db):
+        """STUDIO-327: get_neighbors must walk the same support_status-filtered set as list_models."""
+        creator = make_creator(db)
+        first = make_model(db, creator, name="Alpha")
+        first.parsed_attributes = {"support_status": "unsupported"}
+        skipped = make_model(db, creator, name="Bravo")
+        skipped.parsed_attributes = {"support_status": "pre-supported"}
+        last = make_model(db, creator, name="Charlie")
+        last.parsed_attributes = {"support_status": "unsupported"}
+        commit_all(db)
+
+        resp = client.get(f"/models/{first.id}/neighbors?support_status=unsupported")
+        assert resp.json()["next_id"] == last.id
+
+    def test_neighbors_honor_slicer_filter(self, client, db):
+        """STUDIO-327: get_neighbors must walk the same slicer-filtered set as list_models."""
+        creator = make_creator(db)
+        first = make_model(db, creator, name="Alpha")
+        first.parsed_attributes = {"slicer": "lychee"}
+        skipped = make_model(db, creator, name="Bravo")
+        skipped.parsed_attributes = {"slicer": "chitubox"}
+        last = make_model(db, creator, name="Charlie")
+        last.parsed_attributes = {"slicer": "lychee"}
+        commit_all(db)
+
+        resp = client.get(f"/models/{first.id}/neighbors?slicer=lychee")
+        assert resp.json()["next_id"] == last.id
+
+    def test_neighbors_honor_character_filter(self, client, db):
+        """STUDIO-327: get_neighbors must walk the same character-filtered set as list_models."""
+        creator = make_creator(db)
+        first = make_model(db, creator, name="Alpha", character="Akuma")
+        make_model(db, creator, name="Bravo", character="Ryu")
+        last = make_model(db, creator, name="Charlie", character="Akuma")
+        commit_all(db)
+
+        resp = client.get(f"/models/{first.id}/neighbors?character=Akuma")
+        assert resp.json()["next_id"] == last.id
+
 
 # ---------------------------------------------------------------------------
 # Recently added (#170)
