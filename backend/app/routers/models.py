@@ -1120,6 +1120,9 @@ def get_neighbors(
     min_rating: int | None = Query(None, ge=1, le=5),
     excluded: bool = False,
     added_within_days: int | None = Query(None, ge=1, le=365),
+    support_status: str | None = None,
+    slicer: str | None = None,
+    character: str | None = None,
     sort: str = Query("name"),
     group_variants: bool = Query(True),
     db: Session = Depends(get_db),
@@ -1137,7 +1140,11 @@ def get_neighbors(
         nsfw=nsfw, is_favorite=is_favorite,
         print_status=print_status, exclude_printed=exclude_printed, min_rating=min_rating,
         excluded=excluded, added_within_days=added_within_days,
+        support_status=support_status, slicer=slicer,
     )
+    # character filter is list_models-only (not exposed via Library URL state)
+    if character:
+        q = q.filter(Model.character.ilike(f"%{like_escape(character)}%", escape="\\"))
 
     target_id = model_id
     if group_variants:
