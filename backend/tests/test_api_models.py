@@ -352,12 +352,37 @@ class TestGroupReorder:
         v2 = make_model(db, creator, name="V2", character="Hero")
         v3 = make_model(db, creator, name="V3", character="Hero")
         db.flush()
-        make_variant_group(db, creator, [v1, v2, v3], label="Hero", heuristic_rep=True)
+        group = make_variant_group(db, creator, [v1, v2, v3], label="Hero", heuristic_rep=True)
         commit_all(db)
-        return creator, v1, v2, v3
+        return creator, v1, v2, v3, group
+
+    def test_reorder_via_group_id_persists_and_wins_over_prior_pin(self, client, db):
+        """STUDIO-391: the real frontend always sends group_id (not just
+        creator_id/character), and always pins the durable VariantGroup's
+        rep_model_id — this is the actual path Brent's bug report was hitting."""
+        creator, v1, v2, v3, group = self._trio(db)
+        client.patch(f"/models/{v1.id}/group-rep", json={"is_group_rep": True})
+
+        resp = client.patch(
+            "/models/group/reorder",
+            json={"creator_id": creator.id, "character": "Hero", "group_id": group.id, "ids": [v3.id, v1.id, v2.id]},
+        )
+        assert resp.status_code == 200 and resp.json()["updated"] == 3
+
+        order = [m["id"] for m in client.get(
+            f"/models/variants?group_id={group.id}"
+        ).json()["items"]]
+        assert order == [v3.id, v1.id, v2.id]
+
+        # Reload from a fresh query (not the same request) to prove it's the
+        # persisted rep_model_id doing the work, not request-local state.
+        order_again = [m["id"] for m in client.get(
+            f"/models/variants?group_id={group.id}"
+        ).json()["items"]]
+        assert order_again == [v3.id, v1.id, v2.id]
 
     def test_reorder_sets_rep_and_group_order(self, client, db):
-        creator, v1, v2, v3 = self._trio(db)
+        creator, v1, v2, v3, _group = self._trio(db)
         resp = client.patch(
             "/models/group/reorder",
             json={"creator_id": creator.id, "character": "Hero", "ids": [v3.id, v1.id, v2.id]},
@@ -374,7 +399,7 @@ class TestGroupReorder:
         assert order == [v3.id, v1.id, v2.id]
 
     def test_empty_ids_resets_to_heuristic(self, client, db):
-        creator, v1, v2, v3 = self._trio(db)
+        creator, v1, v2, v3, _group = self._trio(db)
         client.patch(
             "/models/group/reorder",
             json={"creator_id": creator.id, "character": "Hero", "ids": [v3.id, v1.id, v2.id]},
@@ -389,18 +414,29 @@ class TestGroupReorder:
         grid = client.get("/models?group_variants=true").json()["items"]
         assert grid[0]["id"] == v1.id
 
-    def test_designated_rep_still_wins_over_manual_order(self, client, db):
-        creator, v1, v2, v3 = self._trio(db)
+    def test_drag_always_wins_over_a_prior_explicit_rep(self, client, db):
+        """STUDIO-391: dragging a card to the front now always makes it the new
+        rep, even overriding an earlier explicit "set as thumbnail" pin — Brent's
+        explicit call, since the old "explicit rep wins" behavior is what made
+        manual reordering look like it silently failed to persist."""
+        creator, v1, v2, v3, _group = self._trio(db)
         client.patch(f"/models/{v2.id}/group-rep", json={"is_group_rep": True})
         client.patch(
             "/models/group/reorder",
             json={"creator_id": creator.id, "character": "Hero", "ids": [v3.id, v1.id, v2.id]},
         )
         grid = client.get("/models?group_variants=true").json()["items"]
-        assert grid[0]["id"] == v2.id  # explicit rep beats drag order
+        assert grid[0]["id"] == v3.id  # dragged front model is the new rep
+
+        # The old pin is actually cleared, not just outranked — v2 no longer
+        # carries is_group_rep at all.
+        order = [m["id"] for m in client.get(
+            f"/models/variants?creator_id={creator.id}&character=Hero"
+        ).json()["items"]]
+        assert order == [v3.id, v1.id, v2.id]
 
     def test_foreign_ids_ignored(self, client, db):
-        creator, v1, v2, v3 = self._trio(db)
+        creator, v1, v2, v3, _group = self._trio(db)
         other = make_model(db, creator, name="Loner", character="Villain")
         commit_all(db)
         resp = client.patch(
