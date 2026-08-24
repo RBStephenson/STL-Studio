@@ -77,7 +77,14 @@ def reorder_group(body: GroupReorder, db: Session = Depends(get_db)):
     card (see _rep_order). An **empty `ids` resets** the whole (creator, character)
     group — clears every member's variant_order so the heuristic order resumes.
     Ids that don't belong to the group are ignored. Scans never touch
-    variant_order, so no scan-in-progress guard is needed."""
+    variant_order, so no scan-in-progress guard is needed.
+
+    STUDIO-391: `GET /models/variants` sorts by the group's designated rep
+    (`is_group_rep` / `VariantGroup.rep_model_id`) ahead of `variant_order`, so
+    without this the dragged front card never actually became the rep and the
+    old rep kept sorting first on reload — reorder appeared not to persist.
+    Dragging a card to the front now also makes it the rep, same clear-then-set
+    pattern as `set_group_rep` above."""
     if body.group_id is not None:
         group = db.query(Model).filter(Model.variant_group_id == body.group_id)
     elif body.creator_id is not None and body.character:
@@ -87,19 +94,42 @@ def reorder_group(body: GroupReorder, db: Session = Depends(get_db)):
         )
     else:
         raise HTTPException(status_code=400, detail="Provide group_id or (creator_id and character).")
+
+    # Resolve the durable group even when the caller only sent (creator_id,
+    # character) — members may still belong to one, and its rep_model_id has to
+    # stay in sync with is_group_rep regardless of which params the client used.
+    members = group.all()
+    resolved_group_id = body.group_id
+    if resolved_group_id is None:
+        resolved_group_id = next((m.variant_group_id for m in members if m.variant_group_id), None)
+
     if not body.ids:
         updated = group.update({Model.variant_order: None}, synchronize_session=False)
+        for m in members:
+            m.is_group_rep = False
+        if resolved_group_id is not None:
+            vgroup = db.get(VariantGroup, resolved_group_id)
+            if vgroup is not None:
+                vgroup.rep_model_id = None
         db.commit()
         return {"ok": True, "reset": True, "updated": updated}
 
     pos_by_id = {mid: i for i, mid in enumerate(body.ids)}
-    members = group.all()
     touched = 0
     for m in members:
         # Members listed in `ids` get their drag position; any group member the
         # client omitted is sent to the back (keeps a stable, gap-free order).
         m.variant_order = pos_by_id.get(m.id, len(pos_by_id))
         touched += 1
+
+    front_id = body.ids[0]
+    for m in members:
+        m.is_group_rep = (m.id == front_id)
+    if resolved_group_id is not None:
+        vgroup = db.get(VariantGroup, resolved_group_id)
+        if vgroup is not None:
+            vgroup.rep_model_id = front_id
+
     db.commit()
     return {"ok": True, "reset": False, "updated": touched}
 
