@@ -34,3 +34,9 @@ backend/.secret_key
 docker-compose.override.yml
 Dockerfile.local
 stl/
+
+# uv writes this stub when a uv-created venv is used in backend/ (see
+# backend/.venv/pyvenv.cfg). The project installs from requirements.txt
+# everywhere and backend/pyproject.toml has no [project] table, so the lock
+# is empty and machine-local. Drop this line if the project ever adopts uv.
+backend/uv.lock
