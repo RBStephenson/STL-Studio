@@ -42,21 +42,27 @@ either absent or handled by the browser instead.
 
 ---
 
-## Known gap — no CSP on the browser-served path
+## Closed gap — CSP on the browser-served path (STUDIO-370)
 
-STUDIO-258 added a Content-Security-Policy at the **Electron session layer**.
-Nothing adds one for browser clients: `frontend/nginx.conf.template` sets no
-`add_header` directives, and the FastAPI app sets no security headers. So a
-Docker or standalone-binary deployment serves the app with **no CSP, no
-`X-Frame-Options`, and no `X-Content-Type-Options`**.
+STUDIO-258 added a Content-Security-Policy at the **Electron session layer**,
+which left every browser client unprotected: `frontend/nginx.conf.template` set
+no `add_header` directives and the FastAPI app sent no security headers, so a
+Docker or standalone-binary deployment served the app with **no CSP, no
+`X-Frame-Options`, and no `X-Content-Type-Options`**. It was the same class of
+gap 258 closed for the desktop, still open for everyone else, and it mattered
+more rather than less on a deployment reachable over a network.
 
-This is the same class of gap 258 closed for the desktop, still open for
-everyone else. It matters more, not less, when the app is reachable over a
-network rather than bound to loopback.
+**STUDIO-370 closed it.** The canonical policy now lives in
+`backend/app/services/security_headers.py` and is the same directive set
+`desktop/src/csp.ts` validated against the production bundle. A FastAPI
+middleware stamps it on API responses and on the standalone binary's static
+mount; `frontend/nginx.conf.template` carries a derived copy for the Docker
+SPA, pinned character-for-character by
+`backend/tests/test_security_headers.py`.
 
-Section 3.5 verifies the current (absent) state so it is measured rather than
-assumed. **Do not file this as a beta.8 regression** — it predates this build.
-Tracked as **STUDIO-370**.
+Section 3.5 now verifies the headers are **present** and that the app still
+renders under them. There is deliberately **no HSTS**: plenty of deployments are
+plain HTTP on a LAN, where it would lock the user out of their own instance.
 
 ---
 
@@ -378,19 +384,43 @@ not a hypothetical.
 | 3.4.3 | Tablet/mobile viewport | Layout usable | ☐ |
 | 3.4.4 | Long-running scan with a client disconnected mid-run | Scan completes server-side | ☐ |
 
-### 3.5 Response headers — measure the known gap
+### 3.5 Response headers (STUDIO-370)
 
 ```bash
-curl -sI http://localhost/ | grep -iE 'content-security|x-frame|x-content-type|strict-transport'
+curl -sI http://localhost/ | grep -iE 'content-security|x-frame|x-content-type|referrer|strict-transport'
+curl -sI http://localhost/api/health | grep -iE 'content-security|x-frame|x-content-type|referrer'
 ```
 
-| # | Check | Expected today | Pass |
+| # | Check | Expected | Pass |
 |---|---|---|---|
-| 3.5.1 | Headers on the SPA response | **None present** — records the gap | ☐ |
-| 3.5.2 | Headers on an `/api` response | **None present** | ☐ |
+| 3.5.1 | CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` on the SPA response | All four present | ☐ |
+| 3.5.2 | Same four on an `/api` response | All four present | ☐ |
+| 3.5.3 | Count the `Content-Security-Policy` headers on **one** response | Exactly one — browsers intersect duplicates into a policy nobody wrote | ☐ |
+| 3.5.4 | `Strict-Transport-Security` on either response | **Absent** — deliberate, see above | ☐ |
 
-Record the actual output. This is evidence for the follow-up ticket, not a
-beta.8 defect.
+The failure mode is a silently broken UI: CSP violations are console-only, so
+the headers being present proves nothing on their own. Walk the app with
+DevTools open, same as the desktop plan's §2.1:
+
+| # | Step | Expected | Pass |
+|---|---|---|---|
+| 3.5.5 | Click through Library, Creators, Collections, Queue, Triage, Import, Paint Shelf, Tags, Settings, Help | Zero `Refused to load…` / CSP console messages | ☐ |
+| 3.5.6 | Open a model detail page with a **3D preview** | Renders; no CSP error from three.js | ☐ |
+| 3.5.7 | Import → Fetch from a storefront URL | **Remote CDN thumbnails render** (this is why `img-src` allows `https:`) | ☐ |
+| 3.5.8 | Open a **painting guide** | Formatted HTML renders, styled blocks intact | ☐ |
+| 3.5.9 | Run the injection check below in the console | `false` — inline script blocked | ☐ |
+
+```js
+// Paste in DevTools console. Expect false + a CSP violation logged.
+(() => { const s=document.createElement('script');
+  s.textContent='window.__X__=true'; document.head.appendChild(s);
+  return window.__X__===true; })()
+```
+
+**If you find a violation:** capture the full console message. The directive
+name in it points straight at the offending entry in
+`backend/app/services/security_headers.py::CSP_DIRECTIVES` — fix it there, not
+in the nginx template, or the pinning test will fail.
 
 ---
 

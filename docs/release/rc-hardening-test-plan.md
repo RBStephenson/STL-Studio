@@ -10,8 +10,9 @@ toward whatever changed since the previous build.
 Compose and the standalone binary) have their own plan —
 [rc-hardening-test-plan-linux.md](rc-hardening-test-plan-linux.md) — because the
 surface differs enough that sharing one document would mislead: there is no
-Electron shell, so the CSP and external-navigation work does not apply, while
-case-sensitivity matters far more.
+Electron shell, so the external-navigation work does not apply and the CSP
+arrives by a different route (STUDIO-370's nginx/FastAPI headers rather than
+the Electron session layer), while case-sensitivity matters far more.
 
 Sections 0, 1, and 3–7 are reusable for any candidate. **Section 2 is rewritten
 for each build** — it exists to exercise the specific changes that have not yet
