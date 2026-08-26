@@ -40,3 +40,9 @@ stl/
 # everywhere and backend/pyproject.toml has no [project] table, so the lock
 # is empty and machine-local. Drop this line if the project ever adopts uv.
 backend/uv.lock
+
+# Python virtual environments. Not path-scoped: any directory in the repo.
+# uv-created venvs self-ignore via their own .venv/.gitignore, but a plain
+# `python -m venv` does not, so the repo needs its own rule.
+venv/
+.venv/
