@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings as app_settings
 from app.database import Base, engine, SessionLocal
-from app.services import origin_guard
+from app.services import origin_guard, security_headers
 from app.routers import (
     models, tags, groups, print_queue, thumbnails,
     scan, files, collections, scrape, enrich, database, settings, reorganize, imports, cults,
@@ -469,6 +469,16 @@ def create_app(api_prefix: str = "") -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Registered LAST so it is the outermost middleware - Starlette builds the
+    # stack so the most recently added wraps the rest. That way the headers land
+    # on the write-guard's 403s and CORS preflight replies too, and on the
+    # standalone binary's StaticFiles mount / SPA-fallback FileResponse, which
+    # are added after create_app returns (STUDIO-370). The Docker path's SPA is
+    # served by nginx, which stamps its own derived copy; nginx deliberately
+    # scopes that to `location /` so proxied /api/ responses are not stamped
+    # twice, because browsers intersect multiple CSP headers.
+    app.middleware("http")(security_headers.apply_security_headers)
 
     for router in (
         # The tag/group/print-queue/thumbnail routers carry literal `/models/...`

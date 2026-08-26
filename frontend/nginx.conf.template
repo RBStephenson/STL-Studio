@@ -42,5 +42,24 @@ server {
   location / {
     root /usr/share/nginx/html;
     try_files $uri $uri/ /index.html;
+
+    # Security headers for the browser-served SPA (STUDIO-370). The canonical
+    # policy lives in backend/app/services/security_headers.py; this is a
+    # derived copy, because nginx cannot read Python, and
+    # backend/tests/test_security_headers.py pins the two character-for-character
+    # so it cannot rot silently. Change the policy there, not here.
+    #
+    # Scoped to this location and NOT the server block on purpose: /api/ is
+    # proxied from the backend, which stamps its own copy of these headers.
+    # Browsers intersect multiple CSP headers rather than letting the last one
+    # win, so stamping in both places would produce a policy nobody wrote.
+    #
+    # `always` so the headers survive error responses too. No
+    # Strict-Transport-Security: plenty of deployments are plain HTTP on a LAN,
+    # where HSTS would lock the user out of their own instance.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Frame-Options "DENY" always;
   }
 }
