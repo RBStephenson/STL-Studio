@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import BulkTagBar from "./BulkTagBar";
 import { Collection } from "../api/client";
@@ -187,5 +187,48 @@ describe("BulkTagBar enrich mode (#429)", () => {
     fireEvent.click(screen.getByRole("button", { name: /enrich/i }));
     fireEvent.keyDown(screen.getByPlaceholderText("Creator"), { key: "Escape" });
     expect(screen.getByRole("button", { name: /enrich/i })).toBeInTheDocument();
+  });
+});
+
+describe("BulkTagBar deferred status reset (STUDIO-349)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 20 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const applyTags = async () => {
+    fireEvent.click(screen.getByRole("button", { name: /add tags/i }));
+    fireEvent.change(screen.getByPlaceholderText("tag1, tag2, tag3…"), {
+      target: { value: "foo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }));
+    await waitFor(() => expect(vi.mocked(api.models.bulkTag)).toHaveBeenCalled());
+  };
+
+  // The count is read at unmount, before the advance: afterwards it is zero
+  // whether or not the timer was ever cleared.
+  it("cancels the pending reset when the bar unmounts", async () => {
+    const { unmount } = render(<BulkTagBar {...baseProps()} />);
+    await applyTags();
+
+    const pending = vi.getTimerCount();
+    expect(pending).toBeGreaterThan(0);
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(pending - 1);
+  });
+
+  // Clear-before-reschedule is exercised directly in useSettingsFlash and
+  // useNextTick; here only one deferred reset is ever reachable without an
+  // unmount in between, so there is no honest stacking case to assert.
+  it("schedules exactly one deferred reset per successful op", async () => {
+    render(<BulkTagBar {...baseProps()} />);
+    await applyTags();
+
+    expect(vi.getTimerCount()).toBe(1);
   });
 });

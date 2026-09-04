@@ -35,6 +35,30 @@ export default tseslint.config(
         "error",
         { allowTernary: true, allowShortCircuit: true },
       ],
+      // Ratchet (STUDIO-349): a fire-and-forget timer that updates state keeps
+      // running after unmount, and in jsdom it lands after teardown as
+      // `ReferenceError: window is not defined` — an unhandled error that fails
+      // the whole frontend job even when every test passes. Fixed three times
+      // now (STUDIO-95, STUDIO-348, STUDIO-349), so it is a rule rather than a
+      // habit. Scope is deliberately narrow: this flags a DISCARDED return
+      // value, not missing cleanup, so `const t = setTimeout(...)` with no
+      // matching clearTimeout still passes. That shape has never been the one
+      // that bit us; the bare call always has.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "ExpressionStatement > CallExpression[callee.name=/^(setTimeout|setInterval)$/]",
+          message:
+            "Store the timer id (useRef / const) and clear it on unmount — a discarded setTimeout/setInterval fires against a dead tree (STUDIO-349). See PaintPicker.tsx for the useEffect form, ModelCard.tsx for the ref form.",
+        },
+        {
+          selector:
+            "ExpressionStatement > CallExpression[callee.object.name='window'][callee.property.name=/^(setTimeout|setInterval)$/]",
+          message:
+            "Store the timer id (useRef / const) and clear it on unmount — a discarded window.setTimeout/setInterval fires against a dead tree (STUDIO-349). See Navbar.tsx for the useEffect form.",
+        },
+      ],
     },
   },
 );

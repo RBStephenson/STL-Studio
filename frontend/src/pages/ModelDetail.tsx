@@ -128,6 +128,11 @@ export default function ModelDetail() {
   const [showAiOrganizeStrategy, setShowAiOrganizeStrategy] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
+  // Two transient flags that revert on their own timers. Separate refs, since
+  // copying a path and failing to open a folder can overlap and one must not
+  // cancel the other's revert (STUDIO-349).
+  const copiedPathTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openFolderErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [splitting, setSplitting] = useState(false);
   // undefined = loading, null = boundary/unavailable, NavTarget = navigable.
   // Derived from the neighbors query: no origin → null (Prev/Next hidden);
@@ -289,11 +294,20 @@ export default function ModelDetail() {
     }
   };
 
+  useEffect(
+    () => () => {
+      if (copiedPathTimerRef.current) clearTimeout(copiedPathTimerRef.current);
+      if (openFolderErrorTimerRef.current) clearTimeout(openFolderErrorTimerRef.current);
+    },
+    [],
+  );
+
   const copyPath = () => {
     const path = model?.native_folder_path || model?.folder_path || "";
     navigator.clipboard.writeText(path).then(() => {
       setCopiedPath(true);
-      setTimeout(() => setCopiedPath(false), 2000);
+      if (copiedPathTimerRef.current) clearTimeout(copiedPathTimerRef.current);
+      copiedPathTimerRef.current = setTimeout(() => setCopiedPath(false), 2000);
     });
   };
 
@@ -304,7 +318,8 @@ export default function ModelDetail() {
       await api.files.openFolder(model.folder_path);
     } catch {
       setOpenFolderError("Cannot open folder — only available in standalone mode.");
-      setTimeout(() => setOpenFolderError(null), 4000);
+      if (openFolderErrorTimerRef.current) clearTimeout(openFolderErrorTimerRef.current);
+      openFolderErrorTimerRef.current = setTimeout(() => setOpenFolderError(null), 4000);
     }
   };
 

@@ -72,6 +72,10 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
+  // Not a React timer: a plain module function with no component to unmount,
+  // whose callback only frees an object URL. Cancelling it would leak the URL,
+  // which is the exact thing this line exists to prevent (STUDIO-349).
+  // eslint-disable-next-line no-restricted-syntax
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 

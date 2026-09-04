@@ -4,6 +4,7 @@ import { FolderOpen, Plus, Trash2, Pencil, Check, X, ImagePlus } from "lucide-re
 import { api, Collection } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useToast } from "../context/ToastContext";
+import { useNextTick } from "../hooks/useNextTick";
 import CollectionCoverPicker from "../components/CollectionCoverPicker";
 import CreateCollectionModal from "../components/CreateCollectionModal";
 import { errMsg } from "../utils/err";
@@ -27,6 +28,7 @@ function CollectionCard({
   const [draftDesc, setDraftDesc] = useState(col.description ?? "");
   const [pickerOpen, setPickerOpen] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const nextTick = useNextTick();
 
   const coverUrl = col.cover_image_path
     ? api.fileUrl(col.cover_image_path)
@@ -40,7 +42,7 @@ function CollectionCard({
     setDraftName(col.name);
     setDraftDesc(col.description ?? "");
     setRenaming(true);
-    setTimeout(() => nameRef.current?.select(), 0);
+    nextTick(() => nameRef.current?.select());
   };
 
   const commit = async () => {

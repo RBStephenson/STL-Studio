@@ -17,6 +17,7 @@ import { modelLinkTo } from "../utils/modelLink";
 import { measureGridColumns } from "../utils/libraryKeys";
 import { reorderedIds } from "../utils/reorderList";
 import { useLibraryKeyboard } from "../hooks/useLibraryKeyboard";
+import { useNextTick } from "../hooks/useNextTick";
 import { errMsg } from "../utils/err";
 import ErrorState from "../components/ErrorState";
 import EmptyState from "../components/EmptyState";
@@ -45,6 +46,7 @@ function GroupAction({ model, creatorId, moveToGroup, removeFromGroup, onRemoved
   const [settingRep, setSettingRep] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const nextTick = useNextTick();
 
   const makeRep = async () => {
     if (model.is_group_rep || settingRep) return;
@@ -64,7 +66,7 @@ function GroupAction({ model, creatorId, moveToGroup, removeFromGroup, onRemoved
     setTarget("");
     setMoving(true);
     api.models.characters(creatorId).then(setSuggestions).catch(() => {});
-    setTimeout(() => inputRef.current?.focus(), 0);
+    nextTick(() => inputRef.current?.focus());
   };
 
   const saveMove = async () => {
@@ -162,12 +164,13 @@ function BulkMove({ creatorId, currentGroup, onMove }: {
   const [target, setTarget] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const nextTick = useNextTick();
 
   const openMove = () => {
     setTarget("");
     setOpen(true);
     api.models.characters(creatorId).then(setSuggestions).catch(() => {});
-    setTimeout(() => inputRef.current?.focus(), 0);
+    nextTick(() => inputRef.current?.focus());
   };
 
   const submit = async () => {
@@ -231,11 +234,12 @@ function BulkSetImage({ onApply }: { onApply: (url: string) => void | Promise<vo
   const [url, setUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const nextTick = useNextTick();
 
   const openInput = () => {
     setUrl("");
     setOpen(true);
-    setTimeout(() => inputRef.current?.focus(), 0);
+    nextTick(() => inputRef.current?.focus());
   };
 
   const submit = async () => {
@@ -298,11 +302,12 @@ function BulkSetStoreLink({ onApply }: { onApply: (url: string) => void | Promis
   const [url, setUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const nextTick = useNextTick();
 
   const openInput = () => {
     setUrl("");
     setOpen(true);
-    setTimeout(() => inputRef.current?.focus(), 0);
+    nextTick(() => inputRef.current?.focus());
   };
 
   const submit = async () => {
@@ -369,12 +374,13 @@ function BulkAddToCollection({ collections, onAdd }: {
   const [search, setSearch] = useState("");
   const [listOpen, setListOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const nextTick = useNextTick();
 
   const openPicker = () => {
     setSearch("");
     setOpen(true);
     setListOpen(true);
-    setTimeout(() => inputRef.current?.focus(), 0);
+    nextTick(() => inputRef.current?.focus());
   };
 
   const pick = async (col: Collection) => {
@@ -699,11 +705,12 @@ export default function VariantGroup() {
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const renameRef = useRef<HTMLInputElement>(null);
+  const nextTick = useNextTick();
 
   const openRename = () => {
     setRenameValue(decodedCharacter);
     setRenaming(true);
-    setTimeout(() => renameRef.current?.select(), 0);
+    nextTick(() => renameRef.current?.select());
   };
 
   const saveRename = async () => {

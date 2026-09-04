@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Database, Download, LoaderCircle, ShieldAlert, ShieldCheck, Trash2, Upload, Wrench } from "lucide-react";
 import { api } from "../../api/client";
 import type { DatabaseHealth } from "../../api/database";
@@ -17,6 +17,22 @@ export default function DataTab() {
   const [dangerError, setDangerError] = useState<string | null>(null);
   const [health, setHealth] = useState<DatabaseHealth | null>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The reload is deliberately delayed so the flash message is readable, but a
+  // full page reload landing after the user has navigated away is worse than a
+  // no-op — so it is cancelled on unmount (STUDIO-349).
+  const scheduleReload = () => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => window.location.reload(), 1200);
+  };
+
+  useEffect(
+    () => () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    },
+    [],
+  );
 
   const backup = async () => {
     setBusy("backup");
@@ -91,11 +107,11 @@ export default function DataTab() {
         closeDanger();
         if (result.warning) {
           flash(`Database restored; ${result.warning} Reloading...`, "ok");
-          setTimeout(() => window.location.reload(), 1200);
+          scheduleReload();
           return;
         }
         flash("Database restored — reloading…", "ok");
-        setTimeout(() => window.location.reload(), 1200);
+        scheduleReload();
       } catch (e) {
         setDangerError(errMsg(e) || "Restore failed");
       } finally {
@@ -108,7 +124,7 @@ export default function DataTab() {
         await api.database.reset();
         closeDanger();
         flash("All data deleted — reloading…", "ok");
-        setTimeout(() => window.location.reload(), 1200);
+        scheduleReload();
       } catch (e) {
         setDangerError(errMsg(e) || "Delete failed");
       } finally {

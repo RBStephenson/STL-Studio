@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import KitBuilder from "./KitBuilder";
 import { STLFile } from "../api/client";
@@ -114,5 +114,33 @@ describe("KitBuilder", () => {
   it("shows the empty state when the model has no STL files", () => {
     renderKitBuilder([]);
     expect(screen.getByText("No STL files found for this model.")).toBeInTheDocument();
+  });
+
+  // STUDIO-349. The count is checked at unmount, before advancing: after the
+  // advance it is zero whether or not the timer was ever cleared.
+  it("cancels the pending 'Copied!' revert when the kit builder closes", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+
+    try {
+      const { unmount } = renderKitBuilder([file(1, "sword.stl")]);
+      fireEvent.click(screen.getByRole("button", { name: /^sword$/i }));
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /copy list/i }));
+      });
+      expect(screen.getByText("Copied!")).toBeInTheDocument();
+
+      const pending = vi.getTimerCount();
+      expect(pending).toBeGreaterThan(0);
+
+      unmount();
+      expect(vi.getTimerCount()).toBe(pending - 1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
