@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -18,6 +18,11 @@ vi.mock("../api/client", async (importOriginal) => {
         ...orig.api.models,
         creators: vi.fn(async () => CREATORS),
         deleteCreator: vi.fn(async () => undefined),
+      },
+      scan: {
+        ...orig.api.scan,
+        startCreator: vi.fn(),
+        status: vi.fn(),
       },
     },
   };
@@ -131,5 +136,51 @@ describe("Creators delete", () => {
       expect(toastMock).toHaveBeenCalledWith("Network error", "error");
     });
     expect(screen.getByText("Toon Studios")).toBeInTheDocument();
+  });
+});
+
+describe("Creators rescan lifecycle", () => {
+  const SCANNING = {
+    running: true,
+    message: "scanning",
+    models_found: null,
+    files_found: null,
+    cancelled: false,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // STUDIO-349. `rescan` polls in an unbounded loop and then calls
+  // loadCreators/toast/setScanningId — all state updates. Left unguarded, the
+  // loop outlives navigation and keeps writing to a page that is gone. Asserted
+  // on the poll count rather than a timer count, because the loop is what has
+  // to stop, not any single timer.
+  it("stops the rescan poll loop when the page unmounts", async () => {
+    // Real time drives the clock so findBy still resolves; the 1.5s sleeps are
+    // then jumped manually.
+    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 20 });
+    const { api } = await import("../api/client");
+    vi.mocked(api.models.creators).mockResolvedValue(CREATORS);
+    vi.mocked(api.scan.startCreator).mockResolvedValue(SCANNING);
+    vi.mocked(api.scan.status).mockResolvedValue(SCANNING);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    const { unmount } = renderPage();
+    await screen.findByText("Toon Studios");
+    await user.click(screen.getByTitle("Rescan Toon Studios"));
+
+    await vi.advanceTimersByTimeAsync(4000);
+    const pollsWhileMounted = vi.mocked(api.scan.status).mock.calls.length;
+    expect(pollsWhileMounted).toBeGreaterThan(0);
+
+    unmount();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(vi.mocked(api.scan.status).mock.calls.length).toBe(pollsWhileMounted);
   });
 });

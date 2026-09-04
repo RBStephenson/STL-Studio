@@ -181,3 +181,46 @@ describe("StorefrontEnrich – deep field preview on expand", () => {
     expect(screen.getByRole("button", { name: /Apply 1 match/i })).toBeInTheDocument();
   });
 });
+
+describe("StorefrontEnrich – deferred hand-back", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  // STUDIO-349. `onDone` makes the parent re-fetch and re-render, so firing it
+  // 2.5s after this panel is gone touches a component that no longer exists.
+  // The pending count is read at unmount, before the advance — after it, the
+  // count is zero either way.
+  it("does not hand back to the parent after the panel unmounts", async () => {
+    // Real time drives the clock so RTL's findBy still resolves; the 2.5s
+    // linger is then jumped manually rather than waited out.
+    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 20 });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({ ok: true, applied: 1, enriched_deep: 1, fallback_shallow: 0, errors: 0 }),
+    );
+    const onDone = vi.fn();
+    const { unmount } = render(
+      <StorefrontEnrich creatorId={5} creatorName="Acme" onDone={onDone} />,
+    );
+
+    await user.type(
+      screen.getByPlaceholderText(/myminifactory\.com\/users/i),
+      "https://www.myminifactory.com/users/someone",
+    );
+    await user.click(screen.getByRole("button", { name: /^Match$/ }));
+    await user.click(await screen.findByRole("button", { name: /Apply 1 match/i }));
+    await screen.findByText(/Applied to 1 model/i);
+
+    const pending = vi.getTimerCount();
+    expect(pending).toBeGreaterThan(0);
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(pending - 1);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(onDone).not.toHaveBeenCalled();
+  });
+});

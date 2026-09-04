@@ -38,6 +38,22 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
   const inputRef = useRef<HTMLInputElement>(null);
   const colInputRef = useRef<HTMLInputElement>(null);
   const enrichCreatorRef = useRef<HTMLInputElement>(null);
+  // `status` is a single value, so only one deferred transition can be pending:
+  // a second bulk op restarts the countdown instead of stacking a timer, and
+  // unmounting cancels it rather than resetting a bar that is gone (STUDIO-349).
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleStatusReset = (after: () => void, delay: number) => {
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = setTimeout(after, delay);
+  };
+
+  useEffect(
+    () => () => {
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (mode === "collection") { setColOpen(true); colInputRef.current?.focus(); }
@@ -72,11 +88,11 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
       setMessage(`Updated ${res.updated} model${res.updated !== 1 ? "s" : ""}`);
       setTagInput("");
       onDone();
-      setTimeout(reset, 1800);
+      scheduleStatusReset(reset, 1800);
     } catch {
       setStatus("error");
       setMessage("Failed — try again");
-      setTimeout(() => setStatus("idle"), 2500);
+      scheduleStatusReset(() => setStatus("idle"), 2500);
     }
   };
 
@@ -91,11 +107,11 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
       await api.collections.bulkAddModels(col.id, selectedIds);
       setStatus("success");
       setMessage(`Added to "${col.name}"`);
-      setTimeout(reset, 1800);
+      scheduleStatusReset(reset, 1800);
     } catch {
       setStatus("error");
       setMessage("Failed — try again");
-      setTimeout(() => setStatus("idle"), 2500);
+      scheduleStatusReset(() => setStatus("idle"), 2500);
     }
   };
 
@@ -197,11 +213,11 @@ export default function BulkTagBar({ selectedIds, totalOnPage, onSelectAll, onCl
       setStatus("success");
       setMessage(`Updated ${res.updated} model${res.updated !== 1 ? "s" : ""}`);
       onDone();
-      setTimeout(reset, 1800);
+      scheduleStatusReset(reset, 1800);
     } catch {
       setStatus("error");
       setMessage("Failed — try again");
-      setTimeout(() => setStatus("idle"), 2500);
+      scheduleStatusReset(() => setStatus("idle"), 2500);
     }
   };
 

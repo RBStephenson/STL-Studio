@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Users, Zap, X, RefreshCw, Loader2, Plus, Trash2 } from "lucide-react";
 import { api, Creator, ScanStatus } from "../api/client";
@@ -23,6 +23,18 @@ export default function Creators() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const { toast } = useToast();
   const confirm = useConfirm();
+  // `rescan` polls in a loop that outlives navigation, so every state update
+  // after an await has to check that this page is still here first (STUDIO-349,
+  // same guard as RefreshEnrich's STUDIO-92 fix). Reassigned on mount because
+  // StrictMode mounts, unmounts and remounts in development.
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const loadCreators = () => {
     setLoading(true);
@@ -48,16 +60,18 @@ export default function Creators() {
       let last: ScanStatus | null = null;
       for (;;) {
         await new Promise((r) => setTimeout(r, 1500));
+        if (!mountedRef.current) return;
         last = await api.scan.status();
         if (!last.running) break;
       }
+      if (!mountedRef.current) return;
       await loadCreators();
       // Announce the backend's completion summary (#283).
       toast(last?.message || `Rescanned ${c.name}.`, "success");
     } catch {
       /* ignore — e.g. another scan started elsewhere */
     } finally {
-      setScanningId(null);
+      if (mountedRef.current) setScanningId(null);
     }
   };
 

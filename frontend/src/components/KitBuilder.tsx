@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useMemo } from "react";
+import { lazy, Suspense, useState, useMemo, useRef, useEffect } from "react";
 import { X, Copy, Check, Wrench, Download, Box } from "lucide-react";
 import { STLFile, api } from "../api/client";
 import HelpLink from "./HelpLink";
@@ -39,6 +39,9 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
   // other, in or out of a variant cluster.
   const [selection, setSelection] = useState<Set<number>>(new Set());
   const [copied, setCopied] = useState(false);
+  // The "Copied!" flag reverts on a timer, which must not fire after the kit
+  // builder is closed (STUDIO-349).
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [downloading, setDownloading] = useState(false);
   // previewFile: locked by click; hoveredFile: overrides while hovering
   const [previewFile, setPreviewFile] = useState<STLFile | null>(null);
@@ -96,11 +99,19 @@ export default function KitBuilder({ modelName, files, onClose }: Props) {
     [selection, files]
   );
 
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    },
+    [],
+  );
+
   const copyToClipboard = async () => {
     const text = selectedFiles.map((f) => f.filename).join("\n");
     await navigator.clipboard.writeText(text);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
   };
 
   const downloadZip = async () => {

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 
 const get = vi.fn();
@@ -139,5 +139,49 @@ describe("ModelDetail error handling (#221)", () => {
 
     await waitFor(() => expect(toastMock).toHaveBeenCalledWith("Couldn't save category — try again.", "error"));
     await waitFor(() => expect(input.value).toBe(""));
+  });
+});
+
+describe("ModelDetail deferred flag reverts (STUDIO-349)", () => {
+  beforeEach(() => {
+    get.mockReset();
+    toastMock.mockReset();
+    // Real time drives the clock so findBy still resolves.
+    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 20 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Measured as a delta against an untouched unmount rather than an absolute
+  // count: React Query schedules its own cache-GC timers when this page goes
+  // away, so the raw number moves for reasons that have nothing to do with the
+  // revert. Both counts are taken at unmount, before any advance — afterwards
+  // every timer has drained whether or not it was ever cleared, which is the
+  // assertion that passed against broken code in STUDIO-348.
+  it("cancels the pending 'Copied!' revert when the page unmounts", async () => {
+    get.mockResolvedValue({ ...baseModel, folder_path: "/library/goblin" });
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+
+    const quiet = renderAt();
+    await screen.findByRole("button", { name: /copy path/i });
+    const beforeQuiet = vi.getTimerCount();
+    quiet.unmount();
+    const baselineDelta = vi.getTimerCount() - beforeQuiet;
+
+    const withRevert = renderAt();
+    const copy = await screen.findByRole("button", { name: /copy path/i });
+    await act(async () => {
+      fireEvent.click(copy);
+    });
+    expect(screen.getByRole("button", { name: /copied!/i })).toBeInTheDocument();
+
+    const beforeRevert = vi.getTimerCount();
+    withRevert.unmount();
+    expect(vi.getTimerCount() - beforeRevert).toBe(baselineDelta - 1);
   });
 });

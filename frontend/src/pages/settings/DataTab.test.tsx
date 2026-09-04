@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import DataTab from "./DataTab";
@@ -114,5 +114,71 @@ describe("DataTab database health", () => {
     expect(await screen.findByText("Recovery snapshot failed")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /delete all data/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /delete everything/i })).toBeEnabled();
+  });
+});
+
+describe("DataTab deferred reload", () => {
+  const realLocation = window.location;
+
+  // Real time drives the clock so findBy still resolves; the 1.2s delay is then
+  // jumped manually rather than waited out.
+  const useDrivenFakeTimers = () =>
+    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 20 });
+
+  const stubReload = () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...realLocation, reload },
+    });
+    return reload;
+  };
+
+  const runReset = async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(screen.getByRole("button", { name: /delete all data/i }));
+    await user.type(screen.getByPlaceholderText("ACKNOWLEDGED"), "ACKNOWLEDGED");
+    await user.click(screen.getByRole("button", { name: /delete everything/i }));
+    await screen.findByText(/all data deleted/i);
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { api } = await import("../../api/client");
+    vi.mocked(api.database.reset).mockResolvedValue({ ok: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: realLocation,
+    });
+  });
+
+  it("reloads shortly after a successful reset", async () => {
+    useDrivenFakeTimers();
+    const reload = stubReload();
+
+    render(<DataTab />);
+    await runReset();
+    expect(reload).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  // STUDIO-349. A full page reload landing after the user has navigated off
+  // Settings is worse than a no-op, so the pending reload dies with the tab.
+  it("does not reload the page after the tab unmounts", async () => {
+    useDrivenFakeTimers();
+    const reload = stubReload();
+
+    const { unmount } = render(<DataTab />);
+    await runReset();
+
+    unmount();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(reload).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Search, Check, ChevronDown, ChevronUp, Loader2, Zap } from "lucide-react";
 import RefreshEnrich from "./RefreshEnrich";
 import { errMsg } from "../utils/err";
@@ -155,6 +155,17 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   // Deep-detail cache keyed by product URL so variants sharing a listing fetch once.
   const [details, setDetails] = useState<Record<string, DetailState>>({});
+  // The linger before handing back to the parent. `onDone` re-fetches and
+  // re-renders the caller, so it must not fire once this panel is gone
+  // (STUDIO-349).
+  const doneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+    },
+    [],
+  );
 
   const runMatch = async () => {
     if (!url.trim()) return;
@@ -255,7 +266,8 @@ export default function StorefrontEnrich({ creatorId, creatorName, onDone }: Pro
       setResult(await r.json());
       setDone(true);
       // A shallow fallback is worth seeing, so linger longer when some occurred.
-      setTimeout(onDone, 2500);
+      if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+      doneTimerRef.current = setTimeout(onDone, 2500);
     } catch (e) {
       setError(errMsg(e) ?? null);
     } finally {
