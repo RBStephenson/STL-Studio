@@ -86,7 +86,7 @@ describe("AiIntegrationsTab – add an AI API config", () => {
 describe("AiIntegrationsTab – Anthropic model list (STUDIO-175)", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it("offers Sonnet 5 in the model dropdown for a new Anthropic API", async () => {
+  it("offers the current Claude models in the dropdown for a new Anthropic API", async () => {
     const { api } = await import("../../api/client");
     vi.mocked(api.settings.get).mockResolvedValue(mkSettings({ painting_guides_enabled: true }));
 
@@ -94,7 +94,17 @@ describe("AiIntegrationsTab – Anthropic model list (STUDIO-175)", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Add API" }));
 
+    expect(screen.getByRole("option", { name: "Opus 5 — most capable" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Sonnet 5 — balanced" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Fable 5.1 — highest capability, premium pricing" }),
+    ).toBeInTheDocument();
+    // Haiku predates adaptive thinking, so its label warns that Effort is inert.
+    expect(
+      screen.getByRole("option", { name: "Haiku 4.5 — fastest (Effort has no effect)" }),
+    ).toBeInTheDocument();
+    // 4.6 is kept deliberately as a legacy choice.
+    expect(screen.getByRole("option", { name: "Sonnet 4.6 — legacy" })).toBeInTheDocument();
   });
 });
 

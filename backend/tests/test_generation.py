@@ -164,26 +164,46 @@ def _capture_kwargs_client(captured: dict):
     return _Client
 
 
-def test_low_effort_sends_no_thinking(client, db, monkeypatch):
+def test_low_effort_still_sends_adaptive_thinking(client, db, monkeypatch):
+    """Low is now the cheapest effort *level*, not "thinking off" — the request
+    shape matches high apart from the level itself."""
     secrets.set_ai_api_key(db, "sk-test")
     captured: dict = {}
     monkeypatch.setattr(generation, "Anthropic", _capture_kwargs_client(captured))
 
     generation.generate_guide_draft(db, _guide(db))  # default effort = low
-    assert "thinking" not in captured
+    assert captured["thinking"] == {"type": "adaptive"}
+    assert captured["output_config"] == {"effort": "low"}
 
 
-def test_high_effort_enables_thinking_budget(client, db, monkeypatch):
+def test_high_effort_passes_a_level_not_a_token_budget(client, db, monkeypatch):
+    """The fixed `budget_tokens` parameter is rejected with a 400 by every
+    current model (STUDIO-395); effort now rides in output_config instead."""
     secrets.set_ai_api_key(db, "sk-test")
     client.patch("/settings", json={"ai_effort": "high"})
     captured: dict = {}
     monkeypatch.setattr(generation, "Anthropic", _capture_kwargs_client(captured))
 
     generation.generate_guide_draft(db, _guide(db))
-    assert captured["thinking"]["type"] == "enabled"
-    assert captured["thinking"]["budget_tokens"] == 10000
-    # max_tokens must exceed the thinking budget.
-    assert captured["max_tokens"] > 10000
+    assert captured["thinking"] == {"type": "adaptive"}
+    assert captured["output_config"] == {"effort": "high"}
+    assert "budget_tokens" not in json.dumps(captured, default=str)
+    # max_tokens no longer carries headroom for a separate thinking budget.
+    assert captured["max_tokens"] == generation._MAX_TOKENS
+
+
+def test_pre_adaptive_model_sends_neither_thinking_nor_effort(client, db, monkeypatch):
+    """Haiku 4.5 predates adaptive thinking and rejects both `thinking:
+    adaptive` and `output_config.effort`, so it must receive neither — even
+    with Effort set to high, where the old code sent a thinking budget."""
+    secrets.set_ai_api_key(db, "sk-test")
+    client.patch("/settings", json={"ai_model": "claude-haiku-4-5", "ai_effort": "high"})
+    captured: dict = {}
+    monkeypatch.setattr(generation, "Anthropic", _capture_kwargs_client(captured))
+
+    generation.generate_guide_draft(db, _guide(db))
+    assert "thinking" not in captured
+    assert "output_config" not in captured
 
 
 def _png_bytes() -> bytes:

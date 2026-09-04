@@ -126,18 +126,50 @@ def test_anthropic_missing_key_reports_error(monkeypatch):
     assert any(s["id"] == 1 for s in res.suggestions)
 
 
-def test_anthropic_effort_maps_to_thinking_budget(monkeypatch):
+def test_anthropic_effort_maps_to_adaptive_thinking(monkeypatch):
+    """Effort is passed through as the API's own effort level alongside adaptive
+    thinking. The old fixed `budget_tokens` parameter is rejected with a 400 by
+    every current model (STUDIO-395) and must not be sent."""
     captured: dict = {}
     canned = json.dumps({"files": []})
     monkeypatch.setattr(ai, "Anthropic", _fake_anthropic(canned, captured))
 
-    ai.run(_UNRESOLVED, "", "claude-opus-4-8", "sk-ant-x", api_type="anthropic", effort="high")
+    ai.run(_UNRESOLVED, "", "claude-opus-5", "sk-ant-x", api_type="anthropic", effort="high")
 
-    assert captured["create"]["thinking"] == {"type": "enabled", "budget_tokens": 10000}
-    # low effort sends no thinking block
+    assert captured["create"]["thinking"] == {"type": "adaptive"}
+    assert captured["create"]["output_config"] == {"effort": "high"}
+    assert "budget_tokens" not in json.dumps(captured["create"])
+
+    # Low effort is now the cheapest effort level, not "thinking off" — the
+    # request shape is identical apart from the level.
     captured.clear()
-    ai.run(_UNRESOLVED, "", "claude-opus-4-8", "sk-ant-x", api_type="anthropic", effort="low")
+    ai.run(_UNRESOLVED, "", "claude-opus-5", "sk-ant-x", api_type="anthropic", effort="low")
+    assert captured["create"]["thinking"] == {"type": "adaptive"}
+    assert captured["create"]["output_config"] == {"effort": "low"}
+
+
+def test_anthropic_unknown_effort_falls_back_to_low(monkeypatch):
+    captured: dict = {}
+    canned = json.dumps({"files": []})
+    monkeypatch.setattr(ai, "Anthropic", _fake_anthropic(canned, captured))
+
+    ai.run(_UNRESOLVED, "", "claude-opus-5", "sk-ant-x", api_type="anthropic", effort="banana")
+
+    assert captured["create"]["output_config"] == {"effort": "low"}
+
+
+def test_anthropic_pre_adaptive_model_sends_neither_thinking_nor_effort(monkeypatch):
+    """Haiku 4.5 predates adaptive thinking and rejects both `thinking: adaptive`
+    and `output_config.effort`, so it must receive neither — even at high
+    effort, where the old code would have sent a thinking budget."""
+    captured: dict = {}
+    canned = json.dumps({"files": []})
+    monkeypatch.setattr(ai, "Anthropic", _fake_anthropic(canned, captured))
+
+    ai.run(_UNRESOLVED, "", "claude-haiku-4-5", "sk-ant-x", api_type="anthropic", effort="high")
+
     assert "thinking" not in captured["create"]
+    assert "output_config" not in captured["create"]
 
 
 def test_anthropic_all_thinking_no_text_logs_stop_reason(monkeypatch, ai_organize_logs):
