@@ -1,5 +1,5 @@
 # ---- build stage ----
-FROM node:26.7.0-alpine AS build
+FROM node:26.8.1-alpine AS build
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ COPY . .
 RUN npm run build
 
 # ---- serve stage ----
-FROM nginx:1.31.3-alpine
+FROM nginx:1.31.5-alpine
 
 # Serve the SPA on :3000 AND reverse-proxy /api → the backend, so the frontend
 # container is a self-contained entry point (no separate proxy service needed).
