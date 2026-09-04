@@ -959,6 +959,9 @@ entry has:
   OpenAI-compatible, the app fetches the available model list from the base
   URL automatically when you enter it.
 - **Effort** — (Anthropic only) controls reasoning depth: Low, Medium, or High.
+  Low is the cheapest and fastest setting rather than "no reasoning at all".
+  **Haiku 4.5 predates this control and ignores it**, so Effort has no effect
+  while Haiku is the selected model — its dropdown entry says so.
 - **Timeout** — how long (in seconds) to wait for a response from this
   endpoint before giving up. Defaults to **10s**, which suits a local Ollama.
   A **remote** Ollama loading a model for the first time (a "cold start") can

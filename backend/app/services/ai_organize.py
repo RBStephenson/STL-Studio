@@ -29,10 +29,14 @@ _log = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT = 10.0
 
 # Anthropic-only knobs. The organize response is a small JSON object, so a
-# modest cap is plenty; effort maps to an extended-thinking budget (mirrors the
-# painting guide generator).
+# modest cap is plenty; effort is passed through as the API's own effort level
+# (mirrors the painting guide generator).
 _ANTHROPIC_MAX_TOKENS = 4096
-_EFFORT_THINKING_BUDGET = {"low": 0, "medium": 4096, "high": 10000}
+_EFFORT_LEVELS = ("low", "medium", "high")
+# Predate adaptive thinking — they reject both `thinking: adaptive` and
+# `output_config.effort`, so effort is a no-op for them. Mirrors
+# generation._PRE_ADAPTIVE_MODELS; keep the two in step.
+_PRE_ADAPTIVE_MODELS = ("claude-haiku-4-5",)
 
 # Same reasoning for the OpenAI-compatible (Ollama etc.) path: without an
 # explicit cap, a local model that gets stuck (repetition, a quantization that
@@ -943,11 +947,13 @@ def _llm_refine_anthropic(
                 {"role": "user", "content": user_prefix + json.dumps(files, ensure_ascii=False)},
             ],
         }
-        budget = _EFFORT_THINKING_BUDGET.get((effort or "low"), 0)
-        if budget:
-            # max_tokens must exceed the thinking budget.
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
-            kwargs["max_tokens"] = _ANTHROPIC_MAX_TOKENS + budget
+        # Adaptive thinking plus an effort level; the old fixed `budget_tokens`
+        # parameter is rejected with a 400 by every current model (STUDIO-395),
+        # and `max_tokens` no longer needs headroom for a separate budget.
+        if model not in _PRE_ADAPTIVE_MODELS:
+            level = effort if effort in _EFFORT_LEVELS else "low"
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": level}
         resp = client.messages.create(**kwargs)
     except Exception as exc:  # anthropic.APIError, auth, timeout, etc.
         detail = f"{exc.__class__.__name__}: {exc}".strip().rstrip(":")

@@ -34,21 +34,32 @@ _REFERENCE_INSTRUCTION = (
 )
 
 # Sensible default; the user can override via the `ai_model` app setting (#517).
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL = "claude-sonnet-5"
 # A full multi-tab guide's JSON runs well past 8k output tokens; 8192 truncated
 # the reply mid-JSON and surfaced as a cryptic parse error. 16384 gives a whole
 # guide room to complete — comfortably under Sonnet's 64K / Opus's 128K ceiling.
 _MAX_TOKENS = 16384
 
-# Generation effort → extended-thinking budget (tokens). "low" disables thinking
-# for speed/cost; medium/high spend reasoning budget for richer guides.
-_EFFORT_THINKING_BUDGET = {"low": 0, "medium": 4096, "high": 10000}
+# Generation effort, passed through as the API's own effort level. Adaptive
+# thinking picks its depth per request, so there is no fixed token budget to
+# reserve — "low" now means the cheapest/fastest setting rather than "thinking
+# off" (STUDIO-395: the old fixed `budget_tokens` parameter is rejected with a
+# 400 by every current model, and disabling thinking outright is itself invalid
+# on some of them).
+_EFFORT_LEVELS = ("low", "medium", "high")
+
+# Models that predate adaptive thinking. They reject BOTH `thinking: adaptive`
+# and `output_config.effort`, so they get neither and the Effort setting is a
+# no-op for them — which suits the one entry here, since Haiku is chosen for
+# speed and cost rather than reasoning depth. Keep this in step with
+# ANTHROPIC_MODELS in frontend/src/pages/settings/AiIntegrationsTab.tsx.
+_PRE_ADAPTIVE_MODELS = ("claude-haiku-4-5",)
 
 
 def _effort(db: Session) -> str:
     row = db.get(AppSetting, "ai_effort")
     value = row.value if row is not None else None
-    return value if value in _EFFORT_THINKING_BUDGET else "low"
+    return value if value in _EFFORT_LEVELS else "low"
 
 
 class GenerationError(RuntimeError):
@@ -109,7 +120,7 @@ def resolve_anthropic_config(
         key = secrets.get_ai_api_config_key(db, cfg.id)
         if not key:
             raise MissingApiKeyError("No API key is configured for the assigned AI API.")
-        effort = cfg.effort if cfg.effort in _EFFORT_THINKING_BUDGET else "low"
+        effort = cfg.effort if cfg.effort in _EFFORT_LEVELS else "low"
         return AnthropicApiConfig(model=cfg.model or DEFAULT_MODEL, api_key=key, effort=effort)
 
     # Legacy fallback: standalone ai_api_key_enc / ai_model / ai_effort settings.
@@ -207,16 +218,15 @@ def generate_guide_draft(db: Session, guide: Guide) -> GuideDraft:
         "system": assemble_system_prompt(db),
         "messages": [{"role": "user", "content": _build_message_content(db, guide)}],
     }
-    budget = _EFFORT_THINKING_BUDGET[cfg.effort]
-    if budget:
-        kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
-        # max_tokens must exceed the thinking budget.
-        kwargs["max_tokens"] = _MAX_TOKENS + budget
+    # Adaptive thinking plus an effort level. `max_tokens` needs no headroom for
+    # a separate thinking budget any more, because there isn't one.
+    if cfg.model not in _PRE_ADAPTIVE_MODELS:
+        kwargs["thinking"] = {"type": "adaptive"}
+        kwargs["output_config"] = {"effort": cfg.effort}
     try:
-        # Stream and collect the final message: at these output sizes (and with
-        # the thinking budget added on top) a non-streaming request risks the
-        # SDK's long-request timeout. get_final_message() reassembles the whole
-        # reply regardless.
+        # Stream and collect the final message: at these output sizes a
+        # non-streaming request risks the SDK's long-request timeout.
+        # get_final_message() reassembles the whole reply regardless.
         with client.messages.stream(**kwargs) as stream:
             resp = stream.get_final_message()
     except Exception as exc:  # anthropic.APIError and friends

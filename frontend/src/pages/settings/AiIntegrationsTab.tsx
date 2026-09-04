@@ -34,11 +34,15 @@ const EMPTY_DRAFT: DraftConfig = {
   api_key: "",
 };
 
+// Keep in step with _PRE_ADAPTIVE_MODELS in the backend (generation.py /
+// ai_organize.py): Haiku 4.5 predates adaptive thinking, so Effort does nothing
+// for it.
 const ANTHROPIC_MODELS = [
-  { value: "claude-opus-4-8", label: "Opus 4.8 — most capable" },
+  { value: "claude-fable-5-1", label: "Fable 5.1 — highest capability, premium pricing" },
+  { value: "claude-opus-5", label: "Opus 5 — most capable" },
   { value: "claude-sonnet-5", label: "Sonnet 5 — balanced" },
-  { value: "claude-sonnet-4-6", label: "Sonnet 4.6 — balanced" },
-  { value: "claude-haiku-4-5", label: "Haiku 4.5 — fastest" },
+  { value: "claude-haiku-4-5", label: "Haiku 4.5 — fastest (Effort has no effect)" },
+  { value: "claude-sonnet-4-6", label: "Sonnet 4.6 — legacy" },
 ];
 
 // ── Shared field styles ───────────────────────────────────────────────────────
