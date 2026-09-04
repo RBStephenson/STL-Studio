@@ -19,5 +19,5 @@ scikit-image==0.26.0
 pillow==12.3.0
 playwright==1.62.0
 anthropic==0.121.0
-pypdf==6.15.0  # merge per-guide PDFs into a series bundle (#490)
+pypdf==6.16.2  # merge per-guide PDFs into a series bundle (#490)
 pymupdf==1.28.2  # Paint Shelf swatch-chart import (STUDIO-329) — AGPL-3.0, see NOTICE
