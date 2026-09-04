@@ -1,4 +1,26 @@
 version: 2
+
+# Grouping policy
+# ---------------
+# Every ecosystem groups its minor and patch bumps into a single PR, and leaves
+# majors as individual PRs.
+#
+# Why group at all: `main` requires branches to be up to date before merging
+# (branch protection `strict: true`), so every merge re-bases-out every other
+# open PR and a batch lands strictly one PR per CI cycle. One PR per package
+# turns a routine week into a serialised queue — 2026-09-04 had sixteen open at
+# once, six of which were individual backend pip bumps that could have been one.
+#
+# Why minor/patch only: bundling a major in with patches means the whole group
+# is blocked behind whatever review the major needs. The `anthropic` 0.x -> 1.x
+# bump (#1359) is the worked example — it wanted a real read of the migration
+# guide, and grouping it with four harmless patches would have held those
+# hostage to it.
+#
+# Note: security updates bypass grouping entirely — Dependabot always raises an
+# advisory fix as its own PR. That is the desired behaviour and this config does
+# not change it.
+
 updates:
   # npm (frontend)
   - package-ecosystem: "npm"
@@ -10,8 +32,10 @@ updates:
     groups:
       dev-deps:
         dependency-type: "development"
+        update-types: ["minor", "patch"]
       prod-deps:
         dependency-type: "production"
+        update-types: ["minor", "patch"]
     ignore:
       # typescript-eslint peer-caps TypeScript at <6.1.0; TS 7 breaks npm ci.
       # Hold TS majors until typescript-eslint widens its peer range (STUDIO-275).
@@ -28,8 +52,10 @@ updates:
     groups:
       dev-deps:
         dependency-type: "development"
+        update-types: ["minor", "patch"]
       prod-deps:
         dependency-type: "production"
+        update-types: ["minor", "patch"]
 
   # pip (backend)
   - package-ecosystem: "pip"
@@ -38,6 +64,10 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    groups:
+      backend-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -46,6 +76,10 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # Docker base images (frontend build + serve stages)
   - package-ecosystem: "docker"
@@ -54,6 +88,10 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    groups:
+      frontend-images:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # Docker base image (backend)
   - package-ecosystem: "docker"
@@ -62,3 +100,7 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    groups:
+      backend-image:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
