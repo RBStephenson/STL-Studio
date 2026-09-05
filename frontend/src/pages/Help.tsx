@@ -919,7 +919,9 @@ const SECTIONS: Section[] = [
           point (still editable, and never saved as a "preset"), and an{" "}
           <strong>example</strong> renders your template against a few real models as
           you type. An invalid template shows its parse error inline instead of waiting
-          for a save or a full build, and never clears what you typed.
+          for a save or a full build, and never clears what you typed. If you have
+          already built a plan, that stays on screen too — a template caught half-typed
+          no longer discards a plan that took minutes to build.
         </p>
         <p>
           That example is a <strong>template render, not an eligibility check</strong>.

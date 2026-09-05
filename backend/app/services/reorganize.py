@@ -1292,12 +1292,9 @@ def _detect_overlaps(entries: list[Entry]) -> None:
     matters (Phase 2, #324), bucket entries by normalized parent-dir prefix and
     sweep once instead.
     """
-    dirs: list[tuple[Entry, str, str]] = [
-        (e, _key(e.proposed_dir), _key(_canon(e.files[0].current_path)) if e.files else _key(e.proposed_dir))
-        for e in entries
-    ]
-    for i, (e, dst_i, _src_i) in enumerate(dirs):
-        for j, (other, dst_j, src_j) in enumerate(dirs):
+    dirs: list[tuple[Entry, str]] = [(e, _key(e.proposed_dir)) for e in entries]
+    for i, (e, dst_i) in enumerate(dirs):
+        for j, (other, dst_j) in enumerate(dirs):
             if i == j:
                 continue
             # Destination of e nests under, or contains, another's source dir.

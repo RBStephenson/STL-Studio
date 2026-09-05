@@ -9,6 +9,7 @@ the happy path. No test moves any files.
 from pathlib import Path
 
 from app.models import Creator, PackOverride, ReorganizeManifest, ScanRoot
+from app.services import reorganize
 from tests.conftest import make_creator, make_model, make_stl_file
 
 
@@ -699,3 +700,114 @@ class TestStats:
         assert blocked_entry["kind"] in ("move", "rename", "case_rename")
         assert blocked_entry["eligible"] is False
         assert data["stats"]["moves_needed"] == 1
+
+
+class TestCollisionAndOverlapInternals:
+    """Direct coverage for the two private sweeps (STUDIO-406).
+
+    `_detect_overlaps` had no test anywhere in the suite. The ticket asked to
+    confirm the existing coverage before trusting it; there was none to trust,
+    so this is the first. `_detect_collisions` is exercised end-to-end
+    elsewhere, but never for the Unicode-normalization case that the deleted
+    `unicode_only` kind claimed to describe.
+
+    Both are called from the preview builder (`build_preview`), so these pin
+    the functions, not a parallel code path.
+    """
+
+    @staticmethod
+    def _entry(model_id: int, proposed_dir: str, source_file: str) -> reorganize.Entry:
+        """A minimal movable Entry — every flag starts clean so a test that
+        asserts one got set is asserting the sweep set it."""
+        return reorganize.Entry(
+            model_id=model_id,
+            model_name=f"model-{model_id}",
+            files=[
+                reorganize.FileMove(
+                    stl_file_id=model_id,
+                    current_path=source_file,
+                    proposed_path=f"{proposed_dir}/f.stl",
+                    size_bytes=1,
+                    mtime_ns=1,
+                    content_hash=None,
+                    fingerprint_method="stat",
+                    missing_file=False,
+                )
+            ],
+            kind="move",
+            source_dir=source_file.rsplit("/", 1)[0],
+            proposed_dir=proposed_dir,
+            eligible=True,
+            pack_override_paths=[],
+            collision=False,
+            collision_kind="none",
+            collision_with=[],
+            suggested_suffix=None,
+            unclassifiable=False,
+            missing_fields=[],
+            over_length=False,
+            reserved_name=False,
+            overlaps_other=False,
+            spans_multiple_dirs=False,
+            source_directories=[],
+            is_symlink=False,
+            escapes_scan_root=False,
+            missing_files_on_disk=False,
+            locked=False,
+        )
+
+    def test_destination_inside_another_source_blocks_only_the_mover(self):
+        # A's destination sits above B's source folder, so applying A would be
+        # writing into a tree B is still being read out of.
+        a = self._entry(1, "/lib/abe3d/joker", "/lib/raw/a/f.stl")
+        b = self._entry(2, "/lib/other/x", "/lib/abe3d/joker/extra/f.stl")
+
+        reorganize._detect_overlaps([a, b])
+
+        assert a.overlaps_other is True
+        assert a.eligible is False
+        # B's destination touches nothing of A's, so it stays movable — the
+        # sweep is directional, not "flag both halves of the pair".
+        assert b.overlaps_other is False
+        assert b.eligible is True
+
+    def test_overlap_comparison_is_case_insensitive(self):
+        a = self._entry(1, "/lib/ABE3D/Joker", "/lib/raw/a/f.stl")
+        b = self._entry(2, "/lib/other/x", "/lib/abe3d/joker/extra/f.stl")
+
+        reorganize._detect_overlaps([a, b])
+
+        assert a.overlaps_other is True
+
+    def test_unrelated_entries_are_left_alone(self):
+        a = self._entry(1, "/lib/abe3d/joker", "/lib/raw/a/f.stl")
+        b = self._entry(2, "/lib/other/x", "/lib/elsewhere/b/f.stl")
+
+        reorganize._detect_overlaps([a, b])
+
+        assert (a.overlaps_other, b.overlaps_other) == (False, False)
+        assert a.eligible is True
+        assert b.eligible is True
+
+    def test_unicode_form_only_difference_still_collides(self):
+        """Why there is no `unicode_only` collision kind (STUDIO-406).
+
+        `_key` NFC-normalizes before comparing, so two destinations differing
+        only by Unicode form are already the same key by the time collision
+        detection runs. The clash is caught — it just never needed a label of
+        its own, which is why the UI string for it was unreachable.
+        """
+        nfc = "/lib/abe3d/jos\u00e9"       # NFC: e-acute as one code point
+        nfd = "/lib/abe3d/jose\u0301"      # NFD: plain e + combining acute
+        assert nfc != nfd
+
+        a = self._entry(1, nfc, "/lib/raw/a/f.stl")
+        b = self._entry(2, nfd, "/lib/raw/b/f.stl")
+
+        reorganize._detect_collisions([a, b])
+
+        assert a.collision is True
+        assert b.collision is True
+        assert a.collision_kind == "exact"
+        assert a.collision_with == [2]
+        assert b.collision_with == [1]

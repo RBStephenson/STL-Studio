@@ -31,15 +31,26 @@ vi.mock("../api/client", () => {
 let aiSuggestionsEnabled = false;
 let packageModeEnabled = false;
 let slugifyEnabled = true;
+// The template field seeds from settings since STUDIO-406 — there is no
+// frontend default any more — so this mock has to answer `loaded` and carry
+// the server's default, not just the feature flags.
+let settingsLoaded = true;
+let savedTemplate = "";
+let templateDefault = "{creator}/{character}/{title}";
 vi.mock("../context/AppSettingsContext", () => ({
-  useAppSettings: () => ({ settings: {
-    reorganize_ai_suggestions_enabled: aiSuggestionsEnabled,
-    reorganize_package_mode_enabled: packageModeEnabled,
-    reorganize_slugify: slugifyEnabled,
-  } }),
+  useAppSettings: () => ({
+    loaded: settingsLoaded,
+    settings: {
+      reorganize_ai_suggestions_enabled: aiSuggestionsEnabled,
+      reorganize_package_mode_enabled: packageModeEnabled,
+      reorganize_slugify: slugifyEnabled,
+      reorganize_template: savedTemplate,
+      reorganize_template_default: templateDefault,
+    },
+  }),
 }));
 
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 
 const reorg = api.reorganize as unknown as {
   preview: ReturnType<typeof vi.fn>;
@@ -139,6 +150,9 @@ beforeEach(() => {
   aiSuggestionsEnabled = false;
   packageModeEnabled = false;
   slugifyEnabled = true;
+  settingsLoaded = true;
+  savedTemplate = "";
+  templateDefault = "{creator}/{character}/{title}";
   scan.roots.mockReturnValue(new Promise(() => {}));
   reorg.preview.mockResolvedValue(previewFixture());
   reorg.templatePreview.mockResolvedValue(templatePreviewFixture());
@@ -1024,5 +1038,71 @@ describe("ReorganizePage override on any row (STUDIO-400)", () => {
 
     expect(await screen.findByText("Why")).toBeInTheDocument();
     expect(screen.queryByLabelText("character for Locked Model")).not.toBeInTheDocument();
+  });
+});
+
+describe("ReorganizePage template hygiene (STUDIO-406)", () => {
+  const templateField = () =>
+    screen.getByRole("textbox", { name: /destination template/i });
+
+  it("holds the template editor back until the settings have loaded", () => {
+    // The template seeds from the server now, so rendering the editor early
+    // would flash "the template is empty" over a library that has one.
+    settingsLoaded = false;
+    render(<ReorganizePage />);
+    expect(screen.queryByRole("textbox", { name: /destination template/i })).toBeNull();
+  });
+
+  // Deliberately NOT the canonical template: a test using that string cannot
+  // tell "seeded from settings" apart from "hard-coded in the frontend".
+  it("seeds the field from the server's default, not a frontend literal", async () => {
+    templateDefault = "{creator}/{scale}";
+    render(<ReorganizePage />);
+    expect(templateField()).toHaveValue("{creator}/{scale}");
+    await waitFor(() =>
+      expect(reorg.templatePreview).toHaveBeenLastCalledWith("{creator}/{scale}", undefined),
+    );
+  });
+
+  it("prefers a saved template over the server default", async () => {
+    savedTemplate = "{creator}/{title}";
+    templateDefault = "{creator}/{scale}";
+    render(<ReorganizePage />);
+    expect(templateField()).toHaveValue("{creator}/{title}");
+  });
+
+  // The manifest preview stats every file on disk. Throwing it away because a
+  // template was mid-edit cost minutes over a state that lasts one keypress.
+  it("keeps the last good plan when a half-typed template returns 400", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    expect(await screen.findByText("Joker Bust")).toBeInTheDocument();
+
+    reorg.preview.mockRejectedValue(new ApiError(400, "Unknown token: {char"));
+    fireEvent.change(templateField(), { target: { value: "{creator}/{char" } });
+
+    expect(await screen.findByText("Unknown token: {char")).toBeInTheDocument();
+    // The plan is still on screen, and the "couldn't build" empty state never
+    // replaced it.
+    expect(screen.getByText("Joker Bust")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't build the plan")).toBeNull();
+  });
+
+  it("still recovers to a fresh plan once the template is valid again", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    expect(await screen.findByText("Joker Bust")).toBeInTheDocument();
+
+    reorg.preview.mockRejectedValueOnce(new ApiError(400, "Unknown token: {char"));
+    fireEvent.change(templateField(), { target: { value: "{creator}/{char" } });
+    expect(await screen.findByText("Unknown token: {char")).toBeInTheDocument();
+
+    fireEvent.change(templateField(), { target: { value: "{creator}/{title}" } });
+    await waitFor(() =>
+      expect(reorg.preview).toHaveBeenLastCalledWith("{creator}/{title}", undefined),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Unknown token: {char")).toBeNull(),
+    );
   });
 });

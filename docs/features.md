@@ -845,7 +845,9 @@ editable afterwards, and nothing about a preset is saved. An **example** renders
 the current template against a handful of real models from your library as you
 type, so you can see what a change does without building a plan first. A
 malformed template shows its parse error inline rather than waiting for a save or
-a full build, and never clears what you typed.
+a full build, and never clears what you typed. If a plan is already built, it
+stays on screen through that error too — a template caught half-typed no longer
+throws away a manifest that took minutes to assemble.
 
 Two things the example deliberately does not tell you. First, it is a **template
 render, not an eligibility check**: it reports only the problems the template

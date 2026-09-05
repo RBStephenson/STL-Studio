@@ -1,14 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FocusEvent, ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { api, ApiError } from "../../api/client";
 import type { TemplatePreviewResponse } from "../../api/client";
 
-// The one frontend definition (STUDIO-402). ReorganizePage used to declare its
-// own and the Settings field hard-coded the same string as a placeholder, which
-// made three copies counting the backend's `reorganize_template.DEFAULT_TEMPLATE`
-// — both frontend copies now import this one.
-export const DEFAULT_TEMPLATE = "{creator}/{character}/{title}";
+// This component deliberately declares NO default template of its own
+// (STUDIO-406). STUDIO-402 collapsed three frontend copies into one here, which
+// still left it racing the backend parser's `reorganize_template.DEFAULT_TEMPLATE`
+// across the language boundary. The default now arrives from the settings
+// payload and is passed in as `defaultTemplate`.
 
 const PREVIEW_DEBOUNCE_MS = 400;
 
@@ -21,12 +21,22 @@ const TOKENS = ["{creator}", "{character}", "{scale}", "{title}"] as const;
 // scanner auto-tags that most models don't carry, so a required `{scale}` blocks
 // most of a library at once. A one-click preset is exactly the wrong place to
 // hand someone that.
-const PRESETS: { label: string; template: string; hint: string }[] = [
-  {
-    label: "Creator → Character → Title",
-    template: DEFAULT_TEMPLATE,
-    hint: "The default layout.",
-  },
+const buildPresets = (defaultTemplate: string): { label: string; template: string; hint: string }[] => [
+  // Omitted entirely when the settings fetch failed and no default arrived —
+  // a preset button that pastes an empty string is worse than one less preset,
+  // and inventing a local fallback is the drift this ticket removed.
+  ...(defaultTemplate
+    ? [{
+        // Named for what it IS rather than for its current shape: the string
+        // comes from the server now, so a hard-coded "Creator → Character →
+        // Title" label would quietly start lying the day the default changes.
+        // "Built-in" and not "Library" because on the Reorganize page this
+        // pastes the shipped default, not whatever the library has saved.
+        label: "Built-in default",
+        template: defaultTemplate,
+        hint: "The layout used when you haven't set your own.",
+      }]
+    : []),
   {
     label: "Creator → Title",
     template: "{creator}/{title}",
@@ -53,6 +63,10 @@ interface Props {
   onCommit?: () => void;
   /** Limits the live example to one scan root (Reorganize page only). */
   rootId?: number;
+  /** The server's default template, from `settings.reorganize_template_default`
+   *  (STUDIO-406). Passed in rather than read from context here so the
+   *  component's tests don't all need a settings provider. */
+  defaultTemplate: string;
   /** Says whether this field is saved or applies to one plan — the distinction
    *  existed in the code but nothing in the UI ever said so. */
   scopeNote: ReactNode;
@@ -68,7 +82,8 @@ interface Props {
  *  missing files and multi-directory models all need the disk, so a clean
  *  example is NOT a promise that a model will move. Only a built plan says that.
  */
-export default function TemplateEditor({ value, onChange, onCommit, rootId, scopeNote }: Props) {
+export default function TemplateEditor({ value, onChange, onCommit, rootId, defaultTemplate, scopeNote }: Props) {
+  const presets = useMemo(() => buildPresets(defaultTemplate), [defaultTemplate]);
   const [preview, setPreview] = useState<TemplatePreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -183,7 +198,7 @@ export default function TemplateEditor({ value, onChange, onCommit, rootId, scop
 
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-xs text-text-secondary-alt mr-0.5">Start from</span>
-        {PRESETS.map((preset) => (
+        {presets.map((preset) => (
           <button
             key={preset.label}
             type="button"

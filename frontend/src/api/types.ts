@@ -284,10 +284,15 @@ export interface AppSettings {
   ai_organize_api: number | null;
   // Application log verbosity — changing it takes effect immediately (no restart).
   log_level: LogLevel;
-  // Library reorganize destination template ("" = the built-in default,
-  // {creator}/{character}/{title}; optional {scale}) and whether every segment renders
-  // lowercase/hyphenated (import-style) rather than case-preserving.
+  // Library reorganize destination template ("" = inherit the built-in
+  // default, which arrives as reorganize_template_default; optional {scale})
+  // and whether every segment renders lowercase/hyphenated (import-style)
+  // rather than case-preserving.
   reorganize_template: string;
+  // Server-side default, read-only (STUDIO-406). The frontend must not declare
+  // its own copy of the template string — this is the one it renders. Empty
+  // until the settings fetch lands, so gate on the context's `loaded` flag.
+  reorganize_template_default: string;
   reorganize_slugify: boolean;
   // Independent of reorganize_slugify (directory segments only): also renders
   // each STL's own filename lowercase/hyphenated on reorganize/import-apply.
@@ -1072,8 +1077,11 @@ export interface GroupScrapeResult {
 
 // --- Library reorganize, Phase 1 preview (#323) ---
 export type ReorganizeMoveKind = "move" | "rename" | "case_rename" | "in_place" | "merge";
+// Mirrors schemas.CollisionKind. There is no "unicode_only": the backend groups
+// collisions on an NFC-normalized key, so a Unicode-form-only clash is caught
+// but arrives labelled "exact". See the note on the Python Literal.
 export type ReorganizeCollisionKind =
-  | "none" | "exact" | "case_only" | "unicode_only" | "same_destination";
+  | "none" | "exact" | "case_only" | "same_destination";
 
 export interface ReorganizeFileMove {
   stl_file_id: number | null;
