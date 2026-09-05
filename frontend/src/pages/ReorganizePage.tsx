@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, RefreshCw, Square, AlertCircle } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -84,15 +84,10 @@ export default function ReorganizePage() {
   // Starts empty rather than at a locally-declared default (STUDIO-406) — the
   // default is the server's now, and arrives with the settings fetch.
   const [template, setTemplate] = useState("");
-  // Seed the field from the saved library setting once it's loaded (async),
-  // falling back to the server's default when nothing is saved, and only until
-  // the user starts typing their own one-off template.
+  // Seeding moved below the scan-root state (STUDIO-403) — what this field
+  // starts from now depends on which root is selected, so it can't be computed
+  // before `scanRoots` and `rootId` exist.
   const [templateTouched, setTemplateTouched] = useState(false);
-  useEffect(() => {
-    if (templateTouched) return;
-    const seed = settings.reorganize_template || settings.reorganize_template_default;
-    if (seed) setTemplate(seed);
-  }, [settings.reorganize_template, settings.reorganize_template_default, templateTouched]);
   const [overrides, setOverrides] = useState<Record<number, ReorganizeOverride>>({});
   const [preview, setPreview] = useState<ReorganizePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +117,48 @@ export default function ReorganizePage() {
   const [scanRootsError, setScanRootsError] = useState(false);
   const [rootId, setRootId] = useState<number | undefined>();
   const { toast } = useToast();
+
+  // What a root with no template of its own resolves to: the saved library
+  // setting, then the server's built-in default.
+  const libraryFallback = settings.reorganize_template || settings.reorganize_template_default;
+  const selectedRootTemplate = rootId != null
+    ? (scanRoots.find((r) => r.id === rootId)?.reorganize_template ?? null)
+    : null;
+  // All scan roots, with at least one of them carrying its own template
+  // (STUDIO-403). The field stays EMPTY here and the request carries no
+  // template, so the server renders each model against its own root's. Seeding
+  // one string would send it explicitly and flatten every override — and the
+  // plan would then disagree with the unorganized badge, which resolves
+  // per-root. A library where no root overrides is unaffected and still seeds.
+  const perRootMode = rootId == null && scanRoots.some((r) => !!r.reorganize_template);
+
+  /** What the one-off field should start from for a given scope. Takes the
+   *  root id rather than reading `rootId`, because `changeRoot` has to seed for
+   *  the root it is switching TO, a render before that state lands. */
+  const seedTemplateFor = useCallback((id: number | undefined) => {
+    // All roots, at least one of them overriding: stay empty so the request
+    // carries no template and the server resolves each model against its own
+    // root. Seeding a single string here would flatten every override.
+    if (id == null && scanRoots.some((r) => !!r.reorganize_template)) return "";
+    const own = id != null
+      ? (scanRoots.find((r) => r.id === id)?.reorganize_template ?? null)
+      : null;
+    return own || libraryFallback;
+  }, [scanRoots, libraryFallback]);
+
+  // Seed the one-off field once settings/roots have loaded, and only until the
+  // user starts typing their own template.
+  useEffect(() => {
+    if (templateTouched) return;
+    setTemplate(seedTemplateFor(rootId));
+    // Deliberately NOT gated on `scanRootsLoading`. Waiting for the roots would
+    // remove a brief flash of the library template before a per-root library
+    // settles on the empty "each root uses its own" state — but it also means a
+    // /scan/roots call that never resolves leaves this field empty forever with
+    // nothing explaining why. A sub-second flicker for the libraries that have
+    // per-root templates beats a permanently blank field for anyone whose roots
+    // request hangs.
+  }, [templateTouched, seedTemplateFor, rootId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,7 +194,22 @@ export default function ReorganizePage() {
   const hasOverrides = Object.keys(overrides).length > 0;
 
   const changeRoot = (value: string) => {
-    setRootId(value ? Number(value) : undefined);
+    const nextId = value ? Number(value) : undefined;
+    setRootId(nextId);
+    // Re-seed from the newly selected root (STUDIO-403). Changing scope changes
+    // what the field should start from, so a one-off template typed for the old
+    // scope is deliberately not carried across; the seeding effect below does
+    // the actual work on the next render.
+    //
+    // That one-render lag is safe only because the preview effect is debounced
+    // behind a setTimeout it cancels on cleanup: `started` survives a root
+    // change, so the effect does refire immediately with the stale template,
+    // but that run is cancelled before it reaches the network. Seeding
+    // synchronously here to "fix" the lag was tried and reverted — a control
+    // mutation showed removing it changed nothing, because the debounce already
+    // covers it. If that debounce is ever removed, this becomes a real extra
+    // manifest build against the wrong template.
+    setTemplateTouched(false);
     setPreview(null);
     setError(null);
     setOverrides({});
@@ -453,15 +505,25 @@ export default function ReorganizePage() {
             onChange={(next) => { setTemplate(next); setTemplateTouched(true); }}
             rootId={rootId}
             defaultTemplate={settings.reorganize_template_default}
+            inheritedTemplate={perRootMode ? libraryFallback : undefined}
             scopeNote={
-              <>
-                This template applies to <strong>this plan only</strong> and is not saved.
-                It starts from your saved template;{" "}
-                <a href="/settings#library" className="text-indigo-400 hover:text-indigo-300 underline">
-                  change that in Settings
-                </a>{" "}
-                to affect new creator folders, import moves and the unorganized badge too.
-              </>
+              perRootMode ? (
+                <>
+                  <strong>Each scan root uses its own template</strong> — one or more roots
+                  have their own, so leaving this empty builds every model against the
+                  template for the root it lives in. Type here to force{" "}
+                  <strong>one</strong> template across all of them, for this plan only.
+                </>
+              ) : (
+                <>
+                  This template applies to <strong>this plan only</strong> and is not saved.
+                  It starts from {selectedRootTemplate ? "this scan root's saved template" : "your saved template"};{" "}
+                  <a href="/settings#library" className="text-indigo-400 hover:text-indigo-300 underline">
+                    change that in Settings
+                  </a>{" "}
+                  to affect new creator folders and the unorganized badge too.
+                </>
+              )
             }
           />
         ) : (

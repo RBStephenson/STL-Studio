@@ -649,11 +649,15 @@ The **Creators** page lists every creator with their model count. From here you
 can:
 
 - **Add Creator** — add a creator manually, before you've imported any of
-  their models. Its library folder is created automatically, using the
-  destination template from **Settings → Library → Destination Layout** (see
+  their models. Its library folder is created automatically under your first
+  enabled scan location, using **that location's** resolved destination template
+  (its own **Destination** if it has one, otherwise the library-wide template
+  from **Settings → Library → Destination Layout**; see
   [Reorganize](#reorganize-library) for the template syntax), so it's ready for
-  files to land in. This works whether or not Reorganize is enabled — the
-  template is library configuration, not a Reorganize setting.
+  files to land in. Where the folder lands is what decides its shape — otherwise
+  a brand-new creator folder would be reported as unorganized the moment it was
+  scanned. This works whether or not Reorganize is enabled — the template is
+  library configuration, not a Reorganize setting.
 - Click a creator to browse just their models in the Library.
 - **Rescan** a single creator — a targeted scan of just that creator's folder.
   Because you usually add models one creator at a time, this is much faster than
@@ -816,10 +820,38 @@ on the Library toolbar (or **/reorganize**); the menu entry appears once
 **Enable Reorganize Library** is on under **Settings → Library → Library Tools**.
 
 The template itself is not a Reorganize setting. It lives under **Settings →
-Library → Destination Layout**, because four separate things follow it: Reorganize,
-where a brand-new creator folder is created, import moves, and the **unorganized**
+Library → Destination Layout**, because three separate things follow it:
+Reorganize, where a brand-new creator folder is created, and the **unorganized**
 badge on a model's detail page. It is readable and editable whether or not
 Reorganize is enabled.
+
+### Per-scan-root destination templates
+
+One template does not fit every library. `{creator}/{character}/{title}` is right
+for character minis and wrong for a terrain root, where there is no character to
+file under. Each scan location can therefore carry its own destination template,
+set as **Destination** on that location's card under **Settings → Library → Scan
+Locations**.
+
+Resolution runs in three steps, and only the first one that has a value is used:
+
+1. the scan root's own **Destination** template, for models under that root;
+2. the library-wide template under **Settings → Library → Destination Layout**;
+3. the built-in default, `{creator}/{character}/{title}`.
+
+Leaving a location's Destination empty is how it *inherits* — the field is never
+pre-filled with the template it would inherit, so changing the library template
+keeps moving every location that has no opinion of its own. Nothing changes for
+an existing library until a location is actually given a template.
+
+Everything that reads the template follows the same resolution: a plan built
+against a single scan root uses that root's template, the **unorganized** badge
+judges each model against the template of the root it lives in, and a brand-new
+creator folder is shaped by the template of the root it is created under (the
+first enabled one). Building a plan across **all** scan roots renders each model
+against its own root's template rather than forcing one across the library;
+typing a template into the Reorganize page's field overrides all of that for
+that one plan, which is what that field has always meant.
 
 Destination templates support `{creator}`, `{character}`, `{scale}`, and
 `{title}`. `{scale}` comes from scanner-detected scale auto-tags such as `1:6`
@@ -878,9 +910,14 @@ building the newly scoped preview.
 
 The destination template and a **"Lowercase, hyphenated directory names"**
 toggle live in **Settings → Library → Destination Layout** — both are saved
-server-side, so they're shared with manual [creator](#creators--per-creator-rescan)
-folder creation, [import](#import-folder) moves and the model detail
-[unorganized indicator](#model-detail), not just this page. That section sits
+server-side rather than belonging to this page, but they do not have the same
+reach. The **template** is shared with manual
+[creator](#creators--per-creator-rescan) folder creation and the model detail
+[unorganized indicator](#model-detail), and is resolved per scan root (see
+[Per-scan-root destination templates](#per-scan-root-destination-templates)).
+The **slugify** toggles reach further and also shape
+[import](#import-folder) moves, which otherwise use a fixed `{creator}/{title}`
+and ignore your template entirely. That section sits
 directly under your scan locations, deliberately: the **Layout** field on each
 scan location describes how existing folders are *read*, and the destination
 template describes where models *should* live. The Reorganize page shows the
@@ -1009,11 +1046,15 @@ At **/settings** you manage your **scan roots** — the top-level folder paths t
 app reads from. Add or remove paths, and see when each was last scanned. This is
 also where standalone users point the app at their drives for the first time.
 
-Directly beneath them, **Destination Layout** holds the
-[destination template](#reorganize-library) and the two slugify toggles. The two
-are easy to confuse and point opposite ways: a scan root's **Layout** says how
-its existing folders are *read* (which level is the creator, which are tags),
-while the destination template says where models *should* live.
+Each scan root's card carries both directions of the same question, which is the
+easiest pair in Settings to confuse: **Layout** says how that root's existing
+folders are *read* (which level is the creator, which are tags), and
+**Destination** says where models under it *should* live. Destination is
+optional — empty means it inherits.
+
+Directly beneath the roots, **Destination Layout** holds the library-wide
+[destination template](#reorganize-library) — the one every scan location without
+its own **Destination** falls back to — and the two slugify toggles.
 
 If a configured folder can't be found when the Library loads — typically an
 external drive that's unmounted or disconnected — a warning banner appears at the

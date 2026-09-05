@@ -145,13 +145,13 @@ def _package_mode(db: Session) -> bool:
     return bool(row.value) if row is not None else False
 
 
-def _stored_template(db: Session, template: str | None) -> str | None:
-    """An explicit template wins; otherwise fall back to the persisted setting
-    (build_manifest itself falls back further to the built-in default)."""
-    if template:
-        return template
-    row = db.get(AppSetting, "reorganize_template")
-    return row.value if row is not None else None
+# There is deliberately no `_stored_template` helper here any more (STUDIO-403).
+# It used to read the app-wide setting and hand the result to build_manifest, so
+# every caller looked like it had passed an EXPLICIT template — which, under
+# per-root resolution, would have pinned every build to one template and quietly
+# disabled the feature. The fallback chain now lives in one place,
+# `reorganize.TemplateResolver`, next to the ScanRoot rows it has to consult.
+# Pass the caller's own template through untouched, or None to mean "resolve it".
 
 
 def _prune_stale_manifests(db: Session) -> None:
@@ -236,7 +236,7 @@ def preview(
     root_id: int | None = Query(None),
     db: Session = Depends(get_db),
 ) -> ReorganizePreviewResponse:
-    return _build_and_persist(db, _stored_template(db, template), root_id, None)
+    return _build_and_persist(db, template, root_id, None)
 
 
 @router.post("/preview", response_model=ReorganizePreviewResponse)
@@ -247,7 +247,7 @@ def preview_with_overrides(
     resolved manifest is a new persisted artifact with its own fingerprint
     baseline, so apply/undo verify against exactly what the user approved."""
     overrides = {mid: ov.model_dump(exclude_none=True) for mid, ov in body.overrides.items()}
-    return _build_and_persist(db, _stored_template(db, body.template), body.root_id, overrides)
+    return _build_and_persist(db, body.template, body.root_id, overrides)
 
 
 @router.get("/template-preview", response_model=TemplatePreviewResponse)
@@ -273,7 +273,7 @@ def template_preview(
     """
     try:
         preview = reorganize.build_template_preview(
-            db, _stored_template(db, template), root_id, limit,
+            db, template, root_id, limit,
             slugify_all=_slugify_all(db),
         )
     except ReorganizeTemplateError as e:

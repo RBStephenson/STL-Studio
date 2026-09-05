@@ -12,6 +12,7 @@ from app.schemas import (
     ScanStatus, ScanRootCreate, ScanRootUpdate, InboxScanRequest, LibraryRead,
 )
 from app.services import scanner, layout
+from app.services import reorganize_template
 from app.services.reorganize_apply import reorganize_enabled
 from app.config import settings
 
@@ -288,6 +289,28 @@ def list_libraries(db: Session = Depends(get_db)):
     ]
 
 
+def _validated_destination_template(raw: str | None) -> str | None:
+    """Normalize a per-root destination template on write (STUDIO-403).
+
+    Blank collapses to NULL rather than being stored: blank means *inherit* the
+    app-wide setting, and an empty string sitting in the column would render as
+    an override that resolves to nothing. Validation goes through the same
+    parser the manifest builder uses, so a root can never be saved with a
+    template that would later blow up every preview touching it — the same
+    reason `layout` validates on write here.
+    """
+    if raw is None:
+        return None
+    trimmed = raw.strip()
+    if not trimmed:
+        return None
+    try:
+        reorganize_template.parse_template(trimmed)
+    except reorganize_template.ReorganizeTemplateError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return trimmed
+
+
 @router.post("/roots")
 def add_root(body: ScanRootCreate, db: Session = Depends(get_db)):
     path = body.path.strip()
@@ -316,6 +339,7 @@ def add_root(body: ScanRootCreate, db: Session = Depends(get_db)):
         name=(body.name or "").strip() or p.name,
         is_writable=body.is_writable,
         group_by_character=body.group_by_character,
+        reorganize_template=_validated_destination_template(body.reorganize_template),
     )
     db.add(root)
     db.commit()
@@ -342,6 +366,11 @@ def update_root(root_id: int, body: ScanRootUpdate, db: Session = Depends(get_db
         root.is_writable = body.is_writable
     if body.group_by_character is not None:
         root.group_by_character = body.group_by_character
+    if body.reorganize_template is not None:
+        # Only an explicitly-sent field is touched, so a PATCH that changes the
+        # name can't quietly clear a root's template. Sending "" is how the UI
+        # asks to go back to inheriting.
+        root.reorganize_template = _validated_destination_template(body.reorganize_template)
     db.commit()
     db.refresh(root)
     return root

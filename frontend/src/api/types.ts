@@ -127,11 +127,18 @@ export interface ScanRoot {
   id: number;
   path: string;
   enabled: boolean;
+  /** How this root's EXISTING folders are read (which level is the creator).
+   *  The opposite direction to `reorganize_template` below. */
   layout: string;
   last_scanned: string | null;
   name: string | null;
   is_writable: boolean;
   group_by_character: boolean;
+  /** Where models under this root SHOULD go (STUDIO-403). `null` means inherit
+   *  the library-wide `reorganize_template` setting, which itself falls back to
+   *  the built-in default. Never populated with the resolved value — a stored
+   *  copy is how an inheriting root stops inheriting. */
+  reorganize_template: string | null;
 }
 
 export interface Library {

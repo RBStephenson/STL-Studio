@@ -345,3 +345,56 @@ def test_create_all_matches_alembic_upgrade_head(monkeypatch, tmp_path):
     after = _schema_snapshot(engine)
     assert before == after
     engine.dispose()
+
+
+def test_alembic_0033_adds_and_drops_scan_root_reorganize_template(monkeypatch, tmp_path):
+    """0033 adds scan_roots.reorganize_template on an already-stamped DB, and
+    its downgrade removes it again (STUDIO-403).
+
+    Both directions are checked because the column is the first thing this epic
+    added to an existing table: create_all skips tables that already exist, so a
+    managed DB gains the column only from the revision itself, and a downgrade
+    that silently no-ops would leave a rolled-back deploy claiming 0032 while
+    still carrying 0033's schema.
+    """
+    from pathlib import Path
+    from alembic.config import Config
+    from alembic import command
+
+    db_url = f"sqlite:///{tmp_path / 'roots.db'}"
+    engine = create_engine(db_url)
+    with engine.connect() as conn:
+        conn.execute(text(
+            "CREATE TABLE scan_roots (id INTEGER PRIMARY KEY, path VARCHAR, "
+            "enabled BOOLEAN, layout VARCHAR)"
+        ))
+        conn.execute(text("INSERT INTO scan_roots (path, enabled, layout) "
+                          "VALUES ('/srv/minis', 1, '{creator}')"))
+        conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        conn.execute(text("INSERT INTO alembic_version VALUES ('0032')"))
+        conn.commit()
+
+    monkeypatch.setattr("app.database.engine", engine)
+    cfg = Config(str(Path(main_module.__file__).parent.parent / "alembic.ini"))
+
+    command.upgrade(cfg, "0033")
+
+    with engine.connect() as conn:
+        cols = {r[1] for r in conn.execute(text("PRAGMA table_info(scan_roots)"))}
+        version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        # NULL, not a copy of any default: an existing root must come out of the
+        # upgrade still inheriting, or every library silently freezes at
+        # whatever the global template happened to be on upgrade day.
+        inherited = conn.execute(text("SELECT reorganize_template FROM scan_roots")).scalar()
+    assert "reorganize_template" in cols
+    assert version == "0033"
+    assert inherited is None
+
+    command.downgrade(cfg, "0032")
+
+    with engine.connect() as conn:
+        cols = {r[1] for r in conn.execute(text("PRAGMA table_info(scan_roots)"))}
+        version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    assert "reorganize_template" not in cols
+    assert version == "0032"
+    engine.dispose()

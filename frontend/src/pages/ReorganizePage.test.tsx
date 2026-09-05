@@ -1227,3 +1227,175 @@ describe("ReorganizePage destination tree (STUDIO-404)", () => {
     expect(screen.getByText("/lib/Abe3D")).toBeInTheDocument();
   });
 });
+
+
+// STUDIO-403. The page has always sent an EXPLICIT template, seeded from the
+// library setting — which would have quietly flattened every per-root template
+// the moment one existed, and put the built plan at odds with the unorganized
+// badge, since that resolves per root.
+describe("ReorganizePage per-scan-root templates", () => {
+  const OVERRIDING_ROOTS = [
+    { ...ROOTS[0], reorganize_template: "{creator}/{title}" },
+    { ...ROOTS[1] },
+  ];
+
+  it("sends no template for an all-roots plan when a root has its own", async () => {
+    savedTemplate = "{creator}/{character}/{title}";
+    scan.roots.mockResolvedValue(OVERRIDING_ROOTS);
+    render(<ReorganizePage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Scan root" })).toBeEnabled(),
+    );
+    buildPlan();
+
+    // Empty, not seeded: the server then renders each model against the
+    // template for the root it lives in.
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledWith("", undefined));
+  });
+
+  it("leaves the field empty and says each root uses its own", async () => {
+    savedTemplate = "{creator}/{character}/{title}";
+    scan.roots.mockResolvedValue(OVERRIDING_ROOTS);
+    render(<ReorganizePage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Scan root" })).toBeEnabled(),
+    );
+
+    // waitFor, not a bare expect: the field seeds from the library setting on
+    // mount and clears once the roots arrive and reveal an override. That order
+    // is deliberate — see the comment on the seeding effect.
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /destination template/i })).toHaveValue(""),
+    );
+    expect(screen.getByText(/Each scan root uses its own template/)).toBeInTheDocument();
+  });
+
+  it("still seeds the saved template when no root overrides it", async () => {
+    // The regression guard for every existing library: nothing about this
+    // changes until somebody actually sets a per-root template.
+    savedTemplate = "{creator}/{title}";
+    scan.roots.mockResolvedValue(ROOTS);
+    render(<ReorganizePage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Scan root" })).toBeEnabled(),
+    );
+    buildPlan();
+
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledWith("{creator}/{title}", undefined));
+    expect(screen.getByText(/applies to/)).toHaveTextContent("this plan only");
+  });
+
+  it("seeds the selected root's own template when one is chosen", async () => {
+    savedTemplate = "{creator}/{character}/{title}";
+    scan.roots.mockResolvedValue(OVERRIDING_ROOTS);
+    render(<ReorganizePage />);
+
+    const rootSelect = await screen.findByRole("combobox", { name: "Scan root" });
+    await waitFor(() => expect(rootSelect).toBeEnabled());
+    fireEvent.change(rootSelect, { target: { value: "7" } });
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /destination template/i }))
+        .toHaveValue("{creator}/{title}"),
+    );
+    buildPlan();
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledWith("{creator}/{title}", 7));
+  });
+
+  it("says a root-scoped field started from that root's template", async () => {
+    savedTemplate = "{creator}/{character}/{title}";
+    scan.roots.mockResolvedValue(OVERRIDING_ROOTS);
+    render(<ReorganizePage />);
+
+    const rootSelect = await screen.findByRole("combobox", { name: "Scan root" });
+    await waitFor(() => expect(rootSelect).toBeEnabled());
+    fireEvent.change(rootSelect, { target: { value: "7" } });
+
+    expect(await screen.findByText(/applies to/)).toHaveTextContent(
+      "It starts from this scan root's saved template",
+    );
+  });
+
+  it("falls back to the library template for a root that inherits", async () => {
+    savedTemplate = "{creator}/{character}/{title}";
+    scan.roots.mockResolvedValue(OVERRIDING_ROOTS);
+    render(<ReorganizePage />);
+
+    const rootSelect = await screen.findByRole("combobox", { name: "Scan root" });
+    await waitFor(() => expect(rootSelect).toBeEnabled());
+    // Root 9 has no template of its own.
+    fireEvent.change(rootSelect, { target: { value: "9" } });
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /destination template/i }))
+        .toHaveValue("{creator}/{character}/{title}"),
+    );
+  });
+
+  it("re-seeds when the root changes rather than carrying the old scope's template", async () => {
+    savedTemplate = "{creator}/{character}/{title}";
+    scan.roots.mockResolvedValue(OVERRIDING_ROOTS);
+    render(<ReorganizePage />);
+
+    const rootSelect = await screen.findByRole("combobox", { name: "Scan root" });
+    await waitFor(() => expect(rootSelect).toBeEnabled());
+    fireEvent.change(rootSelect, { target: { value: "7" } });
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /destination template/i }))
+        .toHaveValue("{creator}/{title}"),
+    );
+
+    fireEvent.change(rootSelect, { target: { value: "9" } });
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /destination template/i }))
+        .toHaveValue("{creator}/{character}/{title}"),
+    );
+  });
+
+  it("rebuilds once, against the new root's template, when the scope changes", async () => {
+    // `started` survives a root change, so the preview effect refires the moment
+    // rootId updates — with the stale template, one render before the re-seed
+    // lands. Only the effect's setTimeout-and-cancel keeps that from becoming a
+    // second manifest build against the wrong template.
+    //
+    // Honest about what this pins: it passes whether the re-seed happens
+    // synchronously in changeRoot or a render later, because the debounce
+    // covers both. It is a characterization test for the once-only rebuild,
+    // and it is what would fail if that debounce were ever removed.
+    savedTemplate = "{creator}/{character}/{title}";
+    scan.roots.mockResolvedValue(OVERRIDING_ROOTS);
+    render(<ReorganizePage />);
+
+    const rootSelect = await screen.findByRole("combobox", { name: "Scan root" });
+    await waitFor(() => expect(rootSelect).toBeEnabled());
+    buildPlan();
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalled());
+    reorg.preview.mockClear();
+
+    fireEvent.change(rootSelect, { target: { value: "7" } });
+
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledWith("{creator}/{title}", 7));
+    expect(reorg.preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("still lets a typed template force one shape across every root", async () => {
+    savedTemplate = "{creator}/{character}/{title}";
+    scan.roots.mockResolvedValue(OVERRIDING_ROOTS);
+    render(<ReorganizePage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Scan root" })).toBeEnabled(),
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: /destination template/i }), {
+      target: { value: "{creator}" },
+    });
+    buildPlan();
+
+    // Explicit-wins-uniformly, which is what that field has always meant.
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledWith("{creator}", undefined));
+  });
+});

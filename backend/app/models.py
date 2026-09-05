@@ -23,6 +23,14 @@ class ScanRoot(Base):
     # Folder-layout template (see services/layout.py). Describes the path levels
     # down to the creator; the scanner detects models heuristically below it.
     layout = Column(String, nullable=False, default="{creator}", server_default="{creator}")
+    # Destination template for THIS root (STUDIO-403) — the opposite direction to
+    # `layout` two lines up, which is the single easiest thing here to misread.
+    # `layout` says how this root's existing folders are READ; this says where
+    # models under it SHOULD go. NULL (or blank) means inherit: the app-wide
+    # `reorganize_template` setting, and past that the parser's built-in default.
+    # Never write the resolved value back into this column — a stored copy is how
+    # an inheriting root silently stops inheriting.
+    reorganize_template = Column(String, nullable=True)
     # Opt-in folder-driven grouping: when on, the first folder below the creator is
     # the character, and every model anywhere beneath it is one variant group —
     # bypassing the name-based heuristic. Off by default. (User overrides still win.)

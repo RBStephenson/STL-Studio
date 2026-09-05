@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import LibraryTab from "./LibraryTab";
 import { mkSettings } from "../../test/settings";
-import { AppSettings } from "../../api/client";
+import { AppSettings, ScanRoot } from "../../api/client";
 
 let settings: AppSettings = mkSettings();
 const updateMock = vi.fn().mockResolvedValue(undefined);
@@ -27,11 +27,15 @@ vi.mock("../../api/client", () => {
   return {
     ApiError,
     api: {
-      scan: { status: () => scanStatusMock() },
+      scan: {
+        status: () => scanStatusMock(),
+        updateRoot: (...args: unknown[]) => updateRootMock(...args),
+      },
       reorganize: { templatePreview: (...args: unknown[]) => templatePreviewMock(...args) },
     },
   };
 });
+const updateRootMock = vi.fn().mockResolvedValue(undefined);
 
 templatePreviewMock.mockResolvedValue({
   template: "{creator}/{character}/{title}",
@@ -50,6 +54,32 @@ const renderTab = () =>
   render(
     <MemoryRouter>
       <LibraryTab roots={[]} loading={false} onRootsChanged={() => {}} />
+    </MemoryRouter>,
+  );
+
+const mkRoot = (over: Partial<ScanRoot> = {}): ScanRoot => ({
+  id: 1,
+  path: "/srv/minis",
+  enabled: true,
+  layout: "{creator}",
+  last_scanned: null,
+  name: "minis",
+  is_writable: false,
+  group_by_character: false,
+  reorganize_template: null,
+  ...over,
+});
+
+/** The per-root editor's input, disambiguated from the library-wide one by the
+ *  named group around it — both label their textbox "Destination template". */
+const rootTemplateField = (path = "/srv/minis") =>
+  within(screen.getByRole("group", { name: `Destination template for ${path}` }))
+    .getByRole("textbox", { name: /destination template/i });
+
+const renderWithRoots = (roots: ScanRoot[], onRootsChanged = () => {}) =>
+  render(
+    <MemoryRouter>
+      <LibraryTab roots={roots} loading={false} onRootsChanged={onRootsChanged} />
     </MemoryRouter>,
   );
 
@@ -216,14 +246,19 @@ describe("LibraryTab destination template builder (STUDIO-402)", () => {
     );
   });
 
-  // STUDIO-405: the enumeration listed three of the four consumers. Import moves
-  // go through the same template (`routers/imports.py` renders it on apply), and
-  // a user reading a list of three has no reason to think imports are affected.
-  it("names all four consumers, import moves included", () => {
+  // STUDIO-405 added "import moves" to this list and STUDIO-403 took it back
+  // out, because it was never true: `routers/imports.py` passes a hard-coded
+  // "{creator}/{title}" to _build_and_persist and does not read the stored
+  // template at all. The template has THREE consumers. What import apply does
+  // follow is the two slugify toggles in the same box, which is where the
+  // confusion came from — three settings, one panel, different audiences.
+  it("does not claim import moves follow the template", () => {
     renderTab();
-    expect(screen.getByText(/used by Reorganize Library/)).toHaveTextContent(
-      "used by Reorganize Library, new creator folders, import moves, and the \"unorganized\" flag",
+    const note = screen.getByText(/used by Reorganize Library/);
+    expect(note).toHaveTextContent(
+      "used by Reorganize Library, new creator folders, and the \"unorganized\" flag",
     );
+    expect(note).not.toHaveTextContent("import moves");
   });
 
   // STUDIO-406: the Settings copy of the editor gets its default from the same
@@ -348,5 +383,122 @@ describe("LibraryTab scan-running dim state", () => {
     const wrapper = dimmed.closest("section")?.parentElement as HTMLElement;
     expect(wrapper.style.opacity).toBe("0.45");
     expect(wrapper.style.pointerEvents).toBe("none");
+  });
+});
+
+
+// STUDIO-403: each scan location carries an optional destination template.
+// Blank means inherit, and the field is never pre-filled with what it would
+// inherit — a copy stops tracking the parent the moment the parent changes.
+describe("LibraryTab per-scan-root destination template", () => {
+  beforeEach(() => {
+    settings = mkSettings();
+    vi.clearAllMocks();
+    updateRootMock.mockResolvedValue(undefined);
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
+  });
+
+  it("says which level a root inherits from when it has no template", () => {
+    settings = mkSettings({ reorganize_template: "" });
+    renderWithRoots([mkRoot()]);
+
+    // Two levels of inheritance, so "inherits the default" alone would be
+    // ambiguous: with no library template saved, this root follows the
+    // built-in one.
+    expect(screen.getByText(/Inherits the built-in default/)).toBeInTheDocument();
+  });
+
+  it("names the library template instead once one is saved", () => {
+    settings = mkSettings({ reorganize_template: "{creator}/{title}" });
+    renderWithRoots([mkRoot()]);
+
+    expect(screen.getByText(/Inherits the library template/)).toBeInTheDocument();
+  });
+
+  it("shows a root's own template rather than an inherit note", () => {
+    renderWithRoots([mkRoot({ reorganize_template: "{creator}/{scale}" })]);
+
+    expect(screen.getByText("{creator}/{scale}")).toBeInTheDocument();
+    expect(screen.queryByText(/Inherits/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the editor collapsed until asked, so the tab doesn't preview every root", () => {
+    // Each open editor runs its own debounced /template-preview. Rendering one
+    // per root would fire a request per scan location on every visit to this
+    // tab, for a field most libraries never set.
+    renderWithRoots([mkRoot({ id: 1 }), mkRoot({ id: 2, path: "/srv/terrain" })]);
+
+    expect(screen.queryByRole("group", { name: /destination template for/i })).toBeNull();
+    // The library-wide editor is still there — one textbox, not three.
+    expect(screen.getAllByRole("textbox", { name: /destination template/i })).toHaveLength(1);
+  });
+
+  it("opens an editor for just the root whose button was clicked", async () => {
+    renderWithRoots([mkRoot({ id: 1 }), mkRoot({ id: 2, path: "/srv/terrain" })]);
+
+    await userEvent.click(screen.getAllByRole("button", { name: /override/i })[0]);
+
+    const groups = screen.getAllByRole("group", { name: /destination template for/i });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveAccessibleName("Destination template for /srv/minis");
+  });
+
+  it("saves a per-root template on commit", async () => {
+    const onRootsChanged = vi.fn();
+    renderWithRoots([mkRoot({ id: 4 })], onRootsChanged);
+    await userEvent.click(screen.getByRole("button", { name: /override/i }));
+
+    const input = rootTemplateField();
+    await userEvent.type(input, "{{creator}/{{title}");
+    fireEvent.blur(input);
+
+    await waitFor(() =>
+      expect(updateRootMock).toHaveBeenCalledWith(4, { reorganize_template: "{creator}/{title}" }),
+    );
+    await waitFor(() => expect(onRootsChanged).toHaveBeenCalled());
+  });
+
+  it("sends an empty string to go back to inheriting", async () => {
+    // "" is meaningful here rather than a no-op: it is the only way to clear an
+    // override, and the server maps it to NULL.
+    renderWithRoots([mkRoot({ id: 4, reorganize_template: "{creator}/{title}" })]);
+    await userEvent.click(screen.getByRole("button", { name: /change/i }));
+
+    const input = rootTemplateField();
+    await userEvent.clear(input);
+    fireEvent.blur(input);
+
+    await waitFor(() =>
+      expect(updateRootMock).toHaveBeenCalledWith(4, { reorganize_template: "" }),
+    );
+  });
+
+  it("does not save when the template is unchanged", async () => {
+    renderWithRoots([mkRoot({ id: 4, reorganize_template: "{creator}/{title}" })]);
+    await userEvent.click(screen.getByRole("button", { name: /change/i }));
+
+    fireEvent.blur(rootTemplateField());
+
+    await waitFor(() => expect(updateRootMock).not.toHaveBeenCalled());
+  });
+
+  it("reports an invalid per-root template instead of failing silently", async () => {
+    updateRootMock.mockRejectedValue(new Error("unknown token {creater}"));
+    renderWithRoots([mkRoot({ id: 4 })]);
+    await userEvent.click(screen.getByRole("button", { name: /override/i }));
+
+    const input = rootTemplateField();
+    await userEvent.type(input, "{{creater}");
+    fireEvent.blur(input);
+
+    expect(await screen.findByText(/unknown token/)).toBeInTheDocument();
+  });
+
+  it("tells the library-wide field that per-root overrides exist", () => {
+    renderWithRoots([mkRoot()]);
+
+    expect(screen.getByText(/describes how your existing folders are/)).toHaveTextContent(
+      "Any scan location that sets its own Destination above uses that instead",
+    );
   });
 });

@@ -33,7 +33,7 @@ from app.services.tag_sync import sync_model_tags
 from app.services import ai_organize, reorganize
 from app.services.reorganize_template import ReorganizeTemplateError
 from app.services.scanner import resolve_creator, prune_empty_creators
-from app.routers.reorganize import _stored_template, _slugify_all, _slugify_filenames
+from app.routers.reorganize import _slugify_all, _slugify_filenames
 from app.config import settings
 from app.utils import utcnow, like_escape
 
@@ -406,9 +406,11 @@ def create_creator(body: CreatorCreate, db: Session = Depends(get_db)):
     db.refresh(creator)
 
     try:
-        target = reorganize.creator_scan_dir(
-            db, _stored_template(db, None), name, slugify=_slugify_all(db)
-        )
+        # `None`, not the stored setting: creator_scan_dir resolves the template
+        # from the primary scan root the folder is about to be created under
+        # (STUDIO-403). Passing the app-wide setting here would look explicit and
+        # override that root's own template.
+        target = reorganize.creator_scan_dir(db, None, name, slugify=_slugify_all(db))
         if target:
             os.makedirs(target, exist_ok=True)
     except (OSError, ReorganizeTemplateError) as e:
@@ -497,9 +499,10 @@ def delete_creator(creator_id: int, db: Session = Depends(get_db)):
 
     inbox_dir: str | None = None
     if orphaned:
-        template = _stored_template(db, None)
         try:
-            inbox_dir = reorganize.creator_scan_dir(db, template, "_Inbox", slugify=_slugify_all(db))
+            # Same rule as creator creation: the primary root's own template
+            # decides the shape of the _Inbox folder placed under it.
+            inbox_dir = reorganize.creator_scan_dir(db, None, "_Inbox", slugify=_slugify_all(db))
             if inbox_dir:
                 os.makedirs(inbox_dir, exist_ok=True)
         except (ReorganizeTemplateError, OSError) as e:
@@ -1194,9 +1197,13 @@ def get_model(model_id: int, db: Session = Depends(get_db)):
     result.collection_ids = [link.collection_id for link in model.collection_links]
 
     try:
-        template = _stored_template(db, None)
+        # Passing None is what makes this badge honest under per-root templates
+        # (STUDIO-403): build_manifest then resolves the template from the scan
+        # root this model actually lives under. Handing it the app-wide setting
+        # would judge every model against one template and mark a correctly-filed
+        # model unorganized for every root that overrides.
         manifest = reorganize.build_manifest(
-            db, template, model_ids=[model.id], slugify_all=_slugify_all(db),
+            db, None, model_ids=[model.id], slugify_all=_slugify_all(db),
             slugify_filenames=_slugify_filenames(db),
         )
         entry = manifest.entries[0] if manifest.entries else None

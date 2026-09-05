@@ -332,3 +332,93 @@ class TestUnorganizedIndicator:
         resp = client.get(f"/models/{m.id}")
         assert resp.status_code == 200
         assert resp.json()["unorganized"] is False
+
+
+class TestUnorganizedIndicatorFollowsTheRootsTemplate:
+    """The badge judges a model against the template of the root it lives in
+    (STUDIO-403). Judging every model against the library-wide template is the
+    ticket's named hazard: the badge would lie for every root that overrides,
+    telling the user to move files that are already exactly where their own
+    root's template says they belong."""
+
+    def _model_at(self, db, folder, creator_name, character, title):
+        folder.mkdir(parents=True, exist_ok=True)
+        f = folder / "head.stl"
+        f.write_bytes(b"solid\nendsolid\n")
+        creator = db.query(Creator).filter_by(name=creator_name).first() \
+            or make_creator(db, name=creator_name)
+        m = make_model(db, creator, name=title, character=character)
+        m.folder_path = str(folder)
+        m.title = title
+        db.commit()
+        make_stl_file(db, m, filename="head.stl", path=str(f))
+        db.commit()
+        return m
+
+    def test_model_matching_its_own_roots_template_is_not_flagged(self, client, db, tmp_path):
+        root = tmp_path / "terrain"
+        root.mkdir()
+        db.add(ScanRoot(path=str(root), enabled=True,
+                        reorganize_template="{creator}/{title}"))
+        db.commit()
+        # Filed per the ROOT's template (no character level). Under the
+        # library-wide default this same model would read as unorganized.
+        m = self._model_at(db, root / "ruins-co" / "keep", "Ruins Co", "Tower", "Keep")
+
+        resp = client.get(f"/models/{m.id}")
+
+        assert resp.status_code == 200
+        assert resp.json()["unorganized"] is False
+
+    def test_model_matching_only_the_library_template_is_flagged(self, client, db, tmp_path):
+        root = tmp_path / "terrain"
+        root.mkdir()
+        db.add(ScanRoot(path=str(root), enabled=True,
+                        reorganize_template="{creator}/{title}"))
+        db.commit()
+        # The mirror image: filed per the library-wide default, which this root
+        # overrides — so it IS out of place for the root it lives in.
+        m = self._model_at(db, root / "ruins-co" / "tower" / "keep", "Ruins Co", "Tower", "Keep")
+
+        resp = client.get(f"/models/{m.id}")
+
+        assert resp.status_code == 200
+        assert resp.json()["unorganized"] is True
+
+    def test_each_root_is_judged_separately(self, client, db, tmp_path):
+        """Two models, two roots, one request each — the point being that the
+        answer differs per root rather than per library."""
+        minis = tmp_path / "minis"
+        terrain = tmp_path / "terrain"
+        minis.mkdir()
+        terrain.mkdir()
+        db.add(ScanRoot(path=str(minis), enabled=True))
+        db.add(ScanRoot(path=str(terrain), enabled=True,
+                        reorganize_template="{creator}/{title}"))
+        db.commit()
+        mini = self._model_at(db, minis / "abe3d" / "joker" / "bust", "Abe3D", "Joker", "Bust")
+        terr = self._model_at(db, terrain / "ruins-co" / "keep", "Ruins Co", "Tower", "Keep")
+
+        assert client.get(f"/models/{mini.id}").json()["unorganized"] is False
+        assert client.get(f"/models/{terr.id}").json()["unorganized"] is False
+
+
+class TestCreatorFolderFollowsThePrimaryRootsTemplate:
+    def test_new_creator_folder_uses_the_primary_roots_template(self, client, db, tmp_path):
+        """Stated rule (STUDIO-403): the folder is anchored at the primary
+        enabled root, so that root's template shapes it."""
+        primary = tmp_path / "minis"
+        primary.mkdir()
+        db.add(ScanRoot(path=str(primary), enabled=True, reorganize_template="{creator}"))
+        # Deliberately a template that puts a character ABOVE the creator: it is
+        # unrenderable for a bare new creator, so falling back to it creates no
+        # folder at all. That makes the two outcomes distinguishable — an app-wide
+        # template starting with "{creator}" would produce the same directory
+        # either way and the assertion would pass without proving anything.
+        db.add(AppSetting(key="reorganize_template", value="{character}/{creator}"))
+        db.commit()
+
+        resp = client.post("/models/creators", json={"name": "Abe 3D"})
+
+        assert resp.status_code == 201
+        assert (primary / "abe-3d").is_dir()
