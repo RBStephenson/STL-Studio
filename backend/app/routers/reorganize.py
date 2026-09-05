@@ -29,6 +29,8 @@ from app.schemas import (
     ReorganizeUndoRequest,
     ReorganizeUndoResponse,
     ReorganizeUndoSkip,
+    TemplatePreviewResponse,
+    TemplatePreviewSample,
 )
 from app.services import ai_organize, reorganize, reorganize_apply, write_lock
 from app.services.reorganize_apply import ApplyError
@@ -246,6 +248,41 @@ def preview_with_overrides(
     baseline, so apply/undo verify against exactly what the user approved."""
     overrides = {mid: ov.model_dump(exclude_none=True) for mid, ov in body.overrides.items()}
     return _build_and_persist(db, _stored_template(db, body.template), body.root_id, overrides)
+
+
+@router.get("/template-preview", response_model=TemplatePreviewResponse)
+def template_preview(
+    template: str | None = Query(None),
+    root_id: int | None = Query(None),
+    limit: int = Query(5, ge=1, le=50),
+    db: Session = Depends(get_db),
+) -> TemplatePreviewResponse:
+    """Render a destination template against a few real models, cheaply
+    (STUDIO-401).
+
+    Exists because the only other way to see what a template does is
+    ``/preview``, which walks every model, stats every file, runs the global
+    collision and overlap passes and persists a manifest row — a multi-minute
+    round trip per keystroke on a large library. This one does none of that:
+    metadata only, nothing persisted.
+
+    Not flag-gated, matching both ``/preview`` endpoints: ``reorganize_enabled``
+    gates apply and undo (the operations that touch disk), not read-only
+    rendering. Malformed templates 400 with the parse message so the caller can
+    show live validation rather than wiping the page.
+    """
+    try:
+        preview = reorganize.build_template_preview(
+            db, _stored_template(db, template), root_id, limit,
+            slugify_all=_slugify_all(db),
+        )
+    except ReorganizeTemplateError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return TemplatePreviewResponse(
+        template=preview.template,
+        samples=[TemplatePreviewSample(**vars(s)) for s in preview.samples],
+        package_mode=_package_mode(db),
+    )
 
 
 @router.post("/apply", response_model=ReorganizeApplyResponse)
