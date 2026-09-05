@@ -499,6 +499,107 @@ class TestTemplateValidation:
         assert "unknown-scale" in scale_entry["proposed_dir"]
 
 
+class TestOptionalTemplateTokens:
+    """STUDIO-407: `{scale?}` drops its level when the value fell back, instead
+    of forcing an `_Unknown Scale` sentinel and blocking the row. The paired
+    guard — that required `{scale}` still blocks — is
+    TestTemplateValidation::test_missing_scale_only_blocks_when_template_uses_scale.
+    """
+
+    def test_missing_optional_scale_drops_the_level_and_stays_eligible(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust")
+
+        entry = client.get(
+            "/reorganize/preview", params={"template": "{creator}/{scale?}/{title}"}
+        ).json()["entries"][0]
+
+        assert entry["eligible"] is True
+        assert entry["missing_fields"] == []
+        assert entry["unclassifiable"] is False
+        assert entry["proposed_dir"].endswith("abe3d/bust")
+        # Neither the sentinel nor sanitize_segment("")'s "_" fallback may
+        # survive as a real directory level — that's the failure that would
+        # otherwise look like it worked.
+        assert "unknown-scale" not in entry["proposed_dir"]
+        assert "/_/" not in entry["proposed_dir"]
+
+    def test_present_optional_scale_still_renders_its_level(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust", auto_tags=["1:6", "statue"])
+
+        entry = client.get(
+            "/reorganize/preview", params={"template": "{creator}/{scale?}/{title}"}
+        ).json()["entries"][0]
+
+        assert entry["eligible"] is True
+        assert entry["proposed_dir"].endswith("abe3d/1-6/bust")
+
+    def test_optional_title_drops_when_the_model_has_no_title_of_its_own(self, client, db, tmp_path):
+        """Brent's call 2026-09-05, reading (a): `{title?}` drops when the model
+        has no real title, even though a folder-name fallback exists. Reading
+        (b) — drop only when the folder name is blank too — would make the token
+        do nothing, since a model with no name at all is vanishingly rare."""
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path, title="Bust")
+        m.title = None
+        db.commit()
+
+        entry = client.get(
+            "/reorganize/preview", params={"template": "{creator}/{character}/{title?}"}
+        ).json()["entries"][0]
+
+        assert entry["eligible"] is True
+        assert entry["proposed_dir"].endswith("abe3d/joker")
+
+    def test_suffix_override_keeps_an_otherwise_dropped_title_level(self, client, db, tmp_path):
+        """A collision suffix rides on the title segment. If `{title?}` dropped
+        that level anyway, the suffix would silently do nothing and the user
+        would have no way to break the collision at all."""
+        _root(db, tmp_path)
+        m = _model_with_file(db, tmp_path, title="Bust")
+        m.title = None
+        db.commit()
+
+        entry = client.post("/reorganize/preview", json={
+            "template": "{creator}/{character}/{title?}",
+            "overrides": {str(m.id): {"suffix": "v2"}},
+        }).json()["entries"][0]
+
+        assert entry["proposed_dir"].endswith("abe3d/joker/bust-v2")
+
+    def test_mixed_segment_keeps_its_literal_and_slugify_absorbs_the_separator(
+        self, client, db, tmp_path,
+    ):
+        """A segment mixing a required and an optional token survives when the
+        optional one drops, so `{creator}-{scale?}` renders "Abe3D-" at the
+        template layer. What reaches disk depends on the slugify setting, and
+        the default (on) strips the dangling separator — worth pinning, because
+        the docs describe the user-visible name, not the pre-sanitize one."""
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Bust")
+
+        on = client.get(
+            "/reorganize/preview", params={"template": "{creator}-{scale?}/{title}"}
+        ).json()["entries"][0]
+        assert on["proposed_dir"].endswith("abe3d/bust")
+
+        client.patch("/settings", json={"reorganize_slugify": False})
+        off = client.get(
+            "/reorganize/preview", params={"template": "{creator}-{scale?}/{title}"}
+        ).json()["entries"][0]
+        assert off["proposed_dir"].endswith("Abe3D-/Bust")
+
+    def test_all_optional_template_returns_400(self, client, db, tmp_path):
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path)
+
+        resp = client.get(
+            "/reorganize/preview", params={"template": "{creator?}/{title?}"}
+        )
+        assert resp.status_code == 400
+
+
 class TestResolution:
     def test_override_resolves_unclassifiable(self, client, db, tmp_path):
         _root(db, tmp_path)

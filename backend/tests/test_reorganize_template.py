@@ -6,6 +6,7 @@ from app.services.reorganize_template import (
     ReorganizeTemplateError,
     parse_template,
     render_segments,
+    segment_fields,
 )
 
 
@@ -72,3 +73,57 @@ class TestRenderSegments:
         segs = parse_template("by-{creator}")
         out = render_segments(segs, {"creator": "Abe3D", "character": "", "title": ""})
         assert out == ["by-Abe3D"]
+
+
+class TestOptionalTokens:
+    """STUDIO-407: a `?`-suffixed token contributes nothing when its value fell
+    back, instead of forcing a sentinel and blocking the row."""
+
+    VALUES = {"creator": "Abe3D", "character": "Joker", "scale": "_Unknown Scale", "title": "Bust"}
+
+    def test_optional_token_parses_and_is_preserved_verbatim(self):
+        assert parse_template("{creator}/{scale?}/{title}") == [
+            "{creator}", "{scale?}", "{title}",
+        ]
+
+    def test_segment_fields_reports_name_and_optionality(self):
+        assert segment_fields("{creator}") == [("creator", False)]
+        assert segment_fields("{scale?}") == [("scale", True)]
+        assert segment_fields("by-{creator}-{scale?}") == [("creator", False), ("scale", True)]
+        assert segment_fields("Models") == []
+
+    def test_unknown_optional_field_still_rejected(self):
+        with pytest.raises(ReorganizeTemplateError, match="Unknown template field"):
+            parse_template("{creator}/{franchise?}")
+
+    def test_all_optional_template_rejected(self):
+        # Every model would render to the same path and collide with everything.
+        with pytest.raises(ReorganizeTemplateError, match="at least one required"):
+            parse_template("{creator?}/{scale?}")
+
+    def test_dropped_optional_segment_renders_empty(self):
+        segs = parse_template("{creator}/{scale?}/{title}")
+        assert render_segments(segs, self.VALUES, {"scale"}) == ["Abe3D", "", "Bust"]
+
+    def test_rendered_list_keeps_segment_alignment(self):
+        # The caller zips segments with the rendered output, so a dropped
+        # segment must be an empty slot, never a shorter list.
+        segs = parse_template("{creator}/{scale?}/{title}")
+        assert len(render_segments(segs, self.VALUES, {"scale"})) == len(segs)
+
+    def test_optional_token_kept_when_its_value_did_not_fall_back(self):
+        segs = parse_template("{creator}/{scale?}/{title}")
+        values = {**self.VALUES, "scale": "1:6"}
+        assert render_segments(segs, values, set()) == ["Abe3D", "1:6", "Bust"]
+
+    def test_segment_drops_with_its_literal_when_every_token_dropped(self):
+        # "by-{scale?}" is meaningless without the scale — the literal goes too,
+        # rather than leaving a bare "by-" directory.
+        segs = parse_template("{creator}/by-{scale?}")
+        assert render_segments(segs, self.VALUES, {"scale"}) == ["Abe3D", ""]
+
+    def test_segment_survives_when_a_required_token_remains(self):
+        # Only the optional token empties; the segment itself still has content,
+        # so the trailing separator is the template author's own doing.
+        segs = parse_template("{creator}-{scale?}")
+        assert render_segments(segs, self.VALUES, {"scale"}) == ["Abe3D-"]

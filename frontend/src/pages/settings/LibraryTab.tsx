@@ -477,7 +477,10 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
               Tokens: <code className="text-text-secondary">{"{creator}"}</code>,{" "}
               <code className="text-text-secondary">{"{character}"}</code>,{" "}
               <code className="text-text-secondary">{"{scale}"}</code>,{" "}
-              <code className="text-text-secondary">{"{title}"}</code>.
+              <code className="text-text-secondary">{"{title}"}</code>. Add{" "}
+              <code className="text-text-secondary">?</code> to make one optional
+              (<code className="text-text-secondary">{"{scale?}"}</code>) — its level is
+              skipped for models with no value instead of blocking them.
             </p>
           </div>
           <label className="flex items-start gap-3 cursor-pointer select-none">
