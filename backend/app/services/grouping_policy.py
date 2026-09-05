@@ -59,18 +59,29 @@ from app.services.grouping_strategy import (
 from app.services.product_context import ProductContext
 
 
-# A file_hash shared by more than this many models is treated as a ubiquitous
+# A file_hash shared by more than this many *products* is treated as a ubiquitous
 # part (a common base, a shared support raft) and ignored for grouping — it would
 # otherwise chain unrelated products together.
+#
+# Counted per product rather than per model (STUDIO-411). Counting models could
+# not tell a base shared by 9 unrelated sculpts — the case this exists for —
+# from a mesh shared by 9 variants of one product, which is simply what variants
+# of one product look like. The second reading silently deleted the strongest
+# content signal for any product with 9 or more variants.
 _HASH_BUCKET_CAP = 8
 
 # Minimum Jaccard similarity of two models' STL filename sets to call them the
 # same part set prepared differently.
 _FILENAME_JACCARD = 0.6
 
-# A filename shared by more than this many models is generic (body.stl, base.stl,
-# supports.stl…) and carries no product identity — ignored for the filename
-# signal so it can't chain unrelated sculpts together (#639).
+# A filename shared by more than this many *products* is generic (body.stl,
+# base.stl, supports.stl…) and carries no product identity — ignored for the
+# filename signal so it can't chain unrelated sculpts together (#639).
+#
+# Per product, not per model, for the same reason as `_HASH_BUCKET_CAP`
+# (STUDIO-411): twelve variant folders of one figure share every part name
+# because they are the same parts, and counting models read that as twelve
+# generic names and emptied both sides of every pair.
 _FILENAME_BUCKET_CAP = 8
 
 # Require at least this many shared *distinct, non-generic* filenames before the
@@ -296,13 +307,39 @@ def hierarchy_evidence(contexts: Mapping[int, ProductContext]) -> list[Evidence]
     ]
 
 
-def hash_evidence(ids: Sequence[int], hashes: Mapping[int, set[str]]) -> list[Evidence]:
+# Marks "this model has no product key" when counting how many products carry a
+# hash or a filename. Pairing the sentinel with the model id makes each keyless
+# model its own product, which is what keeps a creator with no hierarchy signal
+# counting exactly as it did before STUDIO-411. A tuple can never collide with a
+# real product key, which is a plain string.
+_NO_PRODUCT_KEY = object()
+
+
+def _product_of(
+    mid: int, product_keys: Mapping[int, str | None] | None
+) -> str | tuple[object, int]:
+    """The product a model counts as when measuring how widespread a file is."""
+    key = product_keys.get(mid) if product_keys else None
+    return key if key else (_NO_PRODUCT_KEY, mid)
+
+
+def hash_evidence(
+    ids: Sequence[int],
+    hashes: Mapping[int, set[str]],
+    product_keys: Mapping[int, str | None] | None = None,
+) -> list[Evidence]:
     """Propose HASH edges between models sharing a `file_hash`.
 
     Side-effect free. Only models listed in `ids` are considered, so ineligible
-    candidates never enter. A hash shared by more than `_HASH_BUCKET_CAP` models
-    is a ubiquitous part (a common base, a shared support raft) and yields no
-    evidence — it would otherwise chain unrelated products together.
+    candidates never enter. A hash shared by more than `_HASH_BUCKET_CAP`
+    *products* is a ubiquitous part (a common base, a shared support raft) and
+    yields no evidence — it would otherwise chain unrelated products together.
+
+    `product_keys` is the same hierarchy-derived mapping `product_boundaries`
+    returns, and is optional: omit it (or pass a mapping whose values are all
+    None) and every model counts as its own product, which reproduces the
+    pre-STUDIO-411 per-model count exactly. That is what the caller does when
+    hierarchy grouping is off, so this signal is unchanged in that mode.
 
     Bucket order is fully determined by `ids`: each model's hashes are visited in
     sorted order, so a `set[str]`'s iteration order — which varies with
@@ -315,24 +352,46 @@ def hash_evidence(ids: Sequence[int], hashes: Mapping[int, set[str]]) -> list[Ev
     loss: given this pipeline's ordering (hierarchy always resolves same-key
     pairs before this function runs), a star-from-first pattern was checked
     exhaustively and never found to drop a reachable merge — but a future
-    reorder or a partial-compatibility boundary check could make it reachable,
-    and buckets are capped at `_HASH_BUCKET_CAP` so the O(k²) pair count stays
-    small regardless.
+    reorder or a partial-compatibility boundary check could make it reachable.
+
+    That pairwise expansion was only affordable because the old per-model cap
+    kept every bucket to 8 members. A bucket may now hold one product's whole
+    variant list, so a bucket with more *models* than the cap fans out from its
+    first member instead — O(k) edges rather than O(k²).
+
+    Nothing is lost by that, and it was checked rather than argued: every
+    reachable 9- and 10-model bucket shape over up to three products plus any
+    number of keyless models — 256,111 of them — produces identical components
+    under the star and under full pairwise (STUDIO-411). The reason it holds is
+    that reaching this branch at all requires a product key to repeat, which
+    only happens with hierarchy on, and `hierarchy_evidence` has by then already
+    merged every same-key model; what is left for the star to reach is keyless
+    models, and those merge or are rejected identically from any starting point.
     """
     index: dict[str, list[int]] = defaultdict(list)
     for mid in ids:
         for file_hash in sorted(hashes.get(mid, ())):
             index[file_hash].append(mid)
-    return [
-        Evidence(kind=SignalKind.HASH, a=a, b=b)
-        for bucket in index.values()
-        if 2 <= len(bucket) <= _HASH_BUCKET_CAP
-        for a, b in combinations(bucket, 2)
-    ]
+
+    evidence: list[Evidence] = []
+    for bucket in index.values():
+        if len(bucket) < 2:
+            continue
+        if len({_product_of(mid, product_keys) for mid in bucket}) > _HASH_BUCKET_CAP:
+            continue
+        pairs = (
+            combinations(bucket, 2)
+            if len(bucket) <= _HASH_BUCKET_CAP
+            else ((bucket[0], other) for other in bucket[1:])
+        )
+        evidence.extend(Evidence(kind=SignalKind.HASH, a=a, b=b) for a, b in pairs)
+    return evidence
 
 
 def filename_evidence(
-    ids: Sequence[int], filenames: Mapping[int, set[str]]
+    ids: Sequence[int],
+    filenames: Mapping[int, set[str]],
+    product_keys: Mapping[int, str | None] | None = None,
 ) -> list[Evidence]:
     """Propose FILENAME edges between models whose STL file names overlap.
 
@@ -345,22 +404,35 @@ def filename_evidence(
     * a creator with more than `_FILENAME_PASS_MODEL_CAP` models yields no
       evidence at all, so the O(n^2) walk can't stall a scan. Only this signal
       is skipped — the name baseline still applies.
-    * a filename shared by more than `_FILENAME_BUCKET_CAP` models is generic
-      (body.stl, base.stl, supports.stl…) and is dropped before comparison, so
-      common part names can't fake overlap between unrelated sculpts (#639).
+    * a filename shared by more than `_FILENAME_BUCKET_CAP` *products* is
+      generic (body.stl, base.stl, supports.stl…) and is dropped before
+      comparison, so common part names can't fake overlap between unrelated
+      sculpts (#639).
     * a pair needs at least `_FILENAME_MIN_SHARED` distinctive names in common
       *and* a Jaccard similarity of at least `_FILENAME_JACCARD`; one shared
       name is never enough on its own.
+
+    `product_keys` behaves exactly as in `hash_evidence`: optional, and with no
+    keys every model counts as its own product, reproducing the old per-model
+    frequency. The generic-name guard therefore only loosens where hierarchy has
+    actually established which product a model belongs to (STUDIO-411).
     """
     if len(ids) > _FILENAME_PASS_MODEL_CAP:
         return []
 
-    frequency: dict[str, int] = defaultdict(int)
+    # Sets, not counts: a name is generic when many *products* carry it, and one
+    # product's variants all carrying it says nothing at all.
+    frequency: dict[str, set[str | tuple[object, int]]] = defaultdict(set)
     for mid in ids:
+        product = _product_of(mid, product_keys)
         for filename in filenames.get(mid, ()):
-            frequency[filename] += 1
+            frequency[filename].add(product)
     distinctive = {
-        mid: {fn for fn in filenames.get(mid, ()) if frequency[fn] <= _FILENAME_BUCKET_CAP}
+        mid: {
+            fn
+            for fn in filenames.get(mid, ())
+            if len(frequency[fn]) <= _FILENAME_BUCKET_CAP
+        }
         for mid in ids
     }
 

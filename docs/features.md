@@ -124,9 +124,11 @@ apply**. Manual group overrides still win.
 For mixed creator layouts, the default-off **Improve automatic variant grouping
 with folder hierarchy** setting (Settings â†’ Library) adds the scanner's detected
 character/package context to full scans and creator rescans. Conflicting hierarchy
-acts as an anti-merge boundary, while ambiguous models remain ungrouped. The pass
-only rebuilds automatic groups: manual groups and explicit keep-separate decisions
-remain authoritative.
+acts as an anti-merge boundary, while genuinely ambiguous models remain ungrouped —
+though a variant the scanner couldn't label still rejoins its product when it
+carries that product's exact part set, however many variants that product already
+has. The pass only rebuilds automatic groups: manual groups and explicit
+keep-separate decisions remain authoritative.
 
 The scanner infers the character group from folder names — it's accurate for
 most layouts but occasionally gets it wrong (typo'd folder, unusual nesting,

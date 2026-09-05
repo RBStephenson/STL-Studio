@@ -200,10 +200,15 @@ def regroup_creator(db: Session, creator_id: int) -> None:
         _apply_evidence(uf, ledger, hierarchy_evidence(contexts))
 
     # --- signal 1: file_hash overlap (strongest content signal) ---
-    _apply_evidence(uf, ledger, hash_evidence(ids, hashes))
+    # `boundaries` is passed for its second, quieter job (STUDIO-411): it tells
+    # these signals how many distinct *products* carry a mesh or a part name, so
+    # a file shared across one product's variants stays distinctive while one
+    # shared across many products is still discarded as generic. With hierarchy
+    # off it is None and both signals count per model exactly as they used to.
+    _apply_evidence(uf, ledger, hash_evidence(ids, hashes, boundaries))
 
     # --- signal 2: STL filename overlap ---
-    _apply_evidence(uf, ledger, filename_evidence(ids, filenames))
+    _apply_evidence(uf, ledger, filename_evidence(ids, filenames, boundaries))
 
     # --- signal 3: name key (baseline) ---
     # `names` and `keys` outlive this pass: cluster labelling and the
