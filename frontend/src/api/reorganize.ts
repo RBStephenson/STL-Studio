@@ -5,6 +5,7 @@ import type {
   ReorganizeOverride,
   ReorganizePreview,
   ReorganizeUndoResult,
+  TemplatePreviewResponse,
 } from "./types";
 
 export const reorganizeApi = {
@@ -37,6 +38,16 @@ export const reorganizeApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ manifest_id }),
     }),
+  // Cheap live render of a destination template (STUDIO-401). `template` is
+  // deliberately required even though the endpoint accepts it blank: blank makes
+  // the server fall back to the SAVED template, so an empty editor would show a
+  // confident preview of something the user isn't looking at. Callers guard the
+  // empty case instead.
+  templatePreview: (template: string, rootId?: number, limit = 5) => {
+    const p = new URLSearchParams({ template, limit: String(limit) });
+    if (rootId != null) p.set("root_id", String(rootId));
+    return request<TemplatePreviewResponse>(`/reorganize/template-preview?${p}`);
+  },
   aiSuggest: (manifest_id: string, model_ids: number[]) =>
     request<ReorganizeAiSuggestResult>("/reorganize/ai-suggest", {
       method: "POST",

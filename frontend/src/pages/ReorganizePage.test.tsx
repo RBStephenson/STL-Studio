@@ -19,6 +19,7 @@ vi.mock("../api/client", () => {
       reorganize: {
         preview: vi.fn(),
         previewWithOverrides: vi.fn(),
+        templatePreview: vi.fn(),
         apply: vi.fn(),
         undo: vi.fn(),
         aiSuggest: vi.fn(),
@@ -43,6 +44,7 @@ import { api } from "../api/client";
 const reorg = api.reorganize as unknown as {
   preview: ReturnType<typeof vi.fn>;
   previewWithOverrides: ReturnType<typeof vi.fn>;
+  templatePreview: ReturnType<typeof vi.fn>;
   apply: ReturnType<typeof vi.fn>;
   undo: ReturnType<typeof vi.fn>;
   aiSuggest: ReturnType<typeof vi.fn>;
@@ -113,6 +115,25 @@ function previewFixture() {
   };
 }
 
+// The embedded TemplateEditor (STUDIO-402) calls the cheap template-preview
+// endpoint whenever the field has content, which is every render of this page —
+// so every test here needs it stubbed, not just the ones that assert on it.
+function templatePreviewFixture(over: Record<string, unknown> = {}) {
+  return {
+    template: "{creator}/{character}/{title}",
+    // Deliberately NOT one of the manifest fixture's model names — the live
+    // example and the manifest table both render model names, so a shared name
+    // makes every getByText in this file ambiguous.
+    samples: [{
+      model_id: 1, model_name: "Template Example Model",
+      source_dir: "Abe3D/Example", proposed_dir: "Abe3D/Example/Template Example Model",
+      unclassifiable: false, missing_fields: [], over_length: false, reserved_name: false,
+    }],
+    package_mode: false,
+    ...over,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   aiSuggestionsEnabled = false;
@@ -120,6 +141,7 @@ beforeEach(() => {
   slugifyEnabled = true;
   scan.roots.mockReturnValue(new Promise(() => {}));
   reorg.preview.mockResolvedValue(previewFixture());
+  reorg.templatePreview.mockResolvedValue(templatePreviewFixture());
 });
 
 /** Scanning is explicit now (STUDIO-155) — every test that needs a preview
@@ -228,10 +250,39 @@ describe("ReorganizePage", () => {
     );
   });
 
-  it("explains how package mode changes the destination", () => {
-    packageModeEnabled = true;
+  // Since STUDIO-402 this note comes from `package_mode` in the template-preview
+  // RESPONSE rather than the local setting — the server is the authority on
+  // whether the template is actually driving placement, and the note now says so.
+  it("explains that package mode makes the destination template inert", async () => {
+    reorg.templatePreview.mockResolvedValue(templatePreviewFixture({ package_mode: true }));
     render(<ReorganizePage />);
-    expect(screen.getByText(/Package preservation is on/)).toBeInTheDocument();
+    expect(await screen.findByText(/Package preservation is on/)).toHaveTextContent(
+      "this template does not decide placement",
+    );
+  });
+
+  it("says nothing about package mode when the server reports it off", async () => {
+    render(<ReorganizePage />);
+    expect(await screen.findByText("Example destinations")).toBeInTheDocument();
+    expect(screen.queryByText(/Package preservation is on/)).not.toBeInTheDocument();
+  });
+
+  it("scopes the live template example to the selected scan root", async () => {
+    scan.roots.mockResolvedValue(ROOTS);
+    render(<ReorganizePage />);
+
+    const rootSelect = await screen.findByRole("combobox", { name: "Scan root" });
+    await waitFor(() => expect(rootSelect).toBeEnabled());
+    fireEvent.change(rootSelect, { target: { value: "7" } });
+
+    await waitFor(() =>
+      expect(reorg.templatePreview).toHaveBeenLastCalledWith("{creator}/{character}/{title}", 7),
+    );
+  });
+
+  it("says the page's template is a one-off that is not saved", () => {
+    render(<ReorganizePage />);
+    expect(screen.getByText(/applies to/)).toHaveTextContent("this plan only");
   });
 
   it("shows shared character assets moving only for a complete package selection", async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import LibraryTab from "./LibraryTab";
@@ -8,13 +8,43 @@ import { AppSettings } from "../../api/client";
 
 let settings: AppSettings = mkSettings();
 const updateMock = vi.fn().mockResolvedValue(undefined);
+let settingsLoaded = true;
 vi.mock("../../context/AppSettingsContext", () => ({
-  useAppSettings: () => ({ settings, update: updateMock }),
+  useAppSettings: () => ({ settings, loaded: settingsLoaded, update: updateMock }),
 }));
 const scanStatusMock = vi.fn().mockResolvedValue({ running: false });
-vi.mock("../../api/client", () => ({
-  api: { scan: { status: () => scanStatusMock() } },
-}));
+// The destination-template field is a TemplateEditor since STUDIO-402, and it
+// renders a live example — so this tab now talks to the reorganize API too.
+const templatePreviewMock = vi.fn();
+vi.mock("../../api/client", () => {
+  class ApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  }
+  return {
+    ApiError,
+    api: {
+      scan: { status: () => scanStatusMock() },
+      reorganize: { templatePreview: (...args: unknown[]) => templatePreviewMock(...args) },
+    },
+  };
+});
+
+templatePreviewMock.mockResolvedValue({
+  template: "{creator}/{character}/{title}",
+  samples: [{
+    model_id: 1, model_name: "Joker Bust",
+    source_dir: "Abe3D/Joker Bust", proposed_dir: "Abe3D/Joker/Joker Bust",
+    unclassifiable: false, missing_fields: [], over_length: false, reserved_name: false,
+  }],
+  package_mode: false,
+});
+
+const templateField = () =>
+  screen.getByRole("textbox", { name: /destination template/i });
 
 const renderTab = () =>
   render(
@@ -155,9 +185,67 @@ describe("LibraryTab AI suggestions setting", () => {
   });
 });
 
+describe("LibraryTab destination template builder (STUDIO-402)", () => {
+  beforeEach(() => {
+    settings = mkSettings({ reorganize_template: "{creator}/{character}/{title}" });
+    settingsLoaded = true;
+    vi.clearAllMocks();
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
+  });
+
+  // The context's pre-fetch default is an empty template, so rendering the
+  // editor early would flash "the template is empty" over a library that has
+  // one — and offer a blur-to-save on a value the user was never shown.
+  it("holds the editor back until the saved settings have loaded", () => {
+    settingsLoaded = false;
+    renderTab();
+    expect(screen.queryByRole("textbox", { name: /destination template/i })).toBeNull();
+  });
+
+  it("seeds the builder from the saved template", () => {
+    renderTab();
+    expect(templateField()).toHaveValue("{creator}/{character}/{title}");
+  });
+
+  // The distinction existed in the code (Settings persists, the Reorganize page
+  // is a one-off) but nothing in the UI ever said so.
+  it("says this copy of the template is the saved one", () => {
+    renderTab();
+    expect(screen.getByText(/used by Reorganize Library/)).toHaveTextContent(
+      "Saved — used by Reorganize Library, new creator folders",
+    );
+  });
+
+  it("saves the edited template once focus leaves the builder", async () => {
+    renderTab();
+    const input = templateField();
+    await userEvent.clear(input);
+    await userEvent.type(input, "{{creator}/{{title}");
+    fireEvent.blur(input, { relatedTarget: document.body });
+
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith({ reorganize_template: "{creator}/{title}" }),
+    );
+  });
+
+  // Save-on-blur plus a clickable chip is a half-typed template waiting to be
+  // persisted; the editor only commits once focus leaves it entirely.
+  it("does not save a half-typed template when a token chip is clicked", async () => {
+    renderTab();
+    const input = templateField();
+    await userEvent.clear(input);
+    await userEvent.type(input, "{{creator}/");
+    await userEvent.click(screen.getByRole("button", { name: "{character}" }));
+
+    expect(input).toHaveValue("{creator}/{character}");
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("LibraryTab scan-running dim state", () => {
   beforeEach(() => {
     settings = mkSettings();
+    settingsLoaded = true;
     vi.clearAllMocks();
   });
 
