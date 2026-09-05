@@ -2,7 +2,12 @@ import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import TemplateEditor, { DEFAULT_TEMPLATE } from "./TemplateEditor";
+import TemplateEditor from "./TemplateEditor";
+
+// A stand-in for what the settings payload sends, NOT a copy of the component's
+// default — the component has none any more (STUDIO-406). Tests that care about
+// where the value comes from pass their own, deliberately different, string.
+const SERVER_DEFAULT = "{creator}/{character}/{title}";
 
 vi.mock("../../api/client", () => {
   class ApiError extends Error {
@@ -36,19 +41,21 @@ function sample(over: Record<string, unknown> = {}) {
 }
 
 function previewResponse(over: Record<string, unknown> = {}) {
-  return { template: DEFAULT_TEMPLATE, samples: [sample()], package_mode: false, ...over };
+  return { template: SERVER_DEFAULT, samples: [sample()], package_mode: false, ...over };
 }
 
 /** The component is controlled, so the tests need something holding the value —
  *  the same job both host pages do. */
 function Harness({
-  initial = DEFAULT_TEMPLATE,
+  initial = SERVER_DEFAULT,
   onCommit,
   rootId,
+  defaultTemplate = SERVER_DEFAULT,
 }: {
   initial?: string;
   onCommit?: () => void;
   rootId?: number;
+  defaultTemplate?: string;
 }) {
   const [value, setValue] = useState(initial);
   return (
@@ -57,6 +64,7 @@ function Harness({
       onChange={setValue}
       onCommit={onCommit}
       rootId={rootId}
+      defaultTemplate={defaultTemplate}
       scopeNote="Applies to this plan only."
     />
   );
@@ -120,10 +128,29 @@ describe("TemplateEditor presets", () => {
 
   it("marks the preset matching the current template as active", () => {
     render(<Harness />);
-    expect(screen.getByRole("button", { name: /Creator → Character → Title/ }))
+    expect(screen.getByRole("button", { name: /Built-in default/ }))
       .toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /^Creator → Title$/ }))
       .toHaveAttribute("aria-pressed", "false");
+  });
+
+  // The whole point of STUDIO-406: the default is the server's, so a test that
+  // used the canonical string couldn't tell "read from settings" apart from
+  // "still hard-coded in the component".
+  it("takes the default preset from the server, not from a built-in literal", async () => {
+    render(<Harness initial="{creator}" defaultTemplate="{creator}/{scale}" />);
+    await userEvent.click(screen.getByRole("button", { name: /Built-in default/ }));
+    expect(field()).toHaveValue("{creator}/{scale}");
+  });
+
+  // `loaded` can go true with blank settings when the fetch failed, and a
+  // preset button that pastes "" is worse than one preset fewer. Inventing a
+  // local fallback is exactly the drift this ticket removed.
+  it("drops the default preset entirely when the server sent no default", () => {
+    render(<Harness initial="{creator}" defaultTemplate="" />);
+    expect(screen.queryByRole("button", { name: /Built-in default/ })).toBeNull();
+    // The fixed presets are unaffected.
+    expect(screen.getByRole("button", { name: /^Creator → Title$/ })).toBeInTheDocument();
   });
 
   // Scale auto-tags are missing on most models, so a required {scale} blocks
@@ -175,7 +202,7 @@ describe("TemplateEditor live example", () => {
   it("scopes the example to a scan root when the host supplies one", async () => {
     render(<Harness rootId={7} />);
     await waitFor(() =>
-      expect(templatePreviewMock).toHaveBeenCalledWith(DEFAULT_TEMPLATE, 7),
+      expect(templatePreviewMock).toHaveBeenCalledWith(SERVER_DEFAULT, 7),
     );
   });
 

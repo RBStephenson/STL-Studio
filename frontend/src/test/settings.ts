@@ -27,6 +27,10 @@ export const mkSettings = (over: Partial<AppSettings> = {}): AppSettings => ({
   ai_organize_api: null,
   log_level: "INFO",
   reorganize_template: "",
+  // The real server default, not the context's blank placeholder — tests stand
+  // in for a settled fetch, and a blank one would make every component that
+  // seeds from it render an empty template.
+  reorganize_template_default: "{creator}/{character}/{title}",
   reorganize_slugify: true,
   reorganize_slugify_filenames: false,
   reorganize_enabled: false,

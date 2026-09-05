@@ -13,7 +13,7 @@ import type {
   ScanRoot,
 } from "../api/client";
 import ReorganizeStatsBar from "../components/reorganize/ReorganizeStatsBar";
-import TemplateEditor, { DEFAULT_TEMPLATE } from "../components/reorganize/TemplateEditor";
+import TemplateEditor from "../components/reorganize/TemplateEditor";
 
 const DEBOUNCE_MS = 500;
 const PAGE_SIZES = [20, 50, 100] as const;
@@ -82,7 +82,6 @@ const COLLISION_EXPLANATIONS: Record<ReorganizeCollisionKind, string> = {
   none: "",
   exact: "Another model already resolves to this exact destination path.",
   case_only: "Another model's destination path differs only by letter case — that collides on case-insensitive filesystems.",
-  unicode_only: "Another model's destination path differs only by Unicode normalization (e.g. accented characters) — that collides on some filesystems.",
   same_destination: "Another model resolves to this same destination. This does not mean their files are duplicates.",
 };
 
@@ -160,16 +159,19 @@ function isResolvable(e: ReorganizeEntry): boolean {
 }
 
 export default function ReorganizePage() {
-  const { settings } = useAppSettings();
-  const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
+  const { settings, loaded: settingsLoaded } = useAppSettings();
+  // Starts empty rather than at a locally-declared default (STUDIO-406) — the
+  // default is the server's now, and arrives with the settings fetch.
+  const [template, setTemplate] = useState("");
   // Seed the field from the saved library setting once it's loaded (async),
-  // but only until the user starts typing their own one-off template.
+  // falling back to the server's default when nothing is saved, and only until
+  // the user starts typing their own one-off template.
   const [templateTouched, setTemplateTouched] = useState(false);
   useEffect(() => {
-    if (!templateTouched && settings.reorganize_template) {
-      setTemplate(settings.reorganize_template);
-    }
-  }, [settings.reorganize_template, templateTouched]);
+    if (templateTouched) return;
+    const seed = settings.reorganize_template || settings.reorganize_template_default;
+    if (seed) setTemplate(seed);
+  }, [settings.reorganize_template, settings.reorganize_template_default, templateTouched]);
   const [overrides, setOverrides] = useState<Record<number, ReorganizeOverride>>({});
   const [preview, setPreview] = useState<ReorganizePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -258,8 +260,13 @@ export default function ReorganizePage() {
         }
       } catch (e) {
         if (!cancelled && !cancelledRef.current) {
+          // Deliberately keeps the last good preview (STUDIO-406). This effect
+          // re-fires on every template keystroke, so a half-typed template
+          // ("{creator}/{char") returns 400 — and clearing here threw away a
+          // manifest that stat'd every file on disk, over a state that lasts
+          // one keypress. The error renders inline above the table instead,
+          // which is already how every non-400 failure behaves.
           setError(e instanceof ApiError ? e.message : "Failed to load preview");
-          if (e instanceof ApiError && e.status === 400) setPreview(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -492,21 +499,30 @@ export default function ReorganizePage() {
             </span>
           )}
         </label>
-        <TemplateEditor
-          value={template}
-          onChange={(next) => { setTemplate(next); setTemplateTouched(true); }}
-          rootId={rootId}
-          scopeNote={
-            <>
-              This template applies to <strong>this plan only</strong> and is not saved.
-              It starts from your saved template;{" "}
-              <a href="/settings#library" className="text-indigo-400 hover:text-indigo-300 underline">
-                change that in Settings
-              </a>{" "}
-              to affect new creator folders and the unorganized badge too.
-            </>
-          }
-        />
+        {/* Held back until the settings fetch lands (STUDIO-406), for the same
+            reason the Settings copy is: the template seeds from the server, so
+            rendering early would flash "the template is empty" over a library
+            that has a perfectly good one. */}
+        {settingsLoaded ? (
+          <TemplateEditor
+            value={template}
+            onChange={(next) => { setTemplate(next); setTemplateTouched(true); }}
+            rootId={rootId}
+            defaultTemplate={settings.reorganize_template_default}
+            scopeNote={
+              <>
+                This template applies to <strong>this plan only</strong> and is not saved.
+                It starts from your saved template;{" "}
+                <a href="/settings#library" className="text-indigo-400 hover:text-indigo-300 underline">
+                  change that in Settings
+                </a>{" "}
+                to affect new creator folders and the unorganized badge too.
+              </>
+            }
+          />
+        ) : (
+          <div className="h-9 rounded bg-panel-inset border border-border animate-pulse" />
+        )}
         <div className="rounded-lg border border-border-subtle bg-panel/60 px-3 py-2 text-xs text-text-secondary-alt space-y-1">
           <p>
             Directory slugify is {settings.reorganize_slugify ? "on" : "off"}: destination

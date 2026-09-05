@@ -46,6 +46,14 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 DEFAULTS: dict = AppSettingsRead().model_dump()
 
+# Fields AppSettingsRead exposes that are NOT settings: server-owned values the
+# client only reads. They are absent from AppSettingsUpdate, so the API already
+# refuses to write them; excluding them here stops a hand-planted app_settings
+# row from overlaying one either, which would leave the client believing a
+# default the backend itself does not use (STUDIO-406).
+READ_ONLY_KEYS = frozenset({"reorganize_template_default"})
+_STORED_KEYS = frozenset(DEFAULTS) - READ_ONLY_KEYS
+
 FILTER_PRESETS_KEY = "filter_presets"
 _SAFE_VERSION = re.compile(r"^[A-Za-z0-9._+-]{1,40}$")
 _DEPLOYMENT_MODES = {"electron", "standalone", "web"}
@@ -53,7 +61,7 @@ _DEPLOYMENT_MODES = {"electron", "standalone", "web"}
 
 def _merged(db: Session) -> dict:
     values = dict(DEFAULTS)
-    for row in db.query(AppSetting).filter(AppSetting.key.in_(DEFAULTS)):
+    for row in db.query(AppSetting).filter(AppSetting.key.in_(_STORED_KEYS)):
         values[row.key] = row.value
     return values
 

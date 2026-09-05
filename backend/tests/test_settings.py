@@ -30,6 +30,10 @@ DEFAULTS = {
     "ai_organize_api": None,
     "log_level": "INFO",
     "reorganize_template": "",
+    # Deliberately a literal, not an import of the service constant: this dict
+    # pins the wire contract, so changing the parser's default has to break a
+    # test rather than silently reshape every client's idea of the default.
+    "reorganize_template_default": "{creator}/{character}/{title}",
     "reorganize_slugify": True,
     "reorganize_slugify_filenames": False,
     "reorganize_enabled": False,
@@ -58,6 +62,43 @@ def test_allow_prerelease_updates_defaults_off_and_round_trips(client):
     assert client.get("/settings").json()["allow_prerelease_updates"] is False
     assert client.patch("/settings", json={"allow_prerelease_updates": True}).status_code == 200
     assert client.get("/settings").json()["allow_prerelease_updates"] is True
+
+
+def test_reorganize_template_default_mirrors_the_parser(client):
+    """The default ships to the client so the frontend keeps no copy (STUDIO-406).
+
+    Asserted against the parser's own constant, not a literal: the point of the
+    field is that these two can never disagree.
+    """
+    from app.services.reorganize_template import DEFAULT_TEMPLATE
+
+    body = client.get("/settings").json()
+    assert body["reorganize_template_default"] == DEFAULT_TEMPLATE
+    # "" on the editable setting still means "inherit" — shipping the resolved
+    # default must not quietly pin it.
+    assert body["reorganize_template"] == ""
+
+
+def test_reorganize_template_default_is_read_only(client):
+    """It is not a setting, so AppSettingsUpdate's extra="forbid" rejects it."""
+    resp = client.patch("/settings", json={"reorganize_template_default": "{creator}"})
+    assert resp.status_code == 422
+    from app.services.reorganize_template import DEFAULT_TEMPLATE
+    assert client.get("/settings").json()["reorganize_template_default"] == DEFAULT_TEMPLATE
+
+
+def test_a_planted_row_cannot_fake_the_template_default(client, db):
+    """The API can't write the key, but the store is a plain table — so a row
+    put there by hand must not override it either. Otherwise the client would
+    believe a default the backend never uses, which is the drift STUDIO-406
+    exists to remove."""
+    from app.models import AppSetting
+    from app.services.reorganize_template import DEFAULT_TEMPLATE
+
+    db.add(AppSetting(key="reorganize_template_default", value="{creator}/nope"))
+    db.commit()
+
+    assert client.get("/settings").json()["reorganize_template_default"] == DEFAULT_TEMPLATE
 
 
 def test_reorganize_enabled_round_trips(client):

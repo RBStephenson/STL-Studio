@@ -5,6 +5,10 @@ from pydantic import BaseModel, Field, field_validator
 # Reused as the shape of the app-level default guide theme (#514). The painting
 # schemas don't import app.schemas, so this import is one-directional (no cycle).
 from app.painting.schemas import GuideTheme
+# Same one-directional shape: reorganize_template imports nothing but stdlib.
+# The template parser owns the default; the settings payload only mirrors it so
+# the frontend stops keeping a second copy (STUDIO-406).
+from app.services.reorganize_template import DEFAULT_TEMPLATE as REORGANIZE_DEFAULT_TEMPLATE
 
 
 class CreatorBase(BaseModel):
@@ -555,7 +559,11 @@ class ScanTagRule(BaseModel):
 
 class AppSettingsRead(BaseModel):
     """Every known app setting with its default — the single source of truth
-    for the store's whitelist (routers/settings.py derives DEFAULTS from it)."""
+    for the store's whitelist (routers/settings.py derives DEFAULTS from it).
+
+    A few fields here are server-owned reads rather than settings; the router
+    lists those in READ_ONLY_KEYS and refuses to back them with a stored row.
+    """
     painting_guides_enabled: bool = False
     show_nsfw: bool = False
     library_page_size: int = 50
@@ -599,10 +607,17 @@ class AppSettingsRead(BaseModel):
     # Application log verbosity for the `app.*` loggers. Changing this in the UI
     # takes effect immediately (no restart) and persists across restarts.
     log_level: str = "INFO"
-    # Library reorganize destination template ("" = the built-in default,
-    # {creator}/{character}/{title}; optional {scale}) and whether every segment is rendered
+    # Library reorganize destination template ("" = inherit the built-in
+    # default, shipped to the client as reorganize_template_default below;
+    # optional {scale}) and whether every segment is rendered
     # lowercase/hyphenated (import-style) rather than case-preserving.
     reorganize_template: str = ""
+    # Read-only mirror of the parser's own DEFAULT_TEMPLATE (STUDIO-406) so the
+    # frontend reads the default instead of declaring a second literal that can
+    # drift. Not in AppSettingsUpdate, whose extra="forbid" makes a PATCH of it
+    # a 422 — so never write an app_settings row under this key by hand either,
+    # since _merged would overlay it and only the client would believe it.
+    reorganize_template_default: str = REORGANIZE_DEFAULT_TEMPLATE
     reorganize_slugify: bool = True
     # Independent of reorganize_slugify (directory segments only): also
     # renders each STL's own filename lowercase/hyphenated on reorganize and
@@ -945,8 +960,15 @@ class CultsSearchResponse(BaseModel):
 
 FingerprintMethod = Literal["stat", "content_hash"]
 MoveKind = Literal["move", "rename", "case_rename", "in_place", "merge"]
+# No "unicode_only" kind, and nothing could ever emit one. `_detect_collisions`
+# groups by `reorganize._key`, which NFC-normalizes, so two destinations
+# differing only by Unicode form land in the same group and the clash IS
+# reported — it just classifies as "exact", because the kind is chosen by
+# comparing the raw strings and casefold() does not normalize form. Actually
+# distinguishing NFC from NFD on a filesystem that preserves it would mean
+# comparing before normalization: a separate feature, not a label.
 CollisionKind = Literal[
-    "none", "exact", "case_only", "unicode_only", "same_destination"
+    "none", "exact", "case_only", "same_destination"
 ]
 
 

@@ -472,6 +472,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
                 value={templateEdit ?? settings.reorganize_template}
                 onChange={setTemplateEdit}
                 onCommit={saveReorganizeTemplate}
+                defaultTemplate={settings.reorganize_template_default}
                 scopeNote={
                   <>
                     <strong>Saved</strong> — used by Reorganize Library, new creator folders,

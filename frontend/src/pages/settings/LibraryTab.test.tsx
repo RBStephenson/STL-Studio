@@ -216,6 +216,19 @@ describe("LibraryTab destination template builder (STUDIO-402)", () => {
     );
   });
 
+  // STUDIO-406: the Settings copy of the editor gets its default from the same
+  // settings payload it is editing, so a non-canonical value proves the prop is
+  // actually wired rather than the component falling back to a literal.
+  it("offers the server's default as a preset, not a built-in one", async () => {
+    settings = mkSettings({
+      reorganize_template: "{creator}",
+      reorganize_template_default: "{creator}/{scale}",
+    });
+    renderTab();
+    await userEvent.click(screen.getByRole("button", { name: /Built-in default/ }));
+    expect(templateField()).toHaveValue("{creator}/{scale}");
+  });
+
   it("saves the edited template once focus leaves the builder", async () => {
     renderTab();
     const input = templateField();

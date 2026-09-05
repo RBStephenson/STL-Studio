@@ -31,6 +31,10 @@ const DEFAULTS: AppSettings = {
   ai_organize_api: null,
   log_level: "INFO",
   reorganize_template: "",
+  // Deliberately blank rather than a copy of the backend's default — that copy
+  // is the drift STUDIO-406 removed. It's a pre-fetch placeholder only, so any
+  // consumer that renders it gates on `loaded` first.
+  reorganize_template_default: "",
   reorganize_slugify: true,
   reorganize_slugify_filenames: false,
   reorganize_enabled: false,
