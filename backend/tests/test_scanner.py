@@ -3656,30 +3656,29 @@ class TestScannerTransactionSemantics:
 
     # -- grouping failure -----------------------------------------------------
 
-    def test_grouping_failure_discards_earlier_creators_regrouping(
+    def test_grouping_failure_is_scoped_to_the_failing_creator(
         self, db, tmp_path, monkeypatch
     ):
-        """AC1 (grouping failure). CURRENT BEHAVIOR, AND IT IS A BUG.
+        """AC1 (grouping failure). STUDIO-396: a creator whose regroup raises no
+        longer drags down every creator regrouped before it.
 
-        _scan_root regroups every creator on ONE session (`group_db`) and commits
-        only after the loop finishes. grouping.py never commits — it flushes — so
-        when creator N raises, `group_db.rollback()` discards creators 1..N-1
-        along with it.
+        _scan_root commits `group_db` after EACH creator's regroup, inside the
+        same try that catches the failure, so the rollback triggered by creator N
+        can only reach creator N's own uncommitted work. Creators regrouped
+        earlier are already durable; creators after it are untouched.
 
-        It is worse than those creators losing their regrouping. regroup_creator
-        calls _drop_auto_groups FIRST, so the rollback also undoes the drop:
-        earlier creators come out of the run still holding their STALE auto
-        groups, silently, while the loop carries on and prune_empty_groups runs
-        anyway.
+        Three creators walked in a pinned order: A succeeds, B raises, C
+        succeeds. All three start holding a STALE auto group, so every outcome is
+        measured the same way — regroup_creator calls _drop_auto_groups first, so
+        a creator whose regroup stuck comes out with its stale group GONE, and a
+        creator that was rolled back keeps it.
 
-        Filed as a follow-on ticket; deliberately NOT fixed here, because
-        STUDIO-233 forbids moving commits. When it is fixed this test is
-        supposed to fail — update it then, on purpose.
-
-        Fail-first: there is no guard to break here, because the test asserts the
-        bug rather than a protection. The honest equivalent is to assert the
-        opposite first — that the stale group is gone, i.e. that the drop stuck —
-        watch that go red, then flip to the assertion below.
+        Fail-first: with the per-creator commit removed, A's assertion goes red —
+        B's rollback undoes A's drop and A's stale group survives the run. C's
+        assertion stays green either way, since its drop happens after the
+        rollback and is covered by the loop's final commit, which is exactly why
+        A is the assertion that measures the fix. Deleting that commit is also
+        the mutation this test is pinned against.
         """
         from app.models import ScanRoot, VariantGroup
         from sqlalchemy.orm import sessionmaker
@@ -3688,50 +3687,63 @@ class TestScannerTransactionSemantics:
         monkeypatch.setattr(scanner, "SessionLocal", Session)
         _run_pool_inline(monkeypatch)
 
-        first_dir = tmp_path / "A Creator"
-        second_dir = tmp_path / "B Creator"
-        for d in (first_dir, second_dir):
-            _stl(d / "Model" / "supported")
+        names = ("A Creator", "B Creator", "C Creator")
+        dirs: dict[str, Path] = {}
+        for name in names:
+            dirs[name] = tmp_path / name
+            _stl(dirs[name] / "Model" / "supported")
 
-        # Creator A already exists with a stale AUTO group holding two members.
-        # The members matter: prune_empty_groups deletes member-less auto groups
-        # after the loop, which would mask the rollback we are measuring.
-        first = Creator(name="A Creator")
-        db.add(first)
-        db.flush()
-        stale = VariantGroup(creator_id=first.id, label="Stale Auto Group", source="auto")
-        db.add(stale)
-        db.flush()
-        # no_group=True is what makes regroup_creator take its early-return
-        # branch — the ONLY path that calls _drop_auto_groups. Eligible models
-        # instead go through materialise_proposals, which REUSES the existing
-        # group rather than dropping it, so there would be no drop to roll back
-        # and this test would pass without measuring anything.
-        for i in (1, 2):
-            db.add(Model(
-                name=f"Stale Member {i}",
-                folder_path=str(first_dir / f"member-{i}"),
-                creator_id=first.id,
-                variant_group_id=stale.id,
-                no_group=True,
-            ))
+        # Every creator starts with a stale AUTO group holding two members. The
+        # members matter twice over: prune_empty_groups deletes member-less auto
+        # groups after the loop, which would mask both the drops we expect AND
+        # the rollback we are measuring — a surviving group has to survive for
+        # the right reason.
+        creator_ids: dict[str, int] = {}
+        stale_ids: dict[str, int] = {}
+        for name in names:
+            creator = Creator(name=name)
+            db.add(creator)
+            db.flush()
+            stale = VariantGroup(
+                creator_id=creator.id, label=f"Stale Auto Group ({name})", source="auto"
+            )
+            db.add(stale)
+            db.flush()
+            # no_group=True is what makes regroup_creator take its early-return
+            # branch — the ONLY path that calls _drop_auto_groups. Eligible models
+            # instead go through materialise_proposals, which REUSES the existing
+            # group rather than dropping it, so there would be no drop to roll
+            # back and this test would pass without measuring anything.
+            for i in (1, 2):
+                db.add(Model(
+                    name=f"{name} Stale Member {i}",
+                    folder_path=str(dirs[name] / f"member-{i}"),
+                    creator_id=creator.id,
+                    variant_group_id=stale.id,
+                    no_group=True,
+                ))
+            creator_ids[name], stale_ids[name] = creator.id, stale.id
         db.commit()
-        first_id, stale_group_id = first.id, stale.id
 
         # Pin the creator ORDER: _scan_root's regroup loop follows
-        # iter_creator_dirs, and the bug only shows if the creator that fails is
-        # walked SECOND. Controlling setup order, not the behavior under test.
+        # iter_creator_dirs (dict.fromkeys preserves insertion order), and the fix
+        # only shows if a creator SUCCEEDS before the one that raises.
         monkeypatch.setattr(
             scanner.layout, "iter_creator_dirs",
-            lambda _root, _roles: [(first_dir, []), (second_dir, [])],
+            lambda _root, _roles: [(dirs[n], []) for n in names],
         )
 
         real_regroup = scanner.grouping.regroup_creator
+        failing_id = creator_ids["B Creator"]
 
         def _regroup(session, creator_id):
-            if creator_id != first_id:
+            # Run the REAL regroup FIRST so B's own _drop_auto_groups is actually
+            # flushed before the raise. Raising instead of regrouping would leave
+            # B with nothing to roll back, and B's assertion below would pass for
+            # free — measuring a drop that never happened rather than one undone.
+            real_regroup(session, creator_id)
+            if creator_id == failing_id:
                 raise RuntimeError("simulated regroup failure on the second creator")
-            return real_regroup(session, creator_id)
 
         monkeypatch.setattr(scanner.grouping, "regroup_creator", _regroup)
         monkeypatch.setattr(scanner, "_walk_for_models", lambda **kwargs: None)
@@ -3743,10 +3755,139 @@ class TestScannerTransactionSemantics:
         scanner._scan_root(root, db, scanner.ScanRules())
 
         db.expire_all()
-        assert db.get(VariantGroup, stale_group_id) is not None, (
-            "CURRENT BEHAVIOR (bug): the SECOND creator's failure rolled back the "
-            "FIRST creator's _drop_auto_groups too, so its stale auto group "
-            "survives the run"
+        assert db.get(VariantGroup, stale_ids["A Creator"]) is None, (
+            "STUDIO-396: A regrouped cleanly BEFORE B raised, so its "
+            "_drop_auto_groups must be durable — B's rollback must not reach it"
+        )
+        assert db.get(VariantGroup, stale_ids["C Creator"]) is None, (
+            "C regrouped cleanly AFTER B raised; the loop must carry on and C's "
+            "drop must stick"
+        )
+        assert db.get(VariantGroup, stale_ids["B Creator"]) is not None, (
+            "B's own regroup raised, so B's drop is the one thing the rollback "
+            "SHOULD discard — its stale group stands until a later clean run"
+        )
+        survivors = (
+            db.query(Model)
+            .filter(Model.variant_group_id == stale_ids["B Creator"])
+            .count()
+        )
+        assert survivors == 2, (
+            "B's rolled-back group must still hold its members, or "
+            "prune_empty_groups would have swept it as empty and the assertion "
+            f"above would pass for the wrong reason; got {survivors}"
+        )
+
+    def test_regroup_commit_failure_is_caught_like_a_regroup_failure(
+        self, db, tmp_path, monkeypatch
+    ):
+        """STUDIO-396, second half: the per-creator commit sits INSIDE the try.
+
+        Adding a commit to the loop adds a new way for the loop to raise. SQLite
+        has one writer and this scanner already defends against lock transients
+        everywhere else (STUDIO-79), so a commit that fails must be handled the
+        same as a regroup that fails — logged, rolled back, loop carries on. If
+        the commit sat after the try/except instead, that failure would escape
+        _scan_root and abort the entire root, which is strictly worse than the
+        bug this ticket set out to fix.
+
+        Same three-creator shape as above, except B's regroup SUCCEEDS and its
+        commit is what blows up. The rigged commit fires exactly once, on the
+        call immediately after B's regroup returns, which is the per-creator
+        commit and nothing else.
+
+        Fail-first / mutation: move `group_db.commit()` outside the try and this
+        test goes red — the simulated lock propagates out of _scan_root instead
+        of being swallowed.
+        """
+        from app.models import ScanRoot, VariantGroup
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        state = {"boom": False}
+
+        def _rigged_session():
+            session = Session()
+            real_commit = session.commit
+
+            def _commit():
+                if state["boom"]:
+                    state["boom"] = False
+                    raise RuntimeError("simulated commit failure (SQLite lock)")
+                return real_commit()
+
+            session.commit = _commit
+            return session
+
+        monkeypatch.setattr(scanner, "SessionLocal", _rigged_session)
+        _run_pool_inline(monkeypatch)
+
+        names = ("A Creator", "B Creator", "C Creator")
+        dirs: dict[str, Path] = {}
+        for name in names:
+            dirs[name] = tmp_path / name
+            _stl(dirs[name] / "Model" / "supported")
+
+        creator_ids: dict[str, int] = {}
+        stale_ids: dict[str, int] = {}
+        for name in names:
+            creator = Creator(name=name)
+            db.add(creator)
+            db.flush()
+            stale = VariantGroup(
+                creator_id=creator.id, label=f"Stale Auto Group ({name})", source="auto"
+            )
+            db.add(stale)
+            db.flush()
+            for i in (1, 2):
+                db.add(Model(
+                    name=f"{name} Stale Member {i}",
+                    folder_path=str(dirs[name] / f"member-{i}"),
+                    creator_id=creator.id,
+                    variant_group_id=stale.id,
+                    no_group=True,
+                ))
+            creator_ids[name], stale_ids[name] = creator.id, stale.id
+        db.commit()
+
+        monkeypatch.setattr(
+            scanner.layout, "iter_creator_dirs",
+            lambda _root, _roles: [(dirs[n], []) for n in names],
+        )
+
+        real_regroup = scanner.grouping.regroup_creator
+        failing_id = creator_ids["B Creator"]
+
+        def _regroup(session, creator_id):
+            # B's regroup SUCCEEDS — including its _drop_auto_groups flush — and
+            # arms the next commit instead. That is what makes the commit, and
+            # only the commit, the thing under test.
+            real_regroup(session, creator_id)
+            if creator_id == failing_id:
+                state["boom"] = True
+
+        monkeypatch.setattr(scanner.grouping, "regroup_creator", _regroup)
+        monkeypatch.setattr(scanner, "_walk_for_models", lambda **kwargs: None)
+
+        root = ScanRoot(path=str(tmp_path), enabled=True)
+        db.add(root)
+        db.commit()
+
+        # Must not raise. If this line propagates, the commit escaped the try.
+        scanner._scan_root(root, db, scanner.ScanRules())
+
+        assert state["boom"] is False, (
+            "the rigged commit never fired — the test measured nothing"
+        )
+        db.expire_all()
+        assert db.get(VariantGroup, stale_ids["A Creator"]) is None, (
+            "A committed cleanly before B's commit failed and must stay durable"
+        )
+        assert db.get(VariantGroup, stale_ids["C Creator"]) is None, (
+            "the loop must carry on past a commit failure, so C still regroups"
+        )
+        assert db.get(VariantGroup, stale_ids["B Creator"]) is not None, (
+            "B's own work is the only thing the rollback should discard"
         )
 
     # -- session ownership ----------------------------------------------------
