@@ -262,12 +262,14 @@ const SECTIONS: Section[] = [
           </li>
           <li>
             An <strong>unorganized</strong> icon appears next to the title if the
-            model's current folder no longer matches where{" "}
-            <strong>Reorganize</strong> would put it (e.g. after changing its
-            creator or title) — hover it for a tooltip. Nothing moves
-            automatically; run Reorganize to actually move it. This is unrelated
-            to <strong>Locked</strong> (see below): unorganized just means the
-            files aren't where the template currently says they should be, not
+            model's current folder no longer matches where your{" "}
+            <strong>destination template</strong> says it belongs (e.g. after
+            changing its creator or title). Click it to open that template in{" "}
+            <strong>Settings → Library → Destination Layout</strong> — the badge is
+            decided there, and it shows whether or not Reorganize is enabled.
+            Nothing moves automatically; run Reorganize to actually move it. This is
+            unrelated to <strong>Locked</strong> (see below): unorganized just means
+            the files aren't where the template currently says they should be, not
             that anything is blocked from changing.
           </li>
         </ul>
@@ -893,9 +895,19 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          <strong>Settings → Library Tools → Reorganize Library</strong> (or navigate
-          to <code>/reorganize</code>) tidies your files on disk to match a folder
-          template — by default <code>{"{creator}/{character}/{title}"}</code>.
+          Reorganize tidies your files on disk to match your destination template —
+          by default <code>{"{creator}/{character}/{title}"}</code>. Open it from the{" "}
+          <strong>Library Tools</strong> menu on the Library toolbar (or navigate to{" "}
+          <code>/reorganize</code>); that entry appears once <strong>Enable Reorganize
+          Library</strong> is on under <strong>Settings → Library → Library Tools</strong>.
+        </p>
+        <p>
+          The template itself is <em>not</em> a Reorganize setting. It lives under{" "}
+          <strong>Settings → Library → Destination Layout</strong>, because four
+          separate things follow it: Reorganize, where a brand-new creator folder is
+          created, import moves, and the <strong>unorganized</strong> badge on a
+          model's page. You can read and change it whether or not Reorganize is
+          enabled — that flag gates writing files, not describing where they belong.
         </p>
         <p>
           Templates can also include <code>{"{scale}"}</code>, using scanner-detected
@@ -934,7 +946,7 @@ const SECTIONS: Section[] = [
           not decide placement at all; the example says so rather than showing a layout
           that won't happen. The template on this page applies to{" "}
           <strong>this plan only</strong> and is not saved — the one in{" "}
-          <strong>Settings → Library</strong> is.
+          <strong>Settings → Library → Destination Layout</strong> is.
         </p>
         <p>
           The <strong>Scan root</strong> selector defaults to all configured roots. Choose
@@ -944,14 +956,14 @@ const SECTIONS: Section[] = [
         </p>
         <p>
           The page shows whether <strong>directory slugify</strong> is on or off and
-          links to <strong>Settings → Library</strong> to change it. When it is on,
-          destination folders are lowercased and hyphenated. When it is off, they keep
-          their original casing and spacing.
+          links to <strong>Settings → Library → Destination Layout</strong> to change
+          it. When it is on, destination folders are lowercased and hyphenated. When
+          it is off, they keep their original casing and spacing.
         </p>
         <p>
           For creator packages that contain nested releases such as an{" "}
           <code>Alternate</code> folder, enable <strong>Preserve release package
-          structure</strong> under <strong>Settings → Library</strong>. This default-off
+          structure</strong> under <strong>Settings → Library → Library Tools</strong>. This default-off
           mode normalizes the creator/character prefix, then moves the complete package
           as one unit without flattening its internal folders or companion files. Scale
           is not required. If the package boundary cannot be matched safely, the preview

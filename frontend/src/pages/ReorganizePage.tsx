@@ -460,7 +460,7 @@ export default function ReorganizePage() {
                 <a href="/settings#library" className="text-indigo-400 hover:text-indigo-300 underline">
                   change that in Settings
                 </a>{" "}
-                to affect new creator folders and the unorganized badge too.
+                to affect new creator folders, import moves and the unorganized badge too.
               </>
             }
           />

@@ -216,6 +216,16 @@ describe("LibraryTab destination template builder (STUDIO-402)", () => {
     );
   });
 
+  // STUDIO-405: the enumeration listed three of the four consumers. Import moves
+  // go through the same template (`routers/imports.py` renders it on apply), and
+  // a user reading a list of three has no reason to think imports are affected.
+  it("names all four consumers, import moves included", () => {
+    renderTab();
+    expect(screen.getByText(/used by Reorganize Library/)).toHaveTextContent(
+      "used by Reorganize Library, new creator folders, import moves, and the \"unorganized\" flag",
+    );
+  });
+
   // STUDIO-406: the Settings copy of the editor gets its default from the same
   // settings payload it is editing, so a non-canonical value proves the prop is
   // actually wired rather than the component falling back to a literal.
@@ -252,6 +262,68 @@ describe("LibraryTab destination template builder (STUDIO-402)", () => {
 
     expect(input).toHaveValue("{creator}/{character}");
     expect(updateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("LibraryTab destination layout section (STUDIO-405)", () => {
+  beforeEach(() => {
+    settings = mkSettings({ reorganize_template: "{creator}/{title}" });
+    settingsLoaded = true;
+    vi.clearAllMocks();
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
+  });
+
+  // This is the whole point of the ticket. The template drives four things, only
+  // one of which is Reorganize, so it belongs with the scan roots the user
+  // already reads as "how my library is arranged" — not below a default-off
+  // checkbox labelled Experimental, where it looked like that tool's option.
+  it("puts Destination Layout ahead of Library Tools", () => {
+    renderTab();
+    const headings = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((h) => h.textContent?.trim());
+    const layout = headings.findIndex((h) => h === "Destination Layout");
+    const tools = headings.findIndex((h) => h === "Library Tools");
+    expect(layout).toBeGreaterThan(-1);
+    expect(tools).toBeGreaterThan(-1);
+    expect(layout).toBeLessThan(tools);
+    // And behind the scan locations it configures, not above them.
+    expect(headings.findIndex((h) => h === "Scan Locations")).toBeLessThan(layout);
+  });
+
+  // Already true before the move — the box was only ever *visually* nested
+  // inside the Reorganize block, never wrapped in a conditional on the flag.
+  // Pinned here because the relocation is what makes the claim legible, and a
+  // future tidy-up that folds these back under the flag would be a regression.
+  it("shows the template and both slugify toggles with Reorganize disabled", () => {
+    settings = mkSettings({
+      reorganize_enabled: false,
+      reorganize_template: "{creator}/{title}",
+    });
+    renderTab();
+
+    expect(templateField()).toHaveValue("{creator}/{title}");
+    expect(screen.getByRole("checkbox", { name: /lowercase, hyphenated directory names/i })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /lowercase, hyphenated filenames/i })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /enable reorganize library/i })).not.toBeChecked();
+  });
+
+  // The directory-slugify toggle moved sections and had no test of its own; its
+  // filename sibling did. Covering it here rather than leaving the gap open.
+  it("toggling directory slugify off persists reorganize_slugify=false", async () => {
+    settings = mkSettings({ reorganize_slugify: true });
+    renderTab();
+    await userEvent.click(screen.getByRole("checkbox", { name: /lowercase, hyphenated directory names/i }));
+    expect(updateMock).toHaveBeenCalledWith({ reorganize_slugify: false });
+  });
+
+  // The two live next to each other now and both say "layout", so the section
+  // has to state which direction it points or it just adds confusion.
+  it("distinguishes itself from a scan root's read-direction layout", () => {
+    renderTab();
+    expect(
+      screen.getByText(/describes how your existing folders are/i),
+    ).toHaveTextContent("where models");
   });
 });
 

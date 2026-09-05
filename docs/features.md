@@ -631,8 +631,8 @@ confirm, never applies one automatically.
   moves with it.
 - **Inbox flag** — un-filed imports are marked **inbox**; the Library's
   `?is_inbox=1` filter shows just these.
-- The **move** step follows the Reorganize page's slug-formatting setting
-  (**Settings → Library**) — with it on, an imported pack's creator/title
+- The **move** step follows the library's slug-formatting setting
+  (**Settings → Library → Destination Layout**) — with it on, an imported pack's creator/title
   segments land already lowercase-and-hyphenated on disk, with no separate
   manual Reorganize pass needed afterward.
 - The **move** step requires the **Reorganize Library** feature flag (**Settings →
@@ -649,9 +649,11 @@ The **Creators** page lists every creator with their model count. From here you
 can:
 
 - **Add Creator** — add a creator manually, before you've imported any of
-  their models. Its library folder is created automatically (using the
-  [Reorganize](#reorganize-library) destination template) so it's ready for
-  files to land in.
+  their models. Its library folder is created automatically, using the
+  destination template from **Settings → Library → Destination Layout** (see
+  [Reorganize](#reorganize-library) for the template syntax), so it's ready for
+  files to land in. This works whether or not Reorganize is enabled — the
+  template is library configuration, not a Reorganize setting.
 - Click a creator to browse just their models in the Library.
 - **Rescan** a single creator — a targeted scan of just that creator's folder.
   Because you usually add models one creator at a time, this is much faster than
@@ -808,9 +810,16 @@ as the standalone HTML version.
 
 ## Reorganize library
 
-**Settings → Library Tools → Reorganize Library** (or **/reorganize**) tidies your
-files on disk to match a folder template — by default
-`{creator}/{character}/{title}`.
+Reorganize tidies your files on disk to match your destination template — by
+default `{creator}/{character}/{title}`. Open it from the **Library Tools** menu
+on the Library toolbar (or **/reorganize**); the menu entry appears once
+**Enable Reorganize Library** is on under **Settings → Library → Library Tools**.
+
+The template itself is not a Reorganize setting. It lives under **Settings →
+Library → Destination Layout**, because four separate things follow it: Reorganize,
+where a brand-new creator folder is created, import moves, and the **unorganized**
+badge on a model's detail page. It is readable and editable whether or not
+Reorganize is enabled.
 
 Destination templates support `{creator}`, `{character}`, `{scale}`, and
 `{title}`. `{scale}` comes from scanner-detected scale auto-tags such as `1:6`
@@ -838,8 +847,8 @@ sit one level up rather than getting a folder named after their source folder.
 ### Building a template
 
 You don't have to type any of that by hand. Both places the template appears —
-**Settings → Library → Reorganize** and the Reorganize page itself — use the same
-editor. **Token chips** insert `{creator}`, `{character}`, `{scale}` or `{title}`
+**Settings → Library → Destination Layout** and the Reorganize page itself — use
+the same editor. **Token chips** insert `{creator}`, `{character}`, `{scale}` or `{title}`
 at the cursor. **Presets** fill in a whole layout as a starting point; they stay
 editable afterwards, and nothing about a preset is saved. An **example** renders
 the current template against a handful of real models from your library as you
@@ -868,16 +877,21 @@ clears selections and unresolved field overrides from the previous plan before
 building the newly scoped preview.
 
 The destination template and a **"Lowercase, hyphenated directory names"**
-toggle live in **Settings → Library → Reorganize** — both are saved server-side,
-so they're shared with manual [creator](#creators--per-creator-rescan) folder
-creation and the model detail [unorganized indicator](#model-detail), not just
-this page. The Reorganize page shows the current toggle state beside the template
-and links back to this setting. The toggle is on by default: every segment renders slug-style (e.g.
-`abe-3d` instead of `Abe 3D`), matching how imported folders are named. Turn it
-off to keep each segment's original casing and spacing.
+toggle live in **Settings → Library → Destination Layout** — both are saved
+server-side, so they're shared with manual [creator](#creators--per-creator-rescan)
+folder creation, [import](#import-folder) moves and the model detail
+[unorganized indicator](#model-detail), not just this page. That section sits
+directly under your scan locations, deliberately: the **Layout** field on each
+scan location describes how existing folders are *read*, and the destination
+template describes where models *should* live. The Reorganize page shows the
+current toggle state beside the template and links back to this setting. The
+toggle is on by default: every segment renders slug-style (e.g. `abe-3d` instead
+of `Abe 3D`), matching how imported folders are named. Turn it off to keep each
+segment's original casing and spacing.
 
-The default-off **Preserve release package structure** toggle on the same Settings
-panel changes the move unit from one indexed model to one physical release package.
+The default-off **Preserve release package structure** toggle, under **Settings →
+Library → Library Tools**, changes the move unit from one indexed model to one
+physical release package.
 Reorganize normalizes the `{creator}/{character}` prefix and preserves the package
 folder name plus every relative path beneath it. A package can contain multiple
 independently indexed models—for example, root-level standard STLs and an
@@ -984,8 +998,8 @@ longer visible.
   edited or that now sits where a file would return.
 
 Apply moves real files, so it is **opt-in**: it stays disabled unless the
-**Reorganize Library** feature flag is turned on under **Settings → Library**
-(off by default) and the destination is actually writable (the read-only Docker
+**Reorganize Library** feature flag is turned on under **Settings → Library →
+Library Tools** (off by default) and the destination is actually writable (the read-only Docker
 mount can never apply, making apply effectively standalone-only). Preview and
 resolve work everywhere.
 
@@ -994,6 +1008,12 @@ resolve work everywhere.
 At **/settings** you manage your **scan roots** — the top-level folder paths the
 app reads from. Add or remove paths, and see when each was last scanned. This is
 also where standalone users point the app at their drives for the first time.
+
+Directly beneath them, **Destination Layout** holds the
+[destination template](#reorganize-library) and the two slugify toggles. The two
+are easy to confuse and point opposite ways: a scan root's **Layout** says how
+its existing folders are *read* (which level is the creator, which are tags),
+while the destination template says where models *should* live.
 
 If a configured folder can't be found when the Library loads — typically an
 external drive that's unmounted or disconnected — a warning banner appears at the
