@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app.models import Creator, PackOverride, ReorganizeManifest, ScanRoot
 from app.services import reorganize
-from tests.conftest import make_creator, make_model, make_stl_file
+from tests.conftest import make_creator, make_model, make_stl_file, set_reorganize_enabled
 
 
 def _root(db, tmp_path):
@@ -811,3 +811,41 @@ class TestCollisionAndOverlapInternals:
         assert a.collision_kind == "exact"
         assert a.collision_with == [2]
         assert b.collision_with == [1]
+
+
+class TestPreviewIsNotWriteGated:
+    """`reorganize_enabled` is the WRITE gate, not a visibility gate (STUDIO-405).
+
+    It guards apply and undo (`reorganize_apply.py`) and import apply, all of
+    which touch disk. Neither preview endpoint consults it, and that split is
+    what lets the destination template be library configuration a user can read
+    and edit without turning on a tool labelled Experimental.
+
+    That was true before this test existed, but only as a fact about code nobody
+    had pinned - the un-gating was asserted for `/template-preview` (STUDIO-401)
+    and merely observed for these two. A flag sweep that "helpfully" gated every
+    reorganize route would break the page for everyone with the flag off, and
+    nothing would have failed.
+    """
+
+    def test_get_preview_is_unaffected_by_the_flag(self, client, db, tmp_path):
+        set_reorganize_enabled(db, False)
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path)
+
+        resp = client.get("/reorganize/preview")
+
+        assert resp.status_code == 200
+        assert len(resp.json()["entries"]) == 1
+
+    def test_post_preview_is_unaffected_by_the_flag(self, client, db, tmp_path):
+        set_reorganize_enabled(db, False)
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path)
+
+        resp = client.post(
+            "/reorganize/preview", json={"template": "{creator}/{title}"}
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["entries"][0]["proposed_dir"].endswith("abe3d/bust")

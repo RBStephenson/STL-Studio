@@ -587,13 +587,19 @@ export default function ModelDetail() {
               )}
               <h1 className="text-2xl font-bold text-text-primary break-words flex items-center gap-2">
                 {model.title || model.name}
+                {/* A link, not a bare icon (STUDIO-405): the badge is decided by
+                    the destination template, and the old tooltip's only advice —
+                    "run Reorganize Library" — is useless when that tool's flag is
+                    off, which is its default. Point at the setting instead. */}
                 {model.unorganized && (
-                  <span
-                    title="Unorganized — location doesn't match your organize template. Run Reorganize Library to move it."
-                    className="inline-flex shrink-0"
+                  <Link
+                    to="/settings#library"
+                    title="Unorganized — this model's folder doesn't match your destination template. Open Settings → Library to see or change the template."
+                    aria-label="Unorganized — open the destination template in Settings"
+                    className="inline-flex shrink-0 text-amber-400 hover:text-amber-300 transition-colors"
                   >
-                    <FolderSync size={18} className="text-amber-400" />
-                  </span>
+                    <FolderSync size={18} />
+                  </Link>
                 )}
               </h1>
               {model.creator && (

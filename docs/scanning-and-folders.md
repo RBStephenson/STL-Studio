@@ -77,6 +77,15 @@ The same creator can appear under more than one `{tag}` branch — its models ar
 merged under one creator, each keeping the tag from its own path. Changing a
 layout takes effect on the next scan (full or per-creator).
 
+> **Not the same thing as the destination template.** Settings shows these two
+> near each other and they point opposite ways. A scan root's **Layout** (above)
+> says how your existing folders are *read*. The **destination template**
+> (Settings → Library → **Destination Layout**, directly below your scan
+> locations) says where models *should* live — it drives Reorganize, new creator
+> folders, import moves, and the "unorganized" badge. Changing one does not
+> change the other. See
+> [Reorganize library](features.md#reorganize-library).
+
 ## How a "model" is detected
 
 For each folder (that contains 3D files somewhere in its subtree), the scanner
@@ -131,7 +140,7 @@ alone instead of re-deriving it from the heuristic.
 A scanned **model** is a catalog/viewer unit; a **release package** is a physical
 move boundary. One package may contain several models, such as printable files at
 its root plus a separately indexed `Alternate/` subtree. With **Preserve release
-package structure** enabled under **Settings → Library**, Reorganize finds the
+package structure** enabled under **Settings → Library → Library Tools**, Reorganize finds the
 physical character ancestor and treats its next child as the package root. It then
 moves that complete subtree while keeping all relative folders and companion files
 unchanged. A model stored directly in the character directory uses that directory
@@ -253,6 +262,11 @@ Add a Folder**, then name it and tick **Import destination**.
 
 Marking a folder an import destination only makes it *eligible*. The actual
 on-disk move still requires the **Reorganize Library** feature flag
-(`reorganize_enabled`) to be turned on under **Settings → Library** — it defaults
-off, and while off both Reorganize and import moves are refused. This mirrors
-[Reorganize](features.md#reorganize-library)'s safety posture.
+(`reorganize_enabled`) to be turned on under **Settings → Library → Library
+Tools** — it defaults off, and while off both Reorganize and import moves are
+refused. This mirrors [Reorganize](features.md#reorganize-library)'s safety
+posture.
+
+That flag gates *writes*, not the layout itself. The destination template an
+import move follows lives under **Settings → Library → Destination Layout** and
+is readable and editable with the flag off.

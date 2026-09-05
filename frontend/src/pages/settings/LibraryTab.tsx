@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { HardDrive, Plus, Trash2, FolderSearch, FolderTree, RefreshCw } from "lucide-react";
+import { HardDrive, Plus, Trash2, FolderSearch, FolderTree, FolderSync, RefreshCw } from "lucide-react";
 import { api, ScanRoot } from "../../api/client";
 import FolderPicker from "../../components/FolderPicker";
 import TemplateEditor from "../../components/reorganize/TemplateEditor";
@@ -384,6 +384,89 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
         </div>
       </section>
 
+      {/* Destination layout — library configuration, NOT Reorganize configuration
+          (STUDIO-405). These three settings decide where models belong, and four
+          separate things read them: Reorganize, new creator folders, import
+          moves, and the "unorganized" badge (`routers/models.py` builds that
+          badge from exactly this template plus both slugify flags). Living under
+          a default-off checkbox labelled Experimental made the library's own
+          layout look like an option belonging to a scary tool. */}
+      <section className="mb-8 pt-6 border-t border-border-subtle">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <FolderSync size={14} /> Destination Layout
+        </h2>
+
+        {/* Each scan location above has a field also called "Layout", pointing
+            the other way. Naming the direction is the whole job of this line. */}
+        <p className="text-xs text-text-secondary-alt mb-3 leading-relaxed">
+          The <strong className="text-text-primary-alt2">Layout</strong> on each scan location above
+          describes how your existing folders are <em>read</em> — which level is the creator, which
+          are tags. This describes the opposite: where models <em>should</em> live. Reorganize, new
+          creator folders, import moves, and the <strong className="text-text-primary-alt2">unorganized</strong>{" "}
+          badge on a model's page all follow it.
+        </p>
+
+        <div className="bg-panel/60 border border-border-subtle rounded-lg px-4 py-3 flex flex-col gap-3">
+          <div>
+            <label className="block text-xs text-text-secondary-alt mb-1">Destination template</label>
+            {/* The context's pre-fetch default for reorganize_template is "",
+                so rendering the editor before the settings land would flash
+                "the template is empty" — and, worse, offer a blur-to-save over
+                a template the user hasn't been shown yet. */}
+            {loaded ? (
+              <TemplateEditor
+                value={templateEdit ?? settings.reorganize_template}
+                onChange={setTemplateEdit}
+                onCommit={saveReorganizeTemplate}
+                defaultTemplate={settings.reorganize_template_default}
+                scopeNote={
+                  <>
+                    <strong>Saved</strong> — used by Reorganize Library, new creator folders,
+                    import moves, and the "unorganized" flag on a model's page. The Reorganize
+                    page can override it for a single plan without changing this.
+                  </>
+                }
+              />
+            ) : (
+              <div className="h-9 rounded bg-panel-inset border border-border animate-pulse" />
+            )}
+          </div>
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.reorganize_slugify}
+              onChange={() => update({ reorganize_slugify: !settings.reorganize_slugify }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+              className="mt-0.5 accent-indigo-500"
+            />
+            <div>
+              <p className="text-sm text-text-primary-alt2">Lowercase, hyphenated directory names</p>
+              <p className="text-xs text-text-secondary-alt mt-0.5">
+                Renders every segment slug-style (e.g. <code className="text-text-secondary">abe-3d</code> instead
+                of <code className="text-text-secondary">Abe 3D</code>), matching how imported folders are named.
+                Off keeps the original casing and spacing.
+              </p>
+            </div>
+          </label>
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={settings.reorganize_slugify_filenames}
+              onChange={() => update({ reorganize_slugify_filenames: !settings.reorganize_slugify_filenames }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+              className="mt-0.5 accent-indigo-500"
+            />
+            <div>
+              <p className="text-sm text-text-primary-alt2">Lowercase, hyphenated filenames</p>
+              <p className="text-xs text-text-secondary-alt mt-0.5">
+                Also renames each STL file itself (e.g. <code className="text-text-secondary">cold-giant-hollowed.stl</code>{" "}
+                instead of <code className="text-text-secondary">Cold Giant Hollowed.stl</code>) on Reorganize and
+                import. No template — just normalization. Independent of the directory-name setting above; off by
+                default since it renames files on disk, not just folders.
+              </p>
+            </div>
+          </label>
+        </div>
+      </section>
+
       {/* Library tools */}
       <section className="pt-6 border-t border-border-subtle">
         <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
@@ -435,10 +518,12 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           <div>
             <p className="text-sm text-text-primary-alt2">Enable Reorganize Library (Experimental)</p>
             <p className="text-xs text-text-secondary-alt mt-0.5">
-              Off by default. When on, "Reorganize Library" appears in the Library
-              Tools menu (Creators toolbar) and can move files on disk to match your
-              template — including import moves. A read-only deployment (e.g. Docker
-              mounts) still can't write regardless.
+              Off by default. This is the write gate: with it off nothing moves files
+              on disk — not Reorganize apply or undo, and not import moves. When on,
+              "Reorganize Library" appears in the Library Tools menu (Creators
+              toolbar). Your destination template is library configuration and lives
+              under Destination Layout above, whether this is on or off. A read-only
+              deployment (e.g. Docker mounts) still can't write regardless.
             </p>
           </div>
         </label>
@@ -460,83 +545,26 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           </div>
         </label>
 
-        <div className="bg-panel/60 border border-border-subtle rounded-lg px-4 py-3 mt-4 flex flex-col gap-3">
+        {/* Stays here, unlike the template and slugify settings: this one adds an
+            action to the Reorganize preview and is read nowhere else. */}
+        <label className="flex items-start gap-3 cursor-pointer select-none mb-4 ml-6">
+          <input
+            type="checkbox"
+            checked={settings.reorganize_ai_suggestions_enabled}
+            onChange={() => update({ reorganize_ai_suggestions_enabled: !settings.reorganize_ai_suggestions_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+            className="mt-0.5 accent-indigo-500"
+          />
           <div>
-            <label className="block text-xs text-text-secondary-alt mb-1">Destination template</label>
-            {/* The context's pre-fetch default for reorganize_template is "",
-                so rendering the editor before the settings land would flash
-                "the template is empty" — and, worse, offer a blur-to-save over
-                a template the user hasn't been shown yet. */}
-            {loaded ? (
-              <TemplateEditor
-                value={templateEdit ?? settings.reorganize_template}
-                onChange={setTemplateEdit}
-                onCommit={saveReorganizeTemplate}
-                defaultTemplate={settings.reorganize_template_default}
-                scopeNote={
-                  <>
-                    <strong>Saved</strong> — used by Reorganize Library, new creator folders,
-                    and the "unorganized" flag on a model's page. The Reorganize page can
-                    override it for a single plan without changing this.
-                  </>
-                }
-              />
-            ) : (
-              <div className="h-9 rounded bg-panel-inset border border-border animate-pulse" />
-            )}
+            <p className="text-sm text-text-primary-alt2">AI-assisted field suggestions</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              Adds a "Suggest with AI" action on unclassifiable/collision rows in the
+              Reorganize Library preview — infers creator/character/title from the folder
+              name and file names using the AI Organize endpoint (Settings → AI &amp;
+              Integrations). Suggestions only prefill the resolution form; nothing changes
+              until you confirm.
+            </p>
           </div>
-          <label className="flex items-start gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={settings.reorganize_slugify}
-              onChange={() => update({ reorganize_slugify: !settings.reorganize_slugify }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
-              className="mt-0.5 accent-indigo-500"
-            />
-            <div>
-              <p className="text-sm text-text-primary-alt2">Lowercase, hyphenated directory names</p>
-              <p className="text-xs text-text-secondary-alt mt-0.5">
-                Renders every segment slug-style (e.g. <code className="text-text-secondary">abe-3d</code> instead
-                of <code className="text-text-secondary">Abe 3D</code>), matching how imported folders are named.
-                Off keeps the original casing and spacing.
-              </p>
-            </div>
-          </label>
-          <label className="flex items-start gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={settings.reorganize_slugify_filenames}
-              onChange={() => update({ reorganize_slugify_filenames: !settings.reorganize_slugify_filenames }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
-              className="mt-0.5 accent-indigo-500"
-            />
-            <div>
-              <p className="text-sm text-text-primary-alt2">Lowercase, hyphenated filenames</p>
-              <p className="text-xs text-text-secondary-alt mt-0.5">
-                Also renames each STL file itself (e.g. <code className="text-text-secondary">cold-giant-hollowed.stl</code>{" "}
-                instead of <code className="text-text-secondary">Cold Giant Hollowed.stl</code>) on Reorganize and
-                import. No template — just normalization. Independent of the directory-name setting above; off by
-                default since it renames files on disk, not just folders.
-              </p>
-            </div>
-          </label>
-          <label className="flex items-start gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={settings.reorganize_ai_suggestions_enabled}
-              onChange={() => update({ reorganize_ai_suggestions_enabled: !settings.reorganize_ai_suggestions_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
-              className="mt-0.5 accent-indigo-500"
-            />
-            <div>
-              <p className="text-sm text-text-primary-alt2">AI-assisted field suggestions</p>
-              <p className="text-xs text-text-secondary-alt mt-0.5">
-                Adds a "Suggest with AI" action on unclassifiable/collision rows in the
-                Reorganize Library preview — infers creator/character/title from the folder
-                name and file names using the AI Organize endpoint (Settings → AI &amp;
-                Integrations). Suggestions only prefill the resolution form; nothing changes
-                until you confirm.
-              </p>
-            </div>
-          </label>
-        </div>
+        </label>
 
         <label className="flex items-start gap-3 cursor-pointer select-none mb-4 mt-4">
           <input
