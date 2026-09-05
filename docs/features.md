@@ -835,6 +835,31 @@ suffix field on each row is how you break them.
 folder name, and the optional form treats that as "no title", so those models
 sit one level up rather than getting a folder named after their source folder.
 
+### Building a template
+
+You don't have to type any of that by hand. Both places the template appears —
+**Settings → Library → Reorganize** and the Reorganize page itself — use the same
+editor. **Token chips** insert `{creator}`, `{character}`, `{scale}` or `{title}`
+at the cursor. **Presets** fill in a whole layout as a starting point; they stay
+editable afterwards, and nothing about a preset is saved. An **example** renders
+the current template against a handful of real models from your library as you
+type, so you can see what a change does without building a plan first. A
+malformed template shows its parse error inline rather than waiting for a save or
+a full build, and never clears what you typed.
+
+Two things the example deliberately does not tell you. First, it is a **template
+render, not an eligibility check**: it reports only the problems the template
+itself caused — a required token with no value, a path that came out too long, a
+reserved name — because it does no disk work at all, which is exactly what makes
+it fast enough to re-run as you type. Collisions, locks, symlinks, missing files
+and models spread across several directories all need a built plan. A clean
+example is not a promise that a model will move. Second, while **Preserve release
+package structure** is on the template does not decide placement at all, so the
+example says so rather than showing you a layout that will not happen.
+
+The Settings copy of the template is **saved**. The copy on the Reorganize page is
+a **one-off for that plan** and is not saved. Each editor says which one it is.
+
 The **Scan root** selector defaults to all configured roots. Choose one root to
 limit the preview, Apply, and Undo refreshes to that library. Changing roots
 clears selections and unresolved field overrides from the previous plan before

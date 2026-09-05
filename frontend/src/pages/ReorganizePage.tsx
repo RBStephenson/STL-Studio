@@ -13,8 +13,8 @@ import type {
   ScanRoot,
 } from "../api/client";
 import ReorganizeStatsBar from "../components/reorganize/ReorganizeStatsBar";
+import TemplateEditor, { DEFAULT_TEMPLATE } from "../components/reorganize/TemplateEditor";
 
-const DEFAULT_TEMPLATE = "{creator}/{character}/{title}";
 const DEBOUNCE_MS = 500;
 const PAGE_SIZES = [20, 50, 100] as const;
 
@@ -492,21 +492,21 @@ export default function ReorganizePage() {
             </span>
           )}
         </label>
-        <input
-          type="text"
+        <TemplateEditor
           value={template}
-          onChange={(e) => { setTemplate(e.target.value); setTemplateTouched(true); }}
-          className="w-full bg-panel border border-border rounded px-3 py-2 text-sm text-text-primary font-mono focus:outline-none focus:border-accent-start"
-          aria-label="Destination template"
+          onChange={(next) => { setTemplate(next); setTemplateTouched(true); }}
+          rootId={rootId}
+          scopeNote={
+            <>
+              This template applies to <strong>this plan only</strong> and is not saved.
+              It starts from your saved template;{" "}
+              <a href="/settings#library" className="text-indigo-400 hover:text-indigo-300 underline">
+                change that in Settings
+              </a>{" "}
+              to affect new creator folders and the unorganized badge too.
+            </>
+          }
         />
-        <div className="text-xs text-text-secondary-alt">
-          Tokens: <code className="text-indigo-400">{"{creator}"}</code>{" "}
-          <code className="text-indigo-400">{"{character}"}</code>{" "}
-          <code className="text-indigo-400">{"{scale}"}</code>{" "}
-          <code className="text-indigo-400">{"{title}"}</code> — separate levels with <code>/</code>.
-          {" "}Add <code>?</code> to make one optional (<code className="text-indigo-400">{"{scale?}"}</code>):
-          its level is skipped for models with no value, instead of blocking them.
-        </div>
         <div className="rounded-lg border border-border-subtle bg-panel/60 px-3 py-2 text-xs text-text-secondary-alt space-y-1">
           <p>
             Directory slugify is {settings.reorganize_slugify ? "on" : "off"}: destination
@@ -521,12 +521,10 @@ export default function ReorganizePage() {
             After a successful apply, source folders left empty by the selected moves are removed.
           </p>
         </div>
-        {settings.reorganize_package_mode_enabled && (
-          <div className="text-xs text-indigo-300">
-            Package preservation is on: Reorganize uses the creator/character prefix
-            and keeps each release package's name and internal folders unchanged.
-          </div>
-        )}
+        {/* The package-mode note lives in TemplateEditor now (STUDIO-402): it
+            keys off `package_mode` in the preview response rather than the
+            local setting, and it belongs next to the template it's telling you
+            is inert. */}
         {error && preview && <div className="text-sm text-rose-400">{error}</div>}
       </div>
 

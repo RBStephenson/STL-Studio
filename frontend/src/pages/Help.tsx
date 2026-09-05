@@ -913,6 +913,28 @@ const SECTIONS: Section[] = [
           means more collisions; the suffix field on each row is how you break them.
         </p>
         <p>
+          You don't have to type the template by hand. The Settings field and the one
+          on this page use the same editor: <strong>token chips</strong> insert a token
+          at the cursor, <strong>presets</strong> fill in a whole layout as a starting
+          point (still editable, and never saved as a "preset"), and an{" "}
+          <strong>example</strong> renders your template against a few real models as
+          you type. An invalid template shows its parse error inline instead of waiting
+          for a save or a full build, and never clears what you typed.
+        </p>
+        <p>
+          That example is a <strong>template render, not an eligibility check</strong>.
+          It reports only what the template caused — a required token with no value, a
+          path that came out too long, a reserved name — because it does no disk work at
+          all, which is what makes it fast. Collisions, locks, symlinks, missing files
+          and multi-directory models only show up once you build a plan, so a clean
+          example is not a promise that a model will move. And while{" "}
+          <strong>Preserve release package structure</strong> is on, the template does
+          not decide placement at all; the example says so rather than showing a layout
+          that won't happen. The template on this page applies to{" "}
+          <strong>this plan only</strong> and is not saved — the one in{" "}
+          <strong>Settings → Library</strong> is.
+        </p>
+        <p>
           The <strong>Scan root</strong> selector defaults to all configured roots. Choose
           one root to limit the preview, Apply, and Undo refreshes to that library.
           Changing roots discards selections and unresolved field overrides from the

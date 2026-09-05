@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { HardDrive, Plus, Trash2, FolderSearch, FolderTree, RefreshCw } from "lucide-react";
 import { api, ScanRoot } from "../../api/client";
 import FolderPicker from "../../components/FolderPicker";
+import TemplateEditor from "../../components/reorganize/TemplateEditor";
 import FlashBanner from "./FlashBanner";
 import { useSettingsFlash } from "./useSettingsFlash";
 import { errMsg } from "../../utils/err";
@@ -47,7 +48,7 @@ interface Props {
 
 export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
   const { success, error, flash } = useSettingsFlash();
-  const { settings, update } = useAppSettings();
+  const { settings, loaded, update } = useAppSettings();
   const [newPath, setNewPath] = useState("");
   const [newLayout, setNewLayout] = useState("{creator}");
   const [layoutEdits, setLayoutEdits] = useState<Record<number, string>>({});
@@ -462,26 +463,26 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
         <div className="bg-panel/60 border border-border-subtle rounded-lg px-4 py-3 mt-4 flex flex-col gap-3">
           <div>
             <label className="block text-xs text-text-secondary-alt mb-1">Destination template</label>
-            <input
-              type="text"
-              value={templateEdit ?? settings.reorganize_template}
-              onChange={(e) => setTemplateEdit(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-              onBlur={saveReorganizeTemplate}
-              placeholder="{creator}/{character}/{title}"
-              spellCheck={false}
-              className="w-72 bg-panel-inset border border-border focus:border-accent-start rounded px-2 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none font-mono"
-            />
-            <p className="text-xs text-text-muted mt-1">
-              Used by Reorganize Library, new creator folders, and the "unorganized" flag on a model's page.
-              Tokens: <code className="text-text-secondary">{"{creator}"}</code>,{" "}
-              <code className="text-text-secondary">{"{character}"}</code>,{" "}
-              <code className="text-text-secondary">{"{scale}"}</code>,{" "}
-              <code className="text-text-secondary">{"{title}"}</code>. Add{" "}
-              <code className="text-text-secondary">?</code> to make one optional
-              (<code className="text-text-secondary">{"{scale?}"}</code>) — its level is
-              skipped for models with no value instead of blocking them.
-            </p>
+            {/* The context's pre-fetch default for reorganize_template is "",
+                so rendering the editor before the settings land would flash
+                "the template is empty" — and, worse, offer a blur-to-save over
+                a template the user hasn't been shown yet. */}
+            {loaded ? (
+              <TemplateEditor
+                value={templateEdit ?? settings.reorganize_template}
+                onChange={setTemplateEdit}
+                onCommit={saveReorganizeTemplate}
+                scopeNote={
+                  <>
+                    <strong>Saved</strong> — used by Reorganize Library, new creator folders,
+                    and the "unorganized" flag on a model's page. The Reorganize page can
+                    override it for a single plan without changing this.
+                  </>
+                }
+              />
+            ) : (
+              <div className="h-9 rounded bg-panel-inset border border-border animate-pulse" />
+            )}
           </div>
           <label className="flex items-start gap-3 cursor-pointer select-none">
             <input

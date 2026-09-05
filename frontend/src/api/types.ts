@@ -1189,3 +1189,32 @@ export interface ReorganizeAiSuggestResult {
   llm_status: string;
   llm_detail: string | null;
 }
+
+// Cheap template preview (STUDIO-401) — renders a template against a handful of
+// real models with no filesystem work at all. It is NOT a manifest: no collision
+// pass, no per-file plan, nothing persisted.
+//
+// The flags below report problems the TEMPLATE caused and nothing else. The
+// blockers that need the disk (symlink, missing files, spans-multiple-dirs),
+// `locked`, and `escapes_scan_root` are deliberately absent, so a sample with no
+// flags set does NOT mean the model is eligible to move — only
+// ReorganizePreview answers that.
+export interface TemplatePreviewSample {
+  model_id: number;
+  model_name: string;
+  source_dir: string;
+  proposed_dir: string;
+  unclassifiable: boolean;
+  missing_fields: string[];
+  over_length: boolean;
+  reserved_name: boolean;
+}
+
+export interface TemplatePreviewResponse {
+  template: string;
+  samples: TemplatePreviewSample[];
+  // True when package mode is on, in which case placement comes from
+  // {creator}/{character} plus the package folder name and the template does
+  // not drive it at all — the samples are advisory only.
+  package_mode: boolean;
+}

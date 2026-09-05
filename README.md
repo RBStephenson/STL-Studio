@@ -156,6 +156,7 @@ A folder is only indexed as a model if it contains 3D files.
 
 ### Reorganize Library
 - Preview and apply a folder template (default `{creator}/{character}/{title}`, with optional `{scale}`) to tidy files on disk
+- Build the template with token chips and presets instead of typing it, with a live example rendered against real models as you type — a template render, not an eligibility check
 - Filter the preview by creator before using status tabs, pagination, and page-level select-all, making targeted testing and reorganizing easier
 - Destination template and lowercase/hyphenated ("slug") formatting are saved settings, shared with manual creator-folder creation and the model detail page's "unorganized" indicator
 - A model's own gallery images move along with its STL files (shared/inherited images from a parent folder are left alone); the source folder is removed once it's empty
