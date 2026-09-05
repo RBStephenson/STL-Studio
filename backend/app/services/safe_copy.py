@@ -40,7 +40,14 @@ def copy_verified(src: str, dst: str) -> None:
     os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
     shutil.copyfile(src, tmp)
     shutil.copystat(src, tmp)
-    with open(tmp, "rb") as fh:
+    # "rb+", not "rb" (STUDIO-408): os.fsync on a READ-ONLY descriptor is legal
+    # on POSIX but raises EBADF on Windows, where it routes to _commit(). With
+    # "rb" this function therefore raised on every call on Windows, taking out
+    # every cross-device reorganize move and every folder install — on the one
+    # platform both features actually ship to. Linux-only CI never saw it.
+    # "rb+" neither truncates nor writes, so POSIX behaviour is unchanged; the
+    # file already exists because copyfile just created it.
+    with open(tmp, "rb+") as fh:
         os.fsync(fh.fileno())
     if os.path.getsize(tmp) != os.path.getsize(src):
         os.unlink(tmp)
