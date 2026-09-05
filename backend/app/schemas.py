@@ -1105,3 +1105,32 @@ class ReorganizeAiSuggestResponse(BaseModel):
     suggestions: list[ReorganizeAiSuggestion]
     llm_status: str                    # ok | disabled | skipped | error
     llm_detail: Optional[str] = None
+
+
+# --- Library reorganize, cheap template preview (STUDIO-401) --------------
+
+class TemplatePreviewSample(BaseModel):
+    """One model rendered through the destination template.
+
+    The flags report problems the TEMPLATE caused, and nothing else. Blockers
+    that need the filesystem (symlink, missing files, spans-multiple-dirs) and
+    `locked` are deliberately absent — no flags set here does NOT mean the
+    model is eligible to move. Use /reorganize/preview for that verdict.
+    """
+    model_id: int
+    model_name: str
+    source_dir: str
+    proposed_dir: str
+    unclassifiable: bool               # a REQUIRED token had no value
+    missing_fields: list[str]
+    over_length: bool
+    reserved_name: bool
+
+
+class TemplatePreviewResponse(BaseModel):
+    template: str                      # canonical form, as build_manifest reports it
+    samples: list[TemplatePreviewSample]
+    # True when reorganize_package_mode_enabled is on, in which case package
+    # mode places by {creator}/{character} plus the package folder name and the
+    # template does not drive placement at all — these samples are advisory.
+    package_mode: bool

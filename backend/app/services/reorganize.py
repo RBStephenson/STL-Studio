@@ -15,6 +15,7 @@ import os
 import re
 import time
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from sqlalchemy import or_
@@ -217,41 +218,17 @@ def _scale_value(auto_tags: list | None) -> str:
     return ""
 
 
-def build_manifest(
-    db: Session,
-    template: str | None,
-    root_id: int | None = None,
-    overrides: dict[int, dict] | None = None,
-    inbox_source: str | None = None,
-    slugify_title: bool = False,
-    slugify_all: bool = False,
-    model_ids: list[int] | None = None,
-    slugify_filenames: bool = False,
-    preserve_packages: bool = False,
-) -> Manifest:
-    """Build the reorganize preview manifest. Raises ReorganizeTemplateError on
-    a malformed template (caller maps to 4xx).
+def _manifest_scope(
+    db: Session, root_id: int | None,
+) -> tuple[list[tuple[str, str]], Callable[[Model], str | None]]:
+    """Scan-root keys for `root_id` (all roots when None), plus the resolver
+    that picks an inbox model's managed destination root.
 
-    ``overrides`` (Phase 2c) maps a model_id to user resolutions for that entry:
-    ``creator`` / ``character`` / ``title`` substitutions (fix unclassifiable) and
-    an optional ``suffix`` appended to the title segment (dodge a collision /
-    shorten an over-length or reserved name). A regenerated manifest with
-    overrides is a fresh artifact with its own fingerprint baseline.
-
-    ``slugify_all`` renders every segment lowercase/hyphenated (import-style),
-    overriding the narrower ``slugify_title`` (title-only) used by inbox import.
-    ``model_ids``, when given, restricts the built entries to those models —
-    the collision/overlap passes then only run over that subset.
-
-    ``slugify_filenames`` (#946) additionally renders each STL's own filename
-    lowercase/hyphenated (e.g. "Cold Giant.stl" -> "cold-giant.stl") — a
-    separate, independent toggle from ``slugify_all``/``slugify_title``, which
-    only ever touch directory segments. Gallery image filenames are left
-    untouched; this only applies to STL files."""
-    overrides = overrides or {}
-    segments = parse_template(template)
-    canonical_template = "/".join(segments)
-
+    Extracted from `build_manifest` (STUDIO-401): the template-preview endpoint
+    needs exactly this scope, and re-deriving it there is where a preview would
+    silently diverge from the real manifest for inbox models with a source
+    mapping. Reads rows; touches no filesystem.
+    """
     roots_q = db.query(ScanRoot)
     if root_id is not None:
         roots_q = roots_q.filter(ScanRoot.id == root_id)
@@ -295,12 +272,30 @@ def build_manifest(
                 best_len, best = len(skey), lib
         return best if best is not None else primary_dest
 
-    pack_paths = [_canon(p) for (p,) in db.query(PackOverride.path).all() if p]
+    return root_keys, _dest_for
 
-    models_q = (
-        db.query(Model)
-        .options(joinedload(Model.creator), joinedload(Model.stl_files))
-    )
+
+def _models_for_scope(
+    db: Session,
+    root_keys: list[tuple[str, str]],
+    root_id: int | None,
+    inbox_source: str | None = None,
+    with_files: bool = True,
+) -> list[Model]:
+    """The models a manifest covers, given its scope.
+
+    Extracted from `build_manifest` (STUDIO-401) so template-preview selects
+    the same models the real preview would — the root-scoped filter below is
+    subtle enough (separator forms, casefold) that a second copy would drift.
+
+    ``with_files=False`` skips eager-loading `stl_files`. Template-preview
+    renders from model metadata alone and never reads them; loading them there
+    would turn a deliberately cheap endpoint into an N+1 across the library.
+    """
+    options = [joinedload(Model.creator)]
+    if with_files:
+        options.append(joinedload(Model.stl_files))
+    models_q = db.query(Model).options(*options)
     if inbox_source is not None:
         # Scoped import apply (#453): only inbox models under this source folder.
         skey = _key(inbox_source)
@@ -340,6 +335,50 @@ def build_manifest(
     else:
         models = models_q.all()
 
+    return models
+
+
+def build_manifest(
+    db: Session,
+    template: str | None,
+    root_id: int | None = None,
+    overrides: dict[int, dict] | None = None,
+    inbox_source: str | None = None,
+    slugify_title: bool = False,
+    slugify_all: bool = False,
+    model_ids: list[int] | None = None,
+    slugify_filenames: bool = False,
+    preserve_packages: bool = False,
+) -> Manifest:
+    """Build the reorganize preview manifest. Raises ReorganizeTemplateError on
+    a malformed template (caller maps to 4xx).
+
+    ``overrides`` (Phase 2c) maps a model_id to user resolutions for that entry:
+    ``creator`` / ``character`` / ``title`` substitutions (fix unclassifiable) and
+    an optional ``suffix`` appended to the title segment (dodge a collision /
+    shorten an over-length or reserved name). A regenerated manifest with
+    overrides is a fresh artifact with its own fingerprint baseline.
+
+    ``slugify_all`` renders every segment lowercase/hyphenated (import-style),
+    overriding the narrower ``slugify_title`` (title-only) used by inbox import.
+    ``model_ids``, when given, restricts the built entries to those models —
+    the collision/overlap passes then only run over that subset.
+
+    ``slugify_filenames`` (#946) additionally renders each STL's own filename
+    lowercase/hyphenated (e.g. "Cold Giant.stl" -> "cold-giant.stl") — a
+    separate, independent toggle from ``slugify_all``/``slugify_title``, which
+    only ever touch directory segments. Gallery image filenames are left
+    untouched; this only applies to STL files."""
+    overrides = overrides or {}
+    segments = parse_template(template)
+    canonical_template = "/".join(segments)
+
+    root_keys, _dest_for = _manifest_scope(db, root_id)
+
+    pack_paths = [_canon(p) for (p,) in db.query(PackOverride.path).all() if p]
+
+    models = _models_for_scope(db, root_keys, root_id, inbox_source)
+
     if model_ids is not None:
         wanted = set(model_ids)
         models = [m for m in models if m.id in wanted]
@@ -372,6 +411,94 @@ def build_manifest(
         )
     _detect_overlaps(entries)
     return Manifest(template=canonical_template, entries=entries, _root_keys=[k for _, k in root_keys])
+
+
+@dataclass
+class TemplateSample:
+    """One rendered row of the cheap template preview (STUDIO-401)."""
+    model_id: int
+    model_name: str
+    source_dir: str
+    proposed_dir: str
+    unclassifiable: bool
+    missing_fields: list[str]
+    over_length: bool
+    reserved_name: bool
+
+
+@dataclass
+class TemplatePreview:
+    """Mirrors ``Manifest``'s shape: the canonical template plus its rows."""
+    template: str
+    samples: list[TemplateSample]
+
+
+def build_template_preview(
+    db: Session,
+    template: str | None,
+    root_id: int | None = None,
+    limit: int = 5,
+    slugify_all: bool = False,
+) -> TemplatePreview:
+    """Render ``template`` against a handful of real models, cheaply. Raises
+    ReorganizeTemplateError on a malformed template (caller maps to 400).
+
+    Deliberately NOT a manifest: no ``os.stat``, no per-file move plan, no
+    collision or overlap pass, nothing persisted. It answers "what does this
+    template do to my library" and nothing else.
+
+    **The flags here cover only problems the TEMPLATE caused** — a required
+    token with no value, or a rendered path that came out over-length or
+    reserved. The stat-dependent blockers (symlink, missing files on disk,
+    spans-multiple-dirs) and ``locked`` are absent by design, so a sample with
+    no flags is *not* a promise the model is eligible to move. Reporting some
+    of the blockers would read as an eligibility verdict this endpoint cannot
+    give without the filesystem work it exists to avoid.
+
+    Sampling is deterministic and metadata-only: models in id order, and if any
+    model in scope renders unclassifiable the first such model is always
+    included — seeing the failure mode is the point of previewing at all. That
+    search is O(models) in the worst case (no unclassifiable model exists), but
+    it is pure CPU over rows already loaded.
+    """
+    segments = parse_template(template)
+    canonical_template = "/".join(segments)
+    root_keys, dest_for = _manifest_scope(db, root_id)
+    models = _models_for_scope(db, root_keys, root_id, with_files=False)
+    models.sort(key=lambda m: m.id)
+
+    ok: list[TemplateSample] = []
+    unclassifiable: TemplateSample | None = None
+    for m in models:
+        dest = _render_destination(
+            m, segments, root_keys, None, dest_for(m), slugify_all=slugify_all,
+        )
+        sample = TemplateSample(
+            model_id=m.id,
+            model_name=m.name or "",
+            source_dir=dest.current_dir,
+            proposed_dir=dest.proposed_dir,
+            unclassifiable=bool(dest.missing),
+            missing_fields=dest.missing,
+            over_length=dest.over_length,
+            reserved_name=dest.reserved_name,
+        )
+        if sample.unclassifiable:
+            if unclassifiable is None:
+                unclassifiable = sample
+        elif len(ok) < limit:
+            ok.append(sample)
+        if unclassifiable is not None and len(ok) >= limit:
+            break
+
+    if unclassifiable is None:
+        return TemplatePreview(template=canonical_template, samples=ok[:limit])
+    # Reserve the last slot for the failure case rather than dropping it.
+    kept = [*ok[: max(limit - 1, 0)], unclassifiable]
+    return TemplatePreview(
+        template=canonical_template,
+        samples=sorted(kept, key=lambda s: s.model_id),
+    )
 
 
 def _auto_apply_import_suffixes(
@@ -682,17 +809,42 @@ def _append_non_stl_moves(
     return found_symlink
 
 
-def _build_entry(
+@dataclass
+class RenderedDestination:
+    """The stat-free half of an entry: where the template says a model goes,
+    and the problems the TEMPLATE itself caused getting there.
+
+    Deliberately not an eligibility verdict. The remaining blockers — symlink,
+    missing-files-on-disk, spans-multiple-dirs — all require stat()ing the
+    model's files, and `locked` is model state; none of them belong to the
+    rendering. `_build_entry` adds those; the template-preview endpoint
+    (STUDIO-401) uses this alone and says so.
+    """
+    proposed_dir: str
+    current_dir: str
+    cur_key: str
+    missing: list[str]
+    over_length: bool
+    reserved_name: bool
+    escapes_scan_root: bool
+
+
+def _render_destination(
     m: Model,
     segments: list[str],
     root_keys: list[tuple[str, str]],
-    pack_paths: list[str],
     override: dict | None = None,
     dest_root: str | None = None,
     slugify_title: bool = False,
     slugify_all: bool = False,
-    slugify_filenames: bool = False,
-) -> Entry:
+) -> RenderedDestination:
+    """Render `segments` against one model's metadata to a destination path.
+
+    Extracted verbatim from `_build_entry` (STUDIO-401) so the cheap
+    template-preview endpoint renders through *this* code and cannot drift into
+    a second implementation of the grammar. Touches no filesystem: every value
+    here comes from the model row, the scan-root rows, and the template.
+    """
     # User resolutions (Phase 2c) take precedence over model metadata and clear
     # the corresponding 'missing' flag.
     override = override or {}
@@ -801,6 +953,57 @@ def _build_entry(
 
     over_len = over_len or path_over_length(proposed_dir)
 
+    # Escape = no anchor root to place the model under. For in-library models that
+    # means it sits outside every scan root; for inbox models it means there is no
+    # managed destination root configured to move it into.
+    if m.is_inbox:
+        escapes = anchor is None
+    else:
+        escapes = scan_root is None and len(root_keys) > 0
+    # Even with an anchor, a literal-only template or '..'-laden value could
+    # escape; re-check the assembled destination stays under the anchor root.
+    if anchor is not None:
+        if not (_key(proposed_dir) == _key(anchor)
+                or _key(proposed_dir).startswith(_key(anchor) + "/")):
+            escapes = True
+
+    return RenderedDestination(
+        proposed_dir=proposed_dir,
+        current_dir=current_dir,
+        cur_key=cur_key,
+        missing=missing,
+        over_length=over_len,
+        reserved_name=reserved,
+        escapes_scan_root=escapes,
+    )
+
+
+def _build_entry(
+    m: Model,
+    segments: list[str],
+    root_keys: list[tuple[str, str]],
+    pack_paths: list[str],
+    override: dict | None = None,
+    dest_root: str | None = None,
+    slugify_title: bool = False,
+    slugify_all: bool = False,
+    slugify_filenames: bool = False,
+) -> Entry:
+    # Destination rendering lives in _render_destination so the cheap
+    # template-preview endpoint shares this exact code (STUDIO-401). Unpacked
+    # into the original local names to keep this a pure extraction.
+    dest = _render_destination(
+        m, segments, root_keys, override, dest_root,
+        slugify_title=slugify_title, slugify_all=slugify_all,
+    )
+    proposed_dir = dest.proposed_dir
+    current_dir = dest.current_dir
+    cur_key = dest.cur_key
+    missing = dest.missing
+    over_len = dest.over_length
+    reserved = dest.reserved_name
+    escapes = dest.escapes_scan_root
+
     # Per-file moves + fingerprints.
     files: list[FileMove] = []
     src_dirs: dict[str, str] = {}
@@ -906,20 +1109,6 @@ def _build_entry(
 
     # Path-keyed overrides this move invalidates (under the model's folder).
     pack_refs = [p for p in pack_paths if _key(p) == cur_key or _key(p).startswith(cur_key + "/")]
-
-    # Escape = no anchor root to place the model under. For in-library models that
-    # means it sits outside every scan root; for inbox models it means there is no
-    # managed destination root configured to move it into.
-    if m.is_inbox:
-        escapes = anchor is None
-    else:
-        escapes = scan_root is None and len(root_keys) > 0
-    # Even with an anchor, a literal-only template or '..'-laden value could
-    # escape; re-check the assembled destination stays under the anchor root.
-    if anchor is not None:
-        if not (_key(proposed_dir) == _key(anchor)
-                or _key(proposed_dir).startswith(_key(anchor) + "/")):
-            escapes = True
 
     kind = _classify_kind(current_dir, proposed_dir)
     # A directory classified "in_place" can still have STL files that need
