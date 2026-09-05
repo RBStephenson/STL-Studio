@@ -504,6 +504,8 @@ export default function ReorganizePage() {
           <code className="text-indigo-400">{"{character}"}</code>{" "}
           <code className="text-indigo-400">{"{scale}"}</code>{" "}
           <code className="text-indigo-400">{"{title}"}</code> — separate levels with <code>/</code>.
+          {" "}Add <code>?</code> to make one optional (<code className="text-indigo-400">{"{scale?}"}</code>):
+          its level is skipped for models with no value, instead of blocking them.
         </div>
         <div className="rounded-lg border border-border-subtle bg-panel/60 px-3 py-2 text-xs text-text-secondary-alt space-y-1">
           <p>

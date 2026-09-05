@@ -28,7 +28,7 @@ from app.models import (
 )
 from app.services import name_parser
 from app.services.path_sanitize import path_over_length, sanitize_segment, slug_filename
-from app.services.reorganize_template import VALID_FIELDS, parse_template, render_segments
+from app.services.reorganize_template import parse_template, render_segments, segment_fields
 
 UNKNOWN_CREATOR = "_Unknown Creator"
 UNKNOWN_CHARACTER = "_Unknown Character"
@@ -702,38 +702,59 @@ def _build_entry(
     ov_title = (override.get("title") or "").strip()
     ov_suffix = (override.get("suffix") or "").strip()
 
-    # Fields actually referenced in the template — only flag missing for these.
-    used_fields = {
-        f for seg in segments
-        for f in VALID_FIELDS
-        if ("{" + f + "}") in seg.lower()
-    }
+    # Fields the template references, split by whether the reference is
+    # REQUIRED or optional ("{scale?}"). Only a required reference can make a
+    # model unclassifiable; an optional one drops its level instead (STUDIO-407).
+    used_fields: set[str] = set()
+    for seg in segments:
+        # `name`, not `field` — the latter shadows the dataclasses.field import.
+        for name, optional in segment_fields(seg):
+            if not optional:
+                used_fields.add(name)
 
     # Resolve template field values, tracking which fell back to a sentinel.
+    # `fell_back` drives the optional-token drop; `missing` drives eligibility.
+    # They are deliberately different sets: a field can fall back without being
+    # "missing" (title, below), and an optional field never lands in `missing`.
     missing: list[str] = []
+    fell_back: set[str] = set()
     creator_name = ov_creator or (m.creator.name if m.creator else "") or ""
     if not creator_name:
         creator_name = UNKNOWN_CREATOR
+        fell_back.add("creator")
         if "creator" in used_fields:
             missing.append("creator")
     character = ov_character or m.character or ""
     if not character:
         character = UNKNOWN_CHARACTER
+        fell_back.add("character")
         if "character" in used_fields:
             missing.append("character")
     scale = ov_scale or _scale_value(m.auto_tags)
     if not scale:
         scale = UNKNOWN_SCALE
+        fell_back.add("scale")
         if "scale" in used_fields:
             missing.append("scale")
     title = ov_title or m.title or m.name or ""
     if not (ov_title or (m.title or "").strip()):
-        # title fell back to folder name — only 'missing' if that's also empty
+        # Title is the odd one out: it falls back to the FOLDER NAME before it
+        # is ever "missing", so the two states genuinely differ here. Brent's
+        # call 2026-09-05 is that "{title?}" drops when the model has no real
+        # title of its own — dropping only when the folder name is blank too
+        # would make the token do nothing, since a nameless model is vanishingly
+        # rare.
+        fell_back.add("title")
+        # only 'missing' if the folder name is also empty
         if not (m.name or "").strip() and "title" in used_fields:
             missing.append("title")
     # Suffix dodges a collision / shortens an over-length or reserved name.
     if ov_suffix:
         title = f"{title} {ov_suffix}"
+        # The suffix rides on the title segment, so an optional "{title?}" must
+        # NOT drop that level any more — otherwise the one control the user has
+        # for breaking a collision would silently do nothing.
+        fell_back.discard("title")
 
     values = {
         "creator": creator_name,
@@ -741,15 +762,22 @@ def _build_entry(
         "scale": scale,
         "title": title,
     }
-    rendered = render_segments(segments, values)
+    rendered = render_segments(segments, values, fell_back)
 
     reserved = False
     over_len = False
     safe_parts: list[str] = []
     for raw_seg, part in zip(segments, rendered):
+        # An optional-only segment that dropped comes back empty. Skip it BEFORE
+        # sanitizing — sanitize_segment("") falls back to "_", which would turn
+        # a dropped level into a literal "_" directory (STUDIO-407).
+        if not part:
+            continue
         # slugify_all lowercases/hyphenates every segment (import-style);
         # slugify_title narrows that to just the {title} segment.
-        do_slug = slugify_all or (slugify_title and "{title}" in raw_seg.lower())
+        do_slug = slugify_all or (
+            slugify_title and any(f == "title" for f, _ in segment_fields(raw_seg))
+        )
         sani = sanitize_segment(part, slugify=do_slug)
         reserved = reserved or sani.reserved_name
         over_len = over_len or sani.over_length
@@ -961,13 +989,20 @@ def creator_scan_dir(
     anchor to.
     """
     segments = parse_template(template)
-    idx = next((i for i, seg in enumerate(segments) if "{creator}" in seg.lower()), None)
+    # Matched through segment_fields, not a "{creator}" substring test — the
+    # latter sees nothing in "{creator?}", which would return None here and
+    # silently stop placing new creator folders altogether (STUDIO-407).
+    idx = next(
+        (i for i, seg in enumerate(segments)
+         if any(f == "creator" for f, _ in segment_fields(seg))),
+        None,
+    )
     if idx is None:
         return None
     lead = segments[: idx + 1]
     other_fields = {
-        f for seg in lead for f in ("character", "scale", "title")
-        if ("{" + f + "}") in seg.lower()
+        f for seg in lead for f, _ in segment_fields(seg)
+        if f in ("character", "scale", "title")
     }
     if other_fields:
         return None
@@ -981,8 +1016,11 @@ def creator_scan_dir(
     if not primary or not primary.path:
         return None
 
+    # No dropped_fields: a brand-new creator always has a name, so even an
+    # optional "{creator?}" renders here. The `if p` guard is the same
+    # skip-before-sanitize rule as _build_entry's loop.
     rendered = render_segments(lead, {"creator": creator_name})
-    parts = [sanitize_segment(p, slugify=slugify).value for p in rendered]
+    parts = [sanitize_segment(p, slugify=slugify).value for p in rendered if p]
     return _canon(_canon(primary.path) + "/" + "/".join(parts))
 
 

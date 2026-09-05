@@ -902,6 +902,17 @@ const SECTIONS: Section[] = [
           scale tags like <code>1:6</code> or <code>75mm</code>.
         </p>
         <p>
+          Add a <code>?</code> to make a token <strong>optional</strong>.{" "}
+          <code>{"{creator}/{scale?}/{title}"}</code> uses the scale level for models
+          that have one and leaves it out for models that don't, instead of blocking
+          them — which matters most for scale, since most models carry no scale tag
+          and a required <code>{"{scale}"}</code> would block nearly everything. A
+          level made up only of optional tokens disappears along with any literal
+          text around it, and a template where every token is optional is rejected,
+          since every model could then land in the same folder. Dropping levels
+          means more collisions; the suffix field on each row is how you break them.
+        </p>
+        <p>
           The <strong>Scan root</strong> selector defaults to all configured roots. Choose
           one root to limit the preview, Apply, and Undo refreshes to that library.
           Changing roots discards selections and unresolved field overrides from the

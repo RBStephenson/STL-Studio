@@ -817,6 +817,24 @@ Destination templates support `{creator}`, `{character}`, `{scale}`, and
 or `75mm`; if a template uses `{scale}` and a model has no detected scale, that
 row is marked unclassifiable until you resolve it.
 
+Add a `?` to make a token **optional** — `{creator}/{scale?}/{title}` uses the
+scale level for models that have one and quietly leaves it out for models that
+don't, instead of blocking them. That matters most for `{scale}`, since most
+models carry no scale tag at all and a required `{scale}` therefore blocks most
+of a library at once. Two things follow. A level made up entirely of optional
+tokens disappears with any literal text around it, so `by-{scale?}` leaves no
+stray `by-` folder; a level that still has other content keeps it, so
+`{creator}-{scale?}` becomes just the creator (with slugify on, the default,
+the dangling separator is cleaned up — turn slugify off and you get a literal
+`Abe3D-` folder). And a template where *every* token is
+optional is rejected, because every model could then land in the same folder.
+Expect more collisions once levels start dropping — that is the trade, and the
+suffix field on each row is how you break them.
+
+`{title?}` is worth a note: a model with no title of its own falls back to its
+folder name, and the optional form treats that as "no title", so those models
+sit one level up rather than getting a folder named after their source folder.
+
 The **Scan root** selector defaults to all configured roots. Choose one root to
 limit the preview, Apply, and Undo refreshes to that library. Changing roots
 clears selections and unresolved field overrides from the previous plan before
