@@ -4154,6 +4154,244 @@ class TestScannerTransactionSemantics:
         assert removed == 0, "a protected creator's phantom models are left alone"
         assert db.query(Model).filter(Model.creator_id == protected.id).count() == 1
 
+    # -- STUDIO-398: rescan reconciles rather than wipes ---------------------
+
+    def _model_with_user_metadata(self, db, tmp_path, monkeypatch):
+        """A creator with one model whose two STL rows carry user-owned values.
+
+        part_name, part_type and sup_of_id are set ONLY by user actions in
+        routers/models.py — the scanner never re-derives them, so anything that
+        deletes and re-adds a row loses them silently.
+        """
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+        monkeypatch.setattr(scanner.ScanRules, "load", classmethod(lambda cls, _db: cls()))
+        monkeypatch.setattr(scanner.write_lock, "release_scan", lambda: None)
+        monkeypatch.setattr(scanner.grouping, "regroup_creator", lambda _db, _cid: None)
+        monkeypatch.setattr(scanner.grouping, "prune_empty_groups", lambda _db: 0)
+
+        creator_dir = tmp_path / "Creator"
+        model_dir = creator_dir / "Model A"
+        _stl(model_dir, "base.stl")
+        _stl(model_dir, "base_sup.stl")
+
+        creator = make_creator(db, "Creator")
+        db.flush()
+        model = Model(name="Model A", folder_path=str(model_dir), creator_id=creator.id)
+        db.add(model)
+        db.flush()
+        base = STLFile(model_id=model.id, path=str(model_dir / "base.stl"),
+                       filename="base.stl", part_name="Hand-Renamed Base", part_type="body")
+        sup = STLFile(model_id=model.id, path=str(model_dir / "base_sup.stl"),
+                      filename="base_sup.stl", part_name="Hand-Renamed Sup")
+        db.add(base)
+        db.add(sup)
+        db.flush()
+        sup.sup_of_id = base.id
+        db.commit()
+
+        monkeypatch.setattr(
+            scanner, "_creator_dirs_for", lambda _c, _db: [(creator_dir, [], False)]
+        )
+        return creator.id, model_dir, base.id, sup.id
+
+    def test_successful_rescan_preserves_user_assigned_stl_metadata(
+        self, db, tmp_path, monkeypatch
+    ):
+        """STUDIO-398. A rescan must not touch rows whose file is still there.
+
+        This is a SUCCESS-path test. Before the reconcile, a completely normal
+        rescan reset part_name to its auto-derived value ("Base") and cleared
+        part_type and sup_of_id, because deleting the rows first made every
+        re-insert a "first discovery" and bypassed _index_stl_files'
+        skip-if-present branch.
+
+        Row identity is asserted too, not just the values: sup_of_id is a foreign
+        key to stl_files.id, so a row that comes back with a new id breaks the
+        relationship even if every column looks right. SQLite reuses freed ids,
+        which is exactly how a delete-and-re-add can appear to preserve identity
+        while having destroyed it.
+        """
+        creator_id, _model_dir, base_id, sup_id = self._model_with_user_metadata(
+            db, tmp_path, monkeypatch
+        )
+
+        job = JobHandle(key="rescan-metadata", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._creator_scan(job, creator_id)
+
+        assert job.payload()["state"] == "done"
+        db.expire_all()
+        base = db.get(STLFile, base_id)
+        sup = db.get(STLFile, sup_id)
+
+        assert base is not None and sup is not None, "the rows must survive as themselves"
+        assert base.part_name == "Hand-Renamed Base", (
+            "a manual rename must survive a rescan — _index_stl_files derives "
+            "part_name once at first discovery and never again"
+        )
+        assert base.part_type == "body", "user-assigned part_type must survive a rescan"
+        assert sup.sup_of_id == base_id, (
+            "the explicit sup relationship must survive, and must still point at "
+            "the same row"
+        )
+
+    def test_rescan_still_drops_rows_whose_file_is_gone(self, db, tmp_path, monkeypatch):
+        """The staleness half the wipe used to provide. _index_stl_files is
+        additive-only and never removes a row whose file vanished, so the
+        reconcile has to — otherwise deleted files linger in the index forever.
+        """
+        creator_id, model_dir, base_id, sup_id = self._model_with_user_metadata(
+            db, tmp_path, monkeypatch
+        )
+        (model_dir / "base_sup.stl").unlink()
+
+        job = JobHandle(key="rescan-stale", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._creator_scan(job, creator_id)
+
+        assert job.payload()["state"] == "done"
+        db.expire_all()
+        assert db.get(STLFile, sup_id) is None, (
+            "a row whose file is gone from disk is dropped by the reconcile"
+        )
+        surviving = db.get(STLFile, base_id)
+        assert surviving is not None and surviving.part_type == "body", (
+            "and its neighbour is untouched, metadata included"
+        )
+
+    def test_rescan_issues_no_stl_writes_when_the_model_is_unchanged(
+        self, db, tmp_path, monkeypatch
+    ):
+        """The efficiency half: an unchanged model costs ZERO stl_files writes,
+        where the wipe cost 2N (N deletes plus N re-inserts) on every rescan.
+
+        This counts the SQL actually issued rather than comparing rows before and
+        after. The obvious version of this test — diffing {id: path} — is useless
+        here, and was written that way first: SQLite reuses freed row ids, so a
+        full delete-and-re-add hands back the same ids against the same paths and
+        the comparison passes. It was verified GREEN against the pre-fix wipe,
+        which is exactly the wrong answer. Counting statements is the only form
+        of this test that can tell the two apart.
+        """
+        from sqlalchemy import event
+
+        creator_id, _model_dir, _base_id, _sup_id = self._model_with_user_metadata(
+            db, tmp_path, monkeypatch
+        )
+
+        writes: list[str] = []
+
+        # Match writes that TARGET stl_files, not any statement that merely
+        # mentions it: the pre-scan needs_review clear is an UPDATE on `models`
+        # whose subquery reads stl_files, and a looser substring check counts it
+        # as a write. It is the only false positive here, and it is the reason
+        # this matches on the statement's opening clause instead.
+        targets = ("insert into stl_files", "delete from stl_files", "update stl_files")
+
+        def _record(conn, cursor, statement, params, context, executemany):
+            normalized = " ".join(statement.strip().lower().split())
+            if normalized.startswith(targets):
+                writes.append(statement.strip().split("\n")[0])
+
+        engine = db.get_bind()
+        event.listen(engine, "before_cursor_execute", _record)
+        try:
+            job = JobHandle(key="rescan-noop", _lock=threading.Lock(), state=JobState.RUNNING)
+            scanner._creator_scan(job, creator_id)
+        finally:
+            event.remove(engine, "before_cursor_execute", _record)
+
+        assert job.payload()["state"] == "done"
+        assert writes == [], (
+            "an unchanged model must issue no stl_files writes at all; got:\n  "
+            + "\n  ".join(writes)
+        )
+
+    def test_a_deeper_model_still_claims_a_path_its_ancestor_owns(self, db, tmp_path):
+        """The risk the reconcile introduces, covered directly.
+
+        The wipe made row ownership trivially correct: delete everything, re-add
+        under whoever walks it. With a reconcile the file still exists, so its row
+        is not dropped, and correctness now rests on _index_stl_files' transfer
+        branch — which was previously a safety net and is now load-bearing.
+
+        A deeper (more specific) model must take the row in place, keeping the
+        user metadata on it.
+
+        Fail-first note: this is a REGRESSION GUARD, not a fix-prover. It passes
+        against the pre-STUDIO-398 wipe too, because it exercises
+        _index_stl_files' transfer branch directly and that branch predates this
+        change. It is here because the reconcile PROMOTES that branch from a
+        safety net to the mechanism correctness depends on, so it now needs
+        coverage of its own. Read a green run as "the reconcile did not break
+        ownership transfer", not as evidence of the reconcile itself.
+        """
+        creator = make_creator(db, "Creator")
+        db.flush()
+        parent_dir = tmp_path / "Creator" / "Product"
+        child_dir = parent_dir / "Supported"
+        _stl(child_dir, "part.stl")
+
+        parent = Model(name="Product", folder_path=str(parent_dir), creator_id=creator.id)
+        child = Model(name="Supported", folder_path=str(child_dir), creator_id=creator.id)
+        db.add(parent)
+        db.add(child)
+        db.flush()
+        row = STLFile(model_id=parent.id, path=str(child_dir / "part.stl"),
+                      filename="part.stl", part_name="Hand-Renamed", part_type="body")
+        db.add(row)
+        db.commit()
+        row_id, child_id = row.id, child.id
+
+        scanner._index_stl_files(child, child_dir, db)
+        db.commit()
+
+        db.expire_all()
+        moved = db.get(STLFile, row_id)
+        assert moved is not None and moved.model_id == child_id, (
+            "the deeper model claims the path in place rather than a duplicate "
+            "row being inserted"
+        )
+        assert moved.part_name == "Hand-Renamed" and moved.part_type == "body", (
+            "and the transfer keeps the user-owned metadata on the row"
+        )
+
+    def test_an_ancestor_model_never_steals_a_path_back_from_its_child(
+        self, db, tmp_path
+    ):
+        """The other direction of the same branch: a parent walking over a path
+        its child legitimately owns must leave it alone. Only a strictly deeper
+        model may claim a row.
+
+        Same regression-guard caveat as the test above: green against the
+        pre-STUDIO-398 wipe as well, and deliberately so.
+        """
+        creator = make_creator(db, "Creator")
+        db.flush()
+        parent_dir = tmp_path / "Creator" / "Product"
+        child_dir = parent_dir / "Supported"
+        _stl(child_dir, "part.stl")
+
+        parent = Model(name="Product", folder_path=str(parent_dir), creator_id=creator.id)
+        child = Model(name="Supported", folder_path=str(child_dir), creator_id=creator.id)
+        db.add(parent)
+        db.add(child)
+        db.flush()
+        row = STLFile(model_id=child.id, path=str(child_dir / "part.stl"), filename="part.stl")
+        db.add(row)
+        db.commit()
+        row_id, child_id = row.id, child.id
+
+        # The parent's rglob reaches into the child's folder.
+        scanner._index_stl_files(parent, parent_dir, db)
+        db.commit()
+
+        db.expire_all()
+        assert db.get(STLFile, row_id).model_id == child_id, (
+            "a parent must never take a path back from the deeper model that owns it"
+        )
+
     # -- split_pack -----------------------------------------------------------
 
     def test_split_pack_rewalk_failure_leaves_a_partial_split_durable(

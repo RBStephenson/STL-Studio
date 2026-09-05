@@ -48,9 +48,12 @@ Commit boundaries, by phase
                    per scan root after its walk; prunes commit individually.
   * creator rescan one after the needs_review clear, then one per model from
                    _index_model as the walk proceeds -- each model's STL rows
-                   are replaced inside that model's own commit (STUDIO-397) --
-                   then one for the missing-folder sweep, and one at the end
-                   covering the phantom prune and regrouping.
+                   are RECONCILED inside that model's own commit: rows whose
+                   file is gone are dropped, rows that still exist are left
+                   alone with their user-owned metadata intact (STUDIO-397 put
+                   this per model; STUDIO-398 made it a reconcile rather than a
+                   wipe) -- then one for the missing-folder sweep, and one at
+                   the end covering the phantom prune and regrouping.
   * inbox          after creator resolution, after grouping, and after the
                    single-pack stale-path prune.
   * split pack     the PackOverride and the collapsed model's deletion are BOTH
@@ -69,14 +72,17 @@ Durable after a failure, deliberately
   * A root that is offline, or that had any creator failure, does not advance
     last_scanned, so the next run re-checks everything it may have missed
     (STUDIO-295).
-  * A creator rescan replaces STL rows PER MODEL, inside each model's own
-    commit, rather than wiping the whole creator up front (STUDIO-397). A walk
-    that raises therefore leaves every model it never reached holding its
-    ORIGINAL rows, so the next full scan does not mistake them for phantoms and
-    delete them along with the creator row. Models whose folder is gone are
-    swept explicitly after a clean walk -- the bulk wipe used to cover that as
-    a side effect, and _clear_stl_rows_for_missing_folders now does it on
-    purpose.
+  * A creator rescan RECONCILES STL rows per model, inside each model's own
+    commit, rather than wiping the whole creator up front (STUDIO-397) or even
+    the whole model (STUDIO-398). Rows whose file is gone are dropped; rows that
+    still exist are left untouched, so part_type, part_name and sup_of_id
+    survive a rescan -- which is what _index_stl_files' skip-if-present branch
+    was always for. A walk that raises leaves every model it never reached
+    exactly as it was, so the next full scan does not mistake them for phantoms
+    and delete them along with the creator row. Models whose folder is gone are
+    swept explicitly after a clean walk -- the old bulk wipe covered that as a
+    side effect, and _clear_stl_rows_for_missing_folders now does it on purpose,
+    with a mount-detach guard the bulk wipe never had.
 
 Known sharp edges — characterized here, deliberately NOT fixed by STUDIO-233
   * STUDIO-396: a regroup failure rolls back EVERY creator regrouped earlier in
@@ -1865,19 +1871,16 @@ def _index_model(
                     boundary=gallery_boundary,
                 )
 
-            # STUDIO-397: a full reindex REPLACES an existing model's STL rows
-            # instead of adding to them, because _index_stl_files is
-            # additive-only. This happens here, per model, rather than as one
-            # bulk wipe across the whole creator before the walk: the delete and
-            # the rebuild below share _index_model's single commit, so they are
-            # atomic for this model. A walk that raises therefore leaves every
-            # model it never reached holding its ORIGINAL rows rather than none
-            # -- which is what previously let the next full scan delete them as
-            # phantoms, and the creator row with them.
+            # STUDIO-398: a full reindex drops only the rows whose file is
+            # actually gone, then lets _index_stl_files add what is new. It used
+            # to delete every row for this model and re-add them all, which made
+            # each re-insert a "first discovery" and so bypassed the
+            # skip-if-present branch that exists precisely to keep user-owned
+            # metadata. Still per model and still inside this function's single
+            # commit, so the STUDIO-397 guarantee holds: a walk that raises
+            # leaves every model it never reached exactly as it was.
             if rebuild_stl_index and not is_new:
-                db.query(STLFile).filter(
-                    STLFile.model_id == model.id
-                ).delete(synchronize_session=False)
+                _drop_vanished_stl_rows(db, model)
 
             _index_stl_files(
                 model, folder, db,
@@ -2314,6 +2317,50 @@ def refresh_model_gallery(db: Session, model: Model) -> None:
 
     if model.primary_image_path and model.primary_image_path not in model.image_paths:
         model.primary_image_path = None
+
+
+def _drop_vanished_stl_rows(db: Session, model: Model) -> int:
+    """Remove this model's STL rows whose file is no longer on disk.
+
+    The staleness half of a full reindex, and the only half a rescan needs.
+    _index_stl_files handles the other half already: it inserts any on-disk
+    file not indexed by exact path and SKIPS the ones that are -- deliberately,
+    so user-owned metadata survives. Its own comments say so, and on part_name
+    specifically: auto-derived once at first discovery and never touched again,
+    because a later manual rename (or an AI Organize suggestion) must win.
+
+    This replaces a blanket delete of every row for the model (STUDIO-398).
+    That blanket delete turned every re-insert into a first discovery, which
+    bypassed the skip branch entirely and silently reset part_name to its
+    auto-derived value while clearing part_type and sup_of_id -- on every
+    SUCCESSFUL rescan, not just a failing one. It also cost 2N writes per
+    rescan where an unchanged model now costs none.
+
+    NOT handled here, deliberately: a RENAMED file is a new path, so it is a
+    drop plus an insert and its metadata does not follow. _prune_stale_stl_files
+    treats renames the same way at full-scan level; fixing that is a separate
+    question about identity, not about this reconcile.
+
+    No mount-detach guard is needed here the way _clear_stl_rows_for_missing_folders
+    needs one: this only runs for a folder the walk just classified as a model,
+    which requires it to have been listed and found to contain STLs.
+
+    Does not commit -- _index_model owns the commit, which is what keeps the
+    drop and the rebuild atomic for this model.
+
+    Returns the number of rows removed.
+    """
+    rows = db.query(STLFile.id, STLFile.path).filter(
+        STLFile.model_id == model.id
+    ).all()
+    gone = [r.id for r in rows if not r.path or not os.path.exists(r.path)]
+    if not gone:
+        return 0
+    for i in range(0, len(gone), 500):
+        db.query(STLFile).filter(
+            STLFile.id.in_(gone[i:i + 500])
+        ).delete(synchronize_session=False)
+    return len(gone)
 
 
 def _index_stl_files(
