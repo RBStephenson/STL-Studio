@@ -942,13 +942,21 @@ const SECTIONS: Section[] = [
             case rename, or already in place). No files are touched yet.
           </li>
           <li>
-            <strong>Resolve flagged rows.</strong> Rows marked{" "}
+            <strong>Resolve or adjust any row.</strong> Click a row to expand it and
+            fill in the <strong>creator / character / title / suffix</strong> override
+            fields. The preview re-runs automatically with your values. Rows marked{" "}
             <em>unclassifiable</em> (missing creator, character, or title),{" "}
             <em>collision</em>, <em>over-length</em>, or <em>reserved name</em> are
-            ineligible to apply. Click the row to expand it and fill in the{" "}
-            <strong>creator / character / title / suffix</strong> override fields.
-            The preview re-runs automatically with your values, and a resolved row
-            becomes eligible.
+            ineligible to apply, and filling the fields in makes them eligible — that
+            panel is headed <strong>Resolve</strong>. A row that is already fine gets
+            the same fields under <strong>Adjust</strong>, so a model the scanner
+            classified successfully but wrongly can be corrected without rewriting
+            your whole destination template. Rows blocked by something no value can
+            fix — locked, symlink, multi-directory, overlapping, missing files, or
+            escapes-scan-root — show their <strong>Why</strong> explanation instead;
+            those need a rescan or a fix on disk. What you type shapes this plan
+            only, and is not saved onto the model: the reorganized folder layout on
+            disk is what makes it stick.
           </li>
           <li>
             <strong>Select and apply.</strong> Tick the checkboxes on eligible rows,

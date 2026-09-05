@@ -314,13 +314,15 @@ describe("ReorganizePage", () => {
     });
   });
 
-  it("shows resolve inputs only on an ineligible row, once expanded", async () => {
+  it("shows resolve inputs on a blocked row, once expanded", async () => {
     render(<ReorganizePage />);
     buildPlan();
     await screen.findByText("Mystery");
     fireEvent.click(screen.getByText("Mystery"));
     expect(await screen.findByLabelText("character for Mystery")).toBeInTheDocument();
     expect(await screen.findByLabelText("scale for Mystery")).toBeInTheDocument();
+    // Headed "Resolve" here, vs "Adjust" on an eligible row (STUDIO-400).
+    expect(screen.getByText("Resolve")).toBeInTheDocument();
     // The eligible entry exposes a selection checkbox; the ineligible one doesn't.
     expect(screen.queryByLabelText("Select Mystery")).not.toBeInTheDocument();
   });
@@ -893,5 +895,83 @@ describe("ReorganizePage pagination (ADDENDUM §6)", () => {
     await screen.findByText("Joker Bust");
     expect(screen.queryByRole("button", { name: "Next page" })).not.toBeInTheDocument();
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ReorganizePage override on any row (STUDIO-400)", () => {
+  it("opens the override fields on an eligible row, headed Adjust", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    fireEvent.click(screen.getByText("Joker Bust"));
+
+    expect(await screen.findByLabelText("character for Joker Bust")).toBeInTheDocument();
+    expect(screen.getByLabelText("creator for Joker Bust")).toBeInTheDocument();
+    // A correctly-classified row is being adjusted, not repaired — the heading
+    // distinguishes the two so the form doesn't read as "something is wrong".
+    expect(screen.getByText("Adjust")).toBeInTheDocument();
+  });
+
+  it("re-previews with the override when an eligible row is edited", async () => {
+    reorg.previewWithOverrides.mockResolvedValue(previewFixture());
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    fireEvent.click(screen.getByText("Joker Bust"));
+    fireEvent.change(await screen.findByLabelText("character for Joker Bust"), {
+      target: { value: "Harley" },
+    });
+
+    await waitFor(() =>
+      expect(reorg.previewWithOverrides).toHaveBeenCalledWith(
+        expect.objectContaining({ overrides: { 1: { character: "Harley" } } }),
+      ),
+    );
+  });
+
+  it("keeps an adjusted eligible row selectable", async () => {
+    reorg.previewWithOverrides.mockResolvedValue(previewFixture());
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    fireEvent.click(screen.getByText("Joker Bust"));
+    fireEvent.change(await screen.findByLabelText("character for Joker Bust"), {
+      target: { value: "Harley" },
+    });
+    await waitFor(() => expect(reorg.previewWithOverrides).toHaveBeenCalled());
+
+    expect(await screen.findByLabelText("Select Joker Bust")).toBeInTheDocument();
+  });
+
+  it("still hides Suggest with AI on an eligible row", async () => {
+    // The endpoint only ever returns suggestions for unclassifiable/collision
+    // entries (routers/reorganize.py), so offering the action on a row it will
+    // silently skip would just round-trip to "No suggestion returned".
+    aiSuggestionsEnabled = true;
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    fireEvent.click(screen.getByText("Joker Bust"));
+    await screen.findByLabelText("character for Joker Bust");
+
+    expect(screen.queryByRole("button", { name: /suggest with ai/i })).not.toBeInTheDocument();
+  });
+
+  it("shows no override fields on a blocked row no override can fix", async () => {
+    // Locked ONLY — a row that is also unclassifiable stays resolvable and
+    // keeps its form, so the fixture has to isolate the unresolvable blocker.
+    reorg.preview.mockResolvedValue({
+      ...previewFixture(),
+      entries: [entry({
+        model_id: 4, model_name: "Locked Model", eligible: false, locked: true,
+      })],
+    });
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Locked Model");
+    fireEvent.click(screen.getByText("Locked Model"));
+
+    expect(await screen.findByText("Why")).toBeInTheDocument();
+    expect(screen.queryByLabelText("character for Locked Model")).not.toBeInTheDocument();
   });
 });
