@@ -248,6 +248,46 @@ class TestHashEvidence:
 
         assert grouping.hash_evidence(ids, hashes) == []
 
+    def test_one_products_variants_stay_under_the_cap(self):
+        # STUDIO-411: the cap counts distinct products, not models. Twelve
+        # variant folders of ONE product sharing a mesh are one product, so the
+        # mesh is not ubiquitous and the bucket survives.
+        ids = list(range(1, 13))
+        hashes = {mid: {"shared-mesh"} for mid in ids}
+        keys = {mid: "ada wong" for mid in ids}
+
+        assert len(ids) > grouping_policy._HASH_BUCKET_CAP
+        assert grouping.hash_evidence(ids, hashes, keys) != []
+
+    def test_a_hash_spread_across_many_products_still_produces_no_evidence(self):
+        # The case the cap actually exists for, restated per product: a shared
+        # base across twelve *different* products is still ubiquitous.
+        ids = list(range(1, 13))
+        hashes = {mid: {"commonbase"} for mid in ids}
+        keys = {mid: f"product-{mid}" for mid in ids}
+
+        assert grouping.hash_evidence(ids, hashes, keys) == []
+
+    def test_keyless_models_each_count_as_their_own_product(self):
+        # The fallback that keeps hierarchy-off behaviour identical. Without it
+        # every keyless model would share one "no product" bucket, collapsing to
+        # a single product and making every ubiquitous mesh look distinctive.
+        ids = list(range(1, 13))
+        hashes = {mid: {"commonbase"} for mid in ids}
+
+        assert grouping.hash_evidence(ids, hashes, {mid: None for mid in ids}) == []
+
+    def test_a_large_single_product_bucket_does_not_expand_quadratically(self):
+        # Pairwise expansion was only safe because the cap kept buckets tiny.
+        # Now that one product may fill a bucket without limit, a bucket larger
+        # than the cap fans out from its first member instead — O(k) edges, and
+        # a same-key bucket cannot strand a member at a boundary anyway.
+        ids = list(range(1, 101))
+        hashes = {mid: {"shared-mesh"} for mid in ids}
+        keys = {mid: "ada wong" for mid in ids}
+
+        assert len(grouping.hash_evidence(ids, hashes, keys)) == len(ids) - 1
+
     def test_models_absent_from_ids_are_ignored(self):
         # 3 shares the hash but was filtered out upstream, so it must not be
         # proposed even though `hashes` still carries a row for it.
@@ -309,6 +349,38 @@ class TestFilenameEvidence:
         filenames = {mid: {"body.stl", f"unique-{mid}.stl"} for mid in ids}
 
         assert grouping.filename_evidence(ids, filenames) == []
+
+    def test_one_products_variants_stay_distinctive_past_the_cap(self):
+        # STUDIO-411: frequency counts distinct products, not models. Twelve
+        # variant folders of ONE product carry the same part names because they
+        # ARE the same parts — counted per model that reads as generic and
+        # empties both sides of every pair before the Jaccard test runs.
+        ids = list(range(1, 13))
+        files = {"body.stl", "head.stl", "cape.stl"}
+        filenames = {mid: set(files) for mid in ids}
+        keys = {mid: "ada wong" for mid in ids}
+
+        assert len(ids) > grouping_policy._FILENAME_BUCKET_CAP
+        assert grouping.filename_evidence(ids, filenames, keys) != []
+
+    def test_a_name_spread_across_many_products_is_still_generic(self):
+        # #639 restated per product: body.stl across twelve *different* products
+        # carries no identity and must still be dropped.
+        ids = list(range(1, 13))
+        filenames = {mid: {"body.stl", "base.stl"} for mid in ids}
+        keys = {mid: f"product-{mid}" for mid in ids}
+
+        assert grouping.filename_evidence(ids, filenames, keys) == []
+
+    def test_keyless_models_each_count_as_their_own_product(self):
+        # The fallback that keeps hierarchy-off behaviour identical: with no
+        # product key a model counts as its own product, reproducing the old
+        # per-model frequency exactly. Deleting it would make every generic name
+        # in a flat creator distinctive, which is #639 all over again.
+        ids = list(range(1, 13))
+        filenames = {mid: {"body.stl", "base.stl"} for mid in ids}
+
+        assert grouping.filename_evidence(ids, filenames, {mid: None for mid in ids}) == []
 
     def test_large_creator_skips_filename_evidence_entirely(self):
         cap = grouping_policy._FILENAME_PASS_MODEL_CAP
@@ -1045,6 +1117,92 @@ class TestHierarchySignal:
         db.refresh(manual)
         assert manual.label == "My Ada"
         assert {m.id for m in manual.models} == {a.id, b.id}
+
+
+class TestProductScopedBucketCaps:
+    """Content evidence survives past 8 variants of one product (STUDIO-411).
+
+    The bucket caps used to count models, so a product with 9 or more variants
+    lost both content signals outright and its grouping rested entirely on
+    `character` being right — no second opinion when it wasn't. Counting
+    distinct products instead keeps the #639 guard (a name spread across many
+    products is still generic) while letting one product's variants corroborate
+    each other.
+    """
+
+    # All twelve names are structural, so `character_key` reduces each to
+    # nothing: neither the NAME signal nor the product-identity check can form
+    # or rescue a group here. Identity comes from `character` or from nowhere.
+    VARIANTS = [
+        "Supported", "Unsupported", "Hollow", "Solid", "Presupported", "STL",
+        "32mm", "54mm", "75mm", "Bust", "Chitubox", "Lychee",
+    ]
+    PARTS = ["body.stl", "head.stl", "cape.stl", "base.stl"]
+
+    def _variants(self, db, creator, characters):
+        """One model per name, every one carrying the identical part set."""
+        models = []
+        for name, character in zip(self.VARIANTS, characters):
+            model = make_model(db, creator, name=name, character=character)
+            for filename in self.PARTS:
+                _stl(db, model, filename)
+            models.append(model)
+        db.flush()
+        return models
+
+    def test_orphan_variants_rejoin_their_product_past_the_cap(self, db):
+        """Ten variants the scanner labelled, two it left characterless.
+
+        The two orphans have no `character`, so hierarchy can neither group them
+        nor bar them; the identical part set is the only evidence that they
+        belong. Counted per model that evidence was thrown away for being
+        generic and both orphans fell out of their own product's group.
+        """
+        creator = make_creator(db)
+        models = self._variants(db, creator, ["Ada Wong"] * 10 + [None, None])
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {m.id for m in models}
+        assert groups[0].label == "Ada Wong"
+
+    def test_two_products_sharing_a_file_set_stay_apart_with_hierarchy_on(self, db):
+        """Two characters cut from the same part set must not weld together.
+
+        Twelve models, one identical file set, two `character` envelopes. The
+        per-product count sees two products — under the cap, so the evidence is
+        offered — and the product boundary is what turns it away. Both halves of
+        the protection are exercised here.
+        """
+        creator = make_creator(db)
+        self._variants(db, creator, ["Ada Wong"] * 6 + ["Leon Kennedy"] * 6)
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert {g.label for g in groups} == {"Ada Wong", "Leon Kennedy"}
+        assert sorted(len(g.models) for g in groups) == [6, 6]
+
+    def test_hierarchy_off_keeps_the_old_per_model_count(self, db):
+        """With hierarchy off there are no product keys, so nothing changes.
+
+        Every model falls back to counting as its own product, which reproduces
+        the old per-model frequency exactly. Raising the cap unconditionally
+        instead would merge all twelve of these into one group labelled after a
+        variant folder — this is the test that says no to that.
+        """
+        creator = make_creator(db)
+        self._variants(db, creator, ["Ada Wong"] * 6 + ["Leon Kennedy"] * 6)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert {g.label for g in groups} == {"Ada Wong", "Leon Kennedy"}
+        assert sorted(len(g.models) for g in groups) == [6, 6]
 
 
 class TestNameSignal:
