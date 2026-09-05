@@ -7,6 +7,7 @@ directly, without needing to fake a rename failure first.
 """
 from __future__ import annotations
 
+import builtins
 import os
 
 import pytest
@@ -69,6 +70,44 @@ def test_clears_stale_tmp_debris_before_staging(tmp_path):
 
     assert dst.read_bytes() == b"payload"
     assert not stale_tmp.exists()
+
+
+def test_staged_tmp_is_opened_writable_before_fsync(tmp_path, monkeypatch):
+    """The staged temp file must be opened for WRITING before it is fsynced.
+
+    STUDIO-408: ``os.fsync`` on a read-only descriptor is legal on POSIX and
+    raises ``EBADF`` on Windows, so opening the temp file ``"rb"`` broke every
+    folder install and every cross-device move there — while CI, which runs
+    Linux only, stayed green throughout.
+
+    This asserts the *precondition* rather than the behaviour, which is a
+    deliberate exception to the usual behaviour-first rule: on the only
+    platform CI runs, reverting to ``"rb"`` fails nothing at all, so a
+    behavioural test cannot guard this. Checking the open mode is portable and
+    fails on both platforms, which is the closest available thing to a real
+    guard until a Windows CI job exists.
+    """
+    src = tmp_path / "head.stl"
+    src.write_bytes(b"payload")
+    dst = tmp_path / "b" / "head.stl"
+
+    modes: list[str] = []
+    real_open = builtins.open
+
+    def spy_open(file, mode="r", *args, **kwargs):
+        if str(file).endswith(".safecopytmp"):
+            modes.append(mode)
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", spy_open)
+    copy_verified(str(src), str(dst))
+
+    assert modes, "expected copy_verified to open the staged temp file"
+    read_only = [m for m in modes if not any(c in m for c in "+wa")]
+    assert not read_only, (
+        f"staged temp file opened read-only {read_only} — os.fsync on that "
+        "descriptor raises EBADF on Windows (STUDIO-408)"
+    )
 
 
 def test_size_mismatch_after_copy_raises_and_cleans_up_tmp(tmp_path, monkeypatch):

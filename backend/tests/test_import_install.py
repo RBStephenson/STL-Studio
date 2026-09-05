@@ -5,12 +5,18 @@ extraction logic itself) with flag gating, source-path allowlisting, the
 writable-library check, the default-layout-only restriction, and the write
 lock. These tests exercise the endpoint's own logic, not extraction.
 
-A source built as a real folder on disk routes through copy_verified, which
-hits the same pre-existing Windows-local os.fsync issue documented in
-test_safe_copy.py / test_installer.py — expected to fail locally here too and
-pass in CI (ubuntu-latest). Zip sources don't touch that code path, so the
-rest of this file uses zip fixtures for the happy-path/error-mapping coverage
-and keeps folder-source coverage to one dedicated test.
+A source built as a real folder on disk routes through copy_verified; zip
+sources don't. Most of this file uses zip fixtures for the happy-path and
+error-mapping coverage, with folder-source coverage kept to one dedicated test.
+
+That split used to carry a warning that the folder-source test was "expected to
+fail locally on Windows, pass in CI". It was fixed in STUDIO-408, and the
+warning was wrong in a way worth remembering: copy_verified fsynced a read-only
+descriptor, which POSIX allows and Windows rejects, so the folder path was
+broken *for users on the platform it ships to* — not merely on a developer's
+machine. A test that fails only on the deployment platform is reporting a
+product bug, not a local quirk. (The warning also cited test_safe_copy.py and
+test_installer.py as documenting the issue; neither ever did.)
 """
 import zipfile
 
@@ -108,8 +114,9 @@ class TestHappyPath:
         assert (dest / "Head.stl").exists()
 
     def test_folder_source_happy_path(self, client, db, tmp_path, enabled):
-        """Expected to fail locally on Windows (pre-existing copy_verified
-        os.fsync issue), pass in CI. See module docstring."""
+        """The one folder-source test — everything else here uses zip fixtures.
+        This is the path that was broken on Windows until STUDIO-408; see the
+        module docstring."""
         source = tmp_path / "downloads" / "ZaranaFolder"
         source.mkdir(parents=True)
         (source / "Head.stl").write_bytes(b"head")
