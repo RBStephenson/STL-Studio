@@ -6,19 +6,23 @@ import { useToast } from "../context/ToastContext";
 import type {
   ReorganizeEntry,
   ReorganizePreview,
-  ReorganizeMoveKind,
   ReorganizeOverride,
   ReorganizeApplyResult,
-  ReorganizeCollisionKind,
   ScanRoot,
 } from "../api/client";
 import ReorganizeStatsBar from "../components/reorganize/ReorganizeStatsBar";
 import TemplateEditor from "../components/reorganize/TemplateEditor";
+import DestinationTree from "../components/reorganize/DestinationTree";
+import { KIND_LABEL, blockerFlags, isResolvable } from "../components/reorganize/entryFlags";
 
 const DEBOUNCE_MS = 500;
 const PAGE_SIZES = [20, 50, 100] as const;
 
 type FilterTab = "all" | "moves" | "collisions" | "unclassifiable" | "blocked" | "in_place";
+/** The list answers "which rows will move and can I fix them"; the tree answers
+ *  "what will my library look like" (STUDIO-404). Same entries, same selection,
+ *  different question — so they are view modes, not separate pages. */
+type ViewMode = "list" | "tree";
 
 /** Page numbers to render, collapsing runs into a single "…" — always keeps
  *  first, last, and the pages immediately around `current` (ADDENDUM §6). */
@@ -50,14 +54,6 @@ const FILTERS: { key: FilterTab; label: string; hint: string }[] = [
   { key: "in_place", label: "Already In Place", hint: "Already matches the destination template — nothing to do" },
 ];
 
-const KIND_LABEL: Record<ReorganizeMoveKind, string> = {
-  move: "move",
-  rename: "rename",
-  case_rename: "case rename",
-  in_place: "in place",
-  merge: "merge",
-};
-
 // A row the user is actively resolving via an override stays visible in
 // whatever tab they're on, even once the override makes it eligible and it
 // would otherwise fall out of that tab (e.g. Blocked) — otherwise the row
@@ -78,85 +74,10 @@ function matchesFilter(e: ReorganizeEntry, tab: FilterTab, hasOverride: boolean)
   }
 }
 
-const COLLISION_EXPLANATIONS: Record<ReorganizeCollisionKind, string> = {
-  none: "",
-  exact: "Another model already resolves to this exact destination path.",
-  case_only: "Another model's destination path differs only by letter case — that collides on case-insensitive filesystems.",
-  same_destination: "Another model resolves to this same destination. This does not mean their files are duplicates.",
-};
-
-interface BlockerFlag {
-  label: string;
-  explanation: string;
-}
-
-/** Blocker/flag chips for a single entry, each with a plain-English
- *  explanation (STUDIO-162) — previously chips were bare codes like
- *  "locked" or "over-length" with no way to know why or what to do. */
-function blockerFlags(e: ReorganizeEntry): BlockerFlag[] {
-  const flags: BlockerFlag[] = [];
-  if (e.ambiguous_package) {
-    flags.push({
-      label: "package boundary",
-      explanation: "The model's character does not match a physical ancestor folder, so Reorganize cannot safely determine the release package boundary.",
-    });
-  }
-  if (e.collision) {
-    flags.push({
-      label: `collision: ${e.collision_kind}`,
-      explanation: `${COLLISION_EXPLANATIONS[e.collision_kind]}${
-        e.collision_with.length ? ` Conflicts with ${e.collision_with.length} other model(s).` : ""
-      }`,
-    });
-  }
-  if (e.unclassifiable) {
-    flags.push({
-      label: "unclassifiable",
-      explanation: e.missing_fields.length
-        ? `Missing a value for: ${e.missing_fields.join(", ")}. Fill it in below to resolve.`
-        : "The destination template needs a value this model doesn't have. Fill it in below to resolve.",
-    });
-  }
-  if (e.over_length) {
-    flags.push({ label: "over-length", explanation: "The proposed path is too long for the filesystem. Shorten a field below (e.g. use a suffix) to resolve." });
-  }
-  if (e.reserved_name) {
-    flags.push({ label: "reserved name", explanation: "The proposed name is reserved by the operating system (e.g. CON, NUL). Adjust a field below to resolve." });
-  }
-  if (e.overlaps_other) {
-    flags.push({ label: "overlap", explanation: "This model's files overlap with another model's files on disk. Needs a rescan or manual disk fix — not resolvable here." });
-  }
-  if (e.spans_multiple_dirs) {
-    const directories = e.source_directories.length
-      ? ` Source directories: ${e.source_directories.join("; ")}.`
-      : "";
-    flags.push({
-      label: "multi-dir",
-      explanation: `This model's STL files are spread across multiple directories, so Reorganize can't safely move it as one unit.${directories} Needs a manual disk fix.`,
-    });
-  }
-  if (e.is_symlink) {
-    flags.push({ label: "symlink", explanation: "One or more files are symlinks — Reorganize skips symlinked files to avoid moving something it doesn't actually own." });
-  }
-  if (e.escapes_scan_root) {
-    flags.push({ label: "escapes root", explanation: "The proposed destination would land outside the scan root, which Reorganize refuses to do for safety." });
-  }
-  if (e.missing_files_on_disk) {
-    flags.push({ label: "missing files", explanation: "One or more of this model's files are missing on disk. Rescan the library to refresh what's tracked." });
-  }
-  if (e.locked) {
-    flags.push({ label: "locked", explanation: "This model is locked and won't be touched by Reorganize until it's unlocked." });
-  }
-  return flags;
-}
-
-/** Which blockers a user can resolve here (the rest need a rescan / disk fix).
- *  Drives both the amber-vs-rose row coloring (STUDIO-161) and, since
- *  STUDIO-400, whether a BLOCKED row offers the override form — eligible rows
- *  always offer it, so this only decides the blocked case. */
-function isResolvable(e: ReorganizeEntry): boolean {
-  return e.unclassifiable || e.collision || e.over_length || e.reserved_name;
-}
+// KIND_LABEL, COLLISION_EXPLANATIONS, blockerFlags and isResolvable moved to
+// components/reorganize/entryFlags.ts (STUDIO-404) — the destination tree needs
+// the same words for a blocked row, and a second copy of them here is exactly
+// the drift STUDIO-406 was about. Behaviour is unchanged; they moved verbatim.
 
 export default function ReorganizePage() {
   const { settings, loaded: settingsLoaded } = useAppSettings();
@@ -177,6 +98,11 @@ export default function ReorganizePage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTabRaw] = useState<FilterTab>("all");
+  // Deliberately NOT reset by Rebuild Plan, unlike tab and page (ADDENDUM §6).
+  // Those reset because the row set underneath changed; which shape you want to
+  // look at is a preference about yourself, and re-answering it after every
+  // rebuild would be the annoying kind of helpful.
+  const [view, setView] = useState<ViewMode>("list");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   // Switching tabs/rebuilding/changing page size always resets to page 1
@@ -372,6 +298,24 @@ export default function ReorganizePage() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+
+  // Bulk select/deselect for the tree (STUDIO-404). The tree hands over the ids
+  // it means — already intersected with `eligibleIds` — so this stays a dumb
+  // set operation and there is still only one definition of what's selectable.
+  const setSelectionFor = (ids: number[], select: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) select ? next.add(id) : next.delete(id);
+      return next;
+    });
+
+  // Package mode is a manifest-wide setting mirrored onto every entry, so any
+  // entry answers for the plan — but read it off the entries rather than the
+  // local setting, which can have been toggled since the plan was built.
+  const packageMode = useMemo(
+    () => (preview?.entries ?? []).some((e) => e.package_mode),
+    [preview],
+  );
 
   const setOverride = (id: number, patch: Partial<ReorganizeOverride>) =>
     setOverrides((prev) => {
@@ -630,47 +574,85 @@ export default function ReorganizePage() {
             </select>
           </div>
 
-          {/* Filter tabs */}
-          <div className="flex gap-1 flex-wrap border-b border-border-subtle">
-            {FILTERS.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setTab(f.key)}
-                title={f.hint}
-                className={`px-3 py-1.5 text-sm rounded-t ${
-                  tab === f.key
-                    ? "bg-panel-secondary text-text-primary border-b-2 border-accent-start"
-                    : "text-text-secondary-alt hover:text-text-primary-alt2"
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Page-size selector (ADDENDUM §6) */}
-          <div className="flex items-center justify-end gap-2 text-xs text-text-secondary-alt">
-            <span>Per page</span>
-            <div className="flex rounded-lg overflow-hidden border border-border">
-              {PAGE_SIZES.map((size) => (
+          {/* Filter tabs, with the list/tree toggle alongside them (STUDIO-404)
+              — both views read the same filtered set, so the tabs govern both. */}
+          <div className="flex items-end justify-between gap-3 flex-wrap border-b border-border-subtle">
+            <div className="flex gap-1 flex-wrap">
+              {FILTERS.map((f) => (
                 <button
-                  key={size}
+                  key={f.key}
+                  onClick={() => setTab(f.key)}
+                  title={f.hint}
+                  className={`px-3 py-1.5 text-sm rounded-t ${
+                    tab === f.key
+                      ? "bg-panel-secondary text-text-primary border-b-2 border-accent-start"
+                      : "text-text-secondary-alt hover:text-text-primary-alt2"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex rounded-lg overflow-hidden border border-border mb-1.5 shrink-0">
+              {([
+                { key: "list" as const, label: "List", hint: "Per-model rows — audit, resolve and select individual models" },
+                { key: "tree" as const, label: "Tree", hint: "The proposed folder structure — judge the shape of the result" },
+              ]).map((mode) => (
+                <button
+                  key={mode.key}
                   type="button"
-                  onClick={() => changePageSize(size)}
-                  aria-pressed={pageSize === size}
+                  onClick={() => setView(mode.key)}
+                  aria-pressed={view === mode.key}
+                  title={mode.hint}
                   className={`px-2.5 py-1 text-xs ${
-                    pageSize === size
+                    view === mode.key
                       ? "bg-accent-start text-white"
                       : "bg-panel-secondary text-text-primary-alt2 hover:text-text-primary"
                   }`}
                 >
-                  {size}
+                  {mode.label}
                 </button>
               ))}
             </div>
           </div>
 
+          {/* Page-size selector (ADDENDUM §6) — the tree doesn't paginate, it
+              lazily expands, so this has nothing to say about it. */}
+          {view === "list" && (
+            <div className="flex items-center justify-end gap-2 text-xs text-text-secondary-alt">
+              <span>Per page</span>
+              <div className="flex rounded-lg overflow-hidden border border-border">
+                {PAGE_SIZES.map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => changePageSize(size)}
+                    aria-pressed={pageSize === size}
+                    className={`px-2.5 py-1 text-xs ${
+                      pageSize === size
+                        ? "bg-accent-start text-white"
+                        : "bg-panel-secondary text-text-primary-alt2 hover:text-text-primary"
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {view === "tree" && (
+            <DestinationTree
+              entries={visible}
+              selectableIds={eligibleIds}
+              selected={selected}
+              onSelect={setSelectionFor}
+              packageMode={packageMode}
+            />
+          )}
+
           {/* Manifest table */}
+          {view === "list" && (
           <div className="space-y-1">
             {visibleSelectableIds.length > 0 && (
               <label className="flex items-center gap-2 text-xs text-text-secondary-alt py-1 cursor-pointer select-none">
@@ -854,9 +836,10 @@ export default function ReorganizePage() {
               );
             })}
           </div>
+          )}
 
           {/* Pagination footer (ADDENDUM §6) — hidden when everything fits on one page */}
-          {totalPages > 1 && (
+          {view === "list" && totalPages > 1 && (
             <div className="flex items-center justify-between flex-wrap gap-2 pt-1 text-xs text-text-secondary-alt">
               <span>
                 Showing {rangeStart}–{rangeEnd} of {visible.length}

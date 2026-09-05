@@ -899,8 +899,9 @@ file count and whether the current selection will move or retain them. Envelope
 files use the same drift checks and undo log as package files.
 
 The preview can be filtered by creator before applying its status tabs and
-pagination. Page-level select-all is scoped to the selected creator, and changing
-the creator clears selections that are no longer visible.
+pagination, in either the list or the tree view. Page-level select-all is scoped
+to the selected creator, and changing the creator clears selections that are no
+longer visible.
 
 - **Preview first.** The page shows exactly where every model *would* move, one row
   each—or one row per package in package-preserving mode—with a move-kind chip
@@ -922,6 +923,22 @@ the creator clears selections that are no longer visible.
   exactly what Reorganize exists to fix. Resolvable and unresolvable rows are
   color-distinguished in the preview, and each blocked row explains why it
   can't be reorganized.
+- **List or tree.** A toggle beside the status tabs switches the preview between
+  the per-model row **List** and a **Tree** of the folder structure the plan would
+  produce. The list answers "which models move, and can I fix this one"; the tree
+  answers "what will my library actually look like" without reading paths one at a
+  time across pages. Folders show rolled-up model and file counts (plus package
+  counts when package preservation is on) alongside any collision/blocked totals
+  beneath them, so a problem branch is visible while still collapsed. Ticking a folder selects every *eligible* model under it — the
+  checkbox says how many that is before it applies, and blocked models are never
+  swept in. A partly-selected folder shows as such rather than as empty or full.
+  Both views read the same creator filter, the same status tab and the same
+  selection, so switching never changes what is selected or what is in the plan.
+  In package-preserving mode each release package is one node and the shared
+  character envelope is reported on the character folder above them, which is
+  where the all-packages-or-nothing rule applies. Folders open on demand rather
+  than all at once, so a wide library stays responsive; resolving individual rows
+  stays in the list view.
 - **Resolve or adjust any row.** Expand a row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an
   over-long/reserved name. This works on rows that are already fine, too — a model
