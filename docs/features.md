@@ -877,9 +877,18 @@ the creator clears selections that are no longer visible.
   exactly what Reorganize exists to fix. Resolvable and unresolvable rows are
   color-distinguished in the preview, and each blocked row explains why it
   can't be reorganized.
-- **Resolve flagged rows.** Expand an ineligible row to supply a missing
+- **Resolve or adjust any row.** Expand a row to supply a missing
   creator/character/title or add a suffix that breaks a collision or shortens an
-  over-long/reserved name. A same-destination collision means only that two models
+  over-long/reserved name. This works on rows that are already fine, too — a model
+  the scanner classified successfully but *wrongly* can be corrected here instead
+  of by rewriting the whole destination template. On a blocked row the panel is
+  headed **Resolve**; on one that's already eligible it's headed **Adjust**. The
+  exception is a row nothing you type could fix — locked, symlink,
+  multi-directory, overlapping, missing files, escapes-scan-root — which shows its
+  **Why** explanation but no fields, since those need a rescan or a disk fix.
+  Values you enter shape this plan only; they are not saved onto the model, so the
+  reorganized folder layout is what makes the change stick.
+  A same-destination collision means only that two models
   render to the same folder; it does not claim their files are duplicates. Collision
   rows show their actual source folders so entries with the same derived name remain
   distinguishable without expanding their file lists. When a

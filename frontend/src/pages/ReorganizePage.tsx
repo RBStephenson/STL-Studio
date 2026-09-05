@@ -151,7 +151,10 @@ function blockerFlags(e: ReorganizeEntry): BlockerFlag[] {
   return flags;
 }
 
-/** Which blockers a user can resolve here (the rest need a rescan / disk fix). */
+/** Which blockers a user can resolve here (the rest need a rescan / disk fix).
+ *  Drives both the amber-vs-rose row coloring (STUDIO-161) and, since
+ *  STUDIO-400, whether a BLOCKED row offers the override form — eligible rows
+ *  always offer it, so this only decides the blocked case. */
 function isResolvable(e: ReorganizeEntry): boolean {
   return e.unclassifiable || e.collision || e.over_length || e.reserved_name;
 }
@@ -777,10 +780,20 @@ export default function ReorganizePage() {
                           </ul>
                         </div>
                       )}
-                      {!e.eligible && isResolvable(e) && (
+                      {/* Eligible rows get the same fields (STUDIO-400): a row can
+                          classify successfully and still classify WRONG, and before
+                          this the only fix was editing the global template. Blocked
+                          rows that no override can repair — locked, symlink,
+                          multi-dir, overlaps, missing files, escapes-root — are
+                          deliberately still excluded: typing a character can't
+                          unlock a model, so the form would only buy a full manifest
+                          rebuild that cannot change the outcome. */}
+                      {(e.eligible || isResolvable(e)) && (
                         <div className="pt-2 border-t border-border-subtle/60">
                           <div className="flex items-center justify-between mb-1">
-                            <div className="text-xs text-text-secondary">Resolve</div>
+                            <div className="text-xs text-text-secondary">
+                              {e.eligible ? "Adjust" : "Resolve"}
+                            </div>
                             {settings.reorganize_ai_suggestions_enabled && (e.unclassifiable || e.collision) && (
                               <button
                                 type="button"
