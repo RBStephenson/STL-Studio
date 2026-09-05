@@ -3887,39 +3887,17 @@ class TestScannerTransactionSemantics:
             "an earlier prune's deletion is committed and survives a later prune failing"
         )
 
-    # -- creator rescan: the destructive-commit-before-walk chain ------------
+    # -- creator rescan: per-model STL rebuild (STUDIO-397) ------------------
 
-    def test_creator_rescan_failure_strands_models_the_next_full_scan_prunes(
-        self, db, tmp_path, monkeypatch
-    ):
-        """AC1 (model-index failure) and the sharpest finding in this ticket.
+    def _rescan_fixture(self, db, tmp_path, monkeypatch, model_names):
+        """A creator on disk and in the DB, every model carrying one ORIGINAL
+        STL row whose filename is a marker that no rebuild can reproduce.
 
-        _creator_scan wipes ALL of a creator's STL rows and COMMITS that before
-        walking, because _index_stl_files is additive-only and stale rows would
-        otherwise keep phantom models alive. If the walk then raises, the outer
-        handler logs, marks the job ERROR and closes the session — it never rolls
-        back — so the deletion stands while the rebuild never happened.
-
-        The next full scan can then delete those models outright:
-        _index_model skips _index_stl_files entirely when a folder is
-        `folder_unchanged`, and _prune_phantoms in _full_scan takes NO
-        protected_creator_ids argument, so nothing shields them. prune_empty_creators
-        then removes the now-empty creator too.
-
-        SCOPE — this is not "every failed creator rescan loses data". It needs a
-        rescan that failed for a reason OTHER than new files on disk (the
-        STUDIO-79 transients: a SQLite lock, a mount hiccup), because folders
-        modified since the last successful full scan are not `folder_unchanged`
-        and do get re-indexed. The 50% prune cap is the only other brake, so it
-        also needs the stranded creator to be a minority of the library — which
-        is why creator B exists in this test.
-
-        Filed as a follow-on; NOT fixed here (STUDIO-233 forbids moving commits).
+        A model that the walk re-indexed ends up with `part.stl` and no marker;
+        a model the walk never reached still has its marker. That is what makes
+        "kept its original rows" distinguishable from "was rebuilt", rather than
+        just counting rows.
         """
-        from datetime import timedelta
-        import os
-
-        from app.models import ScanRoot
         from sqlalchemy.orm import sessionmaker
 
         Session = sessionmaker(bind=db.get_bind())
@@ -3927,40 +3905,65 @@ class TestScannerTransactionSemantics:
         monkeypatch.setattr(scanner.ScanRules, "load", classmethod(lambda cls, _db: cls()))
         monkeypatch.setattr(scanner.write_lock, "release_scan", lambda: None)
 
-        # --- library on disk -------------------------------------------------
-        a_dir = tmp_path / "Creator A"
-        a_model_dir = a_dir / "Model A"
-        _stl(a_model_dir)
-        b_dir = tmp_path / "Creator B"
-        b_model_dirs = [b_dir / f"Model B{i}" for i in (1, 2, 3)]
-        for d in b_model_dirs:
+        creator_dir = tmp_path / "Creator A"
+        creator = make_creator(db, "Creator A")
+        db.flush()
+        model_dirs = []
+        for name in model_names:
+            d = creator_dir / name
             _stl(d)
-
-        # --- library in the database ----------------------------------------
-        creator_a = make_creator(db, "Creator A")
-        creator_b = make_creator(db, "Creator B")
-        db.flush()
-        a_model = Model(name="Model A", folder_path=str(a_model_dir), creator_id=creator_a.id)
-        db.add(a_model)
-        db.flush()
-        db.add(STLFile(
-            model_id=a_model.id, path=str(a_model_dir / "part.stl"), filename="part.stl",
-        ))
-        for d in b_model_dirs:
-            b_model = Model(name=d.name, folder_path=str(d), creator_id=creator_b.id)
-            db.add(b_model)
+            model_dirs.append(d)
+            model = Model(name=name, folder_path=str(d), creator_id=creator.id)
+            db.add(model)
             db.flush()
             db.add(STLFile(
-                model_id=b_model.id, path=str(d / "part.stl"), filename="part.stl",
+                model_id=model.id,
+                path=str(d / f"{name}-original-marker.stl"),
+                filename="original-marker.stl",
             ))
         db.commit()
-        a_creator_id, a_model_id = creator_a.id, a_model.id
-
-        # === PHASE 1: the creator rescan crashes mid-walk ====================
         monkeypatch.setattr(
-            scanner, "_creator_dirs_for", lambda _creator, _db: [(a_dir, [], False)]
+            scanner, "_creator_dirs_for", lambda _c, _db: [(creator_dir, [], False)]
         )
+        return creator, creator_dir, model_dirs
 
+    @staticmethod
+    def _markers(db, creator_id):
+        """Model names that still carry their pre-rescan STL row."""
+        rows = (
+            db.query(Model.name)
+            .join(STLFile, STLFile.model_id == Model.id)
+            .filter(Model.creator_id == creator_id, STLFile.filename == "original-marker.stl")
+            .all()
+        )
+        return {r.name for r in rows}
+
+    def test_creator_rescan_failure_leaves_unwalked_models_their_stl_rows(
+        self, db, tmp_path, monkeypatch
+    ):
+        """STUDIO-397. The STL wipe is per model now, sharing _index_model's own
+        commit, so a walk that raises leaves every model it never reached holding
+        its ORIGINAL rows instead of zero.
+
+        This test replaces the STUDIO-233 characterization test that asserted the
+        opposite. That test was written to fail exactly here — it recorded the bug
+        so this fix would be visible rather than silent.
+
+        Phase 2 is the half that matters: previously the stranded models had no
+        STL rows, so the next full scan deleted them as phantoms and took the
+        creator row with them. Now they are not phantoms, so nothing is lost.
+        """
+        from datetime import timedelta
+        import os
+
+        from app.models import ScanRoot
+
+        creator, creator_dir, model_dirs = self._rescan_fixture(
+            db, tmp_path, monkeypatch, ["Model A", "Model B"]
+        )
+        creator_id = creator.id
+
+        # === PHASE 1: the rescan crashes before reaching any model ===========
         real_walk = scanner._walk_for_models
 
         def _boom(**kwargs):
@@ -3968,29 +3971,19 @@ class TestScannerTransactionSemantics:
 
         monkeypatch.setattr(scanner, "_walk_for_models", _boom)
 
-        job = JobHandle(key="creator-rescan-crash", _lock=threading.Lock(), state=JobState.RUNNING)
-        scanner._creator_scan(job, a_creator_id)
+        job = JobHandle(key="rescan-crash", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._creator_scan(job, creator_id)
 
         assert job.payload()["state"] == "error"
         db.expire_all()
-        stranded = db.query(STLFile).filter(STLFile.model_id == a_model_id).count()
-        assert stranded == 0, (
-            "PHASE 1 — the pre-walk STL wipe is committed before the walk runs, so "
-            "a crashed rescan leaves the model with zero STL rows and no rollback"
-        )
-        assert db.get(Model, a_model_id) is not None, (
-            "PHASE 1 — the model row itself survives; only its STL rows are gone"
+        assert self._markers(db, creator_id) == {"Model A", "Model B"}, (
+            "PHASE 1 - a crashed rescan must leave every un-walked model its "
+            "original STL rows; nothing is wiped up front any more"
         )
 
-        # === PHASE 2: the next full scan prunes them as phantoms =============
-        # Restore the real walk specifically. NOT monkeypatch.undo(): the `db`
-        # fixture takes the same function-scoped monkeypatch instance, so undo()
-        # would also revert its SessionLocal patches and let the code under test
-        # reach a real database.
+        # === PHASE 2: the next full scan keeps them ==========================
         monkeypatch.setattr(scanner, "_walk_for_models", real_walk)
         _run_pool_inline(monkeypatch)
-        # Isolate the claim: only the phantom prune and the empty-creator sweep
-        # are left real. The others have their own tests above.
         monkeypatch.setattr(scanner, "_prune_stale_models", lambda *a, **k: 0)
         monkeypatch.setattr(scanner, "_prune_stale_paths", lambda *a, **k: 0)
         monkeypatch.setattr(scanner, "_prune_stale_stl_files", lambda *a, **k: 0)
@@ -3999,32 +3992,167 @@ class TestScannerTransactionSemantics:
         monkeypatch.setattr(scanner.grouping, "regroup_creator", lambda _db, _cid: None)
         monkeypatch.setattr(scanner.grouping, "prune_empty_groups", lambda _db: 0)
 
-        # "Unchanged since the last successful full scan": age every folder well
-        # behind the root's baseline so _index_model takes its folder_unchanged
-        # branch and never rebuilds the STL rows.
         old = utcnow() - timedelta(days=30)
-        for d in (a_dir, a_model_dir, b_dir, *b_model_dirs, tmp_path):
+        for d in (creator_dir, *model_dirs, tmp_path):
             os.utime(d, (old.timestamp(), old.timestamp()))
-        root = ScanRoot(path=str(tmp_path), enabled=True, last_scanned=utcnow() - timedelta(days=1))
-        db.add(root)
+        db.add(ScanRoot(path=str(tmp_path), enabled=True,
+                        last_scanned=utcnow() - timedelta(days=1)))
         db.commit()
 
         job2 = JobHandle(key="next-full-scan", _lock=threading.Lock(), state=JobState.RUNNING)
         scanner._full_scan(job2, db=db)
 
         db.expire_all()
-        assert db.get(Model, a_model_id) is None, (
-            "PHASE 2 — _prune_phantoms takes no protected_creator_ids, so the "
-            "stranded model is deleted outright by the next full scan"
+        assert db.query(Model).filter(Model.creator_id == creator_id).count() == 2, (
+            "PHASE 2 - the models still have STL rows, so they are not phantoms "
+            "and the next full scan leaves them alone"
         )
-        assert db.get(Creator, a_creator_id) is None, (
-            "PHASE 2 — prune_empty_creators then removes the emptied creator too: "
-            "the crash costs the whole creator, not just its STL rows"
+        assert db.get(Creator, creator_id) is not None, (
+            "PHASE 2 - and the creator row survives with them"
         )
-        assert db.query(Model).filter(Model.creator_id == creator_b.id).count() == 3, (
-            "PHASE 2 — the healthy creator is untouched; it is also what keeps the "
-            "phantom share under the 50% cap that would otherwise have skipped the prune"
+
+    def test_partial_rescan_rebuilds_reached_models_and_preserves_the_rest(
+        self, db, tmp_path, monkeypatch
+    ):
+        """The partial state is the whole point of moving the wipe per model:
+        models the walk reached are REBUILT, models it never reached keep their
+        ORIGINAL rows, and neither group is left at zero.
+        """
+        creator, _dir, _dirs = self._rescan_fixture(
+            db, tmp_path, monkeypatch, ["Model A", "Model B", "Model C"]
         )
+        creator_id = creator.id
+
+        real_index = scanner._index_model
+        indexed: list[str] = []
+
+        def _index_then_fail(folder, creator_, db_, *args, **kwargs):
+            if len(indexed) >= 1:
+                raise OSError("simulated failure after the first model")
+            indexed.append(folder.name)
+            return real_index(folder, creator_, db_, *args, **kwargs)
+
+        monkeypatch.setattr(scanner, "_index_model", _index_then_fail)
+
+        job = JobHandle(key="partial-rescan", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._creator_scan(job, creator_id)
+
+        assert job.payload()["state"] == "error"
+        assert len(indexed) == 1, "exactly one model was re-indexed before the failure"
+        db.expire_all()
+
+        rebuilt = indexed[0]
+        markers = self._markers(db, creator_id)
+        assert rebuilt not in markers, (
+            f"{rebuilt} was re-indexed, so its original marker row is gone"
+        )
+        assert markers == {"Model A", "Model B", "Model C"} - {rebuilt}, (
+            "every model the walk never reached keeps its original rows"
+        )
+        for model in db.query(Model).filter(Model.creator_id == creator_id):
+            count = db.query(STLFile).filter(STLFile.model_id == model.id).count()
+            assert count > 0, f"{model.name} must never be left with zero STL rows"
+
+    def test_rescan_clears_stl_rows_for_models_whose_folder_is_gone(
+        self, db, tmp_path, monkeypatch
+    ):
+        """The gap the per-model wipe opens, and the sweep that closes it.
+
+        A per-model rebuild only reaches models the walk visits, so a model whose
+        folder was renamed or deleted would keep stale rows and stop looking like
+        a phantom — something the old bulk wipe handled as a side effect. The
+        creator-scoped sweep restores that, and the phantom prune then removes the
+        model as it always did.
+
+        Fail-first note: this is a REGRESSION GUARD, not a fix-prover, and it is
+        the one test here that passes against the pre-fix code too -- the old bulk
+        wipe cleared these rows as a side effect. Its mutation is therefore not
+        'remove the fix' but 'remove the sweep from the fix', which was verified
+        RED. Read a green run as 'the fix did not open this gap', not as evidence
+        of the fix itself.
+        """
+        creator, creator_dir, model_dirs = self._rescan_fixture(
+            db, tmp_path, monkeypatch, ["Model A", "Gone Model"]
+        )
+        creator_id = creator.id
+
+        # Delete one model's folder from disk, leaving its rows behind.
+        import shutil
+        shutil.rmtree(model_dirs[1])
+
+        job = JobHandle(key="rescan-missing-folder", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._creator_scan(job, creator_id)
+
+        assert job.payload()["state"] == "done"
+        db.expire_all()
+        names = {m.name for m in db.query(Model).filter(Model.creator_id == creator_id)}
+        assert "Gone Model" not in names, (
+            "a model whose folder is gone has its stale STL rows cleared and is "
+            "then removed by the phantom prune, exactly as before the fix"
+        )
+        assert "Model A" in names, "the surviving model is untouched"
+
+    def test_rescan_clears_nothing_when_the_volume_looks_detached(
+        self, db, tmp_path, monkeypatch
+    ):
+        """The sweep must not mistake a dropped mount for deleted folders.
+
+        A detached volume makes every path beneath it report missing, and an
+        unmounted mountpoint presents as an EMPTY directory rather than a missing
+        one — so `exists()` alone is not enough. If no walked directory is online
+        (present and non-empty), the sweep clears nothing and the creator keeps
+        its whole STL index.
+
+        The bulk pre-walk wipe this replaced had no such guard: it would have
+        emptied the creator's STL rows in exactly this situation. This is
+        strictly safer than the code it replaces, not merely equivalent.
+        """
+        import shutil
+
+        creator, creator_dir, model_dirs = self._rescan_fixture(
+            db, tmp_path, monkeypatch, ["Model A", "Model B"]
+        )
+        creator_id = creator.id
+
+        # Volume dropped: the creator folder is still there but empty, and every
+        # model folder beneath it has vanished.
+        for d in model_dirs:
+            shutil.rmtree(d)
+        assert creator_dir.exists() and not any(creator_dir.iterdir())
+
+        job = JobHandle(key="rescan-detached", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._creator_scan(job, creator_id)
+
+        db.expire_all()
+        assert self._markers(db, creator_id) == {"Model A", "Model B"}, (
+            "an offline-looking volume must leave every STL row in place"
+        )
+        assert db.query(Model).filter(Model.creator_id == creator_id).count() == 2, (
+            "and the models therefore survive the phantom prune"
+        )
+
+    def test_prune_phantoms_honours_protected_creator_ids(self, db, tmp_path):
+        """_prune_phantoms was the only destructive prune with no protection.
+        Defensive symmetry with the other three rather than the STUDIO-397 fix
+        itself — with the per-model rebuild a stranded creator is not a phantom
+        in the first place.
+        """
+        protected = make_creator(db, "Protected")
+        other = make_creator(db, "Other")
+        db.flush()
+        db.add(Model(name="No Files", folder_path=str(tmp_path / "a"), creator_id=protected.id))
+        # Two models with STL rows so the 50% cap cannot mask the result.
+        for i in (1, 2):
+            m = Model(name=f"Has Files {i}", folder_path=str(tmp_path / f"b{i}"), creator_id=other.id)
+            db.add(m)
+            db.flush()
+            db.add(STLFile(model_id=m.id, path=str(tmp_path / f"b{i}" / "p.stl"), filename="p.stl"))
+        db.commit()
+
+        removed = scanner._prune_phantoms(db, protected_creator_ids={protected.id})
+
+        assert removed == 0, "a protected creator's phantom models are left alone"
+        assert db.query(Model).filter(Model.creator_id == protected.id).count() == 1
 
     # -- split_pack -----------------------------------------------------------
 

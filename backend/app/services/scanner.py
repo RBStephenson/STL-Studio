@@ -46,10 +46,11 @@ Session ownership
 Commit boundaries, by phase
   * full scan      one commit after the pre-scan needs_review clear, then one
                    per scan root after its walk; prunes commit individually.
-  * creator rescan one after the needs_review clear, one after the pre-walk
-                   STL-row wipe (destructive, and committed BEFORE the walk
-                   meant to rebuild it), one at the end covering the phantom
-                   prune and regrouping.
+  * creator rescan one after the needs_review clear, then one per model from
+                   _index_model as the walk proceeds -- each model's STL rows
+                   are replaced inside that model's own commit (STUDIO-397) --
+                   then one for the missing-folder sweep, and one at the end
+                   covering the phantom prune and regrouping.
   * inbox          after creator resolution, after grouping, and after the
                    single-pack stale-path prune.
   * split pack     the PackOverride and the collapsed model's deletion are BOTH
@@ -68,6 +69,14 @@ Durable after a failure, deliberately
   * A root that is offline, or that had any creator failure, does not advance
     last_scanned, so the next run re-checks everything it may have missed
     (STUDIO-295).
+  * A creator rescan replaces STL rows PER MODEL, inside each model's own
+    commit, rather than wiping the whole creator up front (STUDIO-397). A walk
+    that raises therefore leaves every model it never reached holding its
+    ORIGINAL rows, so the next full scan does not mistake them for phantoms and
+    delete them along with the creator row. Models whose folder is gone are
+    swept explicitly after a clean walk -- the bulk wipe used to cover that as
+    a side effect, and _clear_stl_rows_for_missing_folders now does it on
+    purpose.
 
 Known sharp edges — characterized here, deliberately NOT fixed by STUDIO-233
   * STUDIO-396: a regroup failure rolls back EVERY creator regrouped earlier in
@@ -75,13 +84,6 @@ Known sharp edges — characterized here, deliberately NOT fixed by STUDIO-233
     flushes. Since regroup_creator drops auto groups first, the rollback undoes
     the drop too — earlier creators silently keep STALE auto groups, and the run
     still reports success.
-  * STUDIO-397: _creator_scan commits its STL-row wipe before walking. If the
-    walk raises, the rows are gone and never rebuilt — a later full scan skips
-    file indexing for any unchanged folder, and _prune_phantoms is the ONLY
-    destructive prune with no protected_creator_ids, so those models and then
-    their creator can be deleted outright. Needs a rescan that failed for a
-    reason other than new files, plus a creator small enough not to trip the
-    50% prune cap.
   * split_pack's re-walk failing leaves a partial, durable split: the original
     model deleted, the PackOverride standing, and the children indexed so far
     still present.
@@ -418,7 +420,7 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 # Slicer rows must go before the phantom prune so a model whose
                 # only "STL" was a slicer project is removed in the same scan.
                 _prune_slicer_files(_db)
-                removed += _prune_phantoms(_db)
+                removed += _prune_phantoms(_db, protected_creator_ids=failed_creator_ids)
                 prune_empty_creators(_db)
 
                 # Replace the in-progress "scanning <creator>" message with a
@@ -736,7 +738,8 @@ def prune_empty_creators(db: Session):
         logger.info(f"Removed {len(orphans)} creator(s) with no remaining models")
 
 
-def _prune_phantoms(db: Session, creator_id: int | None = None):
+def _prune_phantoms(db: Session, creator_id: int | None = None,
+                    protected_creator_ids: set[int] | None = None):
     """Delete models that have no STL files — render/preview/empty folders that
     earlier scanner versions wrongly indexed.
 
@@ -749,11 +752,20 @@ def _prune_phantoms(db: Session, creator_id: int | None = None):
     Pass creator_id to restrict pruning to a single creator (used after per-creator
     rescans so we don't touch creators that haven't been walked yet).
 
+    protected_creator_ids excludes creators whose walk failed this run, matching
+    _prune_stale_models / _prune_stale_paths / _prune_stale_stl_files. This was
+    the only destructive prune without it (STUDIO-397). Note this is defensive
+    symmetry rather than the STUDIO-397 fix itself: with the per-model STL
+    rebuild, a creator stranded by a failed rescan keeps its original rows and so
+    is not a phantom in the first place.
+
     Returns the number of models pruned (for the scan completion summary, #223).
     """
     base_q = db.query(Model.id)
     if creator_id is not None:
         base_q = base_q.filter(Model.creator_id == creator_id)
+    if protected_creator_ids:
+        base_q = base_q.filter(~Model.creator_id.in_(protected_creator_ids))
     total = base_q.count()
     ids = [
         row[0] for row in
@@ -767,6 +779,61 @@ def _prune_phantoms(db: Session, creator_id: int | None = None):
     _cascade_delete_models(db, ids)
     logger.info(f"Post-scan: pruned {len(ids)} phantom models (no STL files)")
     return len(ids)
+
+
+def _clear_stl_rows_for_missing_folders(
+    db: Session, creator_id: int, walked_dirs: list[Path]
+) -> int:
+    """Drop STL rows for one creator's models whose folder is gone from disk.
+
+    Companion to the per-model STL rebuild in _index_model (STUDIO-397). That
+    rebuild only reaches models the walk actually visited, so a model whose
+    folder was renamed or deleted keeps rows pointing at a path that no longer
+    exists -- and therefore stops looking like a phantom to _prune_phantoms.
+    The bulk pre-walk wipe this replaced covered that case as a side effect;
+    this covers it deliberately, scoped to the creator being rescanned.
+
+    Callers must skip this when the walk had read failures: an unreadable
+    folder must never be treated as a deleted one (STUDIO-79).
+
+    Mount-detach safety, same rule the other destructive prunes follow: a
+    detached drive makes every path beneath it report missing, so clearing on
+    `exists()` alone would strip a creator's entire STL index the moment its
+    volume hiccuped. Nothing is cleared unless at least one directory the walk
+    actually covered is still ONLINE -- present AND non-empty, since an
+    unmounted mountpoint presents as an empty directory rather than a missing
+    one. (The old bulk pre-walk wipe had no such guard and would happily empty
+    the creator in that situation.)
+
+    Returns the number of STL rows removed.
+    """
+    if not any(_root_available(str(d)) for d in walked_dirs):
+        logger.warning(
+            "Creator rescan: every walked directory is missing or empty -- "
+            "treating this as an offline volume and clearing nothing"
+        )
+        return 0
+
+    rows = (
+        db.query(Model.id, Model.folder_path)
+        .filter(Model.creator_id == creator_id, Model.folder_path != None)  # noqa: E711
+        .all()
+    )
+    missing = [r.id for r in rows if not Path(r.folder_path).exists()]
+    if not missing:
+        return 0
+    removed = 0
+    for i in range(0, len(missing), 500):
+        chunk = missing[i:i + 500]
+        removed += db.query(STLFile).filter(
+            STLFile.model_id.in_(chunk)
+        ).delete(synchronize_session=False)
+    db.commit()
+    logger.info(
+        f"Creator rescan: cleared STL rows for {len(missing)} model(s) "
+        "whose folder is gone"
+    )
+    return removed
 
 
 def _prune_slicer_files(db: Session):
@@ -891,16 +958,12 @@ def _creator_scan(job: JobHandle, creator_id: int):
                 job.update(state=JobState.DONE, message="no folders found for creator")
                 return
 
-            # Clear all STL rows for this creator's models before re-walking.
-            # _index_stl_files is additive-only, so without this, stale rows from
-            # a previous scan keep phantom models above the zero-STL threshold and
-            # _prune_phantoms never removes them.
-            model_ids = [row[0] for row in db.query(Model.id).filter(Model.creator_id == creator_id)]
-            for i in range(0, len(model_ids), 500):
-                chunk = model_ids[i:i + 500]
-                db.query(STLFile).filter(STLFile.model_id.in_(chunk)).delete(synchronize_session=False)
-            db.commit()
-
+            # STL rows are replaced per model by the walk below
+            # (rebuild_stl_index=True), not wiped in bulk up front. The bulk wipe
+            # was committed BEFORE the walk that rebuilt it, so a walk that raised
+            # left every un-walked model with zero STL rows and no rollback --
+            # which the next full scan then deleted as phantoms, taking the
+            # creator row too (STUDIO-397).
             walk_failures: list[ReadFailure] = []
             for creator_dir, layout_tags, grp_by_char in dirs:
                 if _cancelled():
@@ -920,6 +983,7 @@ def _creator_scan(job: JobHandle, creator_id: int):
                     group_by_character=grp_by_char,
                     read_failures=walk_failures,
                     images_cache={},
+                    rebuild_stl_index=True,
                 )
             _report_read_failures(walk_failures)
 
@@ -931,6 +995,14 @@ def _creator_scan(job: JobHandle, creator_id: int):
                     logger.warning(
                         f"Creator rescan hit {len(walk_failures)} unreadable entries — "
                         "phantom prune skipped to avoid removing live models"
+                    )
+                # The per-model rebuild only reaches models the walk actually
+                # visited, so a model whose folder is gone from disk keeps stale
+                # STL rows and stops looking like a phantom. The bulk pre-walk
+                # wipe covered that as a side effect; cover it deliberately now.
+                if not walk_failures:
+                    _clear_stl_rows_for_missing_folders(
+                        db, creator_id, [d for d, _tags, _grp in dirs]
                     )
                 removed = 0 if walk_failures else _prune_phantoms(db, creator_id=creator_id)
                 # Match the full-scan path: creator rescans refresh only
@@ -1191,6 +1263,7 @@ def _walk_for_models(
     read_failures: list[ReadFailure] | None = None,
     boundary_is_product: bool = False,
     images_cache: dict[str, list[Path]] | None = None,
+    rebuild_stl_index: bool = False,
 ):
     """Walk *folder*, indexing models and recursing per classification.
 
@@ -1325,7 +1398,8 @@ def _walk_for_models(
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
                          layout_tags=layout_tags, is_inbox=is_inbox,
                          boundary_is_product=boundary_is_product,
-                         parser_rules=rules.parser_rules, images_cache=images_cache)
+                         parser_rules=rules.parser_rules, images_cache=images_cache,
+                         rebuild_stl_index=rebuild_stl_index)
             return
 
         boundary_keys = {str(child) for child in boundary_children}
@@ -1346,6 +1420,7 @@ def _walk_for_models(
                 boundary_is_product=boundary_is_product,
                 parser_rules=rules.parser_rules,
                 images_cache=images_cache,
+                rebuild_stl_index=rebuild_stl_index,
             )
 
         # Only recurse into the independently qualifying boundaries. Other
@@ -1361,7 +1436,8 @@ def _walk_for_models(
                          stl_cache, auto_signals=signals, last_scanned=last_scanned,
                          layout_tags=layout_tags, is_inbox=is_inbox,
                          boundary_is_product=boundary_is_product,
-                         parser_rules=rules.parser_rules, images_cache=images_cache)
+                         parser_rules=rules.parser_rules, images_cache=images_cache,
+                         rebuild_stl_index=rebuild_stl_index)
             return
 
     # --- Step 3: deepest fallback — STLs here, nothing below ---
@@ -1383,7 +1459,8 @@ def _walk_for_models(
                      stl_cache, auto_signals=signals, last_scanned=last_scanned,
                      layout_tags=layout_tags, is_inbox=is_inbox,
                      boundary_is_product=boundary_is_product,
-                     parser_rules=rules.parser_rules, images_cache=images_cache)
+                     parser_rules=rules.parser_rules, images_cache=images_cache,
+                     rebuild_stl_index=rebuild_stl_index)
         return
 
     # Not a leaf — recurse. Decide the variant-grouping "character" for each child by
@@ -1470,7 +1547,8 @@ def _walk_for_models(
                          group_by_character=group_by_character,
                          read_failures=read_failures,
                          boundary_is_product=boundary_is_product,
-                         images_cache=images_cache)
+                         images_cache=images_cache,
+                         rebuild_stl_index=rebuild_stl_index)
 
     # Two sibling branches (e.g. "Mult Color Filament" / "One Color Filament")
     # can each independently reach the "leaf" strategy at some depth and each
@@ -1549,6 +1627,7 @@ def _index_model(
     boundary_is_product: bool = False,
     parser_rules: name_parser.ParserRules = name_parser.ParserRules(),
     images_cache: dict[str, list[Path]] | None = None,
+    rebuild_stl_index: bool = False,
 ):
     folder_path = str(folder)
 
@@ -1785,6 +1864,20 @@ def _index_model(
                     removed=model.removed_image_paths or [],
                     boundary=gallery_boundary,
                 )
+
+            # STUDIO-397: a full reindex REPLACES an existing model's STL rows
+            # instead of adding to them, because _index_stl_files is
+            # additive-only. This happens here, per model, rather than as one
+            # bulk wipe across the whole creator before the walk: the delete and
+            # the rebuild below share _index_model's single commit, so they are
+            # atomic for this model. A walk that raises therefore leaves every
+            # model it never reached holding its ORIGINAL rows rather than none
+            # -- which is what previously let the next full scan delete them as
+            # phantoms, and the creator row with them.
+            if rebuild_stl_index and not is_new:
+                db.query(STLFile).filter(
+                    STLFile.model_id == model.id
+                ).delete(synchronize_session=False)
 
             _index_stl_files(
                 model, folder, db,
