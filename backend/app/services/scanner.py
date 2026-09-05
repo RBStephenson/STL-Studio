@@ -41,11 +41,15 @@ Session ownership
   * rollback() is called in exactly ONE place: _scan_root's regroup loop. Every
     other failure path discards uncommitted work by closing a scanner-owned
     session, or hands a caller-owned session back untouched — the caller
-    inherits the partial state and owns the cleanup.
+    inherits the partial state and owns the cleanup. That rollback reaches only
+    the creator that failed, because the loop commits after each one
+    (STUDIO-396).
 
 Commit boundaries, by phase
   * full scan      one commit after the pre-scan needs_review clear, then one
-                   per scan root after its walk; prunes commit individually.
+                   per scan root after its walk; inside each root's regroup
+                   pass, one commit PER CREATOR (STUDIO-396) and a final one
+                   covering prune_empty_groups; prunes commit individually.
   * creator rescan one after the needs_review clear, then one per model from
                    _index_model as the walk proceeds -- each model's STL rows
                    are RECONCILED inside that model's own commit: rows whose
@@ -83,13 +87,16 @@ Durable after a failure, deliberately
     swept explicitly after a clean walk -- the old bulk wipe covered that as a
     side effect, and _clear_stl_rows_for_missing_folders now does it on purpose,
     with a mount-detach guard the bulk wipe never had.
+  * A regroup that raises costs ONLY that creator its regrouping (STUDIO-396).
+    The loop commits after each creator, so creators regrouped earlier are
+    already durable and creators after it still run. The failed creator keeps
+    the stale auto groups regroup_creator had dropped, since the rollback undoes
+    that drop as well -- it is left exactly as the run found it, to be rebuilt
+    by the next clean run. The per-creator commit is INSIDE the try, so a commit
+    that raises is logged and rolled back like any other failure rather than
+    aborting the whole root.
 
 Known sharp edges — characterized here, deliberately NOT fixed by STUDIO-233
-  * STUDIO-396: a regroup failure rolls back EVERY creator regrouped earlier in
-    the same _scan_root loop, because they share `group_db` and grouping only
-    flushes. Since regroup_creator drops auto groups first, the rollback undoes
-    the drop too — earlier creators silently keep STALE auto groups, and the run
-    still reports success.
   * split_pack's re-walk failing leaves a partial, durable split: the original
     model deleted, the PackOverride standing, and the children indexed so far
     still present.
@@ -1242,6 +1249,14 @@ def _scan_root(root: ScanRoot, db: Session, rules: ScanRules) -> set[int]:
         for cid in dict.fromkeys(creator_ids.values()):
             try:
                 grouping.regroup_creator(group_db, cid)
+                # Commit per creator so one creator's failure cannot reach the
+                # others (STUDIO-396 — see "Durable after a failure" above for
+                # what the shared transaction used to cost). INSIDE the try on
+                # purpose: a commit that raises (the SQLite-lock transient this
+                # code already defends against elsewhere) has to land on the
+                # log-and-rollback path below, not escape and kill the whole
+                # root.
+                group_db.commit()
             except Exception:
                 logger.exception(f"Error regrouping creator id={cid}")
                 group_db.rollback()
