@@ -873,6 +873,53 @@ class TestVariantGrouping:
         chars = {m.character for m in _models(db, creator)}
         assert chars == {"Goblin"}          # not "Unsupported"/"Supported"
 
+    def test_lone_odd_sibling_does_not_hijack_the_character(self, db, tmp_path):
+        """STUDIO-410: parts/structural children are skipped from the identity
+        vote, so a character folder holding structural variants plus ONE
+        oddly-named child leaves that child as the only voter. Its key must not
+        become the character of its siblings — that overwrote the character
+        folder's own perfectly good name, and welded two different characters
+        into one group named after a variant folder.
+
+        The STLs sit one level below each variant folder (the common
+        pre-supported pack shape): with them directly inside, the whole
+        character folder collapses to a single model and the vote never runs.
+        """
+        creator_dir = tmp_path / "Creator"
+        for character in ("Goblin", "Orc"):
+            for variant in ("Supported", "Unsupported", "Nude V2"):
+                _stl(creator_dir / character / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        # The structural siblings keep the character folder's name…
+        assert chars[str(Path("Goblin/Supported"))] == "Goblin"
+        assert chars[str(Path("Goblin/Unsupported"))] == "Goblin"
+        assert chars[str(Path("Orc/Supported"))] == "Orc"
+        assert chars[str(Path("Orc/Unsupported"))] == "Orc"
+        # …so the two characters can never share one group. The odd sibling's own
+        # character is deliberately not pinned: STUDIO-412/415 decide where it
+        # lands, and this test must not churn when they do.
+
+    def test_lone_sibling_extending_the_parent_name_still_labels_the_group(self, db, tmp_path):
+        """The single-key branch must still win when the lone child's identity
+        *extends* the parent's — "Crimson Wings" holding a "Crimson Wings APC"
+        is one product carrying context, not a hijack, so every sibling shares
+        the parent's label. Guards the carve-out that keeps STUDIO-410's fix
+        from being simplified down to "only at the creator root"."""
+        creator_dir = tmp_path / "Creator"
+        char = creator_dir / "Crimson Wings"
+        for variant in ("Supported", "Unsupported", "Crimson Wings APC"):
+            _stl(char / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {m.character for m in _models(db, creator)}
+        assert chars == {"Crimson Wings"}
+
     def test_support_variant_subfolders_group_across_parents(self, db, tmp_path):
         """DakkaDakka-style: a product whose 'supported' copy is one level shallower
         than its (double-nested) 'unsupported' copy must still group as one character."""

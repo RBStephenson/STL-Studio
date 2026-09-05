@@ -1516,19 +1516,42 @@ def _walk_for_models(
             and name_parser.character_key(folder.name, creator.name)):
         own_character = folder.name
 
+    # This folder's own identity, normalised. Needed both to decide the strategy
+    # (below) and to label a "common" group, so it is computed once here.
+    own_key = name_parser.character_key(own_character, creator.name) if own_character else ""
+
     #   strict-majority shared key → children are support/format/scale variants of one
     #                                product (label it by THIS folder's name); a few
     #                                odd-named or typo'd leaves fold in with the majority
+    #   lone key, nothing better    → that child names the group (the creator root, and
+    #                                a child that extends this folder's own identity)
     #   multiple keys, none dominant → separate products: keep each child's own key
     #   no product keys at all       → variant descriptors of THIS folder
     if not nonempty:
         strategy, common_key = "parent", None
     else:
         top_key, top_n = counts.most_common(1)[0]
-        # > half of the real children share one key (and at least two do), OR a single
-        # real child carries the only identity → one product. Strict majority (not ≥)
-        # keeps an even 2-vs-2 split of two distinct products from collapsing.
-        if (top_n >= 2 and top_n * 2 > len(keys)) or (len(distinct) == 1 and len(keys) == 1):
+        # > half of the real children share one key (and at least two do) → one product.
+        # Strict majority (not ≥) keeps an even 2-vs-2 split of two distinct products
+        # from collapsing.
+        majority = top_n >= 2 and top_n * 2 > len(keys)
+        # A single real child carries the only identity. Parts/structural/nested-variant
+        # children are skipped from `keys` entirely, so this fires for a character folder
+        # holding format variants plus ONE oddly-named child ("Ada Wong/{Supported,
+        # Unsupported, Nude V2}") — and handing that child's key to every sibling
+        # overwrites the character folder's own perfectly good name, welding two
+        # characters into one group named after a variant folder (STUDIO-410). Let the
+        # lone child name the group only when there is genuinely nothing better: at the
+        # creator root, where own_character is None and children must name themselves,
+        # or when its identity *extends* this folder's ("Crimson Wings" / "Crimson Wings
+        # APC"), which is one product carrying context rather than a hijack. Otherwise
+        # fall through to "leaf", where the odd child keeps its own key and every skipped
+        # sibling inherits own_character — identical to "common" for children that have a
+        # key at all, so this narrows the old behaviour rather than redirecting it.
+        lone_key = len(distinct) == 1 and len(keys) == 1
+        if lone_key and own_character:
+            lone_key = bool(own_key) and top_key.lower().startswith(own_key.lower())
+        if majority or lone_key:
             strategy, common_key = "common", top_key
         else:
             strategy, common_key = "leaf", None
@@ -1539,13 +1562,11 @@ def _walk_for_models(
     # creator tag ("Ada Wong" vs "Ada Wong CA3D"), in which case the cleaned folder
     # name is the better label. Require the folder's key to be a *strictly shorter*
     # prefix of the shared key: equal-length means there is no junk to drop, and the
-    # raw folder name may still hold a support word ("…unsupported"). Computed once.
+    # raw folder name may still hold a support word ("…unsupported").
     common_label = common_key
-    if strategy == "common" and own_character:
-        own_key = name_parser.character_key(own_character, creator.name)
-        if (own_key and len(own_key) < len(common_key)
-                and common_key.lower().startswith(own_key.lower())):
-            common_label = own_key
+    if (strategy == "common" and own_key and len(own_key) < len(common_key)
+            and common_key.lower().startswith(own_key.lower())):
+        common_label = own_key
 
     for child in sorted(child_dirs):
         if group_by_character:
