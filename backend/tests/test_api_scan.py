@@ -309,3 +309,77 @@ class TestScanLaunchBusy:
         r = client.post(f"/scan/creator/{creator.id}")
         assert r.status_code == 200
         assert r.json()["running"] is True
+
+
+class TestScanRootDestinationTemplate:
+    """Per-root destination template on the scan-root API (STUDIO-403).
+
+    Note the deliberate asymmetry with `layout`, which is NOT NULL and coerces
+    blank to "{creator}": this column is nullable and coerces blank to NULL,
+    because blank here means *inherit* rather than *use the default shape*.
+    """
+
+    def test_absent_on_create_means_inherit(self, client, tmp_path):
+        resp = client.post("/scan/roots", json={"path": str(tmp_path)})
+        assert resp.status_code == 200
+        assert resp.json()["reorganize_template"] is None
+
+    def test_add_root_with_a_destination_template(self, client, tmp_path):
+        resp = client.post(
+            "/scan/roots",
+            json={"path": str(tmp_path), "reorganize_template": "{creator}/{title}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reorganize_template"] == "{creator}/{title}"
+
+    def test_add_root_rejects_an_invalid_destination_template(self, client, tmp_path):
+        resp = client.post(
+            "/scan/roots",
+            json={"path": str(tmp_path), "reorganize_template": "{creater}"},
+        )
+        assert resp.status_code == 400
+
+    def test_patch_sets_a_destination_template(self, client, tmp_path):
+        root_id = client.post("/scan/roots", json={"path": str(tmp_path)}).json()["id"]
+
+        resp = client.patch(
+            f"/scan/roots/{root_id}", json={"reorganize_template": "{creator}/{title}"}
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["reorganize_template"] == "{creator}/{title}"
+        assert client.get("/scan/roots").json()[0]["reorganize_template"] == "{creator}/{title}"
+
+    def test_patch_with_a_blank_string_clears_it_back_to_inheriting(self, client, tmp_path):
+        """An empty string is the UI's way to say 'go back to inheriting'. It
+        must store NULL, not a blank template — a blank template is not
+        parseable and would 400 every preview that touched this root."""
+        root_id = client.post(
+            "/scan/roots",
+            json={"path": str(tmp_path), "reorganize_template": "{creator}/{title}"},
+        ).json()["id"]
+
+        resp = client.patch(f"/scan/roots/{root_id}", json={"reorganize_template": ""})
+
+        assert resp.status_code == 200
+        assert resp.json()["reorganize_template"] is None
+
+    def test_patch_rejects_an_invalid_destination_template(self, client, tmp_path):
+        root_id = client.post("/scan/roots", json={"path": str(tmp_path)}).json()["id"]
+
+        resp = client.patch(f"/scan/roots/{root_id}", json={"reorganize_template": "{creater}"})
+
+        assert resp.status_code == 400
+
+    def test_patching_another_field_leaves_the_template_alone(self, client, tmp_path):
+        """Omitting the field is not the same as sending "" — renaming a library
+        must not silently drop its destination template."""
+        root_id = client.post(
+            "/scan/roots",
+            json={"path": str(tmp_path), "reorganize_template": "{creator}/{title}"},
+        ).json()["id"]
+
+        resp = client.patch(f"/scan/roots/{root_id}", json={"name": "minis"})
+
+        assert resp.status_code == 200
+        assert resp.json()["reorganize_template"] == "{creator}/{title}"

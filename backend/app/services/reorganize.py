@@ -22,6 +22,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
+    AppSetting,
     ImportSourceMapping,
     Model,
     PackOverride,
@@ -29,7 +30,12 @@ from app.models import (
 )
 from app.services import name_parser
 from app.services.path_sanitize import path_over_length, sanitize_segment, slug_filename
-from app.services.reorganize_template import parse_template, render_segments, segment_fields
+from app.services.reorganize_template import (
+    ReorganizeTemplateError,
+    parse_template,
+    render_segments,
+    segment_fields,
+)
 
 UNKNOWN_CREATOR = "_Unknown Creator"
 UNKNOWN_CHARACTER = "_Unknown Character"
@@ -127,6 +133,12 @@ class Entry:
 
 @dataclass
 class Manifest:
+    # The scope's FALLBACK template in canonical form — the explicit one when the
+    # caller passed one, else the app-wide setting, else the built-in default.
+    # With per-root templates (STUDIO-403) that is not a promise every entry used
+    # it: a root with its own template renders its models against that instead.
+    # Read this as "what a model resolves to when its root has nothing of its
+    # own", never as "the template this manifest used".
     template: str
     entries: list[Entry]
     # collision keys are computed during build; kept for the stats pass
@@ -275,6 +287,77 @@ def _manifest_scope(
     return root_keys, _dest_for
 
 
+class TemplateResolver:
+    """Which destination template applies to which model (STUDIO-403).
+
+    Per-scan-root templates turn "the template" from a per-build question into a
+    per-model one. The rule, in one line: **an explicit template applies
+    uniformly across the whole scope; with no explicit template each model
+    resolves through its own destination root** — that root's saved template,
+    then the app-wide ``reorganize_template`` setting, then the parser's
+    built-in default.
+
+    Explicit-wins-uniformly is deliberate and is what keeps the Reorganize
+    page's one-off field, and import-apply's hard-coded ``{creator}/{title}``,
+    meaning exactly what they say. Anything that passes no template — the
+    unorganized badge, an unmodified preview — gets per-root resolution instead,
+    which is the whole feature.
+
+    The lookup keys on a model's **anchor** root, not the root it currently sits
+    in. For in-library models those are the same thing; they differ for inbox
+    models, which live outside every scan root and anchor at the managed
+    destination library, and there the template that matters belongs to the
+    library the files are moving *into*. That mirrors ``_render_destination``'s
+    own anchor choice on purpose — if the two ever disagree, a model renders
+    under one root's template into a different root's tree.
+
+    Parsing happens once per distinct template here, not once per model: a
+    library with three roots parses at most four templates for a whole manifest.
+    """
+
+    def __init__(self, db: Session, explicit: str | None, root_keys: list[tuple[str, str]]):
+        self._explicit = (explicit or "").strip() or None
+        self._root_keys = root_keys
+
+        fallback = self._explicit
+        if fallback is None:
+            row = db.get(AppSetting, "reorganize_template")
+            fallback = ((row.value or "").strip() or None) if row is not None else None
+        # parse_template(None) yields the built-in default — the third and last
+        # level of inheritance. Resolving it here means "" and None behave
+        # identically at every call site rather than at some of them.
+        self._fallback_segments = parse_template(fallback)
+
+        self._by_root: dict[str, list[str]] = {}
+        if self._explicit is None:
+            for r in db.query(ScanRoot).all():
+                own = (r.reorganize_template or "").strip()
+                if not (r.path and own):
+                    continue
+                try:
+                    self._by_root[_canon(r.path)] = parse_template(own)
+                except ReorganizeTemplateError as e:
+                    # Named, because the caller turns this into a 400 the user
+                    # reads. "unknown token {creater}" with no root attached is
+                    # unactionable when the template they're looking at is fine
+                    # and a different root's is the broken one.
+                    raise ReorganizeTemplateError(f"Scan root {r.path}: {e}") from e
+
+    @property
+    def fallback_segments(self) -> list[str]:
+        """What a model resolves to when its root has no template of its own."""
+        return self._fallback_segments
+
+    def segments_for_anchor(self, anchor: str | None) -> list[str]:
+        if anchor is None:
+            return self._fallback_segments
+        return self._by_root.get(anchor, self._fallback_segments)
+
+    def segments_for(self, m: Model, dest_root: str | None) -> list[str]:
+        anchor = dest_root if m.is_inbox else _scan_root_for(_key(m.folder_path or ""), self._root_keys)
+        return self.segments_for_anchor(anchor)
+
+
 def _models_for_scope(
     db: Session,
     root_keys: list[tuple[str, str]],
@@ -370,10 +453,9 @@ def build_manifest(
     only ever touch directory segments. Gallery image filenames are left
     untouched; this only applies to STL files."""
     overrides = overrides or {}
-    segments = parse_template(template)
-    canonical_template = "/".join(segments)
-
     root_keys, _dest_for = _manifest_scope(db, root_id)
+    resolver = TemplateResolver(db, template, root_keys)
+    canonical_template = "/".join(resolver.fallback_segments)
 
     pack_paths = [_canon(p) for (p,) in db.query(PackOverride.path).all() if p]
 
@@ -392,8 +474,9 @@ def build_manifest(
     else:
         entries = []
         for m in models:
-            entries.append(_build_entry(m, segments, root_keys, pack_paths,
-                                        overrides.get(m.id), _dest_for(m),
+            dest = _dest_for(m)
+            entries.append(_build_entry(m, resolver.segments_for(m, dest), root_keys, pack_paths,
+                                        overrides.get(m.id), dest,
                                         slugify_title=slugify_title,
                                         slugify_all=slugify_all,
                                         slugify_filenames=slugify_filenames))
@@ -405,7 +488,7 @@ def build_manifest(
         # the user rather than just a hint. Silently fold an available
         # suggested_suffix into the title so the import can proceed.
         entries = _auto_apply_import_suffixes(
-            entries, models, segments, root_keys, pack_paths, overrides, _dest_for,
+            entries, models, resolver, root_keys, pack_paths, overrides, _dest_for,
             slugify_title=slugify_title, slugify_all=slugify_all,
             slugify_filenames=slugify_filenames,
         )
@@ -461,17 +544,19 @@ def build_template_preview(
     search is O(models) in the worst case (no unclassifiable model exists), but
     it is pure CPU over rows already loaded.
     """
-    segments = parse_template(template)
-    canonical_template = "/".join(segments)
     root_keys, dest_for = _manifest_scope(db, root_id)
+    resolver = TemplateResolver(db, template, root_keys)
+    canonical_template = "/".join(resolver.fallback_segments)
     models = _models_for_scope(db, root_keys, root_id, with_files=False)
     models.sort(key=lambda m: m.id)
 
     ok: list[TemplateSample] = []
     unclassifiable: TemplateSample | None = None
     for m in models:
+        dest_root = dest_for(m)
         dest = _render_destination(
-            m, segments, root_keys, None, dest_for(m), slugify_all=slugify_all,
+            m, resolver.segments_for(m, dest_root), root_keys, None, dest_root,
+            slugify_all=slugify_all,
         )
         sample = TemplateSample(
             model_id=m.id,
@@ -504,7 +589,7 @@ def build_template_preview(
 def _auto_apply_import_suffixes(
     entries: list[Entry],
     models: list[Model],
-    segments: list[str],
+    resolver: TemplateResolver,
     root_keys: list[tuple[str, str]],
     pack_paths: list[str],
     overrides: dict[int, dict],
@@ -518,7 +603,13 @@ def _auto_apply_import_suffixes(
     ``suggested_suffix`` by appending it to the title and rebuilding the
     entry, then re-checking for collisions. Entries without a suggestion
     (or whose suggestion doesn't resolve the collision) are left as-is and
-    stay blocked, same as before."""
+    stay blocked, same as before.
+
+    Takes the resolver rather than a fixed segment list (STUDIO-403) so a
+    rebuilt entry renders under the same template its first pass used. Import
+    apply passes an explicit template, so today every entry here resolves the
+    same way — but a rebuild that silently switched templates would be a very
+    quiet bug to find later."""
     if not any(e.collision and e.suggested_suffix for e in entries):
         return entries
     by_id = {m.id: m for m in models}
@@ -529,7 +620,8 @@ def _auto_apply_import_suffixes(
             m = by_id[e.model_id]
             ov = dict(overrides.get(m.id) or {})
             ov.setdefault("suffix", e.suggested_suffix)
-            e = _build_entry(m, segments, root_keys, pack_paths, ov, dest_for(m),
+            dest = dest_for(m)
+            e = _build_entry(m, resolver.segments_for(m, dest), root_keys, pack_paths, ov, dest,
                               slugify_title=slugify_title, slugify_all=slugify_all,
                               slugify_filenames=slugify_filenames)
             changed = True
@@ -1176,8 +1268,24 @@ def creator_scan_dir(
     ``{creator}``, an earlier segment needs ``{character}``/``{scale}``/
     ``{title}`` (not available for a bare creator), or there's no scan root to
     anchor to.
+
+    **The per-root rule, stated rather than left implicit (STUDIO-403):** the
+    folder is anchored at the primary enabled root, so it is shaped by *that
+    root's* template. Where it lands decides how it is shaped — anchoring under
+    one root while rendering with another root's template would place a folder
+    the receiving root then reports as unorganized the moment it is scanned.
+    An explicit ``template`` argument still wins, same as everywhere else.
     """
-    segments = parse_template(template)
+    primary = (
+        db.query(ScanRoot)
+        .filter(ScanRoot.enabled == True)  # noqa: E712
+        .order_by(ScanRoot.id)
+        .first()
+    )
+    if not primary or not primary.path:
+        return None
+
+    segments = TemplateResolver(db, template, []).segments_for_anchor(_canon(primary.path))
     # Matched through segment_fields, not a "{creator}" substring test — the
     # latter sees nothing in "{creator?}", which would return None here and
     # silently stop placing new creator folders altogether (STUDIO-407).
@@ -1194,15 +1302,6 @@ def creator_scan_dir(
         if f in ("character", "scale", "title")
     }
     if other_fields:
-        return None
-
-    primary = (
-        db.query(ScanRoot)
-        .filter(ScanRoot.enabled == True)  # noqa: E712
-        .order_by(ScanRoot.id)
-        .first()
-    )
-    if not primary or not primary.path:
         return None
 
     # No dropped_fields: a brand-new creator always has a name, so even an

@@ -51,11 +51,13 @@ function Harness({
   onCommit,
   rootId,
   defaultTemplate = SERVER_DEFAULT,
+  inheritedTemplate,
 }: {
   initial?: string;
   onCommit?: () => void;
   rootId?: number;
   defaultTemplate?: string;
+  inheritedTemplate?: string;
 }) {
   const [value, setValue] = useState(initial);
   return (
@@ -65,6 +67,7 @@ function Harness({
       onCommit={onCommit}
       rootId={rootId}
       defaultTemplate={defaultTemplate}
+      inheritedTemplate={inheritedTemplate}
       scopeNote="Applies to this plan only."
     />
   );
@@ -249,6 +252,65 @@ describe("TemplateEditor validation", () => {
   // it would confidently render a template the user isn't looking at.
   it("never previews an empty template", async () => {
     render(<Harness initial="" />);
+    expect(await screen.findByText(/The template is empty/)).toBeInTheDocument();
+    await waitFor(() => expect(templatePreviewMock).not.toHaveBeenCalled());
+  });
+});
+
+// STUDIO-403: for a per-scan-root field, and for the Reorganize page's
+// all-roots view, blank does not mean "unset" — it means "follow the parent".
+// The amber empty-template warning is correct for the one and wrong for the
+// other, and the difference is entirely `inheritedTemplate`.
+describe("TemplateEditor inherited state", () => {
+  it("states what it inherits instead of warning that the template is empty", async () => {
+    render(<Harness initial="" inheritedTemplate="{creator}/{title}" />);
+
+    expect(await screen.findByText(/Inherits/)).toHaveTextContent("{creator}/{title}");
+    expect(screen.queryByText(/The template is empty/)).not.toBeInTheDocument();
+  });
+
+  it("previews the inherited template so the empty field still shows real destinations", async () => {
+    render(<Harness initial="" inheritedTemplate="{creator}/{title}" />);
+
+    await waitFor(() =>
+      expect(templatePreviewMock).toHaveBeenCalledWith("{creator}/{title}", undefined),
+    );
+    expect(await screen.findByText("Example destinations")).toBeInTheDocument();
+  });
+
+  it("scopes the inherited preview to this root", async () => {
+    render(<Harness initial="" inheritedTemplate="{creator}/{title}" rootId={7} />);
+
+    await waitFor(() =>
+      expect(templatePreviewMock).toHaveBeenCalledWith("{creator}/{title}", 7),
+    );
+  });
+
+  it("leaves the input itself empty — the blank field IS the inherit state", async () => {
+    // Pre-filling with the inherited value is the drift this field exists to
+    // avoid: a copy stops tracking the parent the moment the parent changes,
+    // and nothing on screen would say so.
+    render(<Harness initial="" inheritedTemplate="{creator}/{title}" />);
+
+    await screen.findByText(/Inherits/);
+    expect(field()).toHaveValue("");
+  });
+
+  it("goes back to previewing the typed template once one is entered", async () => {
+    render(<Harness initial="" inheritedTemplate="{creator}/{title}" />);
+    await screen.findByText(/Inherits/);
+
+    await userEvent.type(field(), "{{creator}");
+
+    await waitFor(() => expect(screen.queryByText(/Inherits/)).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(templatePreviewMock).toHaveBeenLastCalledWith("{creator}", undefined),
+    );
+  });
+
+  it("still warns about an empty template when there is nothing to inherit", async () => {
+    render(<Harness initial="" inheritedTemplate="" />);
+
     expect(await screen.findByText(/The template is empty/)).toBeInTheDocument();
     await waitFor(() => expect(templatePreviewMock).not.toHaveBeenCalled());
   });

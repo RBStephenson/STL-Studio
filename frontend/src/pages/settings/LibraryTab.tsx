@@ -56,6 +56,12 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
   const [picking, setPicking] = useState(false);
   const [reloadingEnv, setReloadingEnv] = useState(false);
   const [templateEdit, setTemplateEdit] = useState<string | null>(null);
+  // Per-root destination templates (STUDIO-403). Only the expanded root renders
+  // a TemplateEditor: each one runs its own debounced /template-preview call, so
+  // rendering all of them would fire a request per scan root on every visit to
+  // this tab to show fields most people never touch.
+  const [openTemplateRoot, setOpenTemplateRoot] = useState<number | null>(null);
+  const [rootTemplateEdits, setRootTemplateEdits] = useState<Record<number, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const { status: scanStatus } = useScanStatus(onRootsChanged);
   const scanning = !!scanStatus?.running;
@@ -69,6 +75,34 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       flash("Reorganize template updated", "ok");
     } catch (e) {
       flash(errMsg(e) || "Invalid reorganize template — check the format", "err");
+    }
+  };
+
+  // What a root with no template of its own actually resolves to. Two levels,
+  // and naming which one is in play is the point — "inherits the default" would
+  // be ambiguous between the library setting and the built-in one.
+  const inheritedTemplate = settings.reorganize_template || settings.reorganize_template_default;
+  // Deliberately carries no "above"/"below" — this same phrase is used in the
+  // scan-root cards (where the library template is below) and in prose near the
+  // Destination Layout section itself.
+  const inheritedLabel = settings.reorganize_template
+    ? "the library template"
+    : "the built-in default";
+
+  const saveRootTemplate = async (root: ScanRoot) => {
+    const current = (root.reorganize_template ?? "").trim();
+    const next = (rootTemplateEdits[root.id] ?? root.reorganize_template ?? "").trim();
+    const clearEdit = () =>
+      setRootTemplateEdits((m) => { const copy = { ...m }; delete copy[root.id]; return copy; });
+    if (next === current) { clearEdit(); return; }
+    try {
+      // "" is meaningful, not a no-op: it's how the root goes back to inheriting.
+      await api.scan.updateRoot(root.id, { reorganize_template: next });
+      clearEdit();
+      onRootsChanged();
+      flash(next ? "Destination template saved for this root" : `Root back to inheriting ${inheritedLabel}`, "ok");
+    } catch (e) {
+      flash(errMsg(e) || "Invalid destination template — check the format", "err");
     }
   };
 
@@ -362,6 +396,61 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
                       Group variants by character
                     </label>
                   </div>
+                  {/* Per-root destination template (STUDIO-403). Sits under the
+                      "Layout" field above deliberately, because they are the two
+                      directions of the same question for this one root: Layout
+                      reads its existing folders, this decides where its models
+                      should go. Empty means inherit — never pre-filled with the
+                      inherited value, which is how a copy silently stops
+                      tracking the parent. */}
+                  <div className="flex flex-col gap-2 pl-[27px]">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-text-secondary-alt shrink-0">Destination</label>
+                      {r.reorganize_template ? (
+                        <span className="text-xs font-mono text-text-secondary truncate" title={r.reorganize_template}>
+                          {r.reorganize_template}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-text-muted truncate">
+                          Inherits {inheritedLabel}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOpenTemplateRoot((cur) => (cur === r.id ? null : r.id))
+                        }
+                        aria-expanded={openTemplateRoot === r.id}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 shrink-0"
+                      >
+                        {openTemplateRoot === r.id ? "Done" : r.reorganize_template ? "Change" : "Override"}
+                      </button>
+                    </div>
+                    {openTemplateRoot === r.id && (
+                      // Named group: TemplateEditor labels its input "Destination
+                      // template", and the library-wide editor further down the tab
+                      // uses the same label. Two identically-named textboxes on one
+                      // page is ambiguous for a screen reader, not just for a test
+                      // query — the group says which root this one belongs to.
+                      <div role="group" aria-label={`Destination template for ${r.path}`}>
+                        <TemplateEditor
+                          value={rootTemplateEdits[r.id] ?? r.reorganize_template ?? ""}
+                          onChange={(next) => setRootTemplateEdits((m) => ({ ...m, [r.id]: next }))}
+                          onCommit={() => saveRootTemplate(r)}
+                          rootId={r.id}
+                          defaultTemplate={settings.reorganize_template_default}
+                          inheritedTemplate={inheritedTemplate}
+                          scopeNote={
+                            <>
+                              <strong>Saved for this scan root</strong> — models under this
+                              root use it instead of the library template below. Clear it to
+                              go back to inheriting {inheritedLabel}.
+                            </>
+                          }
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -385,12 +474,18 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
       </section>
 
       {/* Destination layout — library configuration, NOT Reorganize configuration
-          (STUDIO-405). These three settings decide where models belong, and four
-          separate things read them: Reorganize, new creator folders, import
-          moves, and the "unorganized" badge (`routers/models.py` builds that
-          badge from exactly this template plus both slugify flags). Living under
-          a default-off checkbox labelled Experimental made the library's own
-          layout look like an option belonging to a scary tool. */}
+          (STUDIO-405). Living under a default-off checkbox labelled Experimental
+          made the library's own layout look like an option belonging to a scary
+          tool.
+
+          The consumer list said FOUR and was wrong; corrected in STUDIO-403 after
+          reading the code rather than the ticket. The TEMPLATE has three
+          consumers — Reorganize, new creator folders, and the "unorganized"
+          badge. Import apply does NOT read it: `routers/imports.py` passes a
+          hard-coded "{creator}/{title}" to _build_and_persist and never imports
+          the stored template at all. What import apply does follow is the two
+          slugify flags below, which is where the confusion came from — the three
+          settings sit in one box but do not have the same audience. */}
       <section className="mb-8 pt-6 border-t border-border-subtle">
         <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3 flex items-center gap-1.5">
           <FolderSync size={14} /> Destination Layout
@@ -402,8 +497,10 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
           The <strong className="text-text-primary-alt2">Layout</strong> on each scan location above
           describes how your existing folders are <em>read</em> — which level is the creator, which
           are tags. This describes the opposite: where models <em>should</em> live. Reorganize, new
-          creator folders, import moves, and the <strong className="text-text-primary-alt2">unorganized</strong>{" "}
-          badge on a model's page all follow it.
+          creator folders, and the <strong className="text-text-primary-alt2">unorganized</strong>{" "}
+          badge on a model's page all follow it. Any scan location that sets its own{" "}
+          <strong className="text-text-primary-alt2">Destination</strong> above uses that instead,
+          for the models under it.
         </p>
 
         <div className="bg-panel/60 border border-border-subtle rounded-lg px-4 py-3 flex flex-col gap-3">
@@ -421,9 +518,10 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
                 defaultTemplate={settings.reorganize_template_default}
                 scopeNote={
                   <>
-                    <strong>Saved</strong> — used by Reorganize Library, new creator folders,
-                    import moves, and the "unorganized" flag on a model's page. The Reorganize
-                    page can override it for a single plan without changing this.
+                    <strong>Saved</strong> — used by Reorganize Library, new creator folders, and
+                    the "unorganized" flag on a model's page, for every scan location that hasn't
+                    set its own Destination. The Reorganize page can override it for a single plan
+                    without changing this.
                   </>
                 }
               />

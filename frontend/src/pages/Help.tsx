@@ -903,11 +903,21 @@ const SECTIONS: Section[] = [
         </p>
         <p>
           The template itself is <em>not</em> a Reorganize setting. It lives under{" "}
-          <strong>Settings → Library → Destination Layout</strong>, because four
+          <strong>Settings → Library → Destination Layout</strong>, because three
           separate things follow it: Reorganize, where a brand-new creator folder is
-          created, import moves, and the <strong>unorganized</strong> badge on a
-          model's page. You can read and change it whether or not Reorganize is
-          enabled — that flag gates writing files, not describing where they belong.
+          created, and the <strong>unorganized</strong> badge on a model's page. You
+          can read and change it whether or not Reorganize is enabled — that flag
+          gates writing files, not describing where they belong.
+        </p>
+        <p>
+          <strong>Per scan location.</strong> Each scan location can set its own{" "}
+          <strong>Destination</strong> template under{" "}
+          <strong>Settings → Library → Scan Locations</strong>, for libraries whose
+          roots want different shapes — <code>{"{creator}/{character}/{title}"}</code>{" "}
+          suits character minis and is wrong for a terrain root with no characters in
+          it. Leave a location's Destination empty and it follows the library template
+          instead; an empty library template follows the built-in default. Nothing
+          changes until a location is actually given one.
         </p>
         <p>
           Templates can also include <code>{"{scale}"}</code>, using scanner-detected

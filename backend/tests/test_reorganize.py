@@ -849,3 +849,175 @@ class TestPreviewIsNotWriteGated:
 
         assert resp.status_code == 200
         assert resp.json()["entries"][0]["proposed_dir"].endswith("abe3d/bust")
+
+
+class TestPerScanRootTemplates:
+    """Per-scan-root destination templates (STUDIO-403).
+
+    The rule these all pin: an EXPLICIT template applies uniformly across the
+    scope; with no explicit template, every model resolves through its own
+    destination root — that root's saved template, then the app-wide setting,
+    then the built-in default.
+    """
+
+    def _two_roots(self, db, tmp_path):
+        """Two scan roots: `minis` overrides the template, `terrain` inherits."""
+        minis = tmp_path / "minis"
+        terrain = tmp_path / "terrain"
+        minis.mkdir()
+        terrain.mkdir()
+        db.add(ScanRoot(path=str(minis), enabled=True,
+                        reorganize_template="{creator}/{title}"))
+        db.add(ScanRoot(path=str(terrain), enabled=True))
+        db.commit()
+        return minis, terrain
+
+    def test_a_root_with_its_own_template_renders_differently(self, client, db, tmp_path):
+        minis, terrain = self._two_roots(db, tmp_path)
+        _model_with_file(db, minis, creator_name="Abe3D", character="Joker", title="Bust")
+        _model_with_file(db, terrain, creator_name="Ruins Co", character="Tower", title="Keep")
+
+        entries = {e["model_name"]: e for e in client.get("/reorganize/preview").json()["entries"]}
+
+        # The overriding root drops the character level; the inheriting one keeps it.
+        assert entries["Bust"]["proposed_dir"].endswith("minis/abe3d/bust")
+        assert entries["Keep"]["proposed_dir"].endswith("terrain/ruins-co/tower/keep")
+
+    def test_all_roots_build_uses_each_roots_own_template(self, client, db, tmp_path):
+        """The deliberate answer to the ticket's multi-template question: an
+        all-roots manifest renders each entry against its own root rather than
+        refusing to build or flattening every root onto one template."""
+        minis, terrain = self._two_roots(db, tmp_path)
+        _model_with_file(db, minis, creator_name="Abe3D", character="Joker", title="Bust")
+        _model_with_file(db, terrain, creator_name="Ruins Co", character="Tower", title="Keep")
+
+        data = client.get("/reorganize/preview").json()
+
+        dirs = sorted(e["proposed_dir"] for e in data["entries"])
+        assert len(dirs) == 2
+        assert not any(d.endswith("minis/abe3d/joker/bust") for d in dirs), \
+            "the overriding root must not fall back to the library template"
+        # `template` on the response is the scope FALLBACK, not a claim that
+        # every entry used it — the two entries above prove they didn't.
+        assert data["template"] == "{creator}/{character}/{title}"
+
+    def test_root_scoped_build_uses_that_roots_template(self, client, db, tmp_path):
+        minis, _terrain = self._two_roots(db, tmp_path)
+        _model_with_file(db, minis, creator_name="Abe3D", character="Joker", title="Bust")
+        root_id = db.query(ScanRoot).filter_by(path=str(minis)).first().id
+
+        entries = client.get(f"/reorganize/preview?root_id={root_id}").json()["entries"]
+
+        assert len(entries) == 1
+        assert entries[0]["proposed_dir"].endswith("minis/abe3d/bust")
+
+    def test_an_explicit_template_overrides_every_roots_own(self, client, db, tmp_path):
+        """Explicit-wins-uniformly. The Reorganize page's one-off field, and
+        import-apply's hard-coded template, have to keep meaning exactly what
+        they say even when a root has an opinion."""
+        minis, terrain = self._two_roots(db, tmp_path)
+        _model_with_file(db, minis, creator_name="Abe3D", character="Joker", title="Bust")
+        _model_with_file(db, terrain, creator_name="Ruins Co", character="Tower", title="Keep")
+
+        entries = client.get("/reorganize/preview?template=%7Bcreator%7D").json()["entries"]
+
+        assert sorted(e["proposed_dir"].split("/")[-1] for e in entries) == ["abe3d", "ruins-co"]
+
+    def test_blank_root_template_means_inherit_not_empty(self, client, db, tmp_path):
+        """A root storing "" must behave exactly like NULL. The two are
+        indistinguishable to a user and a blank template is not a legal
+        template — treating "" as an override would 400 the whole preview."""
+        root = tmp_path / "minis"
+        root.mkdir()
+        db.add(ScanRoot(path=str(root), enabled=True, reorganize_template=""))
+        db.commit()
+        _model_with_file(db, root, creator_name="Abe3D", character="Joker", title="Bust")
+
+        resp = client.get("/reorganize/preview")
+
+        assert resp.status_code == 200
+        assert resp.json()["entries"][0]["proposed_dir"].endswith("abe3d/joker/bust")
+
+    def test_root_template_beats_the_app_wide_setting(self, client, db, tmp_path):
+        from app.models import AppSetting
+
+        root = tmp_path / "minis"
+        root.mkdir()
+        db.add(ScanRoot(path=str(root), enabled=True, reorganize_template="{creator}/{title}"))
+        db.add(AppSetting(key="reorganize_template", value="{creator}/{scale?}/{character}/{title}"))
+        db.commit()
+        _model_with_file(db, root, creator_name="Abe3D", character="Joker", title="Bust")
+
+        entries = client.get("/reorganize/preview").json()["entries"]
+
+        assert entries[0]["proposed_dir"].endswith("minis/abe3d/bust")
+
+    def test_a_malformed_root_template_names_the_root(self, client, db, tmp_path):
+        """Validation on write makes this unreachable through the API, so the
+        400 exists for hand-edited databases — and there the message has to say
+        WHICH root, since the template the user is looking at is fine."""
+        root = tmp_path / "minis"
+        root.mkdir()
+        db.add(ScanRoot(path=str(root), enabled=True, reorganize_template="{creater}"))
+        db.commit()
+        _model_with_file(db, root, creator_name="Abe3D", character="Joker", title="Bust")
+
+        resp = client.get("/reorganize/preview")
+
+        assert resp.status_code == 400
+        assert "minis" in resp.json()["detail"]
+
+
+class TestCreatorScanDirFollowsItsRoot:
+    """`creator_scan_dir` anchors at the primary enabled root, so it renders
+    with THAT root's template (STUDIO-403). Where the folder lands is what
+    decides its shape — otherwise a brand-new creator folder would be reported
+    unorganized the moment it was scanned."""
+
+    def test_uses_the_primary_roots_own_template(self, db, tmp_path):
+        from app.models import AppSetting
+
+        primary = tmp_path / "minis"
+        secondary = tmp_path / "terrain"
+        primary.mkdir()
+        secondary.mkdir()
+        db.add(ScanRoot(path=str(primary), enabled=True,
+                        reorganize_template="{creator}"))
+        db.add(ScanRoot(path=str(secondary), enabled=True,
+                        reorganize_template="{creator}/{character}"))
+        # Chosen so the two possible answers are DISTINGUISHABLE, which the first
+        # version of this test wasn't: an app-wide template that needs a
+        # character above the creator level is one creator_scan_dir cannot render
+        # for a bare creator, so it answers None. Against the root's own
+        # "{creator}" it answers a path. A control mutation that ignored the
+        # root's template survived the earlier assertion because the built-in
+        # default happens to render the same leading "{creator}" segment.
+        db.add(AppSetting(key="reorganize_template", value="{character}/{creator}"))
+        db.commit()
+
+        target = reorganize.creator_scan_dir(db, None, "Abe 3D")
+
+        assert target == reorganize._canon(str(primary) + "/abe-3d")
+
+    def test_falls_back_to_the_app_setting_when_the_root_has_none(self, db, tmp_path):
+        from app.models import AppSetting
+
+        root = tmp_path / "minis"
+        root.mkdir()
+        db.add(ScanRoot(path=str(root), enabled=True))
+        db.add(AppSetting(key="reorganize_template", value="{creator}/{title}"))
+        db.commit()
+
+        target = reorganize.creator_scan_dir(db, None, "Abe 3D")
+
+        assert target == reorganize._canon(str(root) + "/abe-3d")
+
+    def test_an_explicit_template_still_wins(self, db, tmp_path):
+        root = tmp_path / "minis"
+        root.mkdir()
+        db.add(ScanRoot(path=str(root), enabled=True, reorganize_template="{character}/{creator}"))
+        db.commit()
+
+        target = reorganize.creator_scan_dir(db, "{creator}", "Abe 3D")
+
+        assert target == reorganize._canon(str(root) + "/abe-3d")

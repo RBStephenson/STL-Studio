@@ -79,12 +79,15 @@ layout takes effect on the next scan (full or per-creator).
 
 > **Not the same thing as the destination template.** Settings shows these two
 > near each other and they point opposite ways. A scan root's **Layout** (above)
-> says how your existing folders are *read*. The **destination template**
-> (Settings → Library → **Destination Layout**, directly below your scan
-> locations) says where models *should* live — it drives Reorganize, new creator
-> folders, import moves, and the "unorganized" badge. Changing one does not
-> change the other. See
-> [Reorganize library](features.md#reorganize-library).
+> says how your existing folders are *read*. The **destination template** says
+> where models *should* live — it drives Reorganize, new creator folders, and the
+> "unorganized" badge. Changing one does not change the other.
+>
+> Both now live on the same card: **Layout** reads, **Destination** writes. A
+> location's **Destination** is optional and empty means inherit — first the
+> library-wide template under Settings → Library → **Destination Layout**, then
+> the built-in default. See
+> [Per-scan-root destination templates](features.md#per-scan-root-destination-templates).
 
 ## How a "model" is detected
 
@@ -267,6 +270,13 @@ Tools** — it defaults off, and while off both Reorganize and import moves are
 refused. This mirrors [Reorganize](features.md#reorganize-library)'s safety
 posture.
 
-That flag gates *writes*, not the layout itself. The destination template an
-import move follows lives under **Settings → Library → Destination Layout** and
-is readable and editable with the flag off.
+That flag gates *writes*, not the layout itself.
+
+An import move does **not** follow your destination template. It always lands in
+`{creator}/{title}` under the chosen destination library — a fixed shape, so an
+import is predictable regardless of how the rest of your library is filed. What
+it does share with the destination template are the two slugify toggles under
+**Settings → Library → Destination Layout**, which is why an import arrives
+already lowercase-and-hyphenated when that setting is on. Run
+[Reorganize](features.md#reorganize-library) afterwards to file imported models
+under the template for the root they landed in.

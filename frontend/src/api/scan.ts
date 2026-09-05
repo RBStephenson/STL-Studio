@@ -29,7 +29,9 @@ export const scanApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, layout: layout || "{creator}", ...opts }),
     }),
-  updateRoot: (id: number, body: { layout?: string; enabled?: boolean; name?: string; is_writable?: boolean; group_by_character?: boolean }) =>
+  // `reorganize_template`: omit to leave a root's destination template alone;
+  // send "" to clear it back to inheriting the library setting (STUDIO-403).
+  updateRoot: (id: number, body: { layout?: string; enabled?: boolean; name?: string; is_writable?: boolean; group_by_character?: boolean; reorganize_template?: string }) =>
     request<ScanRoot>(`/scan/roots/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

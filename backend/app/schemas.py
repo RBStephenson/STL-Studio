@@ -371,6 +371,9 @@ class ScanRootCreate(BaseModel):
     name: Optional[str] = None
     is_writable: bool = False
     group_by_character: bool = False
+    # Per-root destination template (STUDIO-403). Blank/absent = inherit the
+    # app-wide setting. Note this is NOT `layout`, which points the other way.
+    reorganize_template: Optional[str] = Field(None, max_length=500)
 
 
 class ScanRootUpdate(BaseModel):
@@ -379,6 +382,11 @@ class ScanRootUpdate(BaseModel):
     name: Optional[str] = None
     is_writable: Optional[bool] = None
     group_by_character: Optional[bool] = None
+    # Two distinct nulls, and the difference is the whole feature: omitting the
+    # field leaves the root's template alone (normal PATCH semantics), while
+    # sending "" clears it back to inheriting. There is deliberately no way to
+    # store a blank template — blank IS inherit (STUDIO-403).
+    reorganize_template: Optional[str] = Field(None, max_length=500)
 
 
 class LibraryRead(BaseModel):

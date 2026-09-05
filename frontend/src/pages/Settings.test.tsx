@@ -461,6 +461,7 @@ describe("Settings – Library name + import destination (#452)", () => {
   const root = {
     id: 7, path: "/srv/minis", enabled: true, layout: "{creator}",
     last_scanned: null, name: "minis", is_writable: false, group_by_character: false,
+    reorganize_template: null,
   };
 
   it("toggles is_writable via updateRoot", async () => {

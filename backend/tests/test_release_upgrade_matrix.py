@@ -181,7 +181,15 @@ def test_released_database_upgrades_to_head_without_data_loss(
     }.issubset({index["name"] for index in inspector.get_indexes("models")})
 
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0032"
+        # Tracks the current Alembic head — bump it with each new revision.
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0033"
+        # 0033's per-root destination template (STUDIO-403) must arrive NULL on
+        # an upgraded database. A server_default, or any backfill, would freeze
+        # every existing scan root at whatever the global template happened to
+        # be on upgrade day instead of leaving it inheriting.
+        assert conn.execute(
+            text("SELECT reorganize_template FROM scan_roots")
+        ).scalar_one() is None
         model = conn.execute(text(
             "SELECT name, title, description, tags, print_status, print_count, locked "
             "FROM models WHERE id = 1"

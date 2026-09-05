@@ -67,6 +67,14 @@ interface Props {
    *  (STUDIO-406). Passed in rather than read from context here so the
    *  component's tests don't all need a settings provider. */
   defaultTemplate: string;
+  /** What a blank field falls back to, when blank means INHERIT rather than
+   *  "unset" (STUDIO-403 — the per-scan-root field, and the Reorganize page's
+   *  all-roots view). Given this, an empty value stops being the amber "the
+   *  template is empty" warning and becomes a stated inheritance, previewed
+   *  against the inherited string. The input itself stays empty on purpose:
+   *  pre-filling it with the inherited value is how the two silently diverge
+   *  the next time the parent changes. */
+  inheritedTemplate?: string;
   /** Says whether this field is saved or applies to one plan — the distinction
    *  existed in the code but nothing in the UI ever said so. */
   scopeNote: ReactNode;
@@ -82,7 +90,7 @@ interface Props {
  *  missing files and multi-directory models all need the disk, so a clean
  *  example is NOT a promise that a model will move. Only a built plan says that.
  */
-export default function TemplateEditor({ value, onChange, onCommit, rootId, defaultTemplate, scopeNote }: Props) {
+export default function TemplateEditor({ value, onChange, onCommit, rootId, defaultTemplate, inheritedTemplate, scopeNote }: Props) {
   const presets = useMemo(() => buildPresets(defaultTemplate), [defaultTemplate]);
   const [preview, setPreview] = useState<TemplatePreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -100,12 +108,20 @@ export default function TemplateEditor({ value, onChange, onCommit, rootId, defa
   });
 
   const trimmed = value.trim();
+  const inherited = (inheritedTemplate ?? "").trim();
+  // Blank means two different things depending on the host, and the difference
+  // is the whole of STUDIO-403's display problem. Without `inheritedTemplate`
+  // it means "unset" and there is genuinely nothing to render. With it, blank
+  // means "use the parent's" — a real, resolvable template the user is entitled
+  // to see rendered even though this field is empty.
+  const inheriting = !trimmed && !!inherited;
+  const effective = trimmed || (inheriting ? inherited : "");
 
   useEffect(() => {
-    // A blank template makes the server fall back to the SAVED one, so previewing
-    // it would confidently render a template the user isn't looking at. Say
-    // nothing instead of saying the wrong thing.
-    if (!trimmed) {
+    // A blank template with nothing to inherit makes the server fall back to the
+    // SAVED one, so previewing it would confidently render a template the user
+    // isn't looking at. Say nothing instead of saying the wrong thing.
+    if (!effective) {
       setPreview(null);
       setError(null);
       setBusy(false);
@@ -115,7 +131,7 @@ export default function TemplateEditor({ value, onChange, onCommit, rootId, defa
     setBusy(true);
     const timer = setTimeout(async () => {
       try {
-        const data = await api.reorganize.templatePreview(trimmed, rootId);
+        const data = await api.reorganize.templatePreview(effective, rootId);
         if (!cancelled) {
           setPreview(data);
           setError(null);
@@ -134,7 +150,7 @@ export default function TemplateEditor({ value, onChange, onCommit, rootId, defa
       }
     }, PREVIEW_DEBOUNCE_MS);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [trimmed, rootId]);
+  }, [effective, rootId]);
 
   const replaceSelection = (text: string) => {
     const el = inputRef.current;
@@ -221,13 +237,24 @@ export default function TemplateEditor({ value, onChange, onCommit, rootId, defa
 
       {error && <div className="text-xs text-rose-400">{error}</div>}
 
-      {!trimmed && (
+      {inheriting && (
+        // Muted, not amber: inheriting is the correct resting state for a root
+        // that has no opinion, and colouring it as a warning would push people
+        // into pasting a copy of the parent template just to make it go away —
+        // which is the drift this whole field exists to avoid.
+        <div className="text-xs text-text-muted">
+          Inherits <code className="font-mono text-text-secondary">{inherited}</code> — leave
+          this empty to keep following it, or type a template to override it here.
+        </div>
+      )}
+
+      {!trimmed && !inheriting && (
         <div className="text-xs text-amber-400">
           The template is empty — insert a token above to see where models would go.
         </div>
       )}
 
-      {trimmed && !error && (
+      {effective && !error && (
         <div className="rounded-lg border border-border-subtle bg-panel/60 px-3 py-2 space-y-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-text-primary-alt2">Example destinations</span>
