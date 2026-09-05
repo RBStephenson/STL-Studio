@@ -51,6 +51,8 @@ vi.mock("../context/AppSettingsContext", () => ({
 }));
 
 import { api, ApiError } from "../api/client";
+// Type-only import of the entry shape, so this survives the api/client mock above.
+import { mkEntry, mkFileMove } from "../test/reorganize";
 
 const reorg = api.reorganize as unknown as {
   preview: ReturnType<typeof vi.fn>;
@@ -87,24 +89,6 @@ const ROOTS = [
   },
 ];
 
-function entry(over: Record<string, unknown>) {
-  return {
-    model_id: 1, model_name: "Joker Bust", files: [], kind: "move",
-    creator_id: 1, creator_name: "Abe3D",
-    model_ids: [1], package_mode: false, package_name: null, ambiguous_package: false,
-    character_source_dir: null, character_proposed_dir: null,
-    character_package_ids: [], character_model_ids: [], shared_files: [],
-    source_path: "/lib/Abe3D/Joker/Bust",
-    proposed_dir: "/lib/Abe3D/Joker/Bust", eligible: true,
-    pack_override_paths: [],
-    collision: false, collision_kind: "none", collision_with: [], suggested_suffix: null,
-    unclassifiable: false, missing_fields: [], over_length: false,
-    reserved_name: false, overlaps_other: false, spans_multiple_dirs: false, source_directories: [],
-    is_symlink: false, escapes_scan_root: false, missing_files_on_disk: false,
-    ...over,
-  };
-}
-
 const STATS = {
   total: 2, eligible: 1, moves_needed: 1, already_in_place: 0, collisions: 0,
   unclassifiable: 1, over_length: 0, reserved: 0, overlaps: 0, blocked: 1,
@@ -115,8 +99,8 @@ function previewFixture() {
     manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
     generated_at: "now",
     entries: [
-      entry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
-      entry({
+      mkEntry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
+      mkEntry({
         model_id: 2, model_name: "Mystery", eligible: false,
         unclassifiable: true, missing_fields: ["character"],
         proposed_dir: "/lib/Abe3D/_Unknown Character/Mystery",
@@ -300,25 +284,20 @@ describe("ReorganizePage", () => {
   });
 
   it("shows shared character assets moving only for a complete package selection", async () => {
-    const sharedFile = {
-      stl_file_id: null,
-      current_path: "/lib/Abe3D/Ada Wong/img/preview.jpg",
+    const sharedFile = mkFileMove("/lib/Abe3D/Ada Wong/img/preview.jpg", {
       proposed_path: "/lib/abe3d/ada-wong/img/preview.jpg",
       size_bytes: 3,
       mtime_ns: 1,
-      content_hash: null,
-      fingerprint_method: "stat",
-      missing_file: false,
       kind: "character_asset",
-    };
+    });
     reorg.preview.mockResolvedValue({
       ...previewFixture(),
       entries: [
-        entry({
+        mkEntry({
           model_id: 1, model_name: "Release One", character_package_ids: [1, 2],
           character_model_ids: [1, 2], shared_files: [sharedFile],
         }),
-        entry({ model_id: 2, model_name: "Release Two", character_package_ids: [1, 2] }),
+        mkEntry({ model_id: 2, model_name: "Release Two", character_package_ids: [1, 2] }),
       ],
       stats: { ...STATS, total: 2, eligible: 2, blocked: 0, unclassifiable: 0, moves_needed: 2 },
     });
@@ -395,7 +374,7 @@ describe("ReorganizePage", () => {
   it("explains an ambiguous package boundary", async () => {
     reorg.preview.mockResolvedValue({
       ...previewFixture(),
-      entries: [entry({ eligible: false, ambiguous_package: true })],
+      entries: [mkEntry({ eligible: false, ambiguous_package: true })],
     });
     render(<ReorganizePage />);
     buildPlan();
@@ -484,7 +463,7 @@ describe("ReorganizePage", () => {
   it("prefills a collision suffix from the source-folder suggestion", async () => {
     reorg.preview.mockResolvedValue({
       ...previewFixture(),
-      entries: [entry({
+      entries: [mkEntry({
         model_id: 2,
         model_name: "Mystery",
         eligible: false,
@@ -524,8 +503,8 @@ describe("ReorganizePage keeps a resolved row visible in its tab (STUDIO-182)", 
     reorg.previewWithOverrides.mockResolvedValue({
       ...previewFixture(),
       entries: [
-        entry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
-        entry({ model_id: 2, model_name: "Mystery", eligible: true }),
+        mkEntry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
+        mkEntry({ model_id: 2, model_name: "Mystery", eligible: true }),
       ],
     });
     fireEvent.change(screen.getByLabelText("character for Mystery"), {
@@ -665,9 +644,9 @@ describe("ReorganizePage select all eligible (STUDIO-160)", () => {
       manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
       generated_at: "now",
       entries: [
-        entry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
-        entry({ model_id: 3, model_name: "Batman Bust", eligible: true }),
-        entry({
+        mkEntry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
+        mkEntry({ model_id: 3, model_name: "Batman Bust", eligible: true }),
+        mkEntry({
           model_id: 2, model_name: "Mystery", eligible: false,
           unclassifiable: true, missing_fields: ["character"],
           proposed_dir: "/lib/Abe3D/_Unknown Character/Mystery",
@@ -727,8 +706,8 @@ describe("ReorganizePage creator filter (#1035)", () => {
     return {
       ...previewFixture(),
       entries: [
-        entry({ model_id: 1, model_name: "Joker Bust", creator_id: 1, creator_name: "Abe3D" }),
-        entry({ model_id: 3, model_name: "Ada Wong", creator_id: 2, creator_name: "CA3D" }),
+        mkEntry({ model_id: 1, model_name: "Joker Bust", creator_id: 1, creator_name: "Abe3D" }),
+        mkEntry({ model_id: 3, model_name: "Ada Wong", creator_id: 2, creator_name: "CA3D" }),
       ],
       stats: { ...STATS, total: 2, eligible: 2, moves_needed: 2, blocked: 0, unclassifiable: 0 },
     };
@@ -776,12 +755,12 @@ describe("ReorganizePage resolvable vs unresolvable coloring (STUDIO-161)", () =
       manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
       generated_at: "now",
       entries: [
-        entry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
-        entry({
+        mkEntry({ model_id: 1, model_name: "Joker Bust", eligible: true }),
+        mkEntry({
           model_id: 2, model_name: "Mystery", eligible: false,
           unclassifiable: true, missing_fields: ["character"],
         }),
-        entry({
+        mkEntry({
           model_id: 4, model_name: "Locked Model", eligible: false,
           locked: true,
         }),
@@ -808,11 +787,11 @@ describe("ReorganizePage collision source context (#1026)", () => {
       manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
       generated_at: "now",
       entries: [
-        entry({
+        mkEntry({
           model_id: 1, model_name: "2B", source_path: "/library/Abe3D/2B/Alternative",
           eligible: false, collision: true, collision_kind: "same_destination", collision_with: [2],
         }),
-        entry({
+        mkEntry({
           model_id: 2, model_name: "Joker Bust", source_path: "/library/Abe3D/Joker/Bust",
         }),
       ],
@@ -833,15 +812,15 @@ describe("ReorganizePage error explanations (STUDIO-162)", () => {
       manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
       generated_at: "now",
       entries: [
-        entry({
+        mkEntry({
           model_id: 2, model_name: "Mystery", eligible: false,
           unclassifiable: true, missing_fields: ["character"],
         }),
-        entry({
+        mkEntry({
           model_id: 4, model_name: "Locked Model", eligible: false,
           locked: true,
         }),
-        entry({
+        mkEntry({
           model_id: 5, model_name: "Split Model", eligible: false,
           spans_multiple_dirs: true,
           source_directories: ["/library/Abe3D/Joker", "/library/Abe3D/Joker/Alternative"],
@@ -894,7 +873,7 @@ describe("ReorganizePage pagination (ADDENDUM §6)", () => {
       manifest_id: "deadbeef", template: "{creator}/{character}/{title}",
       generated_at: "now",
       entries: Array.from({ length: count }, (_, i) =>
-        entry({ model_id: i + 1, model_name: `Model ${i + 1}`, eligible: true })),
+        mkEntry({ model_id: i + 1, model_name: `Model ${i + 1}`, eligible: true })),
       stats: { ...STATS, total: count, eligible: count, moves_needed: count, blocked: 0, unclassifiable: 0 },
     };
   }
@@ -1027,7 +1006,7 @@ describe("ReorganizePage override on any row (STUDIO-400)", () => {
     // keeps its form, so the fixture has to isolate the unresolvable blocker.
     reorg.preview.mockResolvedValue({
       ...previewFixture(),
-      entries: [entry({
+      entries: [mkEntry({
         model_id: 4, model_name: "Locked Model", eligible: false, locked: true,
       })],
     });
@@ -1104,5 +1083,147 @@ describe("ReorganizePage template hygiene (STUDIO-406)", () => {
     await waitFor(() =>
       expect(screen.queryByText("Unknown token: {char")).toBeNull(),
     );
+  });
+});
+
+// The tree and the list are two shapes of one plan (STUDIO-404). What matters
+// here is that they never disagree — same filters, same eligibility, one
+// selection — so these assert across the boundary rather than inside the tree,
+// which has its own suite in components/reorganize/DestinationTree.test.tsx.
+describe("ReorganizePage destination tree (STUDIO-404)", () => {
+  const showTree = () => fireEvent.click(screen.getByRole("button", { name: "Tree" }));
+  const showList = () => fireEvent.click(screen.getByRole("button", { name: "List" }));
+
+  it("swaps the row list for the proposed folder structure", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    // Pagination belongs to the list; the tree expands lazily instead.
+    expect(screen.getByText("Per page")).toBeInTheDocument();
+
+    showTree();
+    expect(screen.getByText("/lib/Abe3D")).toBeInTheDocument();
+    expect(screen.queryByText("Per page")).toBeNull();
+  });
+
+  it("counts the same models the list is showing", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    showTree();
+    // Two entries in the fixture, one of them eligible — matching the list's
+    // own "Select all eligible (1)".
+    expect(screen.getByText(/2 models · 0 files · 1 eligible/)).toBeInTheDocument();
+  });
+
+  it("carries a selection made in the list through to the tree", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Joker Bust" }));
+
+    showTree();
+    expect(
+      screen.getByRole("checkbox", { name: /Deselect 1 eligible model under \/lib\/Abe3D/ }),
+    ).toBeChecked();
+  });
+
+  it("carries a selection made in the tree back to the list and to Apply", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    showTree();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select 1 eligible model under \/lib\/Abe3D/ }));
+    expect(screen.getByRole("button", { name: "Apply 1" })).toBeInTheDocument();
+
+    showList();
+    expect(screen.getByRole("checkbox", { name: "Select Joker Bust" })).toBeChecked();
+  });
+
+  it("unticking a folder gives the selection back", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    showTree();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select 1 eligible model under \/lib\/Abe3D/ }));
+    expect(screen.getByRole("button", { name: "Apply 1" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Deselect 1 eligible model under \/lib\/Abe3D/ }));
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+  });
+
+  it("selects every eligible model under a folder and leaves the blocked ones alone", async () => {
+    reorg.preview.mockResolvedValue({
+      ...previewFixture(),
+      entries: [
+        mkEntry({ model_id: 1, model_name: "Joker Bust", proposed_dir: "/lib/Abe3D/Joker/Bust" }),
+        mkEntry({ model_id: 2, model_name: "Joker Statue", proposed_dir: "/lib/Abe3D/Joker/Statue" }),
+        mkEntry({
+          model_id: 3, model_name: "Mystery", eligible: false, unclassifiable: true,
+          proposed_dir: "/lib/Abe3D/Joker/Mystery",
+        }),
+      ],
+    });
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    showTree();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select 2 eligible models under \/lib\/Abe3D\/Joker/ }));
+    // Two selected, and the blocked third never joined them.
+    expect(screen.getByRole("button", { name: "Apply 2" })).toBeInTheDocument();
+  });
+
+  it("applies the creator filter to the tree, not just the list", async () => {
+    reorg.preview.mockResolvedValue({
+      ...previewFixture(),
+      entries: [
+        mkEntry({ model_id: 1, model_name: "Joker Bust", proposed_dir: "/lib/Abe3D/Joker/Bust" }),
+        mkEntry({
+          model_id: 2, model_name: "Riddler Bust", creator_id: 2, creator_name: "Bob3D",
+          proposed_dir: "/lib/Bob3D/Riddler/Bust",
+        }),
+      ],
+    });
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    showTree();
+    // Matched on the title, which is always the full path — the visible label
+    // changes as chains collapse, and dropping one creator changes what
+    // collapses.
+    expect(screen.getByTitle("/lib/Abe3D/Joker/Bust")).toBeInTheDocument();
+    expect(screen.getByTitle("/lib/Bob3D/Riddler/Bust")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by creator" }), {
+      target: { value: "id:1" },
+    });
+    expect(screen.getByTitle("/lib/Abe3D/Joker/Bust")).toBeInTheDocument();
+    expect(screen.queryByTitle("/lib/Bob3D/Riddler/Bust")).toBeNull();
+  });
+
+  it("applies the filter tabs to the tree as well", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    showTree();
+    fireEvent.click(screen.getByRole("button", { name: "Unclassifiable" }));
+
+    // Only the blocked entry survives the tab, so its branch is all that's left.
+    expect(screen.getByText("/lib/Abe3D/_Unknown Character/Mystery")).toBeInTheDocument();
+    expect(screen.queryByText("/lib/Abe3D/Joker/Bust")).toBeNull();
+  });
+
+  it("stays on the tree across a rebuild, unlike the tab and page", async () => {
+    render(<ReorganizePage />);
+    buildPlan();
+    await screen.findByText("Joker Bust");
+    showTree();
+
+    fireEvent.click(screen.getByRole("button", { name: /Rebuild Plan/ }));
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("/lib/Abe3D")).toBeInTheDocument();
   });
 });

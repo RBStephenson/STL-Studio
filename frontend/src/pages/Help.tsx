@@ -977,6 +977,20 @@ const SECTIONS: Section[] = [
             case rename, or already in place). No files are touched yet.
           </li>
           <li>
+            <strong>List or tree.</strong> The toggle beside the status tabs switches
+            between the per-model <strong>List</strong> and a <strong>Tree</strong> of
+            the folder structure the plan would produce — the list for deciding about
+            one model, the tree for judging the shape of the whole result. Folders
+            carry rolled-up model and file counts — plus package counts when
+            package preservation is on — alongside any collision or blocked totals
+            below them, so a problem branch shows up without being expanded. Ticking a folder selects every eligible model under it, and the
+            checkbox says how many that is first; blocked models are never included.
+            The creator filter, the status tabs and your selection are shared by both
+            views, so switching changes the shape and nothing else. In package
+            preservation mode each package is one node, and the shared character files
+            are reported on the character folder above them.
+          </li>
+          <li>
             <strong>Resolve or adjust any row.</strong> Click a row to expand it and
             fill in the <strong>creator / character / title / suffix</strong> override
             fields. The preview re-runs automatically with your values. Rows marked{" "}
