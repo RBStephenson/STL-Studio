@@ -3464,3 +3464,644 @@ class TestSeparatorInsensitiveIdentity:
         _walk(db, creator, tmp_path / "Creator")
 
         assert len(_models(db, creator)) == 2, "case-distinct folders remain distinct"
+
+
+# ---------------------------------------------------------------------------
+# STUDIO-233 — transaction and failure semantics (characterization)
+# ---------------------------------------------------------------------------
+
+def _run_pool_inline(monkeypatch):
+    """Make _scan_root's worker pool run each creator inline, in order.
+
+    These tests characterize TRANSACTION semantics, not thread scheduling, and
+    real threading is actively misleading on this fixture: the `db` fixture
+    builds its engine with StaticPool and check_same_thread=False, so every
+    worker's `SessionLocal()` lands on the SAME connection and therefore the
+    same transaction. One worker's rollback would then discard another's
+    uncommitted work as a pure harness artifact that production — a file-backed
+    SQLite database with a real pool — never reproduces. Running the pool inline
+    makes the sessions sequential, which is what gives them genuine isolation
+    here.
+
+    _scan_root's post-pool grouping pass already runs single-threaded on its own
+    `group_db`, so it behaves identically either way.
+    """
+    class _InlineFuture:
+        def __init__(self, fn, args, kwargs):
+            self._exc = None
+            try:
+                self._value = fn(*args, **kwargs)
+            except BaseException as exc:  # noqa: BLE001 — re-raised in result()
+                self._value, self._exc = None, exc
+
+        def result(self):
+            if self._exc is not None:
+                raise self._exc
+            return self._value
+
+    class _InlineExecutor:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def submit(self, fn, *args, **kwargs):
+            return _InlineFuture(fn, args, kwargs)
+
+    monkeypatch.setattr(scanner, "ThreadPoolExecutor", _InlineExecutor)
+    monkeypatch.setattr(scanner, "as_completed", lambda futures: list(futures))
+
+
+class TestScannerTransactionSemantics:
+    """STUDIO-233: pin the scanner's CURRENT commit boundaries and failure
+    behavior before STUDIO-234/235 move transaction ownership around.
+
+    Several of these tests assert behavior that is arguably wrong — one of them
+    says so outright. That is the point of a characterization suite: if a later
+    ticket deliberately changes one of these boundaries, the matching test
+    SHOULD go red and be updated as part of that change. Do not "fix" a test
+    here to agree with new behavior without confirming the change was intended.
+
+    The policy these tests describe is written up in scanner.py's module
+    docstring, under "Transaction and failure policy".
+    """
+
+    # -- creator-walk failure -------------------------------------------------
+
+    def test_raised_creator_walk_is_reported_for_prune_protection(
+        self, db, tmp_path, monkeypatch
+    ):
+        """A creator whose walk raises comes back in _scan_root's failed set,
+        which is what shields its models from the destructive stale prune
+        (STUDIO-79). Covers AC1 (creator-walk failure) and AC2.
+
+        Fail-first: assert `failed == set()` instead and this goes red, which is
+        what proves the injected walk really raised rather than being skipped.
+        """
+        from app.models import ScanRoot
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+        _run_pool_inline(monkeypatch)
+
+        _stl(tmp_path / "Doomed Creator" / "Model A")
+
+        def _boom(**kwargs):
+            raise OSError("simulated mid-walk failure")
+
+        monkeypatch.setattr(scanner, "_walk_for_models", _boom)
+        monkeypatch.setattr(scanner.grouping, "regroup_creator", lambda _db, _cid: None)
+        monkeypatch.setattr(scanner.grouping, "prune_empty_groups", lambda _db: 0)
+
+        root = ScanRoot(path=str(tmp_path), enabled=True)
+        db.add(root)
+        db.commit()
+
+        failed = scanner._scan_root(root, db, scanner.ScanRules())
+
+        creator = db.query(Creator).filter(Creator.name == "Doomed Creator").one()
+        assert failed == {creator.id}, (
+            "a creator whose walk raised must be reported so the stale prune skips it"
+        )
+
+    def test_unreadable_entries_protect_a_creator_like_a_raised_walk(
+        self, db, tmp_path, monkeypatch
+    ):
+        """A walk that COMPLETES but on an incomplete view of the disk is treated
+        exactly like one that raised. Deliberate: a folder whose listing came
+        back short may never have been reached, so its models must not look
+        deleted this run.
+        """
+        from app.models import ScanRoot
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+        _run_pool_inline(monkeypatch)
+
+        creator_dir = tmp_path / "Flaky Creator"
+        _stl(creator_dir / "Model A")
+
+        def _short_listing(**kwargs):
+            kwargs["read_failures"].append(
+                scanner.ReadFailure(path=str(creator_dir), error="permission denied")
+            )
+
+        monkeypatch.setattr(scanner, "_walk_for_models", _short_listing)
+        monkeypatch.setattr(scanner.grouping, "regroup_creator", lambda _db, _cid: None)
+        monkeypatch.setattr(scanner.grouping, "prune_empty_groups", lambda _db: 0)
+
+        root = ScanRoot(path=str(tmp_path), enabled=True)
+        db.add(root)
+        db.commit()
+
+        failed = scanner._scan_root(root, db, scanner.ScanRules())
+
+        creator = db.query(Creator).filter(Creator.name == "Flaky Creator").one()
+        assert failed == {creator.id}, (
+            "read failures must protect a creator's models exactly like a raised walk"
+        )
+
+    def test_partial_creator_walk_leaves_already_indexed_models_durable(
+        self, db, tmp_path, monkeypatch
+    ):
+        """_index_model commits per model, so a walk that raises partway through
+        leaves every model indexed BEFORE the failure durably committed. The
+        failure is not all-or-nothing, which is precisely why the prune
+        protection above has to exist at all.
+        """
+        from app.models import ScanRoot
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+        _run_pool_inline(monkeypatch)
+
+        creator_dir = tmp_path / "Half Creator"
+        for name in ("Model A", "Model B", "Model C"):
+            _stl(creator_dir / name)
+
+        real_index = scanner._index_model
+        indexed: list[str] = []
+
+        def _index_then_fail(folder, creator, db_, *args, **kwargs):
+            if len(indexed) >= 2:
+                raise OSError("simulated failure after two models")
+            indexed.append(folder.name)
+            return real_index(folder, creator, db_, *args, **kwargs)
+
+        monkeypatch.setattr(scanner, "_index_model", _index_then_fail)
+        monkeypatch.setattr(scanner.grouping, "regroup_creator", lambda _db, _cid: None)
+        monkeypatch.setattr(scanner.grouping, "prune_empty_groups", lambda _db: 0)
+
+        root = ScanRoot(path=str(tmp_path), enabled=True)
+        db.add(root)
+        db.commit()
+
+        failed = scanner._scan_root(root, db, scanner.ScanRules())
+
+        creator = db.query(Creator).filter(Creator.name == "Half Creator").one()
+        assert failed == {creator.id}, "the partial walk must still be reported as failed"
+        db.expire_all()
+        survived = db.query(Model).filter(Model.creator_id == creator.id).count()
+        assert survived == 2, (
+            "models committed before the failure stay durable — _index_model "
+            f"commits per model; expected 2 survivors, got {survived}"
+        )
+
+    # -- grouping failure -----------------------------------------------------
+
+    def test_grouping_failure_discards_earlier_creators_regrouping(
+        self, db, tmp_path, monkeypatch
+    ):
+        """AC1 (grouping failure). CURRENT BEHAVIOR, AND IT IS A BUG.
+
+        _scan_root regroups every creator on ONE session (`group_db`) and commits
+        only after the loop finishes. grouping.py never commits — it flushes — so
+        when creator N raises, `group_db.rollback()` discards creators 1..N-1
+        along with it.
+
+        It is worse than those creators losing their regrouping. regroup_creator
+        calls _drop_auto_groups FIRST, so the rollback also undoes the drop:
+        earlier creators come out of the run still holding their STALE auto
+        groups, silently, while the loop carries on and prune_empty_groups runs
+        anyway.
+
+        Filed as a follow-on ticket; deliberately NOT fixed here, because
+        STUDIO-233 forbids moving commits. When it is fixed this test is
+        supposed to fail — update it then, on purpose.
+
+        Fail-first: there is no guard to break here, because the test asserts the
+        bug rather than a protection. The honest equivalent is to assert the
+        opposite first — that the stale group is gone, i.e. that the drop stuck —
+        watch that go red, then flip to the assertion below.
+        """
+        from app.models import ScanRoot, VariantGroup
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+        _run_pool_inline(monkeypatch)
+
+        first_dir = tmp_path / "A Creator"
+        second_dir = tmp_path / "B Creator"
+        for d in (first_dir, second_dir):
+            _stl(d / "Model" / "supported")
+
+        # Creator A already exists with a stale AUTO group holding two members.
+        # The members matter: prune_empty_groups deletes member-less auto groups
+        # after the loop, which would mask the rollback we are measuring.
+        first = Creator(name="A Creator")
+        db.add(first)
+        db.flush()
+        stale = VariantGroup(creator_id=first.id, label="Stale Auto Group", source="auto")
+        db.add(stale)
+        db.flush()
+        # no_group=True is what makes regroup_creator take its early-return
+        # branch — the ONLY path that calls _drop_auto_groups. Eligible models
+        # instead go through materialise_proposals, which REUSES the existing
+        # group rather than dropping it, so there would be no drop to roll back
+        # and this test would pass without measuring anything.
+        for i in (1, 2):
+            db.add(Model(
+                name=f"Stale Member {i}",
+                folder_path=str(first_dir / f"member-{i}"),
+                creator_id=first.id,
+                variant_group_id=stale.id,
+                no_group=True,
+            ))
+        db.commit()
+        first_id, stale_group_id = first.id, stale.id
+
+        # Pin the creator ORDER: _scan_root's regroup loop follows
+        # iter_creator_dirs, and the bug only shows if the creator that fails is
+        # walked SECOND. Controlling setup order, not the behavior under test.
+        monkeypatch.setattr(
+            scanner.layout, "iter_creator_dirs",
+            lambda _root, _roles: [(first_dir, []), (second_dir, [])],
+        )
+
+        real_regroup = scanner.grouping.regroup_creator
+
+        def _regroup(session, creator_id):
+            if creator_id != first_id:
+                raise RuntimeError("simulated regroup failure on the second creator")
+            return real_regroup(session, creator_id)
+
+        monkeypatch.setattr(scanner.grouping, "regroup_creator", _regroup)
+        monkeypatch.setattr(scanner, "_walk_for_models", lambda **kwargs: None)
+
+        root = ScanRoot(path=str(tmp_path), enabled=True)
+        db.add(root)
+        db.commit()
+
+        scanner._scan_root(root, db, scanner.ScanRules())
+
+        db.expire_all()
+        assert db.get(VariantGroup, stale_group_id) is not None, (
+            "CURRENT BEHAVIOR (bug): the SECOND creator's failure rolled back the "
+            "FIRST creator's _drop_auto_groups too, so its stale auto group "
+            "survives the run"
+        )
+
+    # -- session ownership ----------------------------------------------------
+
+    def test_caller_owned_session_is_left_open_after_a_failure(
+        self, db, tmp_path, monkeypatch
+    ):
+        """AC3. _full_scan(db=caller_db) never rolls back or closes a session it
+        does not own — it logs, marks the job ERROR, and hands the session back
+        exactly as the failure left it. Synchronous callers (tests, and
+        scan_all_roots(db)) therefore inherit any partial state and own the
+        cleanup themselves.
+        """
+        from app.models import ScanRoot
+
+        (tmp_path / "creator").mkdir()
+        root = ScanRoot(path=str(tmp_path), enabled=True)
+        db.add(root)
+        db.commit()
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("simulated scan failure")
+
+        monkeypatch.setattr(scanner, "_scan_root", _boom)
+        monkeypatch.setattr(scanner.write_lock, "release_scan", lambda: None)
+
+        # Record close/rollback rather than inferring from usability: a closed
+        # SQLAlchemy Session is still usable (it just begins a new transaction),
+        # so "did a later query work" would measure nothing and would stay green
+        # even if the scanner started closing sessions it does not own.
+        closed: list[bool] = []
+        rolled_back: list[bool] = []
+        real_close, real_rollback = db.close, db.rollback
+        monkeypatch.setattr(db, "close", lambda: (closed.append(True), real_close())[1])
+        monkeypatch.setattr(db, "rollback", lambda: (rolled_back.append(True), real_rollback())[1])
+
+        job = JobHandle(key="caller-owned-session", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._full_scan(job, db=db)
+
+        assert job.payload()["state"] == "error"
+        assert closed == [], "the scanner must not close a session it does not own"
+        assert rolled_back == [], (
+            "the scanner must not roll back a caller-owned session — the caller "
+            "inherits the partial state and owns the cleanup"
+        )
+        assert db.query(ScanRoot).count() == 1, "session still usable afterwards"
+
+    def test_scanner_owned_session_is_closed_after_a_failure(
+        self, db, tmp_path, monkeypatch
+    ):
+        """AC3, the other half: when _full_scan opens its own session it always
+        closes it in the finally, failure or not. Rollback is still never called
+        — closing is what discards the uncommitted remainder.
+        """
+        from app.models import ScanRoot
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        (tmp_path / "creator").mkdir()
+        root = ScanRoot(path=str(tmp_path), enabled=True)
+        db.add(root)
+        db.commit()
+
+        closed: list[bool] = []
+        rolled_back: list[bool] = []
+
+        def _tracking_session():
+            session = Session()
+            real_close, real_rollback = session.close, session.rollback
+            # Record rather than assert-by-exception: a closed SQLAlchemy Session
+            # is still usable (it simply begins a new transaction), so "did it
+            # raise on use" would not measure anything.
+            session.close = lambda: (closed.append(True), real_close())[1]
+            session.rollback = lambda: (rolled_back.append(True), real_rollback())[1]
+            return session
+
+        monkeypatch.setattr(scanner, "SessionLocal", _tracking_session)
+        monkeypatch.setattr(
+            scanner, "_scan_root",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("simulated scan failure")),
+        )
+        monkeypatch.setattr(scanner.write_lock, "release_scan", lambda: None)
+
+        job = JobHandle(key="scanner-owned-session", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._full_scan(job)
+
+        assert job.payload()["state"] == "error"
+        assert closed == [True], "a scanner-owned session must be closed exactly once"
+        assert rolled_back == [], (
+            "current behavior: the scanner never rolls back — the close is what "
+            "discards uncommitted work"
+        )
+
+    # -- prune phases ---------------------------------------------------------
+
+    def test_each_prune_phase_commits_independently(self, db, tmp_path, monkeypatch):
+        """AC1 (prune failure). Every prune helper commits internally, so a later
+        prune raising does NOT undo an earlier one: the run ends with partial,
+        durable deletion rather than an all-or-nothing rollback.
+
+        Fail-first note, and a real limit of this harness: the shared StaticPool
+        fixture puts every session on ONE connection, so a flush is visible to
+        any other session exactly like a commit. Turning _cascade_delete_models
+        commit -> flush alone therefore leaves this test GREEN. It only goes red
+        under the compound mutation (that flush PLUS a rollback in _full_scan s
+        handler), which is what actually demonstrates the internal commit is
+        load-bearing. Do not read a green run here as proof of a COMMIT
+        specifically; it proves the deletion is not undone by the later failure.
+        """
+        from app.models import ScanRoot
+
+        (tmp_path / "creator").mkdir()
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        creator = make_creator(db, "Prune Creator")
+        gone = Model(name="Gone", folder_path=str(tmp_path / "missing"), creator_id=creator.id)
+        db.add(gone)
+        db.commit()
+        gone_id = gone.id
+
+        def _first_prune(_db, *args, **kwargs):
+            scanner._cascade_delete_models(_db, [gone_id])
+            return 1
+
+        def _second_prune(*args, **kwargs):
+            raise RuntimeError("simulated prune failure")
+
+        monkeypatch.setattr(scanner, "_scan_root", lambda *a, **k: set())
+        monkeypatch.setattr(scanner, "_prune_stale_models", _first_prune)
+        monkeypatch.setattr(scanner, "_prune_stale_paths", _second_prune)
+        monkeypatch.setattr(scanner.write_lock, "release_scan", lambda: None)
+
+        job = JobHandle(key="prune-durability", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._full_scan(job, db=db)
+
+        assert job.payload()["state"] == "error"
+        db.expire_all()
+        assert db.get(Model, gone_id) is None, (
+            "an earlier prune's deletion is committed and survives a later prune failing"
+        )
+
+    # -- creator rescan: the destructive-commit-before-walk chain ------------
+
+    def test_creator_rescan_failure_strands_models_the_next_full_scan_prunes(
+        self, db, tmp_path, monkeypatch
+    ):
+        """AC1 (model-index failure) and the sharpest finding in this ticket.
+
+        _creator_scan wipes ALL of a creator's STL rows and COMMITS that before
+        walking, because _index_stl_files is additive-only and stale rows would
+        otherwise keep phantom models alive. If the walk then raises, the outer
+        handler logs, marks the job ERROR and closes the session — it never rolls
+        back — so the deletion stands while the rebuild never happened.
+
+        The next full scan can then delete those models outright:
+        _index_model skips _index_stl_files entirely when a folder is
+        `folder_unchanged`, and _prune_phantoms in _full_scan takes NO
+        protected_creator_ids argument, so nothing shields them. prune_empty_creators
+        then removes the now-empty creator too.
+
+        SCOPE — this is not "every failed creator rescan loses data". It needs a
+        rescan that failed for a reason OTHER than new files on disk (the
+        STUDIO-79 transients: a SQLite lock, a mount hiccup), because folders
+        modified since the last successful full scan are not `folder_unchanged`
+        and do get re-indexed. The 50% prune cap is the only other brake, so it
+        also needs the stranded creator to be a minority of the library — which
+        is why creator B exists in this test.
+
+        Filed as a follow-on; NOT fixed here (STUDIO-233 forbids moving commits).
+        """
+        from datetime import timedelta
+        import os
+
+        from app.models import ScanRoot
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+        monkeypatch.setattr(scanner.ScanRules, "load", classmethod(lambda cls, _db: cls()))
+        monkeypatch.setattr(scanner.write_lock, "release_scan", lambda: None)
+
+        # --- library on disk -------------------------------------------------
+        a_dir = tmp_path / "Creator A"
+        a_model_dir = a_dir / "Model A"
+        _stl(a_model_dir)
+        b_dir = tmp_path / "Creator B"
+        b_model_dirs = [b_dir / f"Model B{i}" for i in (1, 2, 3)]
+        for d in b_model_dirs:
+            _stl(d)
+
+        # --- library in the database ----------------------------------------
+        creator_a = make_creator(db, "Creator A")
+        creator_b = make_creator(db, "Creator B")
+        db.flush()
+        a_model = Model(name="Model A", folder_path=str(a_model_dir), creator_id=creator_a.id)
+        db.add(a_model)
+        db.flush()
+        db.add(STLFile(
+            model_id=a_model.id, path=str(a_model_dir / "part.stl"), filename="part.stl",
+        ))
+        for d in b_model_dirs:
+            b_model = Model(name=d.name, folder_path=str(d), creator_id=creator_b.id)
+            db.add(b_model)
+            db.flush()
+            db.add(STLFile(
+                model_id=b_model.id, path=str(d / "part.stl"), filename="part.stl",
+            ))
+        db.commit()
+        a_creator_id, a_model_id = creator_a.id, a_model.id
+
+        # === PHASE 1: the creator rescan crashes mid-walk ====================
+        monkeypatch.setattr(
+            scanner, "_creator_dirs_for", lambda _creator, _db: [(a_dir, [], False)]
+        )
+
+        real_walk = scanner._walk_for_models
+
+        def _boom(**kwargs):
+            raise OSError("simulated transient failure (SQLite lock / mount hiccup)")
+
+        monkeypatch.setattr(scanner, "_walk_for_models", _boom)
+
+        job = JobHandle(key="creator-rescan-crash", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._creator_scan(job, a_creator_id)
+
+        assert job.payload()["state"] == "error"
+        db.expire_all()
+        stranded = db.query(STLFile).filter(STLFile.model_id == a_model_id).count()
+        assert stranded == 0, (
+            "PHASE 1 — the pre-walk STL wipe is committed before the walk runs, so "
+            "a crashed rescan leaves the model with zero STL rows and no rollback"
+        )
+        assert db.get(Model, a_model_id) is not None, (
+            "PHASE 1 — the model row itself survives; only its STL rows are gone"
+        )
+
+        # === PHASE 2: the next full scan prunes them as phantoms =============
+        # Restore the real walk specifically. NOT monkeypatch.undo(): the `db`
+        # fixture takes the same function-scoped monkeypatch instance, so undo()
+        # would also revert its SessionLocal patches and let the code under test
+        # reach a real database.
+        monkeypatch.setattr(scanner, "_walk_for_models", real_walk)
+        _run_pool_inline(monkeypatch)
+        # Isolate the claim: only the phantom prune and the empty-creator sweep
+        # are left real. The others have their own tests above.
+        monkeypatch.setattr(scanner, "_prune_stale_models", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_stale_paths", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_stale_stl_files", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_ignored", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_slicer_files", lambda *a, **k: None)
+        monkeypatch.setattr(scanner.grouping, "regroup_creator", lambda _db, _cid: None)
+        monkeypatch.setattr(scanner.grouping, "prune_empty_groups", lambda _db: 0)
+
+        # "Unchanged since the last successful full scan": age every folder well
+        # behind the root's baseline so _index_model takes its folder_unchanged
+        # branch and never rebuilds the STL rows.
+        old = utcnow() - timedelta(days=30)
+        for d in (a_dir, a_model_dir, b_dir, *b_model_dirs, tmp_path):
+            os.utime(d, (old.timestamp(), old.timestamp()))
+        root = ScanRoot(path=str(tmp_path), enabled=True, last_scanned=utcnow() - timedelta(days=1))
+        db.add(root)
+        db.commit()
+
+        job2 = JobHandle(key="next-full-scan", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._full_scan(job2, db=db)
+
+        db.expire_all()
+        assert db.get(Model, a_model_id) is None, (
+            "PHASE 2 — _prune_phantoms takes no protected_creator_ids, so the "
+            "stranded model is deleted outright by the next full scan"
+        )
+        assert db.get(Creator, a_creator_id) is None, (
+            "PHASE 2 — prune_empty_creators then removes the emptied creator too: "
+            "the crash costs the whole creator, not just its STL rows"
+        )
+        assert db.query(Model).filter(Model.creator_id == creator_b.id).count() == 3, (
+            "PHASE 2 — the healthy creator is untouched; it is also what keeps the "
+            "phantom share under the 50% cap that would otherwise have skipped the prune"
+        )
+
+    # -- split_pack -----------------------------------------------------------
+
+    def test_split_pack_rewalk_failure_leaves_a_partial_split_durable(
+        self, db, tmp_path, monkeypatch
+    ):
+        """split_pack commits its PackOverride and the destructive delete of the
+        collapsed model BEFORE re-walking, and _index_model commits each child as
+        it goes. A re-walk that raises therefore leaves a partially split,
+        durable result: the original model is gone for good, the override stands,
+        and however many children were indexed before the failure remain. The
+        error is reported in the return value only — nothing is rolled back.
+
+        Same harness caveat as test_each_prune_phase_commits_independently: on
+        the shared-connection fixture this only goes red under a compound
+        mutation (both _cascade_delete_models and _index_model commit -> flush,
+        plus a rollback in split_pack s handler). Verified red that way.
+        """
+        from app.models import PackOverride
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+        monkeypatch.setattr(scanner.write_lock, "release_scan", lambda: None)
+        monkeypatch.setattr(scanner.write_lock, "try_acquire_for_scan", lambda: True)
+
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Sinister Six"
+        for child in ("Electro", "Sandman", "Spiderman"):
+            _stl(pack / child / "supported")
+
+        setup = Session()
+        creator = Creator(name="Creator")
+        setup.add(creator)
+        setup.flush()
+        collapsed = Model(name="Sinister Six", folder_path=str(pack), creator_id=creator.id)
+        setup.add(collapsed)
+        setup.commit()
+        collapsed_id = collapsed.id
+        setup.close()
+
+        real_index = scanner._index_model
+        indexed: list[str] = []
+
+        def _index_then_fail(folder, creator_, db_, *args, **kwargs):
+            if len(indexed) >= 1:
+                raise OSError("simulated failure partway through the re-walk")
+            indexed.append(folder.name)
+            return real_index(folder, creator_, db_, *args, **kwargs)
+
+        monkeypatch.setattr(scanner, "_index_model", _index_then_fail)
+
+        result = scanner.split_pack(collapsed_id)
+
+        assert result["ok"] is False, "the caller is told the split failed"
+        check = Session()
+        try:
+            # Identity is checked by FOLDER PATH, not by id: split_pack expunges
+            # the deleted model precisely because SQLite reuses freed row ids, so
+            # get(Model, collapsed_id) can legitimately return one of the newly
+            # indexed children instead of None.
+            assert check.query(Model).filter(
+                Model.folder_path == str(pack)
+            ).count() == 0, (
+                "the collapsed model was deleted and committed before the re-walk — "
+                "the failure does not bring it back"
+            )
+            assert check.query(PackOverride).filter(
+                PackOverride.path == str(pack)
+            ).count() == 1, (
+                "the PackOverride is committed up front and survives the failure, so "
+                "a later rescan still treats this folder as a pack boundary"
+            )
+            assert len(indexed) == 1, "exactly one child was indexed before the failure"
+            assert check.query(Model).filter(Model.folder_path.like(f"{pack}%")).count() == 1, (
+                "that child is durable — _index_model commits per model, so the run "
+                "ends with a partial split rather than an all-or-nothing rollback"
+            )
+        finally:
+            check.close()

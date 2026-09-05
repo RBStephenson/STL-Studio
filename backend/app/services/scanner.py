@@ -21,6 +21,70 @@ Leaf detection priority:
 
 Auto-tags are generated from detected scale, type, and modifier tokens.
 needs_review=True is set when confidence is low.
+
+Transaction and failure policy (STUDIO-233)
+-------------------------------------------
+CHARACTERIZED, NOT DESIGNED. This section records what the code does today, so
+that STUDIO-234/235 can move transaction ownership deliberately instead of
+guessing. Every statement below is pinned by TestScannerTransactionSemantics in
+tests/test_scanner.py — change a boundary here and expect the matching test to
+go red, then update it as part of that change.
+
+Session ownership
+  * _full_scan and _inbox_scan take an OPTIONAL caller session; `own_db` tracks
+    which it got. A session the scanner opened is always closed in the finally;
+    a caller-owned one never is.
+  * _creator_scan and split_pack always open their own session and accept none.
+  * _scan_root's workers each open their own session (SQLite has one writer, so
+    _index_model serializes every DB interaction under _db_lock). The post-pool
+    regroup pass uses a third session, `group_db`.
+  * rollback() is called in exactly ONE place: _scan_root's regroup loop. Every
+    other failure path discards uncommitted work by closing a scanner-owned
+    session, or hands a caller-owned session back untouched — the caller
+    inherits the partial state and owns the cleanup.
+
+Commit boundaries, by phase
+  * full scan      one commit after the pre-scan needs_review clear, then one
+                   per scan root after its walk; prunes commit individually.
+  * creator rescan one after the needs_review clear, one after the pre-walk
+                   STL-row wipe (destructive, and committed BEFORE the walk
+                   meant to rebuild it), one at the end covering the phantom
+                   prune and regrouping.
+  * inbox          after creator resolution, after grouping, and after the
+                   single-pack stale-path prune.
+  * split pack     the PackOverride and the collapsed model's deletion are BOTH
+                   committed before the re-walk; one commit at the end.
+  * model indexing _index_model commits per model, so any walk failure leaves
+                   every model indexed before it durably committed.
+  * grouping       grouping.py NEVER commits — it only flushes. Its commit is
+                   owned by whoever called it.
+  * prunes         every prune helper commits internally, so a later prune
+                   failing never undoes an earlier one.
+
+Durable after a failure, deliberately
+  * A creator whose walk raised — or merely returned read failures — is reported
+    to the caller and excluded from the destructive stale prunes for that run
+    (STUDIO-79). Its already-indexed models stay.
+  * A root that is offline, or that had any creator failure, does not advance
+    last_scanned, so the next run re-checks everything it may have missed
+    (STUDIO-295).
+
+Known sharp edges — characterized here, deliberately NOT fixed by STUDIO-233
+  * STUDIO-396: a regroup failure rolls back EVERY creator regrouped earlier in
+    the same _scan_root loop, because they share `group_db` and grouping only
+    flushes. Since regroup_creator drops auto groups first, the rollback undoes
+    the drop too — earlier creators silently keep STALE auto groups, and the run
+    still reports success.
+  * STUDIO-397: _creator_scan commits its STL-row wipe before walking. If the
+    walk raises, the rows are gone and never rebuilt — a later full scan skips
+    file indexing for any unchanged folder, and _prune_phantoms is the ONLY
+    destructive prune with no protected_creator_ids, so those models and then
+    their creator can be deleted outright. Needs a rescan that failed for a
+    reason other than new files, plus a creator small enough not to trip the
+    50% prune cap.
+  * split_pack's re-walk failing leaves a partial, durable split: the original
+    model deleted, the PackOverride standing, and the children indexed so far
+    still present.
 """
 import logging
 import os
