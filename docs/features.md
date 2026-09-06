@@ -81,7 +81,10 @@ the keyboard button in the header) at any time to see the full list.
 When several folders share the same character (for example a *Bust*, a
 *Full size*, and a *Pre-supported* version of the same figure), the Library
 collapses them into a **single group card** with a "*N* variants" badge.
-Click it to open the group and see each variant individually.
+Click it to open the group and see each variant individually. Folder names that
+differ only in letter case ("Ada Wong" next to "ADA WONG") are read as the same
+character, so a creator's inconsistent capitalisation doesn't split one figure
+into several groups.
 
 This keeps the grid tidy when a creator ships many cuts/versions of one model.
 

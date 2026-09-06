@@ -475,6 +475,12 @@ def name_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evidence]
     The weakest content signal and the baseline when no content signal exists.
     Side-effect free; keyless models simply never appear in a bucket.
 
+    Buckets fold case (STUDIO-413), matching `product_context`'s `product_key`.
+    The fold lives here rather than in `name_keys` on purpose: that function's
+    values are also what `select_label` picks a group's label from, so folding
+    them would lowercase every label a NAME cluster produces. Bucket on the
+    fold, label from the raw key.
+
     Fans out from the bucket's first member, kept as a star pattern
     deliberately (STUDIO-300 considered switching to pairwise like
     `hash_evidence`, but a name-key bucket has no size cap — a creator with
@@ -486,7 +492,7 @@ def name_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evidence]
     for mid in ids:
         key = keys.get(mid)
         if key:
-            index[key].append(mid)
+            index[key.casefold()].append(mid)
     return [
         Evidence(kind=SignalKind.NAME, a=bucket[0], b=other)
         for bucket in index.values()
@@ -522,7 +528,14 @@ def character_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evid
     """Propose CHARACTER edges between models sharing a `character_key`.
 
     The weakest signal, run last. Side-effect free; keyless models never appear
-    in a bucket. Fans out from the bucket's first member — same star-pattern
+    in a bucket.
+
+    Case-folded like `name_evidence`, and the one signal that reaches a library
+    which has not been rescanned since STUDIO-413: a model's stored `character`
+    only changes when the scanner walks it again, and these models frequently
+    have no name key of their own to fall back on in the meantime.
+
+    Fans out from the bucket's first member — same star-pattern
     reasoning as `name_evidence`: a character shared across many size/variant
     siblings under one product is a real, unbounded shape, and this pipeline's
     ordering never makes a star pattern here reachable-but-wrong (STUDIO-300's
@@ -533,7 +546,7 @@ def character_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evid
     for mid in ids:
         key = keys.get(mid)
         if key:
-            index[key].append(mid)
+            index[key.casefold()].append(mid)
     return [
         Evidence(kind=SignalKind.CHARACTER, a=bucket[0], b=other)
         for bucket in index.values()

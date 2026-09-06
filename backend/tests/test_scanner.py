@@ -1026,6 +1026,75 @@ class TestVariantGrouping:
         chars = {m.character for m in _models(db, creator)}
         assert chars == {"Sinister Pack"}
 
+    def test_case_variant_siblings_are_one_product(self, db, tmp_path):
+        """STUDIO-413: the sibling vote compared product keys case-sensitively,
+        so a creator who typed one folder in caps split their own character into
+        three products. `product_key` has always folded case, which is why
+        hierarchy grouping papered over this — with hierarchy off it is a real
+        miss, and the stored characters disagree either way.
+
+        Pins both halves of the fix, not just the fold: folding the vote alone
+        would store "ADA WONG" here (the alphabetical winner of a three-way tie),
+        so this also fails if the parent-casing rule goes. Shape-isolated in
+        `test_the_folders_own_casing_wins_a_case_only_match`."""
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Ada Wong Supported", "ADA WONG Unsupported", "ada wong Hollow"):
+            _stl(creator_dir / "Ada Wong" / variant)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        # The parent folder's own casing names the product — it is the most
+        # authoritative label available and never a machine-lowercased key.
+        assert {m.character for m in _models(db, creator)} == {"Ada Wong"}
+
+    def test_the_folders_own_casing_wins_a_case_only_match(self, db, tmp_path):
+        """The half of STUDIO-413 that needs no folding at all to go wrong: a
+        lone child already reaches the "common" strategy here, and the label
+        guard requires the folder's key to be a *strictly shorter* prefix of the
+        shared one. A case-only difference is the same length, so the guard
+        cannot fire and every model under "Ada Wong" was stored as "ADA WONG"."""
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Supported", "Unsupported", "ADA WONG"):
+            _stl(creator_dir / "Ada Wong" / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {"Ada Wong"}
+
+    def test_case_variant_siblings_at_the_creator_root_pick_one_casing(self, db, tmp_path):
+        """At the creator root there is no parent name to borrow, so the vote
+        falls back to the most frequent casing among the children, ties broken
+        alphabetically — the same rule as `grouping_policy._most_common`
+        (STUDIO-248). All three tie here, and ASCII sorts caps first, so the
+        shouty one wins. Deliberate: reproducibility outranks prettiness, and
+        the value is still a real folder's casing."""
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Ada Wong Supported", "ADA WONG Unsupported", "ada wong Hollow"):
+            _stl(creator_dir / variant)
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {"ADA WONG"}
+
+    def test_case_only_siblings_beside_a_structural_folder_are_one_product(self, db, tmp_path):
+        """The boundary shape, and the reason this is an extension rather than a
+        new class: with the siblings identically cased this folder already flips
+        to "common" and hands the structural child their character instead of
+        the pack's name. Case-only siblings reached "leaf" instead and left all
+        three ungrouped — strictly worse, for no reason a user could see."""
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Sinister Pack"
+        for variant in ("Supported", "ADA WONG Unsupported", "ada wong Hollow"):
+            _stl(pack / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {"ADA WONG"}
+
     def test_support_variant_subfolders_group_across_parents(self, db, tmp_path):
         """DakkaDakka-style: a product whose 'supported' copy is one level shallower
         than its (double-nested) 'unsupported' copy must still group as one character."""
