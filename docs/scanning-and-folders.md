@@ -107,7 +107,7 @@ If none match, the scanner recurses deeper, carrying the deepest **meaningful**
 Structural folders — support status (`Supported`/`Unsupported`/`Presupported`),
 mesh-repair state (`Original`/`Repaired`), containers/formats (`STL`, `Lychee`,
 and slicer folders like `LYS`, `CTB`, `Chitu`), pre-slice prep
-(`Sliced`/`Presliced`), render folders (`Renders`, `Images`), pure scale/cut
+(`Sliced`/`Presliced`), render folders (`Renders`, `Images`, `img`), pure scale/cut
 descriptors, and base folders that spell out their sizes and shapes
 (`Bases 25mm-32mm (Round+Square)`) — are **never** used as the character.
 Otherwise every creator's `LYS` (or `STL`, `Supported`, …) folder would collapse
