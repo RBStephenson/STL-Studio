@@ -454,6 +454,12 @@ _STRUCTURAL_EXACT: set[str] = {
     "presupport", "presupports", "presupported", "pre-supported", "pre supported",
     "supported", "unsupported", "no_supported", "no supported", "no_support",
     "nosupport", "nosupports", "supports", "support",
+    # Mesh-repair state as a folder LEVEL rather than a name suffix (STUDIO-428).
+    # "…/trap jaw 1-6/Repaired" is the same prep-state pair one level up, and
+    # without this the folder reads as a character of its own: a product of one,
+    # ungrouped, while its siblings sit together. Same shape and same remedy as
+    # the "supported"/"full cutted"/"no_cuts" entries above (STUDIO-281/288/291).
+    "original", "repaired", "repair",
     "renders", "render", "images", "image", "photos", "photo",
     "preview", "previews", "gallery", "turntable",
     "split", "merged", "solid", "hollow",
@@ -476,8 +482,8 @@ _STRUCTURAL_EXACT: set[str] = {
 }
 
 
-# Support-status / print-format tokens that mark a *variant* of a product rather
-# than a distinct product. _strip_signal_tokens already removes scale/type/modifier
+# Support-status / print-format / mesh-prep tokens that mark a *variant* of a product
+# rather than a distinct product. _strip_signal_tokens already removes scale/type/modifier
 # tokens (incl. "pre-supported"/"supported"), but not these, so character_key folds
 # them in too. Word boundaries keep "unsupported" from matching inside other words.
 _SUPPORT_FORMAT = re.compile(
@@ -485,6 +491,20 @@ _SUPPORT_FORMAT = re.compile(
     r"un[\s_-]?supported|presupport(?:ed)?|unsupported|support(?:ed|s)?|presup|pre|"
     r"no[\s_-]?supports?|nosupports?|"
     r"solid|hollow|"
+    # Mesh-repair state (STUDIO-428). Creators who ship a fixed mesh beside the
+    # sculptor's untouched one name the pair "<Character>_STL_Original" /
+    # "…_STL_Repaired" — the same product prepared two ways, exactly like
+    # Supported/Unsupported above, and the only difference is that this vocabulary
+    # never learned the words. Measured on a 3503-model library: 25 products split
+    # in two by it, and the split becomes permanent once the product boundary is on.
+    # Deliberately here rather than in _MODIFIERS: this is a grouping-key concern
+    # only, and _MODIFIERS would additionally emit an auto-tag and move
+    # parse_folder's confidence, neither of which the defect asks for.
+    # "repair" (singular) is a real English word a product could in principle be
+    # named with — one live creator uses it as a typo'd sibling of "Repaired", and
+    # the risk of eating a genuine "Repair Droid" is accepted rather than guarded,
+    # the same trade already made for "complete", "free" and "bonus".
+    r"original|repair(?:ed)?|"
     r"without|uncut|no[\s_-]?cuts?|full[\s_-]?cut(?:s|ted)?|"
     # "semi cut"/"semi cutted" only as a unit — bare "semi" must survive so a real
     # name keeps its identity ("Semiramis" is protected by \b, "Semi Truck" is not

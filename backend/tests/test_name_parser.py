@@ -424,6 +424,102 @@ class TestCharacterKey:
         assert character_key("Ada Wong CA3D") == "Ada Wong CA3D"
 
 
+class TestMeshRepairVocabulary:
+    """STUDIO-428. `Original` and `Repaired` describe how a mesh was prepared,
+    exactly like `Supported`/`Unsupported`/`Uncut` — the vocabulary simply never
+    learned them, so one product keyed as two."""
+
+    @pytest.mark.parametrize("folder", [
+        # The real spelling on disk: the prep word is a suffix on a compound
+        # name with the format token in the middle, not a tidy "Ciri Original".
+        "Ciri_STL_Original", "Ciri_STL_Repaired",
+        "Ciri-STL-Original", "Ciri STL Repaired",
+    ])
+    def test_prep_variants_collapse_to_the_product(self, folder):
+        assert character_key(folder) == "Ciri"
+
+    def test_singular_repair_collapses_too(self):
+        # One creator typed a single folder "_STL_Repair". `repair(?:ed)?` needs
+        # the trailing \b to force a backtrack into the optional group; writing
+        # either spelling alone silently drops the other.
+        assert character_key("Dexter_STL_Original") == character_key(
+            "Dexter_STL_Repair") == "Dexter"
+
+    def test_prep_word_alone_has_no_identity(self):
+        # A whole folder LEVEL named for the prep state — the same defect one
+        # level up. Empty key plus is_structural_folder is what makes the walk
+        # inherit the real character instead of filing the model under "Repaired".
+        for name in ["Original", "Repaired", "Repair", "repaired", "ORIGINAL"]:
+            assert character_key(name) == ""
+            assert name_parser.is_structural_folder(name) is True
+            assert name_parser.is_type_worded_name(name) is False
+
+    def test_display_name_drops_the_prep_word(self):
+        assert display_name("Ciri_STL_Original") == "Ciri"
+        assert display_name("Scarlet-Witch_STL-Original") == "Scarlet Witch"
+        # Nothing identifying left → the raw folder name still stands in.
+        assert display_name("Repaired") == "Repaired"
+
+    def test_a_real_name_carrying_the_word_keeps_its_identity(self):
+        # The all-tokens rule is what keeps this vocabulary safe: a prep word
+        # beside a surviving token is a product, not a structural folder.
+        for name in ["Original Sin", "Repair Droid", "Modi Bolts Original"]:
+            assert name_parser.is_structural_folder(name) is False
+            assert character_key(name) != ""
+
+    def test_the_prep_words_do_not_become_tags_or_move_confidence(self):
+        """The containment that makes this a grouping fix and nothing else.
+
+        `_MODIFIERS` is where the ticket pointed, and it produces identical
+        `character_key` output — so without this assertion the shipped design and
+        the rejected one are indistinguishable to the suite, and a later
+        "consolidation" into `_MODIFIERS` would look free. It is not: that list
+        feeds `parse()`, so every one of the ~55 live folders would gain an
+        `original`/`repaired` auto-tag and flip `is_product`, which is a tagging
+        and product-boundary change nothing asked for.
+
+        If the tag is ever wanted as a filterable attribute, that is a deliberate
+        decision and this test is the one to change.
+        """
+        for name in ["Ciri Original", "Ciri Repaired", "Original", "Repaired",
+                     "Dexter Repair"]:
+            sig = parse(name)
+            assert sig.modifiers == [], name
+            assert sig.auto_tags == [], name
+            assert sig.is_product is False, name
+            assert sig.confidence == pytest.approx(0.2), name
+
+    def test_the_prep_vocabulary_is_disjoint_from_studio_422s_token_set(self):
+        """STUDIO-428's acceptance criterion, and the reason the answer is zero.
+
+        422 ("stripping too much merges unrelated products") is about `_TYPES` —
+        `hero`, `monster`, `bust`, `chibi`, `kit`, `mini`. This ticket is about
+        preparation words. Two separate lists that happen to be consumed by one
+        function, so a prep-vocabulary change cannot make 422's shapes more
+        mergeable. Pinned whitebox rather than by asserting `character_key`
+        values, because those values ARE 422's defect and will change when it
+        lands — this assertion should survive that fix untouched.
+        """
+        for name in ["Monster Hunter", "Hero Hunter", "Kit Fisto", "Bust Only",
+                     "Chibi Link", "Mini Cooper", "Round Table Knight"]:
+            assert name_parser._SUPPORT_FORMAT.search(name) is None, name
+
+    def test_the_accepted_cost_of_stripping_positionally(self):
+        """Pinned because it is a real trade, not because it is desirable.
+
+        The prep words are stripped wherever they appear, like every other token
+        in `_SUPPORT_FORMAT`, so a name whose *leading* word is "Original" loses
+        it. Measured on a 3503-model library: zero occurrences — every live hit
+        is a trailing suffix or a whole folder level. A positional carve-out
+        would protect this shape at the cost of a special case in a regex that
+        five shipped regressions have already been fought over
+        (STUDIO-281/286/288/291/371), and would then miss a creator who writes
+        "Original_Ciri". If this ever bites a real library, this is the test to
+        come back to.
+        """
+        assert character_key("Original Sin") == "Sin"
+
+
 # ---------------------------------------------------------------------------
 # is_structural_folder — variant-grouping character must skip structural folders
 # ---------------------------------------------------------------------------

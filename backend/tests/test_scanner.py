@@ -1490,6 +1490,167 @@ class TestVariantGrouping:
 
         assert {m.character for m in _models(db, creator)} == {"2b"}
 
+    def test_a_mesh_repair_pair_is_one_product(self, db, tmp_path):
+        """STUDIO-428: `Original` and `Repaired` name one product twice.
+
+        Transcribed from a real library tree (creator `Zenith Studios`), which
+        ships a fixed mesh beside the sculptor's untouched one for 26 characters
+        and spells the pair `<Character>_STL_Original` / `…_STL_Repaired`. The
+        `_STL_` sits mid-name — the ticket's own example writes `Ciri Original`,
+        which is the *derived* character, not the folder on disk, and a test
+        against the tidied spelling would not exercise the real string.
+
+        Before the fix the two folders keyed to `Ciri Original` and
+        `Ciri Repaired`: two products, and the sibling vote saw no majority, so
+        each named itself. Hierarchy off a content signal welds them anyway, so
+        the visible damage is the label; hierarchy on, the product boundary makes
+        the split permanent. That is 49 of the 132 groupings STUDIO-427 measured
+        as the cost of turning the flag on.
+        """
+        creator_dir = tmp_path / "Zenith Studios"
+        char = creator_dir / "Ciri"
+        _stl(char / "Ciri_STL_Original")
+        _stl(char / "Ciri_STL_Repaired")
+        creator = make_creator(db, "Zenith Studios")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert len(models) == 2
+        assert {m.character for m in models} == {"Ciri"}
+
+    def test_the_singular_repair_spelling_groups_with_its_pair(self, db, tmp_path):
+        """The same creator typed one of the 26 pairs `_STL_Repair`, singular.
+
+        Worth its own test rather than a parametrize: `repair(?:ed)?` relies on
+        the trailing `\\b` forcing a backtrack into the optional group, so a
+        "simplification" to `repair` or `repaired` alone silently drops one
+        spelling — and this is the only folder in the library that would notice.
+        """
+        creator_dir = tmp_path / "Zenith Studios"
+        char = creator_dir / "Dexter Morgan"
+        _stl(char / "Dexter_STL_Original")
+        _stl(char / "Dexter_STL_Repair")
+        creator = make_creator(db, "Zenith Studios")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {"Dexter"}
+
+    def test_a_bare_repaired_folder_level_does_not_become_a_character(
+            self, db, tmp_path):
+        """The other half of STUDIO-428: the same prep state one level up.
+
+        Transcribed from `ZEZ Studios/Trapjaw`, where the repaired mesh is a
+        folder *level* rather than a name suffix. Before the fix that folder
+        carried `character='Repaired'` — a product of one, ungrouped, while its
+        two siblings sat together — and a second creator spelling a folder the
+        same way would have welded two unrelated characters into one bucket, the
+        cross-character collapse `_STRUCTURAL_EXACT` exists to prevent
+        (STUDIO-281/288/291).
+
+        Asserting "every model here shares one character" rather than naming the
+        winner: the point is that the prep word is not one of them, and pinning
+        the exact label would re-pin the sibling vote's tie-breaking, which is
+        STUDIO-429's business and not this ticket's.
+        """
+        creator_dir = tmp_path / "ZEZ Studios"
+        char = creator_dir / "Trapjaw"
+        # Transcribed rather than reduced to one dummy STL each, because the file
+        # list is load-bearing twice over. `base_1-2_0.stl` is a two-part base,
+        # but `_SCALE_RATIO` reads "1-2" as a 1:2 scale, so `parse_folder` calls
+        # the Repaired folder a product and it becomes a boundary child with a
+        # model of its own — which is the only reason there is a stray character
+        # here to fix. A one-file stand-in makes the folder vanish into its parent
+        # and the test then passes against any code at all.
+        parts = ["base_1-2", "base_2-2", "head", "torso", "left_arm", "full_base"]
+        for p in parts:
+            _stl(char / "trap jaw 1-6", f"{p}.stl")
+            _stl(char / "trap jaw 1-6" / "Repaired", f"{p}_0.stl")
+        _stl(char / "trapjaw bust")
+        creator = make_creator(db, "ZEZ Studios")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert len(chars) == 3, chars
+        assert "Repaired" not in chars.values(), chars
+        # It inherits the product it sits under. Comparing keys rather than the
+        # raw labels: the label is the sibling vote's business (STUDIO-429/413),
+        # and grouping compares `character_key`, which is what has to match.
+        repaired = chars[str(Path("Trapjaw/trap jaw 1-6/Repaired"))]
+        parent = chars[str(Path("Trapjaw/trap jaw 1-6"))]
+        assert name_parser.character_key(repaired) == name_parser.character_key(
+            parent) != "", chars
+
+    def test_a_container_named_original_still_holds_distinct_products(
+            self, db, tmp_path):
+        """STUDIO-428's counter-case, and the reason the change was measured
+        rather than assumed safe.
+
+        `Mod Innovations` uses `Original` as a *load-bearing* container name —
+        it means "the legacy bolts, not the V2 ones" — and the folder holds four
+        genuinely different products beside a sibling container. Stripping the
+        word takes its key from `Modi Bolts Original` to `Modi Bolts`, which is
+        exactly one of its own children's keys. That is STUDIO-422's failure
+        shape reached through this ticket's vocabulary, so it needs pinning
+        rather than a paragraph saying it is fine.
+
+        It survives because the sibling vote takes `leaf` when the children carry
+        distinct keys, and the container's own key is unread on that path.
+
+        What this test actually kills, measured rather than asserted: handing
+        distinct-keyed children the container's name instead of their own, and
+        the prep words landing in `_MODIFIERS` (which moves `parse()` and with it
+        the product-boundary decision). It does NOT kill a relaxed majority rule
+        — four children each holding one vote never reach a majority under any
+        variant of that arithmetic — so that guard belongs to STUDIO-410/412's
+        tests, not this one.
+
+        The two identically-named `ExtraStrong Modi Bolts` leaves are the sharp
+        end: they are distinguished by nothing but their container, so if the
+        containers ever collapse these two merge silently.
+        """
+        creator_dir = tmp_path / "Mod Innovations"
+        legacy = creator_dir / "Z. Legacy Bolts"
+        for leaf in ("ExtraStrong Modi Bolts", "Modi Bolts",
+                     "Modi Bolts with Locks", "Modi locks"):
+            _stl(legacy / "Modi Bolts Original" / leaf)
+        for leaf in ("ExtraStrong Modi Bolts", "Pop Bolts"):
+            _stl(legacy / "Modi Pop Bolts" / leaf)
+        creator = make_creator(db, "Mod Innovations")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert len(models) == 6
+        chars = {_rel(m, creator_dir): m.character for m in models}
+        legacy_rel = Path("Z. Legacy Bolts")
+        # Pinned as exact values rather than "four distinct ones". Distinctness
+        # is too weak to notice the coincidence this fix introduces: the
+        # container's key becomes `Modi Bolts`, which is byte-identical to the
+        # `Modi Bolts` child's. A leaf path that let an equal-keyed child inherit
+        # the container's name instead relabels that child and still leaves four
+        # distinct values, so it passed a distinctness assertion — and passed the
+        # whole 560-test suite — while quietly changing behaviour.
+        assert {
+            leaf: chars[str(legacy_rel / "Modi Bolts Original" / leaf)]
+            for leaf in ("ExtraStrong Modi Bolts", "Modi Bolts",
+                         "Modi Bolts with Locks", "Modi locks")
+        } == {
+            # Qualified by the container's RAW name (STUDIO-287), which this
+            # change does not touch — `qualifier_from_folder` deliberately skips
+            # the strip pipeline, so the container keeps "Original" in the label
+            # even though its grouping key no longer carries it.
+            "ExtraStrong Modi Bolts": "Modi Bolts Original — ExtraStrong Modi Bolts",
+            "Modi Bolts": "Modi Bolts",
+            "Modi Bolts with Locks": "Modi Bolts with Locks",
+            "Modi locks": "Modi locks",
+        }, chars
+        # The two same-named leaves are told apart only by their container.
+        assert (chars[str(legacy_rel / "Modi Bolts Original" / "ExtraStrong Modi Bolts")]
+                != chars[str(legacy_rel / "Modi Pop Bolts" / "ExtraStrong Modi Bolts")])
+
 
 # ---------------------------------------------------------------------------
 # Opt-in pack split (PackOverride)

@@ -105,11 +105,11 @@ If none match, the scanner recurses deeper, carrying the deepest **meaningful**
 [variant grouping](features.md#variant-grouping).
 
 Structural folders — support status (`Supported`/`Unsupported`/`Presupported`),
-containers/formats (`STL`, `Lychee`, and slicer folders like `LYS`, `CTB`,
-`Chitu`), pre-slice prep (`Sliced`/`Presliced`), render folders (`Renders`,
-`Images`), pure scale/cut descriptors, and base folders that spell out their
-sizes and shapes (`Bases 25mm-32mm (Round+Square)`) — are **never** used as the
-character.
+mesh-repair state (`Original`/`Repaired`), containers/formats (`STL`, `Lychee`,
+and slicer folders like `LYS`, `CTB`, `Chitu`), pre-slice prep
+(`Sliced`/`Presliced`), render folders (`Renders`, `Images`), pure scale/cut
+descriptors, and base folders that spell out their sizes and shapes
+(`Bases 25mm-32mm (Round+Square)`) — are **never** used as the character.
 Otherwise every creator's `LYS` (or `STL`, `Supported`, …) folder would collapse
 into one giant cross-character variant group. The real character is inherited from
 the nearest meaningful ancestor instead, so `Spiderman/Supported/LYS/` groups under
