@@ -461,6 +461,27 @@ _STRUCTURAL_EXACT: set[str] = {
     # the "supported"/"full cutted"/"no_cuts" entries above (STUDIO-281/288/291).
     "original", "repaired", "repair",
     "renders", "render", "images", "image", "photos", "photo",
+    # The abbreviated spelling of the same gallery folder (STUDIO-432). "Images"
+    # has been here since the beginning and "img" never was, so an image folder
+    # counted as a real voter in the sibling-identity vote and could break an
+    # otherwise clean majority: three real children 2-vs-1 is a majority, but a
+    # fourth voter makes `2 * 2 > 4` false and the vote falls through to "leaf",
+    # where every child keeps its own key. Measured on the live library: 27 bare
+    # `img` folders, none of which holds a mesh, so no real product loses its
+    # boundary here. Eight character folders change vote strategy; seven of them
+    # change a stored character (22 models, all toward the character folder's own
+    # name), and the eighth is a wash whose children already carried the right
+    # value. A strategy flip is not the same thing as a visible change.
+    #
+    # This reaches a folder named exactly "img" and nothing more.
+    # `is_structural_folder` requires EVERY token to be structural, so
+    # "img Barbarella" still votes — exactly as "Images Barbarella" always has.
+    # That larger shape (112 such folders, 71 of them already-supported "images"
+    # spellings) is a separate, deliberately unshipped decision; do not "finish
+    # the job" by loosening the all-tokens rule without measuring it, since
+    # this vocabulary already carries five shipped regressions
+    # (STUDIO-281/286/288/291/371). TestIsStructuralFolder pins the boundary.
+    "img", "imgs",
     "preview", "previews", "gallery", "turntable",
     "split", "merged", "solid", "hollow",
     # "full cut" / "full cutted" — print-prep term meaning pre-separated body parts,

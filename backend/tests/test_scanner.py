@@ -873,6 +873,53 @@ class TestVariantGrouping:
         chars = {m.character for m in _models(db, creator)}
         assert chars == {"Goblin"}          # not "Unsupported"/"Supported"
 
+    def test_bare_img_gallery_folder_does_not_vote_as_a_product(self, db, tmp_path):
+        """STUDIO-432 cause 2: `Images` has always been structural vocabulary but
+        `img` was not, so a gallery folder counted as a real voter in the
+        sibling-identity vote.
+
+        The three real children here are 2-vs-1, which IS a strict majority of
+        three. `img` makes it four voters, `2 * 2 > 4` is false, and the vote
+        falls through to `leaf` where every child keeps its own key — the
+        character folder's own perfectly good name goes unused and `Left Arm fix`
+        becomes a product of one. Measured on the 3503-model library: 27 bare
+        `img` folders, not one holding a mesh; eight character folders change
+        vote strategy and seven of those change a stored character.
+
+        Deliberately isolates the img token — there is no creator tag anywhere in
+        this tree, so the assertion cannot start passing for the wrong reason if
+        STUDIO-432's *other* cause (a mid-string creator token surviving
+        `character_key`) is fixed later. Reverting the vocabulary entry must fail
+        this test.
+
+        Scope note: this fix reaches a folder named exactly `img`, NOT one named
+        `img <something>` — `is_structural_folder` requires every token to be
+        structural, which is also why `Images Barbarella` has always voted. That
+        larger shape is its own ticket; see TestIsStructuralFolder for the pin.
+
+        The STLs sit one level below each variant folder for the same reason as
+        `test_lone_odd_sibling_does_not_hijack_the_character` — with them directly
+        inside, the character folder collapses to one model and no vote runs.
+        """
+        creator_dir = tmp_path / "Abe3d"
+        char = creator_dir / "Samus Aran"
+        for variant in ("1_4 Samus Aran", "1_6 Samus Aran", "Left Arm fix"):
+            _stl(char / variant / "STL")
+        _img(char / "img")          # gallery only, no mesh — the shape on disk
+        creator = make_creator(db, "Abe3d")
+
+        _walk(db, creator, creator_dir)
+
+        # Pin each folder's exact value rather than the set. STUDIO-428's lesson:
+        # a set-shaped assertion ("one distinct character") stays true under a
+        # mutation that merely relabels a member, so it kills nothing.
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars == {
+            str(Path("Samus Aran/1_4 Samus Aran")): "Samus Aran",
+            str(Path("Samus Aran/1_6 Samus Aran")): "Samus Aran",
+            str(Path("Samus Aran/Left Arm fix")): "Samus Aran",
+        }, "the img gallery folder voted as a product and broke the majority"
+
     def test_lone_odd_sibling_does_not_hijack_the_character(self, db, tmp_path):
         """STUDIO-410: parts/structural children are skipped from the identity
         vote, so a character folder holding structural variants plus ONE

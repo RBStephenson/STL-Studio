@@ -549,6 +549,9 @@ class TestIsStructuralFolder:
         "Alternative_Cut", "Alternative", "alternative", "Alt Cut",
         "base cut", "standard version",
         "No_cuts", "no_cuts", "No_Cuts", "No cut",
+        # Abbreviated gallery folders (STUDIO-432). "Images"/"Image" were always
+        # here; the "img" spelling was not, so it voted as a real product.
+        "img", "imgs", "IMG", "Img", "img renders",
     ])
     def test_structural_names(self, name):
         assert name_parser.is_structural_folder(name) is True
@@ -573,6 +576,29 @@ class TestIsStructuralFolder:
         "Batman Kingdom Come Sculpture Medium Cuts (Saturn Size)",
     ])
     def test_character_names(self, name):
+        assert name_parser.is_structural_folder(name) is False
+
+    @pytest.mark.parametrize("name", [
+        "img Barbarella", "Img Jessica Cruz - Abe3D", "img 2B YoRHa",
+        "Images Barbarella", "Images Dracula", "images Alexstrasza 3D Verse",
+    ])
+    def test_qualified_gallery_folders_are_deliberately_not_structural(self, name):
+        """STUDIO-432 scope pin, NOT an endorsement of the behaviour.
+
+        Adding "img" to the vocabulary fixes a folder named exactly `img`. It
+        does not reach `img <something>`, because the all-tokens rule demands
+        every token be structural and a character name never is — which is also
+        why `Images Barbarella` has voted as a product since day one, with the
+        supported spelling, unnoticed.
+
+        Measured on the live library: 112 such folders (41 `img`, 71 `image(s)`),
+        none holding a mesh, and skipping them changes the vote on 81 character
+        folders with no case where a correct majority collapses. That is a real
+        defect and it has its own ticket. This test exists so the boundary is a
+        recorded decision rather than an oversight — when that ticket is built,
+        this test is the one that should change, deliberately and with the
+        measurement rerun.
+        """
         assert name_parser.is_structural_folder(name) is False
 
 
