@@ -112,6 +112,11 @@ class SignalPolicy:
     formed by more than one kind. `reason_template` is formatted with the
     cluster's label, so a signal whose reason varies with the label needs no
     special case at the call site.
+
+    Precedence orders *attribution* and nothing else. It deliberately does not
+    rank a signal against the product boundary, so no confidence here entitles
+    an edge to cross one — STUDIO-415 measured that question and `_UnionFind`'s
+    docstring records why the answer is no.
     """
 
     precedence: int
@@ -556,6 +561,46 @@ def character_evidence(ids: Sequence[int], keys: Mapping[int, str]) -> list[Evid
 
 
 class _UnionFind:
+    """Union-find whose components carry their product keys as an anti-merge set.
+
+    The boundary is an unconditional veto: two components holding different
+    `product_key`s never merge, whatever evidence is offered. STUDIO-415 asked
+    whether it should instead be a confidence threshold, letting a strong enough
+    signal through. Measured after STUDIO-410/412/413/414, it should not — and
+    the reason is that the boundary is not on the confidence axis at all.
+
+    * **Precedence cannot express it.** The only signal ranked above the
+      boundary's own 0.85 is HASH (0.9), and `STLFile.file_hash` is never
+      written by any code path — `schemas.py` calls it "the dead
+      STLFile.file_hash column" outright (STUDIO-419). Letting HASH override
+      would therefore change nothing at all in production, and where it did
+      bite it would weld together every product sharing one base mesh, up to
+      `_HASH_BUCKET_CAP` of them, which is #639 restated.
+    * **The rejections are indistinguishable from each other.** Every rejection
+      reachable without a hash is a single FILENAME edge at 0.7, and the cases
+      where the veto is right present exactly what the doubtful ones present:
+      `Goblin`/`Goblin King` (two products, right), `Ada Wong`/`Ada Wong Alt`
+      (arguably one, so arguably wrong) and `Ada Wong`/`Leon Kennedy` (two
+      products, right) each offer one FILENAME edge and differ in nothing this
+      class can see. Whether `Alt` names a variant or a product is a question
+      for the `_strip_signal_tokens` vocabulary, one level up, not for a
+      threshold here — which is the general shape of the answer.
+    * **Edge count fails too, and backwards.** See
+      `TestBoundaryIsNotOnTheConfidenceAxis` in tests/test_grouping.py: the
+      shape the veto should let through offers *more* evidence than the shape
+      it has to stop, so any cost function over edges ranks the two the wrong
+      way round.
+
+    Instrumenting the whole suite as it stood before this change recorded 39
+    boundary rejections — 36 of them inside the single #639 protection test and
+    3 using hand-set hashes — so there was no false split anywhere in the corpus
+    to calibrate a threshold against. (The tests added alongside this docstring
+    deliberately contribute more, which is why the count is quoted as of then.)
+
+    A wrong boundary is therefore fixed by fixing `product_key` upstream, which
+    is what STUDIO-410, 412, 413 and 414 each did, never by relaxing the veto.
+    """
+
     def __init__(self, ids: list[int], boundaries: dict[int, str | None] | None = None):
         self.parent = {i: i for i in ids}
         self.boundaries = {i: ({boundaries[i]} if boundaries and boundaries.get(i) else set()) for i in ids}
@@ -574,6 +619,8 @@ class _UnionFind:
             return _MergeResult.ALREADY_CONNECTED
         combined = self.boundaries[ra] | self.boundaries[rb]
         if len(combined) > 1:
+            # Unconditional by decision, not by omission — see the class docstring
+            # for why no signal, however strong, is allowed past this (STUDIO-415).
             return _MergeResult.REJECTED_HIERARCHY
         self.parent[rb] = ra
         self.boundaries[ra] = combined

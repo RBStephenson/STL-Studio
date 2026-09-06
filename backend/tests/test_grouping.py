@@ -168,6 +168,123 @@ class TestProductBoundaries:
         assert uf.find(1) != uf.find(3)
 
 
+class TestBoundaryIsNotOnTheConfidenceAxis:
+    """Why the product boundary has no confidence threshold (STUDIO-415).
+
+    STUDIO-415 proposed letting a strong enough signal override the boundary.
+    These two layouts are why it cannot: the veto is wrong in the first and
+    right in the second, and they hand the union-find the same kind of evidence
+    at the same confidence — the second, which must stay split, offering *less*
+    of it. Nothing available at the boundary separates them, so no threshold
+    over confidence or edge count can admit one without admitting the other.
+
+    Both are real scanner output, not hand-picked characters: walking
+    `Ada Wong/{Supported, Unsupported, Nude V2, Bikini V3}` and
+    `Sinister Pack/{Supported, Electro, Sandman}` assigns exactly the
+    `character` values set below. They are STUDIO-421's two shapes, and that
+    ticket deferred to this one to find out whether content overlap could tell
+    them apart. It cannot — which is the answer, not a gap in these tests.
+
+    Green before and after by design: this pins a decision, so breaking it
+    requires a deliberate mutant, never a passing run (STUDIO-414's lesson).
+    """
+
+    # One product's variants: every folder holds the same parts, because they
+    # are the same sculpt prepared four ways.
+    PRODUCT_PARTS = ["ada_body.stl", "ada_head.stl", "ada_base.stl"]
+    # A pack's separate sculpts, prepared by a creator with one house naming
+    # convention — which is what makes this shape mimic the one above.
+    PACK_PARTS = ["body.stl", "head.stl", "base.stl"]
+
+    def _build(self, db, creator, rows, parts):
+        """One model per `(folder, name, character)` row, all carrying `parts`.
+
+        The folder name seeds a distinct `folder_path` — two variant folders of
+        one product really do resolve to the same `name`, so the path is what
+        keeps them separate, exactly as in a scan.
+        """
+        models = []
+        for folder, name, character in rows:
+            model = make_model(db, creator, name=folder, character=character)
+            model.name = name
+            for filename in parts:
+                _stl(db, model, filename)
+            models.append(model)
+        db.flush()
+        return models
+
+    def test_a_products_own_variants_are_turned_away_at_the_boundary(self, db):
+        """The veto being WRONG. `Nude V2` and `Bikini V3` are Ada Wong's, and
+        the identical part set says so, but each carries its own character and
+        so its own product key. Both are left out of their own product's group.
+        """
+        creator = make_creator(db)
+        supported, unsupported, nude, bikini = self._build(
+            db,
+            creator,
+            [
+                ("Supported", "Ada Wong", "Ada Wong"),
+                ("Unsupported", "Ada Wong", "Ada Wong"),
+                ("Nude V2", "Nude", "Nude V2"),
+                ("Bikini V3", "Bikini", "Bikini V3"),
+            ],
+            self.PRODUCT_PARTS,
+        )
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {supported.id, unsupported.id}
+        assert nude.variant_group_id is None
+        assert bikini.variant_group_id is None
+
+    def test_a_packs_separate_sculpts_are_turned_away_by_the_very_same_rule(self, db):
+        """The veto being RIGHT, on evidence of the same kind and confidence.
+
+        `Electro` and `Sandman` are different characters that happen to share a
+        naming convention. Welding them — to each other or to the pack — is the
+        #639 failure the boundary exists to prevent.
+        """
+        creator = make_creator(db)
+        self._build(
+            db,
+            creator,
+            [
+                ("Supported", "Sinister Pack", "Sinister Pack"),
+                ("Electro", "Electro", "Electro"),
+                ("Sandman", "Sandman", "Sandman"),
+            ],
+            self.PACK_PARTS,
+        )
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        assert _groups(db, creator) == []
+
+    def test_the_shape_that_should_merge_offers_more_evidence_than_the_one_that_must_not(self):
+        """The measurement that kills a cost function over edges.
+
+        Both shapes offer FILENAME edges and nothing else, so a threshold on
+        signal kind or confidence sees one number twice. Counting edges instead
+        does separate them — in the wrong direction, ranking the pack that must
+        stay split as the better-evidenced merge of the two.
+        """
+        product_files = {mid: set(self.PRODUCT_PARTS) for mid in (1, 2, 3, 4)}
+        product_keys = {1: "ada wong", 2: "ada wong", 3: "nude v2", 4: "bikini v3"}
+        pack_files = {mid: set(self.PACK_PARTS) for mid in (1, 2, 3)}
+        pack_keys = {1: "sinister pack", 2: "electro", 3: "sandman"}
+
+        product = grouping.filename_evidence([1, 2, 3, 4], product_files, product_keys)
+        pack = grouping.filename_evidence([1, 2, 3], pack_files, pack_keys)
+
+        assert {e.kind for e in product} == {SignalKind.FILENAME}
+        assert {e.kind for e in pack} == {SignalKind.FILENAME}
+        assert len(product) > len(pack)
+
+
 class TestHierarchyEvidence:
     """Pure HIERARCHY edge generation (STUDIO-244)."""
 
