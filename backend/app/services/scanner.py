@@ -1490,27 +1490,6 @@ def _walk_for_models(
     # distinct products stay separate. See name_parser.character_key.
     next_parents = (parent_names or []) + [folder.name]
 
-    # Normalised product keys for the "real" child folders (skip parts/structural
-    # buckets, which never carry product identity).
-    keys: dict[str, str] = {}
-    for c in child_dirs:
-        if (name_parser.parse(c.name, rules.parser_rules).is_parts
-                or name_parser.is_structural_folder(c.name, rules.parser_rules)
-                or _is_nested_variant_boundary(c.name)):
-            continue
-        keys[c.name] = name_parser.character_key(c.name, creator.name)
-    nonempty = [k for k in keys.values() if k]
-    # The vote compares case-insensitively (STUDIO-413). One creator typing a
-    # single folder in caps splits their own character into separate products
-    # otherwise, and `product_context` has always folded case for the same
-    # reason — hierarchy grouping was quietly rescuing this shape, so with that
-    # setting off it was a real miss. Only the *comparison* folds: the winning
-    # key is stored as Model.character and shown as a group label, so it is
-    # handed back through `_representative_casing` as a real folder's casing.
-    folded = [k.casefold() for k in nonempty]
-    distinct = set(folded)
-    counts = Counter(folded)
-
     # This folder's own identity. Use the *raw* folder name (not the normalised key)
     # so a real character keeps its readable label, e.g. "Auron - Final Fantasy X".
     # The creator root and structural/parts folders carry no identity of their own —
@@ -1527,6 +1506,51 @@ def _walk_for_models(
     # This folder's own identity, normalised. Needed both to decide the strategy
     # (below) and to label a "common" group, so it is computed once here.
     own_key = name_parser.character_key(own_character, creator.name) if own_character else ""
+
+    # Normalised product keys for the "real" child folders (skip parts/structural
+    # buckets, which never carry product identity).
+    keys: dict[str, str] = {}
+    for c in child_dirs:
+        if (name_parser.parse(c.name, rules.parser_rules).is_parts
+                or name_parser.is_structural_folder(c.name, rules.parser_rules)
+                or _is_nested_variant_boundary(c.name)):
+            # …with one exception (STUDIO-414). A folder whose every token is a
+            # type keyword — "Chibi Hero", "Bust", "Hero" — reads as structural
+            # and is skipped here, and the "common" strategy below then hands it
+            # the winning sibling's label anyway. A real product therefore landed
+            # in an unrelated character's group: the same false merge STUDIO-410
+            # exists to prevent, reached from the other side.
+            #
+            # Nothing in such a name says which reading is right. "Bust" under
+            # "Ada Wong" is her bust; "Chibi Hero" under the creator is the
+            # product. Position is the only thing that separates them, and this
+            # is where position is known — so the rescue lives here rather than
+            # in name_parser, whose answers are deliberately context-free.
+            # scanner.py's naming step already draws exactly this distinction for
+            # "RPG Bases" (STUDIO-287 case B); the vote never got the same rule.
+            #
+            # `own_character` is the test: when it is set this folder IS a
+            # product, so a type-worded child is one of its variants. Only when
+            # nothing above supplies an identity does the child name itself, and
+            # then with its raw folder name, since character_key consumed the
+            # whole thing and left nothing to vote with.
+            if own_character or not name_parser.is_type_worded_name(
+                    c.name, rules.parser_rules):
+                continue
+            keys[c.name] = c.name
+        else:
+            keys[c.name] = name_parser.character_key(c.name, creator.name)
+    nonempty = [k for k in keys.values() if k]
+    # The vote compares case-insensitively (STUDIO-413). One creator typing a
+    # single folder in caps splits their own character into separate products
+    # otherwise, and `product_context` has always folded case for the same
+    # reason — hierarchy grouping was quietly rescuing this shape, so with that
+    # setting off it was a real miss. Only the *comparison* folds: the winning
+    # key is stored as Model.character and shown as a group label, so it is
+    # handed back through `_representative_casing` as a real folder's casing.
+    folded = [k.casefold() for k in nonempty]
+    distinct = set(folded)
+    counts = Counter(folded)
 
     #   strict-majority shared key → children are support/format/scale variants of one
     #                                product (label it by THIS folder's name); a few

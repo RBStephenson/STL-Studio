@@ -1095,6 +1095,138 @@ class TestVariantGrouping:
 
         assert {m.character for m in _models(db, creator)} == {"ADA WONG"}
 
+    def test_type_worded_product_does_not_inherit_a_siblings_character(self, db, tmp_path):
+        """STUDIO-414: a folder whose every token is a type keyword ("Chibi Hero",
+        "Bust") reads as structural, so it is skipped from the identity vote — and
+        then the "common" strategy hands it the winner's label anyway. A real
+        product therefore landed in an unrelated character's variant group, which
+        is the false merge STUDIO-410 exists to prevent, reached from the other
+        side. At the creator root nothing above supplies an identity, so such a
+        folder names itself."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Chibi Hero" / "Supported" / "STL")
+        _stl(creator_dir / "Chibi Hero" / "Unsupported" / "STL")
+        for variant in ("Supported", "Unsupported"):
+            _stl(creator_dir / "Goblin" / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars[str(Path("Chibi Hero"))] == "Chibi Hero"
+        assert chars[str(Path("Goblin/Supported"))] == "Goblin"
+        assert chars[str(Path("Goblin/Unsupported"))] == "Goblin"
+
+    def test_type_worded_product_keeps_its_own_models_together(self, db, tmp_path):
+        """The multi-model form of the same bug. A type keyword also makes the
+        folder a product boundary (scanner.py step 1), so its children with
+        signals of their own become separate models — every one of which took the
+        unrelated sibling's character, not just one."""
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Bust", "Statue"):
+            _stl(creator_dir / "Chibi Hero" / variant / "STL")
+        for variant in ("Supported", "Unsupported"):
+            _stl(creator_dir / "Goblin" / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars[str(Path("Chibi Hero/Bust"))] == "Chibi Hero"
+        assert chars[str(Path("Chibi Hero/Statue"))] == "Chibi Hero"
+        assert chars[str(Path("Goblin/Supported"))] == "Goblin"
+
+    def test_type_worded_product_alone_still_gets_a_character(self, db, tmp_path):
+        """With no sibling to inherit from, the same folder left its models with
+        no character at all — nothing for the CHARACTER signal to group on, and
+        no rescan reaches an existing library to fix it."""
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Bust", "Statue"):
+            _stl(creator_dir / "Chibi Hero" / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {"Chibi Hero"}
+
+    def test_an_underscore_joined_type_worded_product_is_rescued_too(self, db, tmp_path):
+        """Underscore is a word character, so the type patterns never fire on
+        the raw name — but is_structural_folder splits on it and skips the
+        folder anyway. Without normalising separators the fix would miss the
+        most common real-library spelling of exactly the names it targets.
+
+        This spelling also shows the bug at its worst. parse() reads the raw
+        name too, so it finds no type signal and the folder is NOT promoted to a
+        product boundary the way "Chibi Hero" is — it keeps recursing, and every
+        model underneath took the unrelated sibling's character, not just one.
+        """
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Supported", "Unsupported"):
+            _stl(creator_dir / "Chibi_Hero" / variant / "STL")
+            _stl(creator_dir / "Goblin" / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars[str(Path("Chibi_Hero/Supported"))] == "Chibi_Hero"
+        assert chars[str(Path("Chibi_Hero/Unsupported"))] == "Chibi_Hero"
+        assert chars[str(Path("Goblin/Supported"))] == "Goblin"
+        assert chars[str(Path("Goblin/Unsupported"))] == "Goblin"
+
+    def test_two_type_worded_folders_beside_a_two_variant_product(self, db, tmp_path):
+        """The arithmetic spillover, measured rather than assumed. Letting these
+        folders vote grows the majority denominator: 2 of 2 was a strict
+        majority, 2 of 4 is not. Ada Wong's own two variants still group, and
+        the two type-worded folders become products instead of being absorbed
+        into her — which is the same fix in a different costume, not a new
+        class of behaviour."""
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Ada Wong Supported", "Ada Wong Unsupported"):
+            _stl(creator_dir / variant / "STL")
+        _stl(creator_dir / "Bust" / "STL")
+        _stl(creator_dir / "Statue" / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars[str(Path("Ada Wong Supported"))] == "Ada Wong"
+        assert chars[str(Path("Ada Wong Unsupported"))] == "Ada Wong"
+        assert chars[str(Path("Bust"))] == "Bust"
+        assert chars[str(Path("Statue"))] == "Statue"
+
+    def test_a_genuinely_structural_folder_still_takes_the_shared_character(self, db, tmp_path):
+        """The guard on the fix, and the reason it keys on the token rule rather
+        than on position alone. "Renders" and "Supported" are listed structural
+        names, not type-keyword names, so they keep inheriting the creator's one
+        real product — they are that product's render/format folders, not
+        products of their own."""
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Supported", "Unsupported"):
+            _stl(creator_dir / "Goblin" / variant / "STL")
+        _stl(creator_dir / "Renders" / "STL")
+        _stl(creator_dir / "Supported" / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {"Goblin"}
+
+    def test_a_type_worded_variant_under_a_real_character_is_not_a_product(self, db, tmp_path):
+        """The regression the fix is designed around. "Bust" and "Statue" are
+        variants of Ada Wong, not two products — the folder above them supplies
+        the identity, so the token rule must not fire there. Splitting these is
+        what a name-only fix would have done."""
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Bust", "Statue", "Supported"):
+            _stl(creator_dir / "Ada Wong" / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {"Ada Wong"}
+
     def test_support_variant_subfolders_group_across_parents(self, db, tmp_path):
         """DakkaDakka-style: a product whose 'supported' copy is one level shallower
         than its (double-nested) 'unsupported' copy must still group as one character."""
