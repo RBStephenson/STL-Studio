@@ -1544,15 +1544,35 @@ def _walk_for_models(
         # lone child name the group only when there is genuinely nothing better: at the
         # creator root, where own_character is None and children must name themselves,
         # or when its identity *extends* this folder's ("Crimson Wings" / "Crimson Wings
-        # APC"), which is one product carrying context rather than a hijack. Otherwise
-        # fall through to "leaf", where the odd child keeps its own key and every skipped
-        # sibling inherits own_character — identical to "common" for children that have a
-        # key at all, so this narrows the old behaviour rather than redirecting it.
+        # APC"), which is one product carrying context rather than a hijack.
+        #
+        # When that veto fires and some children were skipped from the vote, the two
+        # halves of this folder disagree: the skipped siblings inherit own_character,
+        # while the lone real child keeps a key of its own and so becomes a product of
+        # one — the only model here whose identity was recoverable is the only one left
+        # out of the product it belongs to (STUDIO-412). Those skipped siblings are the
+        # evidence that resolves it: a folder whose other children inherit its identity —
+        # its own name, or one carried down through a structural level such as
+        # "Ada Wong/Supported" — is a product, not a container of products, so every
+        # child is one of its variants and "parent" hands them all own_character. With
+        # nothing skipped there is no such evidence and no asymmetry, and "leaf" still
+        # stands — a pack folder holding a single differently-named product
+        # ("Release/OneProduct") keeps that product's own name.
+        # Two or more real children carrying *different* keys stay on "leaf" as well,
+        # deliberately: nothing in the names separates two variants of one product from
+        # two products in a pack, and assuming one product there would weld two
+        # characters into one group, which is the failure STUDIO-410 exists to prevent.
+        # (Two children sharing one key never reach here at all — that is a majority,
+        # so they take "common".)
         lone_key = len(distinct) == 1 and len(keys) == 1
+        vetoed_lone_child = False
         if lone_key and own_character:
             lone_key = bool(own_key) and top_key.lower().startswith(own_key.lower())
+            vetoed_lone_child = not lone_key
         if majority or lone_key:
             strategy, common_key = "common", top_key
+        elif vetoed_lone_child and len(child_dirs) > len(keys):
+            strategy, common_key = "parent", None
         else:
             strategy, common_key = "leaf", None
 
