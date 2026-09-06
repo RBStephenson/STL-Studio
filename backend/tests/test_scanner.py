@@ -1382,6 +1382,114 @@ class TestVariantGrouping:
         names = {Path(m.folder_path).name for m in _models(db, creator)}
         assert "Sinister Six" in names
 
+    def test_a_folder_extending_its_ancestor_keeps_the_ancestors_character(
+            self, db, tmp_path):
+        """STUDIO-429: a model's character must not depend on how deep it sits
+        below the character folder.
+
+        Transcribed from a real library tree (creator `Abe3d`, character folder
+        `2B`) — seven model folders at mixed depths under one character folder,
+        with the file counts per folder checked against the source. Depth-1
+        folders inherited `2B`,
+        but every folder that merely *extends* that identity
+        (`1_4 2B YoRHa - Abe3D`) discarded it and named itself, so its own
+        children keyed to `2B YoRHa` instead. One character folder, four
+        characters, three of them wrong.
+
+        `character_key` strips the scale prefix and the creator suffix, so the
+        two spellings collapse to `2B` and `2B YoRHa` — two product keys, and
+        with the hierarchy boundary on they cannot merge (see the companion
+        grouping test). Hierarchy off, the FILENAME signal welded all seven
+        anyway, which is why this went unnoticed: the character was already
+        wrong in both modes, and it is user-visible in the Library and in
+        Reorganize's `{character}` token.
+        """
+        creator_dir = tmp_path / "Abe3d"
+        char = creator_dir / "2B"
+        for scale in ("1_4", "1_6"):
+            _stl(char / f"{scale} 2B YoRHa - Abe3D")
+            _stl(char / f"{scale} 2B YoRHa - Abe3D" / "Alternative")
+            _stl(char / "2B YoRHa - Abe3D NSFW" / f"{scale} 2B YoRHa - Abe3D NSFW")
+        _stl(char / "1_4 update v1.1 - skirt narrow v2")
+        creator = make_creator(db, "Abe3d")
+
+        _walk(db, creator, creator_dir)
+
+        models = _models(db, creator)
+        assert len(models) == 7
+        assert {m.character for m in models} == {"2B"}
+
+    def test_a_folder_whose_name_merely_repeats_its_ancestor_still_names_itself(
+            self, db, tmp_path):
+        """The carve-out that keeps STUDIO-429 from flattening punctuation.
+
+        A folder whose key *equals* the one it inherited is the folder the
+        ancestor was pointing at, so its raw spelling wins — the inherited value
+        is a normalised `character_key` with dashes stripped, and it is the raw
+        name that reaches the Library and Reorganize. Keep only "does my key
+        extend the inherited one" and this reads `Auron Final Fantasy X`.
+
+        Guards against widening the rule to `startswith` alone, which is true
+        for equal keys too.
+        """
+        creator_dir = tmp_path / "Creator"
+        char = creator_dir / "Auron - Final Fantasy X"
+        _stl(char / "STL" / "Bust")
+        _stl(char / "Presupport" / "Bust")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {
+            "Auron - Final Fantasy X"}
+
+    def test_an_unrelated_sibling_still_names_itself_however_short_the_inherited_key(
+            self, db, tmp_path):
+        """The other half of STUDIO-429's rule: inheriting is for folders that
+        *extend* the ancestor, never for every folder that happens to sit under
+        a shorter name.
+
+        `Orc` wins the majority vote here (two of the three children key to it),
+        so `Goblin Warrior` is handed a character it has nothing to do with.
+        Its key is longer than the inherited one but does not extend it, so it
+        must name itself — otherwise the model beneath it is filed under *Orc*,
+        which is STUDIO-410's weld arriving by a new route.
+        """
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Set"
+        _stl(pack / "Orc")
+        _stl(pack / "Orc - Creator")
+        _stl(pack / "Goblin Warrior" / "Alternative")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars[str(Path("Set/Goblin Warrior/Alternative"))] == "Goblin Warrior"
+        assert chars[str(Path("Set/Orc"))] == "Orc"
+
+    def test_extending_the_ancestor_is_judged_case_insensitively(self, db, tmp_path):
+        """STUDIO-413's rule, applied to STUDIO-429's test: one creator typing a
+        single folder in a different case must not split their own character.
+
+        `character_key` preserves the creator's casing — it returns `2B YoRHa`,
+        not `2b yorha` — so comparing the two keys raw makes `1_4 2B YoRHa`
+        stop extending a character folder typed `2b`. It would then name itself,
+        and the model below it would key to `2B YoRHa` while its shallower
+        siblings key to `2b`: the depth split all over again, triggered by one
+        capital letter. The sibling vote folds case for this exact reason.
+        """
+        creator_dir = tmp_path / "Abe3d"
+        char = creator_dir / "2b"                     # lower-case character folder
+        for scale in ("1_4", "1_6"):
+            _stl(char / f"{scale} 2B YoRHa - Abe3D")
+        _stl(char / "1_4 2B YoRHa - Abe3D" / "Alternative")
+        creator = make_creator(db, "Abe3d")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {"2b"}
+
 
 # ---------------------------------------------------------------------------
 # Opt-in pack split (PackOverride)

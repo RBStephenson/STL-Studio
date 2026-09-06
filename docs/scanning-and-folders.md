@@ -113,7 +113,13 @@ character.
 Otherwise every creator's `LYS` (or `STL`, `Supported`, …) folder would collapse
 into one giant cross-character variant group. The real character is inherited from
 the nearest meaningful ancestor instead, so `Spiderman/Supported/LYS/` groups under
-*Spiderman*. A model left with a stale structural name by an older scan (e.g. a
+*Spiderman*. A meaningful folder does not take over the character either, when
+its own name merely **extends** the one it inherited — `2B` holding
+`1_4 2B YoRHa - Abe3D` is one more level of the same product, so everything
+below stays *2B* rather than splitting off under the longer name. Only a
+genuinely different name starts a new character, which is why `Orc` holding a
+`Goblin Warrior` still gives you a *Goblin Warrior*.
+A model left with a stale structural name by an older scan (e.g. a
 folder that used to be called `LYS`) self-heals to the derived character name on
 the next rescan. A model's name is owned by the scanner and re-derived on every
 scan, so improvements to the naming rules always reach models that were indexed

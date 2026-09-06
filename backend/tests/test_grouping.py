@@ -1258,6 +1258,75 @@ class TestHierarchySignal:
         assert {m.id for m in manual.models} == {a.id, b.id}
 
 
+class TestCharacterDepthDoesNotSplitAProduct:
+    """STUDIO-429, end to end: folder layout -> scanner -> grouping.
+
+    Every other test in this file hands `Model.character` to the engine
+    directly, which is exactly how this bug stayed invisible — the values the
+    scanner actually produces for one character folder disagreed with each
+    other, and no test ever asked the scanner for them. So this one walks a real
+    tree.
+
+    The tree is transcribed from a real library (creator `Abe3d`, character
+    folder `2B`): seven model folders at mixed depths under a single character
+    folder. Before the fix the walk
+    stamped four different characters, folding to two product keys (`2B` and
+    `2B YoRHa`), and the product boundary — correctly, on the evidence it was
+    given — refused to merge across them.
+
+    The hierarchy flag is ON deliberately. With it off these seven merge on
+    FILENAME evidence regardless of the bug, so a green test in that mode would
+    be measuring the shared file names, not the fix.
+    """
+
+    def _walk_the_2b_tree(self, db, tmp_path):
+        from tests.test_scanner import _stl as _stl_file, _walk
+
+        creator_dir = tmp_path / "Abe3d"
+        char = creator_dir / "2B"
+        for scale in ("1_4", "1_6"):
+            _stl_file(char / f"{scale} 2B YoRHa - Abe3D")
+            _stl_file(char / f"{scale} 2B YoRHa - Abe3D" / "Alternative")
+            _stl_file(char / "2B YoRHa - Abe3D NSFW" / f"{scale} 2B YoRHa - Abe3D NSFW")
+        _stl_file(char / "1_4 update v1.1 - skirt narrow v2")
+
+        creator = make_creator(db, "Abe3d")
+        _walk(db, creator, creator_dir)
+        return creator
+
+    def test_all_seven_variants_land_in_one_group_with_hierarchy_on(
+            self, db, tmp_path):
+        creator = self._walk_the_2b_tree(db, tmp_path)
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert len(groups[0].models) == 7
+
+    def test_one_character_folder_yields_exactly_one_product_key(
+            self, db, tmp_path):
+        """The boundary itself, stated directly: whatever the walk decides to
+        call these models, every one of them must resolve to the same
+        `product_key`, because they are one product. Guards the fix at the layer
+        the split actually happened on, so a future change that re-splits the
+        characters fails here even if some other signal papers over the group.
+        """
+        from app.models import Model
+        from app.services.product_context import resolve_product_context
+
+        creator = self._walk_the_2b_tree(db, tmp_path)
+
+        models = db.query(Model).filter_by(creator_id=creator.id).all()
+        assert len(models) == 7
+        keys = {resolve_product_context(folder_path=m.folder_path,
+                                        character=m.character,
+                                        creator_name=creator.name).product_key
+                for m in models}
+        assert keys == {"2b"}
+
+
 class TestProductScopedBucketCaps:
     """Content evidence survives past 8 variants of one product (STUDIO-411).
 
