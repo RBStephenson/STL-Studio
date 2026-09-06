@@ -1,6 +1,8 @@
 """
 Tests for name_parser — pure functions, no DB or network needed.
 """
+import re
+
 import pytest
 from app.services import name_parser
 from app.services.name_parser import (
@@ -476,6 +478,82 @@ class TestIsStructuralFolder:
     ])
     def test_character_names(self, name):
         assert name_parser.is_structural_folder(name) is False
+
+
+class TestIsTypeWordedName:
+    """STUDIO-414. The narrower half of is_structural_folder: names that read as
+    structural ONLY because every token happens to be a type keyword, and so
+    could equally be a real product name."""
+
+    @pytest.mark.parametrize("name", [
+        "Chibi Hero", "Bust", "Hero", "Monster", "Creature", "Figure",
+        "Statue", "Diorama", "Maquette", "Collectible", "Vehicle", "Prop",
+        "Hero Bust", "Chibi Statue", "Garage Kit",
+        # Separator forms of the same names. Underscore is a word character, so
+        # the \b-anchored type patterns never fire on the raw string — which is
+        # why the check normalises separators first, exactly as character_key
+        # does. Dashes are not word characters and worked either way; pinned
+        # here so a "simplification" that drops the normalisation is caught for
+        # both. Underscore-joined names are the common real-library shape
+        # ("AleCask_32mm_UnSupported", "Gohan_SSJ2").
+        "Chibi_Hero", "Hero_Bust", "Chibi-Hero", "Hero-Bust", "Chibi__Hero",
+    ])
+    def test_type_worded_names(self, name):
+        assert name_parser.is_type_worded_name(name) is True
+
+    @pytest.mark.parametrize("name", [
+        # Listed structural names — the vote must keep skipping these, which is
+        # what stops a creator's render/format folder becoming a product.
+        "STL", "LYS", "Renders", "Images", "Supported", "Unsupported",
+        "Presupport", "Full_cutted", "No_cuts", "Alternative_Cut", "Sliced",
+        # Parts buckets.
+        "parts", "base", "bases", "head",
+        # Scale and modifier descriptors carry no type noun.
+        "75mm", "1-10 Scale", "1-10 Scale Split", "32mm Supported", "Solid",
+        "Presupported", "uncut", "NSFW", "Deluxe",
+        # A collector-scale ratio makes parse() infer a "statue" type, so a bare
+        # ratio would qualify on its scale alone if _TYPES weren't matched
+        # directly. It is a scale descriptor, not a product.
+        "1-6", "1:12", "1_10",
+        # Real product names are not type-worded — they have a token that
+        # survives stripping.
+        "Auron - Final Fantasy X", "Goblin Warband", "Chibi Kirara - Inuyasha",
+        "Monster Hunter", "Round Table Knight",
+        # Nothing at all is not a name.
+        "", "   ",
+    ])
+    def test_not_type_worded(self, name):
+        assert name_parser.is_type_worded_name(name) is False
+
+    def test_a_type_worded_name_has_no_identity_of_its_own(self):
+        """Why these need rescuing positionally at all: the strip pipeline
+        consumes them whole, so they reach the scanner's vote with no key to
+        vote with — and are then handed the winner's label anyway."""
+        for name in ["Chibi Hero", "Bust", "Hero", "Statue", "Garage Kit"]:
+            assert name_parser.character_key(name) == ""
+
+    def test_a_user_tag_rule_cannot_make_a_name_type_worded(self):
+        """ParserRules' contract: a tag rule adds tags, and never changes how
+        products group. "Deluxe" is emptied by a modifier keyword, so a tag rule
+        supplying the missing type signal would otherwise flip it."""
+        rules = name_parser.ParserRules(
+            tag_rules=((re.compile(r"\bdeluxe\b", re.I), "bust"),),
+        )
+        assert name_parser.is_type_worded_name("Deluxe", rules) is False
+
+    def test_user_configured_parts_name_is_not_type_worded(self):
+        """A name the user declared a parts bucket stays one, even if its words
+        happen to be type keywords."""
+        rules = name_parser.ParserRules(parts_names=frozenset({"bust"}))
+        assert name_parser.is_type_worded_name("Bust", rules) is False
+
+    def test_no_built_in_structural_or_parts_name_is_type_worded(self):
+        """The whole listed vocabulary at once, rather than the handful spelled
+        out above. These sets grow with nearly every grouping ticket, and an
+        addition that reads as type-worded would start letting a format folder
+        vote as a product — this is the check that would notice."""
+        for name in name_parser._STRUCTURAL_EXACT | name_parser._PARTS_EXACT:
+            assert name_parser.is_type_worded_name(name) is False, name
 
 
 # ---------------------------------------------------------------------------

@@ -672,6 +672,65 @@ def is_structural_folder(name: str, rules: ParserRules | None = None) -> bool:
     )
 
 
+def is_type_worded_name(name: str, rules: ParserRules | None = None) -> bool:
+    """True if `name` is made up *only* of type keywords ("Chibi Hero", "Bust").
+
+    A strictly narrower question than :func:`is_structural_folder`, which answers
+    True for these too. The difference is whether the name could plausibly be a
+    real product: "Supported" and "Renders" describe how a folder was prepared
+    and never name a thing, but "Chibi Hero" is both a pile of type keywords and
+    a perfectly ordinary product name. Nothing in the name itself separates the
+    two readings — only position can, which is why this is a separate predicate
+    for the scanner to combine with context rather than a change to
+    ``is_structural_folder``. (STUDIO-414)
+
+    Two conditions, and both are load-bearing:
+
+    * the whole name is consumed by ``_strip_signal_tokens``, so it has no
+      identity left to group on (``character_key`` returns ""); and
+
+    * at least one built-in ``_TYPES`` keyword appears — a word naming a kind of
+      thing. Scale and modifier keywords empty a name just as thoroughly
+      ("75mm", "Presupported", "NSFW", "Deluxe"), and those really are pure
+      variant descriptors, so a type keyword is what separates the two.
+
+    Both run against a separator-normalised copy, for the reason ``character_key``
+    normalises as its very first step: underscore is a word character, so the
+    \\b-anchored patterns never fire on "Chibi_Hero" — and that is the ordinary
+    spelling in a real library, not an edge case. ``is_structural_folder`` reaches
+    the same answer by splitting on separators before it tests tokens; without
+    this the two would disagree on exactly the names this predicate exists to
+    catch, and the folder would be skipped by one and unrescued by the other. The
+    set lookups deliberately use the RAW lower-cased name, because
+    ``_STRUCTURAL_EXACT`` lists underscore spellings ("full_cutted", "no_cuts")
+    of its own.
+
+    ``_TYPES`` is matched directly rather than through ``parse()`` for two
+    reasons: ``parse()`` infers a "statue" type from a collector-scale ratio, so
+    a bare "1-6" would qualify on its scale alone; and it merges
+    ``rules.tag_rules``, whose contract is that a user's tag rule adds tags
+    without ever changing how products group.
+
+    Listed structural names and parts buckets are rejected outright, so a name
+    the user declared a parts bucket stays one even when its words happen to be
+    type keywords. Against the *built-in* vocabularies that first check is
+    currently redundant — no entry in ``_STRUCTURAL_EXACT`` or ``_PARTS_EXACT``
+    both survives to be consumed whole and carries a type keyword, so the two
+    conditions below already reject every one of them (measured: 0 of 69). It
+    stays as a precedence rule, because those sets grow with nearly every
+    grouping ticket and a future entry like "bust" would need it. Only
+    ``rules.parts_names`` reaches it today.
+    """
+    rules = rules or _DEFAULT_RULES
+    low = name.lower().strip()
+    if not low or low in _STRUCTURAL_EXACT or _is_parts_name(low, rules):
+        return False
+    spaced = _spaced(name)
+    if _strip_signal_tokens(spaced):
+        return False
+    return any(pattern.search(spaced) for pattern, _ in _TYPES)
+
+
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------

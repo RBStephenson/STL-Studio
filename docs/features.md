@@ -84,7 +84,11 @@ collapses them into a **single group card** with a "*N* variants" badge.
 Click it to open the group and see each variant individually. Folder names that
 differ only in letter case ("Ada Wong" next to "ADA WONG") are read as the same
 character, so a creator's inconsistent capitalisation doesn't split one figure
-into several groups.
+into several groups. A folder named entirely with product words ("Chibi Hero",
+"Bust") is read as a product in its own right when it sits directly under the
+creator, instead of being absorbed into a neighbouring figure's group — while
+the same name one level down, under a character folder, still reads as that
+character's variant.
 
 This keeps the grid tidy when a creator ships many cuts/versions of one model.
 
