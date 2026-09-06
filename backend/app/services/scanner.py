@@ -1500,8 +1500,16 @@ def _walk_for_models(
             continue
         keys[c.name] = name_parser.character_key(c.name, creator.name)
     nonempty = [k for k in keys.values() if k]
-    distinct = set(nonempty)
-    counts = Counter(nonempty)
+    # The vote compares case-insensitively (STUDIO-413). One creator typing a
+    # single folder in caps splits their own character into separate products
+    # otherwise, and `product_context` has always folded case for the same
+    # reason — hierarchy grouping was quietly rescuing this shape, so with that
+    # setting off it was a real miss. Only the *comparison* folds: the winning
+    # key is stored as Model.character and shown as a group label, so it is
+    # handed back through `_representative_casing` as a real folder's casing.
+    folded = [k.casefold() for k in nonempty]
+    distinct = set(folded)
+    counts = Counter(folded)
 
     # This folder's own identity. Use the *raw* folder name (not the normalised key)
     # so a real character keeps its readable label, e.g. "Auron - Final Fantasy X".
@@ -1530,7 +1538,8 @@ def _walk_for_models(
     if not nonempty:
         strategy, common_key = "parent", None
     else:
-        top_key, top_n = counts.most_common(1)[0]
+        top_fold, top_n = counts.most_common(1)[0]
+        top_key = _representative_casing(top_fold, nonempty, own_key)
         # > half of the real children share one key (and at least two do) → one product.
         # Strict majority (not ≥) keeps an even 2-vs-2 split of two distinct products
         # from collapsing.
@@ -2040,6 +2049,41 @@ def _is_hidden(name: str) -> bool:
 def _is_nested_variant_boundary(name: str) -> bool:
     """True for a variant descriptor that should own its physical subtree."""
     return bool(NESTED_VARIANT_BOUNDARY.fullmatch(name.strip()))
+
+
+def _representative_casing(fold: str, keys: list[str], own_key: str) -> str:
+    """The casing to *store* for a case-folded product key (STUDIO-413).
+
+    The sibling vote compares folded keys, but its winner becomes a model's
+    `character` and a group's label, so it has to come back as a casing someone
+    actually typed rather than a machine-lowercased string.
+
+    This folder's own name wins whenever it is the same identity: the parent is
+    the most authoritative label available, and it need not appear among the
+    children at all ("Ada Wong" holding only "ADA WONG Unsupported" is still
+    Ada Wong's folder). That case also has no other fix — the `common_label`
+    guard below requires the folder's key to be a *strictly shorter* prefix of
+    the shared one, which a case-only difference never is.
+
+    Failing that (the creator root, where there is no parent identity to
+    borrow), the most frequent casing among the children carrying that key
+    wins, ties broken alphabetically. Same rule as `grouping_policy._most_common`
+    and for the same reason (STUDIO-248): `Counter.most_common` breaks ties by
+    insertion order, which would make a stored character depend on the order the
+    filesystem happened to list siblings in. Deliberately duplicated rather than
+    imported — this rule is a superset of that one, and a shared helper for two
+    lines would cost a public name in `name_parser` to buy nothing.
+
+    `fold` must be a key the vote already folded, and `keys` the raw keys it was
+    folded from: the winner comes out of a Counter built from those same keys, so
+    at least one always matches. Handed a raw key instead, nothing matches and the
+    `min` raises — the intended direction for a broken invariant, and the reason
+    there is no empty-sequence fallback quietly inventing a label.
+    """
+    if own_key and own_key.casefold() == fold:
+        return own_key
+    candidates = Counter(k for k in keys if k.casefold() == fold)
+    return min(candidates, key=lambda value: (-candidates[value], value))
 
 
 def _has_hidden_ancestor(path: Path, within: Path) -> bool:

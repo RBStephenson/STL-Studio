@@ -1047,6 +1047,28 @@ class TestHierarchySignal:
         assert groups[0].label == "Ada Wong"
         assert groups[0].reason == "same product hierarchy"
 
+    def test_case_variant_envelopes_are_one_product(self, db):
+        """Green before STUDIO-413 as well as after, and pinned precisely
+        because of that: `product_key` folds case, which is the only reason
+        mixed-case siblings ever grouped and therefore the reason the bug read
+        as latent for so long. Nothing pinned this shape while it was doing the
+        rescuing, so the fold it depends on could have been dropped in silence.
+        `display_label` keeps a real casing per member; `_most_common` picks
+        among them."""
+        creator = make_creator(db)
+        a = make_model(db, creator, name="Supported Files")
+        b = make_model(db, creator, name="Alternate Cut")
+        c = make_model(db, creator, name="Hollow")
+        a.character, b.character, c.character = "Ada Wong", "ADA WONG", "ada wong"
+        _enable_hierarchy(db)
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id, c.id}
+        assert groups[0].reason == "same product hierarchy"
+
     def test_conflicting_envelopes_block_shared_hash_merge(self, db):
         creator = make_creator(db)
         a = make_model(db, creator, name="Supported")
@@ -1230,6 +1252,24 @@ class TestNameSignal:
 
         assert _groups(db, creator) == []
 
+    def test_names_differing_only_in_case_share_a_bucket(self, db):
+        """STUDIO-413. `display_name` title-cases most of this away before it
+        reaches the bucket, but it deliberately preserves short all-caps tokens
+        so acronyms ("APC", "JSC") survive — which leaves "ADA WONG" and
+        "Ada Wong" in two buckets for one product. The label still comes from a
+        raw key, so folding the bucket must not lowercase it."""
+        creator = make_creator(db)
+        a = make_model(db, creator, name="ADA WONG Supported")
+        b = make_model(db, creator, name="Ada Wong Unsupported")
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id}
+        assert groups[0].label == "ADA WONG"      # a real casing, never "ada wong"
+
 
 class TestCharacterSignal:
     """Scan-time reproduction of the legacy startup backfill's grouping,
@@ -1271,6 +1311,25 @@ class TestCharacterSignal:
         _run(db, creator)
 
         assert _groups(db, creator) == []
+
+    def test_characters_differing_only_in_case_group_without_a_rescan(self, db):
+        """STUDIO-413's reason to fix the bucket and not just the scanner: this
+        is what a library already holds. The scanner fix only reaches models
+        that are re-walked, and nothing here has a name key to fall back on —
+        so before the fold these three variants of one product were not merely
+        mis-labelled, they formed no group at all."""
+        creator = make_creator(db)
+        a = make_model(db, creator, name="20", character="Trays Full")
+        b = make_model(db, creator, name="25", character="TRAYS FULL")
+        c = make_model(db, creator, name="30", character="trays full")
+        db.flush()
+
+        _run(db, creator)
+
+        groups = _groups(db, creator)
+        assert len(groups) == 1
+        assert {m.id for m in groups[0].models} == {a.id, b.id, c.id}
+        assert groups[0].label == "TRAYS FULL"    # a real casing, never "trays full"
 
     def test_name_signal_takes_precedence_when_both_apply(self, db):
         # A stronger signal already explains the merge, so CHARACTER's weaker
