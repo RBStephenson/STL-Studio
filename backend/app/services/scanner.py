@@ -1501,7 +1501,27 @@ def _walk_for_models(
             and not name_parser.is_structural_folder(folder.name, rules.parser_rules)
             and not _is_nested_variant_boundary(folder.name)
             and name_parser.character_key(folder.name, creator.name)):
-        own_character = folder.name
+        # A folder that merely *extends* the identity it inherited is one more
+        # level of the same product, not a new one ("2B" -> "1_4 2B YoRHa"), and
+        # naming itself here would hand its children a key its shallower
+        # siblings do not share — one character folder, several product keys,
+        # split by nothing but depth (STUDIO-429). Keep the ancestor's name for
+        # those, and only those: the same *strictly shorter* prefix rule the
+        # sibling vote uses below, so an unrelated child under a short name
+        # ("Orc" -> "Goblin Warrior") still names itself, and a child whose key
+        # merely *equals* the inherited one names itself too — that folder is
+        # the one the ancestor was pointing at, and its raw spelling is the
+        # readable label, where the inherited value is already normalised
+        # ("Auron - Final Fantasy X", not "Auron Final Fantasy X").
+        inherited_key = (name_parser.character_key(character, creator.name)
+                         if character else "")
+        folder_key = name_parser.character_key(folder.name, creator.name)
+        extends_inherited = (
+            bool(inherited_key)
+            and len(inherited_key) < len(folder_key)
+            and folder_key.lower().startswith(inherited_key.lower()))
+        if not extends_inherited:
+            own_character = folder.name
 
     # This folder's own identity, normalised. Needed both to decide the strategy
     # (below) and to label a "common" group, so it is computed once here.
