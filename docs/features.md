@@ -127,7 +127,10 @@ character/package context to full scans and creator rescans. Conflicting hierarc
 acts as an anti-merge boundary, while genuinely ambiguous models remain ungrouped —
 though a variant the scanner couldn't label still rejoins its product when it
 carries that product's exact part set, however many variants that product already
-has. The pass only rebuilds automatic groups: manual groups and explicit
+has, and a single oddly-named folder sitting alongside a product's support or
+format folders is read as one more of its variants rather than a product of its
+own.
+The pass only rebuilds automatic groups: manual groups and explicit
 keep-separate decisions remain authoritative.
 
 The scanner infers the character group from folder names — it's accurate for

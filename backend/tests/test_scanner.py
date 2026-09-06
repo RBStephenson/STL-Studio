@@ -899,9 +899,11 @@ class TestVariantGrouping:
         assert chars[str(Path("Goblin/Unsupported"))] == "Goblin"
         assert chars[str(Path("Orc/Supported"))] == "Orc"
         assert chars[str(Path("Orc/Unsupported"))] == "Orc"
-        # …so the two characters can never share one group. The odd sibling's own
-        # character is deliberately not pinned: STUDIO-412/415 decide where it
-        # lands, and this test must not churn when they do.
+        # …and STUDIO-412 lands the odd sibling in its own character's group
+        # rather than in a singleton of its own, so the two characters can never
+        # share one group and neither leaves a model behind.
+        assert chars[str(Path("Goblin/Nude V2"))] == "Goblin"
+        assert chars[str(Path("Orc/Nude V2"))] == "Orc"
 
     def test_lone_sibling_extending_the_parent_name_still_labels_the_group(self, db, tmp_path):
         """The single-key branch must still win when the lone child's identity
@@ -919,6 +921,110 @@ class TestVariantGrouping:
 
         chars = {m.character for m in _models(db, creator)}
         assert chars == {"Crimson Wings"}
+
+    def test_lone_odd_sibling_rejoins_its_own_product(self, db, tmp_path):
+        """STUDIO-412: STUDIO-410 stopped the odd child hijacking its siblings
+        but left the child itself carrying its own folder name — a character of
+        its own, therefore a singleton, therefore ungrouped. The one model in
+        the tree whose identity was recoverable was the only one with no group.
+
+        There is a single character folder here, so
+        `_disambiguate_colliding_characters` has nothing to collide and never
+        runs: the split is made by the walk, not by the disambiguator the ticket
+        named. The structural siblings are what make this decidable — a folder
+        whose other children inherit its identity is a product, not a container
+        of products, so the odd one out is one more of its variants."""
+        creator_dir = tmp_path / "Creator"
+        for variant in ("Supported", "Unsupported", "Nude V2"):
+            _stl(creator_dir / "Ada Wong" / variant / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars == {
+            str(Path("Ada Wong/Supported")): "Ada Wong",
+            str(Path("Ada Wong/Unsupported")): "Ada Wong",
+            str(Path("Ada Wong/Nude V2")): "Ada Wong",
+        }
+
+    def test_odd_sibling_rejoins_a_character_carried_through_a_structural_level(self, db, tmp_path):
+        """The same rule reached through a folder that *carries* an identity
+        rather than owning one: `Supported` is structural, so it holds Ada Wong's
+        name on behalf of its ancestor, and the odd child beneath it belongs to
+        Ada Wong just as much. This is the shape the fix's comment cites, and
+        the likeliest one in a real library."""
+        creator_dir = tmp_path / "Creator"
+        supported = creator_dir / "Ada Wong" / "Supported"
+        _stl(supported / "Nude V2")
+        _stl(supported / "Lychee")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {m.character for m in _models(db, creator)}
+        assert chars == {"Ada Wong"}
+
+    def test_two_odd_siblings_keep_their_own_names(self, db, tmp_path):
+        """The boundary on STUDIO-412, and the reason it is narrowed to a lone
+        odd child. This layout is structurally identical to the case above — a
+        folder with its own identity, a structural child inheriting it, and
+        oddly-named children that do not — except there are TWO of them, and
+        nothing in the names distinguishes two variants of one product from two
+        products in a pack. Handing them the folder's name would weld two
+        different characters into one group, which is the failure this epic
+        exists to remove, so they keep their own."""
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Sinister Pack"
+        _stl(pack / "Supported" / "STL")
+        for char in ("Electro", "Sandman"):
+            _stl(pack / char / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars == {
+            str(Path("Sinister Pack/Supported")): "Sinister Pack",
+            str(Path("Sinister Pack/Electro")): "Electro",
+            str(Path("Sinister Pack/Sandman")): "Sandman",
+        }
+
+    def test_lone_product_with_no_skipped_siblings_keeps_its_own_name(self, db, tmp_path):
+        """The other half of STUDIO-412's narrowing, and it needs its own test:
+        a mutant that drops the skipped-children requirement and hands every
+        vetoed lone child its parent's name passed the entire suite, because
+        nothing pinned this shape. With no structural sibling there is no
+        evidence that the outer folder is a product rather than a pack holding
+        one, so the child keeps the name it brought — the conservative reading,
+        and the one STUDIO-410 settled on."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Sinister Pack" / "Electro" / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {m.character for m in _models(db, creator)}
+        assert chars == {"Electro"}
+
+    def test_lone_product_beside_a_structural_sibling_takes_the_folder_name(self, db, tmp_path):
+        """The same narrowing seen from the other side, and the one shape whose
+        behaviour STUDIO-412 changes outside the character-folder case it was
+        filed for: a folder holding one structural child and one oddly-named
+        child is one product however it is named, because the structural child's
+        contents can only belong to that product. Both models therefore share
+        the folder's name and group, where before they were two ungrouped
+        singletons."""
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Sinister Pack"
+        _stl(pack / "Supported" / "STL")
+        _stl(pack / "Electro" / "STL")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {m.character for m in _models(db, creator)}
+        assert chars == {"Sinister Pack"}
 
     def test_support_variant_subfolders_group_across_parents(self, db, tmp_path):
         """DakkaDakka-style: a product whose 'supported' copy is one level shallower
