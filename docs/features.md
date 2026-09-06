@@ -81,6 +81,9 @@ the keyboard button in the header) at any time to see the full list.
 When several folders share the same character (for example a *Bust*, a
 *Full size*, and a *Pre-supported* version of the same figure), the Library
 collapses them into a **single group card** with a "*N* variants" badge.
+Words describing how a mesh was *prepared* rather than what it is are read the
+same way, so a creator who ships `Ciri_STL_Original` beside `Ciri_STL_Repaired`
+gets one *Ciri* card with two variants rather than two separate figures.
 Click it to open the group and see each variant individually. Folder names that
 differ only in letter case ("Ada Wong" next to "ADA WONG") are read as the same
 character, so a creator's inconsistent capitalisation doesn't split one figure
