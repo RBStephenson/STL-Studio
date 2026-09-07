@@ -403,10 +403,38 @@ class TestCharacterKey:
         # wrongly make the folder inherit its parent's character.
         assert character_key("CA3D", "CA 3D Studios") == "CA3D"
 
-    def test_creator_tag_not_stripped_from_middle(self):
-        # Creator tag in the middle of a name is left alone; only trailing tags
-        # are stripped to avoid clobbering real character names.
+    def test_creator_tag_leading_not_stripped(self):
+        # A tag that STARTS the key is left alone (STUDIO-442): there the creator's
+        # name is frequently part of the product name, so stripping it clobbers a
+        # real character. The live library's proof is the creator "Portal Gun",
+        # which ships a product folder named exactly "Portal Gun" — stripping a
+        # leading tag would leave nothing at all.
+        # (This test used to be named …_from_middle, which it never tested; the
+        # middle case is now covered below and behaves the opposite way.)
         assert character_key("CA3D Dragon", "CA 3D Studios") == "CA3D Dragon"
+        assert character_key("Portal Gun", "Portal Gun") == "Portal Gun"
+        # Leading tag kept, trailing tag stripped, in one key.
+        assert character_key("Ghamak Barbarian Ghamak", "Ghamak") == "Ghamak Barbarian"
+
+    def test_creator_tag_stripped_from_middle(self):
+        # STUDIO-432 cause 1. Creators tack a sculptor credit or a version after
+        # their own name, and an end-anchored pattern reached none of them —
+        # 85 folder names on the live library, all of which carried the creator's
+        # name into Model.name and Model.character.
+        assert (character_key("1_4 Barbarella - Abe3D by Stopa", "Abe3d")
+                == "Barbarella by Stopa")
+        assert character_key("1_4 Jean Grey - Abe3D v1.1", "Abe3d") == "Jean Grey v1"
+        assert (character_key("Ada Wong CA3D by Someone", "CA 3D Studios")
+                == "Ada Wong by Someone")
+
+    def test_mid_string_strip_keeps_the_separator(self):
+        # The old pattern ended `\s*$`. Removing only the `$` — the obvious way to
+        # "un-anchor" it — leaves the `\s*` eating the separator AFTER the tag as
+        # well as the one before it, welding the neighbours: "Barbarellaby Stopa".
+        # `\s*$` has to go as a unit. This is the guard against it coming back.
+        key = character_key("Barbarella Abe3D by Stopa", "Abe3d")
+        assert "Barbarellaby" not in key
+        assert key == "Barbarella by Stopa"
 
     @pytest.mark.parametrize("folder,creator,expected", [
         # A lone word of a multi-word creator name must NOT be stripped, even when
@@ -856,6 +884,12 @@ class TestDisplayName:
 
     def test_strips_creator_suffix(self):
         assert display_name("Barbarian Ghamak", "Ghamak") == "Barbarian"
+
+    def test_strips_mid_string_creator_tag(self):
+        # STUDIO-432 cause 1 reaches the displayed label too — display_name is
+        # built on character_key, so 89 Model.name values move with this.
+        assert (display_name("1_4 Barbarella - Abe3D by Stopa", "Abe3d")
+                == "Barbarella By Stopa")
 
     def test_falls_back_to_raw_when_empty(self):
         # Pure variant descriptor → nothing identifying → keep the raw folder name.

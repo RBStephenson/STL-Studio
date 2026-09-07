@@ -578,12 +578,15 @@ def character_key(name: str, creator_name: str | None = None) -> str:
     reduce to "Ada Wong CA3D". Returns "" when nothing product-identifying remains
     (a pure variant descriptor such as "75mm Unsupported" or "15").
 
-    When creator_name is supplied, a trailing creator-name *tag* is removed so e.g.
-    "Ada Wong CA3D" collapses with "Ada Wong" for that creator. Only forms unlikely to
+    When creator_name is supplied, a creator-name *tag* is removed wherever it appears
+    after the first token: "Ada Wong CA3D" collapses onto "Ada Wong", and
+    "Barbarella - Abe3D by Stopa" reduces to "Barbarella by Stopa" (the sculptor
+    credit is STUDIO-439's, not this function's). Only forms unlikely to
     coincide with a real character word are stripped — a glued abbreviation of 2+
     consecutive creator words ("CA 3D Studios" → "CA3D") or the full creator name. An
     individual word of a multi-word creator ("Dragon" from "Dragon Studios") is left
-    alone, so "Red Dragon" keeps its identity. The strip is guarded: if nothing would
+    alone, so "Red Dragon" keeps its identity. A tag that *starts* the key is left
+    alone too (STUDIO-442). The strip is guarded: if nothing would
     remain, the key is left unchanged.
     """
     # Normalise underscores/dashes to spaces FIRST so the \b-anchored token regexes
@@ -615,7 +618,7 @@ def character_key(name: str, creator_name: str | None = None) -> str:
 
 @lru_cache(maxsize=256)
 def _creator_suffix_pattern(creator_name: str) -> re.Pattern | None:
-    """Compile a regex matching a trailing creator-name tag.
+    """Compile a regex matching a creator-name tag anywhere but the start of a key.
 
     Two forms are stripped, both unlikely to collide with a real character word:
       * a glued concatenation of 2+ consecutive creator words — the abbreviation
@@ -641,13 +644,30 @@ def _creator_suffix_pattern(creator_name: str) -> re.Pattern | None:
         aliases.add(" ".join(tokens))
     # Longest first so the alternation prefers the most specific match.
     alts = "|".join(re.escape(a) for a in sorted(aliases, key=len, reverse=True))
-    # Require at least one leading space so we never strip the whole key when it
-    # is nothing but a creator tag (guard handled in _strip_creator_suffix).
-    return re.compile(r"(?:\s+\b(?:" + alts + r")\b)+\s*$", re.I)
+    # STUDIO-432 cause 1. The tag is matched WHEREVER it occurs, not only at the
+    # end. Creators routinely tack a sculptor credit or a version after their own
+    # name — "1_4 Barbarella - Abe3D by Stopa" — and an end-anchored pattern misses
+    # every one: 85 folder names on the live library, whose keys and display names
+    # both carried the creator's name.
+    #
+    # The leading \s+ is load-bearing twice over, and is why "un-anchor" does not
+    # mean "match anywhere". It is the empty-key guard (a key that is nothing BUT
+    # the tag has no leading space, so it cannot match), and it keeps a tag that
+    # *starts* the key out of scope — there the creator's name is often part of the
+    # product name, and the live library proves it: the creator "Portal Gun" ships
+    # a product folder named exactly "Portal Gun", which a leading strip would
+    # reduce to nothing. That half is STUDIO-442, 31 folder names.
+    #
+    # The trailing \s* went with the anchor, and must not come back. It never did
+    # anything — `key` is already stripped before it reaches here — but unanchored
+    # it would eat the separator AFTER the tag too, gluing the neighbours together
+    # ("Barbarella Abe3D by Stopa" -> "Barbarellaby Stopa"). Dropping `\s*$` as a
+    # unit is therefore the whole change; "just delete the $" is the bug.
+    return re.compile(r"(?:\s+\b(?:" + alts + r")\b)+", re.I)
 
 
 def _strip_creator_suffix(key: str, creator_name: str) -> str:
-    """Remove trailing creator-tag tokens from a grouping key.
+    """Remove creator-tag tokens from a grouping key.
     Falls back to the original key when the result would be empty.
     """
     pattern = _creator_suffix_pattern(creator_name)
