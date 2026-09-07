@@ -194,6 +194,27 @@ describe("LibraryTab package-preserving setting", () => {
   });
 });
 
+describe("LibraryTab folder-level token setting (STUDIO-431)", () => {
+  beforeEach(() => {
+    settings = mkSettings();
+    vi.clearAllMocks();
+    scanStatusMock.mockReturnValue(new Promise(() => {}));
+  });
+
+  it("toggling it on persists reorganize_keep_level_enabled=true", async () => {
+    settings = mkSettings({ reorganize_keep_level_enabled: false });
+    renderTab();
+    await userEvent.click(screen.getByRole("checkbox", { name: /folder-level token/i }));
+    expect(updateMock).toHaveBeenCalledWith({ reorganize_keep_level_enabled: true });
+  });
+
+  it("reflects an already-on setting as checked", () => {
+    settings = mkSettings({ reorganize_keep_level_enabled: true });
+    renderTab();
+    expect(screen.getByRole("checkbox", { name: /folder-level token/i })).toBeChecked();
+  });
+});
+
 describe("LibraryTab AI suggestions setting", () => {
   beforeEach(() => {
     settings = mkSettings();

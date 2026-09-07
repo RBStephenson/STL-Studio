@@ -33,7 +33,7 @@ from app.services.tag_sync import sync_model_tags
 from app.services import ai_organize, reorganize
 from app.services.reorganize_template import ReorganizeTemplateError
 from app.services.scanner import resolve_creator, prune_empty_creators
-from app.routers.reorganize import _slugify_all, _slugify_filenames
+from app.routers.reorganize import _keep_level_enabled, _slugify_all, _slugify_filenames
 from app.config import settings
 from app.utils import utcnow, like_escape
 
@@ -1205,6 +1205,7 @@ def get_model(model_id: int, db: Session = Depends(get_db)):
         manifest = reorganize.build_manifest(
             db, None, model_ids=[model.id], slugify_all=_slugify_all(db),
             slugify_filenames=_slugify_filenames(db),
+            keep_enabled=_keep_level_enabled(db),
         )
         entry = manifest.entries[0] if manifest.entries else None
         result.unorganized = bool(entry and entry.kind != "in_place")

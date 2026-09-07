@@ -145,6 +145,15 @@ def _package_mode(db: Session) -> bool:
     return bool(row.value) if row is not None else False
 
 
+def _keep_level_enabled(db: Session) -> bool:
+    """Whether the ``{keep}`` destination token resolves (STUDIO-431). Defaults
+    off, matching AppSettingsRead.reorganize_keep_level_enabled — the default is
+    mirrored here rather than assumed, because reading a missing row as "on" is
+    exactly the drift STUDIO-426 records for the hierarchy flag."""
+    row = db.get(AppSetting, "reorganize_keep_level_enabled")
+    return bool(row.value) if row is not None else False
+
+
 # There is deliberately no `_stored_template` helper here any more (STUDIO-403).
 # It used to read the app-wide setting and hand the result to build_manifest, so
 # every caller looked like it had passed an EXPLICIT template — which, under
@@ -207,6 +216,7 @@ def _build_and_persist(
             slugify_title=slugify_title, slugify_all=resolved_slugify_all,
             slugify_filenames=resolved_slugify_filenames,
             preserve_packages=_package_mode(db),
+            keep_enabled=_keep_level_enabled(db),
         )
     except ReorganizeTemplateError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -275,6 +285,7 @@ def template_preview(
         preview = reorganize.build_template_preview(
             db, template, root_id, limit,
             slugify_all=_slugify_all(db),
+            keep_enabled=_keep_level_enabled(db),
         )
     except ReorganizeTemplateError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -40,6 +40,7 @@ const DEFAULTS: AppSettings = {
   reorganize_enabled: false,
   installer_enabled: false,
   reorganize_package_mode_enabled: false,
+  reorganize_keep_level_enabled: false,
   reorganize_ai_suggestions_enabled: false,
   hierarchy_variant_grouping_enabled: false,
   variant_sidebar_enabled: false,

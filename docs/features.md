@@ -873,7 +873,8 @@ typing a template into the Reorganize page's field overrides all of that for
 that one plan, which is what that field has always meant.
 
 Destination templates support `{creator}`, `{character}`, `{scale}`, and
-`{title}`. `{scale}` comes from scanner-detected scale auto-tags such as `1:6`
+`{title}`, plus `{keep}` once it is switched on (see below). `{scale}` comes
+from scanner-detected scale auto-tags such as `1:6`
 or `75mm`; if a template uses `{scale}` and a model has no detected scale, that
 row is marked unclassifiable until you resolve it.
 
@@ -895,12 +896,41 @@ suffix field on each row is how you break them.
 folder name, and the optional form treats that as "no title", so those models
 sit one level up rather than getting a folder named after their source folder.
 
+#### Keeping a folder level the template can't name
+
+Every token above renders something the app knows *about* a model. That leaves a
+gap: if you have organised a creator's folder by faction, game system, release
+wave or project year, no token names that level, so a reorganize drops it —
+`One Page Rules/Human Defense Force/HDF APC` becomes `One Page Rules/HDF APC/…`
+and the faction is gone.
+
+Turn on **Settings → Library → "Allow the folder-level token in templates"** and
+a fifth token appears: **`{keep}`**, the folder the model already sits under.
+`{creator}/{keep?}/{character}/{title}` keeps your faction level and normalizes
+everything else.
+
+Three things worth knowing:
+
+- **It skips levels the destination already names.** If a creator is filed by
+  character — `Abe3D/Ada Wong/Bust` — the folder above the product *is* the
+  character, so `{keep?}` contributes nothing rather than repeating it. That
+  comparison ignores spelling, so a folder like
+  `Abe3D/1_6 Ada Wong - Abe3D by Ronejr` still counts as "already named" and you
+  get the tidied `Abe3D/Ada Wong/…`, not the original folder name back.
+- **It keeps one level.** A model buried two container levels deep keeps the
+  outer one.
+- **It does nothing under package preservation**, which builds its destination
+  without consulting the template at all.
+
+Use the `?` form. A required `{keep}` blocks every model that has no folder level
+to keep — which, in an unsorted creator folder, is all of them.
+
 ### Building a template
 
 You don't have to type any of that by hand. Both places the template appears —
 **Settings → Library → Destination Layout** and the Reorganize page itself — use
 the same editor. **Token chips** insert `{creator}`, `{character}`, `{scale}` or `{title}`
-at the cursor. **Presets** fill in a whole layout as a starting point; they stay
+at the cursor — plus `{keep?}` when the folder-level token is switched on. **Presets** fill in a whole layout as a starting point; they stay
 editable afterwards, and nothing about a preset is saved. An **example** renders
 the current template against a handful of real models from your library as you
 type, so you can see what a change does without building a plan first. A

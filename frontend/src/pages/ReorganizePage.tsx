@@ -505,6 +505,7 @@ export default function ReorganizePage() {
             onChange={(next) => { setTemplate(next); setTemplateTouched(true); }}
             rootId={rootId}
             defaultTemplate={settings.reorganize_template_default}
+            keepEnabled={settings.reorganize_keep_level_enabled}
             inheritedTemplate={perRootMode ? libraryFallback : undefined}
             scopeNote={
               perRootMode ? (

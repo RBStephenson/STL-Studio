@@ -156,6 +156,7 @@ A folder is only indexed as a model if it contains 3D files.
 
 ### Reorganize Library
 - Preview and apply a folder template (default `{creator}/{character}/{title}`, with optional `{scale}`) to tidy files on disk
+- Opt into `{keep}` (Settings → Library) to preserve a folder level the template can't name — a faction, game system or release wave — instead of dropping it; skipped automatically wherever the destination already names that level
 - Build the template with token chips and presets instead of typing it, with a live example rendered against real models as you type — a template render, not an eligibility check
 - Filter the preview by creator before using status tabs, pagination, and page-level select-all, making targeted testing and reorganizing easier
 - Destination template and lowercase/hyphenated ("slug") formatting are saved settings, shared with manual creator-folder creation and the model detail page's "unorganized" indicator
