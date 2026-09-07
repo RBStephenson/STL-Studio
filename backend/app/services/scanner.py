@@ -434,7 +434,7 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 # only "STL" was a slicer project is removed in the same scan.
                 _prune_slicer_files(_db)
                 removed += _prune_phantoms(_db, protected_creator_ids=failed_creator_ids)
-                prune_empty_creators(_db)
+                prune_empty_creators(_db, protected_creator_ids=failed_creator_ids)
 
                 # Replace the in-progress "scanning <creator>" message with a
                 # summary the UI can show once the run finishes (#223).
@@ -445,6 +445,12 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 )
                 if removed:
                     summary += f", {removed} removed"
+                # A run that lost creator walks is NOT an unqualified success: those
+                # creators are partially indexed or empty, so the model count is a
+                # floor. Saying only "done" is what made STUDIO-437 look like a small
+                # library rather than a failed scan.
+                if failed_creator_ids:
+                    summary += f", {len(failed_creator_ids)} creators failed"
                 job.update(state=JobState.DONE, message=summary)
         finally:
             if own_db:
@@ -731,19 +737,29 @@ def _prune_stale_models(
     return len(stale_ids)
 
 
-def prune_empty_creators(db: Session):
+def prune_empty_creators(db: Session, protected_creator_ids: set[int] | None = None):
     """Delete Creator rows that have no models — left behind by stale-path pruning,
     or by a caller reassigning every one of a creator's models elsewhere
     (single-pack import's placeholder creator — named after the pack folder,
     e.g. "Ignisaurus Clan ..." — orphaned the moment the user sets the real
     creator name via bulk-enrich or a single-model edit; #1108). Public
     (no leading underscore) since it's now called from outside this module,
-    not just the post-scan pass below."""
+    not just the post-scan pass below.
+
+    ``protected_creator_ids`` shields creators whose walk failed this run, the same
+    way the model-level prunes above already do (STUDIO-79). Without it a creator
+    whose walk raised has zero models and gets deleted outright, which is how a
+    transient failure turned into "STL Studio didn't find my models" with nothing
+    in the UI to say so (STUDIO-437). A creator left behind with zero models is a
+    visible failure; a deleted one is an invisible one. Defaults to None so the
+    non-scan callers (bulk-enrich, tag rules) keep their existing behaviour."""
     orphans = (
         db.query(Creator)
         .filter(~Creator.id.in_(db.query(Model.creator_id).filter(Model.creator_id != None).distinct()))
         .all()
     )
+    if protected_creator_ids:
+        orphans = [c for c in orphans if c.id not in protected_creator_ids]
     if orphans:
         for c in orphans:
             db.delete(c)
@@ -1163,9 +1179,15 @@ def _scan_root(root: ScanRoot, db: Session, rules: ScanRules) -> set[int]:
     roles = layout.roles_for(root.layout)
     creator_entries = layout.iter_creator_dirs(root_path, roles)
 
-    # Capture last_scanned as a plain value before fanning out — `root` belongs to
-    # the main-thread session and must not be touched from worker threads.
+    # Capture every `root` attribute the workers need as a plain value before fanning
+    # out — `root` belongs to the main-thread session and must not be touched from
+    # worker threads. Reading one live inside a worker is not a benign race: the
+    # db.commit() below EXPIRES these attributes, so the access fires a lazy reload
+    # against the main thread's Session, which is not thread-safe and raises. That
+    # kills the whole creator walk (STUDIO-437) — group_by_character was read live
+    # here and cost 12 creator walks on one first scan of an empty library.
     root_last_scanned = root.last_scanned
+    root_group_by_character = root.group_by_character
 
     # Pre-create all Creator rows in the main session before going parallel so
     # worker threads never race to INSERT the same creator name. The same creator
@@ -1205,7 +1227,7 @@ def _scan_root(root: ScanRoot, db: Session, rules: ScanRules) -> set[int]:
                 last_scanned=root_last_scanned,
                 rules=rules,
                 layout_tags=layout_tags,
-                group_by_character=root.group_by_character,
+                group_by_character=root_group_by_character,
                 read_failures=walk_failures,
                 images_cache={},
             )
