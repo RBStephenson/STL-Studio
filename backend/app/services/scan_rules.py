@@ -32,10 +32,27 @@ IGNORE_PATTERNS_KEY = "scan_ignore_patterns"
 TAG_RULES_KEY = "scan_tag_rules"
 PARTS_NAMES_KEY = "scan_parts_names"
 
-# Built-in ignore patterns, merged with the user's. Empty today (the scanner has
-# always walked everything), but the hook makes the merge semantics explicit and
-# gives Phase-2/3 work a place to seed sensible defaults.
-_DEFAULT_IGNORE_PATTERNS: tuple[str, ...] = ()
+# Built-in ignore patterns, merged with the user's. This is the "sensible
+# defaults" hook the merge semantics were built for.
+#
+# `__MACOSX` is the resource-fork sidecar macOS puts in every zip it creates. It
+# mirrors the real tree and fills it with `._<name>` stubs, so the scanner indexed
+# it as real content: 29 phantom models across three creators on the live library.
+# `installer.py:_IGNORED_TOP_LEVEL_PREFIXES` has always skipped it when unpacking;
+# the scanner simply never learned the same fact, which is the inconsistency fixed
+# here (STUDIO-435).
+#
+# Seeded when STUDIO-435 made the phantoms actively harmful rather than merely
+# useless. Those stubs share filenames across every product a creator ships, so
+# once the models carried a clean character they became FILENAME bridges and
+# welded unrelated products together — measured as one group spanning **16**
+# characters (Athena, Cardinal, Leon, Sekhmet…) under RAYBOX Games. Cross-character
+# welding is the exact failure STUDIO-410 exists to prevent.
+#
+# Matching is case-insensitive and tested against the basename, so this catches
+# `__MACOSX` at any depth. User patterns merge with these and can never remove
+# them.
+_DEFAULT_IGNORE_PATTERNS: tuple[str, ...] = ("__MACOSX",)
 
 
 @dataclass(frozen=True)

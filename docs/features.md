@@ -1221,7 +1221,12 @@ break them. All three take effect on the next scan.
 - **Ignore patterns** — folders matching a pattern (and everything inside them)
   are skipped. Matching is case-insensitive against a folder's name (`WIP`) or its
   full path (`*/_archive/*`). Adding a pattern also drops any already-indexed
-  models it now covers on the next scan.
+  models it now covers on the next **full** scan (a per-creator rescan skips the
+  folder but does not remove rows indexed before the pattern existed).
+  **`__MACOSX` is built in and always applied** — it is the sidecar folder macOS
+  adds to every zip it creates, mirroring the real tree with placeholder files, so
+  without it the scanner indexes a duplicate, unprintable copy of the archive.
+  Built-in patterns merge with yours and cannot be removed.
 - **Tag rules** — a keyword→tag pair adds an auto-tag to any model whose name
   contains the whole keyword (e.g. `Aztec` → `civ`). They supplement the built-in
   tag detection and do **not** change how variants group.
