@@ -210,6 +210,11 @@ Every rule list *adds* to the defaults (it never replaces them) and applies on t
 next scan. See [Scan rules](features.md#scan-rules) for the full description:
 
 - **Ignore patterns** — skip folders by name (`WIP`) or path glob (`*/_archive/*`).
+  One pattern is built in and always applied: **`__MACOSX`**, the sidecar folder
+  macOS adds to every zip it creates. It mirrors the real folder tree and fills it
+  with placeholder files, so without this the scanner indexes a duplicate,
+  unprintable copy of everything in the archive. If you have scanned Mac-authored
+  zips before, expect those duplicates to disappear on your next full scan.
 - **Tag rules** — add an auto-tag when a name contains a keyword (`Aztec` → `civ`).
 - **Parts folder names** — extra exact folder names treated as parts/structure.
 

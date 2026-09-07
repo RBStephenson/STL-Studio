@@ -42,20 +42,53 @@ class TestIgnoreMatcher:
 
 
 class TestLoadIgnoreMatcher:
-    def test_no_row_yields_empty(self, db):
-        assert load_ignore_matcher(db).patterns == ()
+    def test_no_row_yields_the_built_in_defaults(self, db):
+        """Was `== ()` until STUDIO-435 seeded `__MACOSX`. The defaults are not
+        user-removable, so with no stored row the matcher is exactly them."""
+        expected = tuple(p.strip().lower() for p in scan_rules._DEFAULT_IGNORE_PATTERNS)
+        assert load_ignore_matcher(db).patterns == expected
+
+    def test_macosx_sidecar_is_ignored_by_default(self, db):
+        """STUDIO-435. macOS puts a `__MACOSX` resource-fork mirror in every zip
+        it makes, full of `._<name>` stubs. The scanner indexed those as real
+        models — 29 phantoms across three creators on the live library — while
+        `installer.py:_IGNORED_TOP_LEVEL_PREFIXES` had always skipped them when
+        unpacking. Same fact, two modules, only one of which knew it.
+
+        They became actively harmful once the mesh-free-voter fix gave them clean
+        characters: the stubs share filenames across every product a creator
+        ships, so they bridged unrelated products and welded one group spanning
+        **16** characters under RAYBOX Games.
+        """
+        m = load_ignore_matcher(db)
+        assert "__macosx" in m.patterns
+        # Case-insensitive, and at any depth — not just a top-level prefix.
+        assert m.matches(Path("/lib/Creator/Product/__MACOSX")) is True
+        assert m.matches(Path("/lib/Creator/Product/__macosx")) is True
+        # A real folder that merely mentions it is untouched.
+        assert m.matches(Path("/lib/Creator/__MACOSX Cleanup Tool")) is False
+
+    def test_user_patterns_cannot_remove_a_built_in_default(self, db):
+        """The merge is additive by design — a user pattern list that omits
+        `__MACOSX` must not resurrect the phantoms."""
+        db.add(AppSetting(key=scan_rules.IGNORE_PATTERNS_KEY, value=["wip"]))
+        db.commit()
+        assert "__macosx" in load_ignore_matcher(db).patterns
 
     def test_loads_and_normalises_user_patterns(self, db):
         db.add(AppSetting(key=scan_rules.IGNORE_PATTERNS_KEY,
                           value=["  WIP ", "wip", "", "Supports"]))
         db.commit()
-        # stripped, lower-cased, de-duped, blanks dropped — order preserved
-        assert load_ignore_matcher(db).patterns == ("wip", "supports")
+        # stripped, lower-cased, de-duped, blanks dropped — order preserved, and
+        # appended after the built-in defaults (STUDIO-435 seeded the first one).
+        assert load_ignore_matcher(db).patterns == ("__macosx", "wip", "supports")
 
     def test_non_list_stored_value_is_treated_as_empty(self, db):
+        """A malformed stored value contributes nothing — but must not take the
+        built-in defaults down with it (STUDIO-435)."""
         db.add(AppSetting(key=scan_rules.IGNORE_PATTERNS_KEY, value="oops-not-a-list"))
         db.commit()
-        assert load_ignore_matcher(db).patterns == ()
+        assert load_ignore_matcher(db).patterns == ("__macosx",)
 
     def test_merges_built_in_defaults(self, db, monkeypatch):
         monkeypatch.setattr(scan_rules, "_DEFAULT_IGNORE_PATTERNS", ("thumbs.db",))
