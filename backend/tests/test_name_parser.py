@@ -11,6 +11,7 @@ from app.services.name_parser import (
     children_look_like_parts,
     extract_character_name,
     character_key,
+    key_preserves_tokens,
     support_status,
     cut_status,
     slicer,
@@ -1048,3 +1049,97 @@ class TestDisplayName:
     ])
     def test_strips_release_number_marker_without_leaving_a_stray_hash(self, folder, expected):
         assert display_name(folder) == expected
+
+
+class TestKeyPreservesTokens:
+    """STUDIO-443: does a raw folder name carry junk, or just nicer punctuation?
+
+    The scanner stores a raw folder name as Model.character on the parent path.
+    That is right when the raw spelling only differs from the key by punctuation
+    and wrong when it carries a scale prefix, a creator tag or a sculptor credit.
+    This is the test that separates the two.
+    """
+
+    @pytest.mark.parametrize("name,creator", [
+        # The case scanner.py's own comment cites: the key is the same words with
+        # the dashes flattened, so the raw spelling is the better label.
+        ("Auron - Final Fantasy X", None),
+        ("Joker (Face Off)", None),
+        ("Superman (Red Son)", None),
+        ("Kai-Sa", None),
+        ("Ram-Man", None),
+        ("Symbionte Spider-Man", None),
+        ("Rei - Evangelion", None),
+        ("Spear_B", None),
+        # A creator name the strip deliberately leaves alone: "Dragon" is one
+        # word of a multi-word creator, so "Red Dragon" keeps its identity.
+        ("Red Dragon", "Dragon Studios"),
+    ])
+    def test_punctuation_only_differences_preserve_the_tokens(self, name, creator):
+        assert key_preserves_tokens(name, creator) is True
+
+    @pytest.mark.parametrize("name,creator", [
+        ("1_6 April ONeil - Abe3D by Davi", "Abe3d"),   # scale + tag + credit
+        ("1_4 Ada Wong - Abe3D", "Abe3d"),              # scale + tag
+        ("Barbarella - Abe3D NSFW", "Abe3d"),           # tag + junk
+        ("2B_Bust_TanukiFigures", "Tanuki Figures"),    # type word + tag
+        ("Gohan_SSJ2_TanukiFigures", "Tanuki Figures"),
+        ("trap jaw 1-6", None),                         # scale
+        ("Clay Face 1-6 UNsupported", None),            # scale + support state
+        ("01 - Gridrunner supported", None),            # ordering prefix + support
+    ])
+    def test_a_name_carrying_junk_does_not_preserve_its_tokens(self, name, creator):
+        assert key_preserves_tokens(name, creator) is False
+
+    def test_a_name_with_no_identity_left_is_false(self):
+        """Every token dropped is the strongest form of "carries junk", not a
+        pass. Callers that would rather keep the raw name than store nothing
+        check the key themselves — scanner.py's call site is already guarded on
+        character_key being truthy."""
+        assert character_key("75mm Unsupported") == ""
+        assert key_preserves_tokens("75mm Unsupported") is False
+
+    def test_a_name_with_no_word_tokens_at_all_is_false(self):
+        """The case the explicit empty-key guard exists for. "75mm Unsupported"
+        is caught anyway — it has tokens, the key has none, so the comparison
+        already fails. A name with no alphanumerics on EITHER side compares
+        [] == [] and would read as "preserved" without the guard. Unreachable
+        from scanner.py, whose call site is guarded on character_key being
+        truthy, but this function is public and answers for itself."""
+        assert character_key("---") == ""
+        assert key_preserves_tokens("---") is False
+
+    def test_comparison_is_case_insensitive(self):
+        # character_key preserves the source casing, so a comparison that folded
+        # neither side would call every re-cased token a dropped one.
+        assert key_preserves_tokens("AURON - final fantasy X") is True
+
+    def test_a_partly_stripped_repeat_is_not_preserved(self):
+        """Counts, not sets — and this is the case that proves the difference.
+
+        The creator tag is stripped after the first token but not at the start
+        (STUDIO-442), so one copy of "Groundeffected" goes and one stays. The
+        token SETS are then identical and a set comparison would call this name
+        junk-free, keeping a character that says the creator's name twice. Found
+        by measuring set-vs-count across all 6,315 live names: this is the only
+        name in the library where the two rules disagree.
+        """
+        name = "Groundeffected — Groundeffected Spidey"
+        assert character_key(name, "Groundeffected") == "Groundeffected — Spidey"
+        assert key_preserves_tokens(name, "Groundeffected") is False
+
+    def test_a_repeat_the_key_keeps_whole_is_preserved(self):
+        # The other side of it: nothing dropped, so the raw spelling wins.
+        assert key_preserves_tokens("Mask of the Mask") is True
+
+    def test_underscores_separate_rather_than_glue(self):
+        r"""\w would treat "2B_Bust" as a single token and make this True, which
+        would leave every underscore-glued creator tag in the library untouched.
+        Underscores are separators everywhere else in this module."""
+        assert key_preserves_tokens("2B_Bust_TanukiFigures", "Tanuki Figures") is False
+
+    def test_it_answers_for_the_creator_it_is_given(self):
+        # The same folder name reads differently under a different creator: the
+        # tag is only strippable when it IS the creator's name.
+        assert key_preserves_tokens("Ada Wong CA3D", "CA 3D Studios") is False
+        assert key_preserves_tokens("Ada Wong CA3D", "Abe3d") is True

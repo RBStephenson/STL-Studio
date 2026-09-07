@@ -753,6 +753,36 @@ def _strip_attribution_clause(key: str) -> str:
     return stripped if stripped else key
 
 
+# Alphanumeric runs. Deliberately not \w: underscores are separators everywhere
+# else in this module ("2B_Bust" is two tokens), and \w would glue them.
+_WORD_TOKEN = re.compile(r"[a-z0-9]+")
+
+
+def key_preserves_tokens(name: str, creator_name: str | None = None) -> bool:
+    """True when character_key(name) drops nothing but punctuation and spacing.
+
+    The question a caller is really asking is "does this raw folder name carry
+    junk?". "Auron - Final Fantasy X" keys to "Auron Final Fantasy X" — same
+    words, prettier spelling, so the raw name is worth keeping. "1_6 April ONeil
+    - Abe3D by Davi" keys to "April ONeil", losing a scale prefix, a creator tag
+    and a sculptor credit, so the raw name is not (STUDIO-443).
+
+    Compares token *multisets*, case-folded — counts, not sets. A set comparison
+    looks equivalent and is not: "Groundeffected — Groundeffected Spidey" keys to
+    "Groundeffected — Spidey", dropping the second copy of the creator name while
+    STUDIO-442's rule keeps the leading one. The token sets are identical, so a
+    set comparison calls that name junk-free and keeps the duplicate.
+
+    A name with no product identity at all (character_key returns "") is False —
+    every token was dropped, which is the strongest possible form of "carries
+    junk". Callers that would rather keep the raw name than store nothing must
+    check the key themselves; this function answers one question only.
+    """
+    key_tokens = _WORD_TOKEN.findall(character_key(name, creator_name).casefold())
+    return (bool(key_tokens)
+            and sorted(key_tokens) == sorted(_WORD_TOKEN.findall(name.casefold())))
+
+
 def is_structural_folder(name: str, rules: ParserRules | None = None) -> bool:
     """True if `name` is a structural/variant descriptor, not a character name.
 

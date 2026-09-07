@@ -1512,8 +1512,10 @@ def _walk_for_models(
     # distinct products stay separate. See name_parser.character_key.
     next_parents = (parent_names or []) + [folder.name]
 
-    # This folder's own identity. Use the *raw* folder name (not the normalised key)
-    # so a real character keeps its readable label, e.g. "Auron - Final Fantasy X".
+    # This folder's own identity. Prefer the *raw* folder name over the normalised
+    # key so a real character keeps its readable label, e.g. "Auron - Final
+    # Fantasy X" rather than "Auron Final Fantasy X" — but only when that raw
+    # spelling carries no junk (see the STUDIO-443 note below).
     # The creator root and structural/parts folders carry no identity of their own —
     # at the creator root own_character stays None so its children decide for
     # themselves (a standalone product groups only with key-sharing siblings).
@@ -1543,7 +1545,30 @@ def _walk_for_models(
             and len(inherited_key) < len(folder_key)
             and folder_key.lower().startswith(inherited_key.lower()))
         if not extends_inherited:
-            own_character = folder.name
+            # …but "the raw spelling is the readable label" only holds when that
+            # spelling has nothing to strip. Stored raw, a folder like
+            # "1_6 April ONeil - Abe3D by Davi" puts a scale prefix, a creator
+            # tag and a sculptor credit into Model.character — which is a
+            # Reorganize {character} path token, so a wrong value gets written to
+            # disk and read back as ground truth next scan. Every name_parser
+            # rule (STUDIO-432, -439, -442) was structurally unable to reach this
+            # value, because nothing on this path ever parsed it (STUDIO-443).
+            #
+            # The token test is what separates the two cases: "Auron - Final
+            # Fantasy X" keys to the same words and keeps its punctuation, while
+            # the April ONeil folder loses whole tokens and takes the key. It is
+            # also why this is not simply `own_character = folder_key`, measured
+            # on the live library: parsing unconditionally rewrites 333 correct,
+            # readable labels ("Joker (Face Off)" -> "Joker Face Off") to fix the
+            # same 374 this reaches.
+            #
+            # `character_key` is idempotent over every name in the live library,
+            # so own_key below is unchanged either way and no grouping decision
+            # moves — this is a labelling fix, not a grouping one.
+            own_character = (
+                folder.name
+                if name_parser.key_preserves_tokens(folder.name, creator.name)
+                else folder_key)
 
     # This folder's own identity, normalised. Needed both to decide the strategy
     # (below) and to label a "common" group, so it is computed once here.
