@@ -91,7 +91,11 @@ into several groups. A folder named entirely with product words ("Chibi Hero",
 "Bust") is read as a product in its own right when it sits directly under the
 creator, instead of being absorbed into a neighbouring figure's group — while
 the same name one level down, under a character folder, still reads as that
-character's variant.
+character's variant. How *deep* a variant sits under its character folder
+doesn't change which character it belongs to: a sub-folder whose name simply
+extends the character's ("2B" → "1_4 2B YoRHa - Abe3D") keeps the character from
+above rather than naming itself, so variants split across different nesting
+depths still land in one group.
 
 This keeps the grid tidy when a creator ships many cuts/versions of one model.
 

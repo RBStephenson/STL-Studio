@@ -134,6 +134,19 @@ full Scan Library — older versions of the app could mis-handle creators whose
 **name** contained a type word (like "Figures" or "Miniatures"); current versions
 fix this, and a rescan corrects the data.
 
+**Check the scan's finishing message.** A scan that could not finish walking one
+or more creators now says so — `done — 3,000 models, 10,000 files, 2 creators
+failed`. Those creators were left in place with whatever they had indexed rather
+than being cleaned up, so you can see which ones are short. Run a full Scan
+Library again; a second run usually picks up what the first one missed. If the
+same creators fail every time, check the
+[support logs](#accessing-support-logs) for `Error scanning creator`.
+
+Versions before this fix could drop a creator **entirely and silently** in this
+situation — the scan reported plain success and the creator simply wasn't there.
+If you scanned an empty library and creators were missing, a second full scan
+recovers them.
+
 ## The scan reports files it couldn't read
 
 Some folders can be listed while an individual file or sub-folder inside them

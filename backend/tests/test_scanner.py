@@ -5287,3 +5287,168 @@ class TestScannerTransactionSemantics:
             )
         finally:
             check.close()
+
+
+# ---------------------------------------------------------------------------
+# STUDIO-437 — a scan must not silently lose creators
+# ---------------------------------------------------------------------------
+
+
+class _ThreadGuardedRoot:
+    """Delegates to a real ScanRoot, but reading ``group_by_character`` from any
+    thread other than the main one raises.
+
+    This is a deterministic stand-in for what production actually does. The
+    ``db.commit()`` that pre-creates Creator rows EXPIRES every attribute on
+    ``root``, so a worker's read is not a cached lookup — it fires a lazy reload
+    against the main thread's Session, which is not thread-safe, and raises.
+
+    That is a race, and a test that tried to reproduce it by timing would be
+    flaky. The invariant worth pinning is not the race anyway: it is "no worker
+    thread touches this object at all", which is exactly what this guard measures.
+    """
+
+    def __init__(self, root):
+        object.__setattr__(self, "_root", root)
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_root"), name)
+
+    @property
+    def group_by_character(self):
+        if threading.current_thread() is not threading.main_thread():
+            raise RuntimeError(
+                "ScanRoot.group_by_character read from a worker thread — this is "
+                "the STUDIO-437 defect; snapshot it before the fan-out"
+            )
+        return object.__getattribute__(self, "_root").group_by_character
+
+
+class TestScanRootAttributesAreSnapshotBeforeFanOut:
+    """STUDIO-437. _scan_one read ``root.group_by_character`` live, from a worker
+    thread. The exception was swallowed by the STUDIO-79 handler, so the creator
+    finished the run with zero models and nothing surfaced it."""
+
+    def test_worker_threads_never_read_scan_root_attributes(
+        self, db, tmp_path, monkeypatch
+    ):
+        from app.models import ScanRoot
+
+        _stl(tmp_path / "Abe3d" / "Auron")
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        monkeypatch.setattr(scanner, "SessionLocal", sessionmaker(bind=db.get_bind()))
+
+        root = _ThreadGuardedRoot(db.query(ScanRoot).first())
+        failed = scanner._scan_root(root, db, scanner.ScanRules())
+
+        assert failed == set(), (
+            "no ScanRoot attribute may be read from a worker thread — reading one "
+            "kills the whole creator walk"
+        )
+        creator = db.query(Creator).filter(Creator.name == "Abe3d").one()
+        assert db.query(Model).filter(Model.creator_id == creator.id).count() > 0, (
+            "the creator's models must actually be indexed, not merely 'not failed'"
+        )
+
+
+class TestFailedCreatorSurvivesTheEmptyCreatorPrune:
+    """STUDIO-437 defence in depth. A creator whose walk failed has zero models,
+    so the empty-creator prune deleted it outright — erasing the last trace of the
+    failure. A visibly-empty creator is strictly better than a vanished one."""
+
+    def test_protected_creator_with_no_models_is_kept(self, db):
+        creator = make_creator(db, "Abe3d")
+        db.commit()
+
+        scanner.prune_empty_creators(db, protected_creator_ids={creator.id})
+
+        assert db.query(Creator).filter(Creator.id == creator.id).count() == 1, (
+            "a creator whose walk failed must survive the prune"
+        )
+
+    def test_unprotected_creator_with_no_models_is_still_deleted(self, db):
+        creator = make_creator(db, "Ignisaurus Clan Placeholder")
+        db.commit()
+
+        scanner.prune_empty_creators(db)
+
+        assert db.query(Creator).filter(Creator.id == creator.id).count() == 0, (
+            "the #1108 placeholder cleanup must keep working when nothing is "
+            "protected — the shield is opt-in, not a behaviour change"
+        )
+
+    def test_full_scan_hands_its_failed_set_to_the_prune(
+        self, db, tmp_path, monkeypatch
+    ):
+        """Pins the CALL SITE, not just the new parameter. The four model-level
+        prunes already receive the failed set; this one did not, and a default
+        argument makes that easy to regress silently."""
+        from app.models import ScanRoot
+
+        (tmp_path / "Abe3d").mkdir()
+        creator = make_creator(db, "Abe3d")
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        cid = creator.id
+        monkeypatch.setattr(scanner, "_prune_stale_models", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_stale_paths", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_stale_stl_files", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_ignored", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_slicer_files", lambda *a, **k: None)
+        monkeypatch.setattr(scanner, "_prune_phantoms", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db, _rules: {cid})
+
+        scanner.scan_all_roots(db)
+
+        assert db.query(Creator).filter(Creator.id == cid).count() == 1, (
+            "_full_scan must pass failed_creator_ids to prune_empty_creators"
+        )
+
+
+class TestScanSummaryReportsFailedCreators:
+    """STUDIO-437 visibility. A run that lost creator walks reported plain
+    'done — N models, N files'. To the user that reads as a smaller library, not
+    a failed scan, and nothing suggests a retry would help."""
+
+    def _stub_prunes(self, monkeypatch):
+        monkeypatch.setattr(scanner, "_prune_stale_models", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_stale_paths", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_stale_stl_files", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_ignored", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_slicer_files", lambda *a, **k: None)
+        monkeypatch.setattr(scanner, "_prune_phantoms", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "prune_empty_creators", lambda *a, **k: None)
+
+    def test_summary_states_the_failure_count(self, db, tmp_path, monkeypatch):
+        from app.models import ScanRoot
+
+        (tmp_path / "creator").mkdir()
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        self._stub_prunes(monkeypatch)
+        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db, _rules: {101, 102})
+
+        scanner.scan_all_roots(db)
+
+        assert "2 creators failed" in scanner.get_status()["message"], (
+            "a partially-failed scan must not report unqualified success"
+        )
+
+    def test_clean_scan_summary_says_nothing_about_failures(
+        self, db, tmp_path, monkeypatch
+    ):
+        from app.models import ScanRoot
+
+        (tmp_path / "creator").mkdir()
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        self._stub_prunes(monkeypatch)
+        monkeypatch.setattr(scanner, "_scan_root", lambda root, _db, _rules: set())
+
+        scanner.scan_all_roots(db)
+
+        assert "failed" not in scanner.get_status()["message"], (
+            "a clean run must stay clean — an unconditional suffix would cry wolf "
+            "on every scan"
+        )
