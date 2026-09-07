@@ -920,6 +920,70 @@ class TestVariantGrouping:
             str(Path("Samus Aran/Left Arm fix")): "Samus Aran",
         }, "the img gallery folder voted as a product and broke the majority"
 
+    def test_meshless_folder_does_not_vote_on_sibling_identity(self, db, tmp_path):
+        """STUDIO-435. A folder with no mesh anywhere beneath it produces zero
+        models, so its name is evidence about nothing — yet it counts toward
+        `len(keys)`, the denominator of the strict-majority test. Three real
+        children at 2-vs-1 is a majority of three; a fourth, model-less voter
+        makes `2 * 2 > 4` false, the vote drops to `leaf`, every child keeps its
+        own key, and `Left Arm fix` becomes a product of one.
+
+        The mesh-free folder here is deliberately named `final` — **not** a
+        gallery word, and not structural. STUDIO-432 fixed this shape by
+        vocabulary, which can only ever reach names a word list enumerates.
+        Measured on the live library: of 427 mesh-free voters, 195 are
+        unreachable that way — typos (`final rendersr`), bare words (`final`,
+        `logo`), or numeric folders (`1`, `2`, `3`). **This test fails if the fix
+        is reimplemented as a name rule.**
+        """
+        creator_dir = tmp_path / "Abe3d"
+        char = creator_dir / "Samus Aran"
+        for variant in ("1_4 Samus Aran", "1_6 Samus Aran", "Left Arm fix"):
+            _stl(char / variant / "STL")
+        _img(char / "final")        # images only — no mesh anywhere beneath
+        creator = make_creator(db, "Abe3d")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars == {
+            str(Path("Samus Aran/1_4 Samus Aran")): "Samus Aran",
+            str(Path("Samus Aran/1_6 Samus Aran")): "Samus Aran",
+            str(Path("Samus Aran/Left Arm fix")): "Samus Aran",
+        }, "a folder holding no mesh voted on its siblings' product identity"
+
+    def test_meshless_folder_cannot_break_an_existing_majority(self, db, tmp_path):
+        """STUDIO-435's do-no-harm guard, and the reason it is not decoration.
+
+        A mesh-free folder is often named after the character (`alien render`
+        under `Alien`), which means it was *propping up* the majority. Removing
+        it from the vote outright turns a correct `common` into `leaf` and
+        splits the character — measured at **8** such folders on the live
+        library, all of the shape below.
+
+        That the old answer was reached accidentally does not make the split
+        acceptable, so the rule is two-sided: a mesh-free child never creates a
+        product boundary, and never destroys an agreement that already existed.
+
+        This test passes before the change as well as after — it pins behaviour
+        that must survive. **The mutant is what gives it teeth:** drop the guard
+        and keep the skip, and this must fail.
+        """
+        creator_dir = tmp_path / "ZEZ Studios"
+        char = creator_dir / "Alien"
+        _stl(char / "alien bust" / "STL")            # key 'alien'
+        _stl(char / "xenomorph 1-6" / "STL")         # key 'xenomorph'
+        _img(char / "alien render")                  # key 'alien', but no mesh
+        creator = make_creator(db, "ZEZ Studios")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars == {
+            str(Path("Alien/alien bust")): "Alien",
+            str(Path("Alien/xenomorph 1-6")): "Alien",
+        }, "dropping the mesh-free voter destroyed a majority that was correct"
+
     def test_lone_odd_sibling_does_not_hijack_the_character(self, db, tmp_path):
         """STUDIO-410: parts/structural children are skipped from the identity
         vote, so a character folder holding structural variants plus ONE

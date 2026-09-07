@@ -1582,6 +1582,50 @@ def _walk_for_models(
             keys[c.name] = c.name
         else:
             keys[c.name] = name_parser.character_key(c.name, creator.name)
+
+    # STUDIO-435. A child holding no mesh anywhere beneath it produces zero
+    # models, so its name is evidence about nothing — and yet it counts toward
+    # `len(keys)`, the denominator of the strict-majority test below. Three real
+    # children at 2-vs-1 is a majority of three; a fourth, model-less voter makes
+    # `2 * 2 > 4` false and the vote drops to "leaf", where every child keeps its
+    # own key and an oddly-named sibling becomes a product of one.
+    #
+    # Deliberately filtered HERE rather than in the loop above: parts and
+    # structural folders are excluded by name at no I/O cost, so only a folder
+    # that would actually vote pays for `_has_stls`'s subtree walk. The result is
+    # memoised in the same `stl_cache` the boundary paths already use — do not
+    # reimplement the mesh check, or ignore rules, hidden folders and excluded
+    # subtrees will disagree with the rest of the scanner.
+    #
+    # This replaces STUDIO-432's vocabulary approach, which could only reach
+    # names a word list enumerates. Measured on a 3503-model library: 427 voters
+    # hold no mesh, and 195 of those are unreachable by any vocabulary — typos
+    # ("final rendersr"), bare words ("final", "logo") and numeric folders.
+    voting_keys = dict(keys)
+    for c in child_dirs:
+        if c.name not in voting_keys:
+            continue
+        child_key = str(c)
+        if child_key not in stl_cache:
+            stl_cache[child_key] = _has_stls(c, recurse=True)
+        if not stl_cache[child_key]:
+            del voting_keys[c.name]
+
+    # …but the filter may only ever ADD agreement, never remove it. A mesh-free
+    # folder is very often named after the character it illustrates ("alien
+    # render" under "Alien"), which means it was *propping up* the majority;
+    # dropping it outright turns a correct "common" into "leaf" and splits the
+    # character. Measured: 8 such folders on the live library, against 97 folders
+    # this whole change improves. That the old answer was reached accidentally
+    # does not make the split acceptable, so the rule is two-sided — a mesh-free
+    # child never creates a product boundary, and never destroys one that the
+    # mesh-bearing children had already agreed on.
+    if (len(voting_keys) != len(keys)
+            and _vote_has_majority(keys)
+            and not _vote_has_majority(voting_keys)):
+        voting_keys = keys
+    keys = voting_keys
+
     nonempty = [k for k in keys.values() if k]
     # The vote compares case-insensitively (STUDIO-413). One creator typing a
     # single folder in caps splits their own character into separate products
@@ -1604,12 +1648,16 @@ def _walk_for_models(
     if not nonempty:
         strategy, common_key = "parent", None
     else:
-        top_fold, top_n = counts.most_common(1)[0]
+        top_fold = counts.most_common(1)[0][0]
         top_key = _representative_casing(top_fold, nonempty, own_key)
         # > half of the real children share one key (and at least two do) → one product.
         # Strict majority (not ≥) keeps an even 2-vs-2 split of two distinct products
         # from collapsing.
-        majority = top_n >= 2 and top_n * 2 > len(keys)
+        # Via the shared helper so this rule exists once. The subtle part is that
+        # the denominator is `len(keys)` and not `len(nonempty)` — an empty-keyed
+        # child still occupies a seat — and STUDIO-435's do-no-harm guard has to
+        # ask the identical question of a second key set. Two copies would drift.
+        majority = _vote_has_majority(keys)
         # A single real child carries the only identity. Parts/structural/nested-variant
         # children are skipped from `keys` entirely, so this fires for a character folder
         # holding format variants plus ONE oddly-named child ("Ada Wong/{Supported,
@@ -2246,6 +2294,22 @@ def _has_stls(folder: Path, recurse: bool = False) -> bool:
     if recurse:
         return any(p.suffix.lower() in STL_EXTENSIONS for p in _iter_files_recursive(folder))
     return any(f.suffix.lower() in STL_EXTENSIONS for f in folder.iterdir() if f.is_file())
+
+
+def _vote_has_majority(keys: dict[str, str]) -> bool:
+    """Does this key set carry a strict majority (STUDIO-435)?
+
+    Mirrors the `majority` test in `_walk_for_models` exactly, including the
+    detail that the denominator is `len(keys)` and not the count of non-empty
+    keys — an empty-keyed child still occupies a seat. Extracted so the vote can
+    be asked the same question twice: once with every child, once with only the
+    children that actually hold meshes.
+    """
+    folded = [v.casefold() for v in keys.values() if v]
+    if not folded:
+        return False
+    top_n = Counter(folded).most_common(1)[0][1]
+    return top_n >= 2 and top_n * 2 > len(keys)
 
 
 def _any_child_has_stls_cached(child_dirs: list[Path], cache: dict[str, bool]) -> bool:

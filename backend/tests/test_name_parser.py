@@ -592,12 +592,22 @@ class TestIsStructuralFolder:
         supported spelling, unnoticed.
 
         Measured on the live library: 112 such folders (41 `img`, 71 `image(s)`),
-        none holding a mesh, and skipping them changes the vote on 81 character
-        folders with no case where a correct majority collapses. That is a real
-        defect and it has its own ticket. This test exists so the boundary is a
-        recorded decision rather than an oversight — when that ticket is built,
-        this test is the one that should change, deliberately and with the
-        measurement rerun.
+        none holding a mesh. This test exists so the boundary is a recorded
+        decision rather than an oversight.
+
+        **Follow-up, STUDIO-435: that defect is fixed, and this test did not
+        change.** When it was written it predicted the opposite — that the next
+        ticket would widen the vocabulary and invert this pin. It didn't: the
+        names turned out to be unenumerable (`renders` at either end, plus typos
+        like `final rendersr`, bare words like `logo`, and numeric folders), so
+        the fix moved to a content signal in the scanner instead — a folder with
+        no mesh beneath it does not vote. See
+        `TestVariantGrouping::test_meshless_folder_does_not_vote_on_sibling_identity`.
+
+        So the boundary below still stands, but for a different reason than
+        originally recorded: `img Barbarella` is genuinely not a structural
+        *name*, and nothing here needs to pretend otherwise, because the vote no
+        longer depends on the name at all.
         """
         assert name_parser.is_structural_folder(name) is False
 

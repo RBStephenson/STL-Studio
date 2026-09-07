@@ -111,7 +111,19 @@ and slicer folders like `LYS`, `CTB`, `Chitu`), pre-slice prep
 descriptors, and base folders that spell out their sizes and shapes
 (`Bases 25mm-32mm (Round+Square)`) — are **never** used as the character.
 Otherwise every creator's `LYS` (or `STL`, `Supported`, …) folder would collapse
-into one giant cross-character variant group. The real character is inherited from
+into one giant cross-character variant group.
+
+**A folder holding no 3D files anywhere beneath it does not influence grouping at
+all, whatever it is called.** When sibling folders are compared to work out which
+product they belong to, only folders that actually contain models get a say — so a
+gallery folder named `img Barbarella`, `mulan renders`, `final` or just `1` cannot
+split a character into separate products by being counted as one. This is a
+content rule rather than a naming rule precisely because such folders are named
+inconsistently. The one exception protects you from a surprise: if the mesh-free
+folder's name *agrees* with what the real folders already say, the grouping it was
+already producing is kept rather than changed.
+
+The real character is inherited from
 the nearest meaningful ancestor instead, so `Spiderman/Supported/LYS/` groups under
 *Spiderman*. A meaningful folder does not take over the character either, when
 its own name merely **extends** the one it inherited — `2B` holding

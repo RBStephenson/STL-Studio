@@ -40,14 +40,30 @@ PARTS_NAMES_KEY = "scan_parts_names"
 # it as real content: 29 phantom models across three creators on the live library.
 # `installer.py:_IGNORED_TOP_LEVEL_PREFIXES` has always skipped it when unpacking;
 # the scanner simply never learned the same fact, which is the inconsistency fixed
-# here (STUDIO-435).
+# here (STUDIO-436, split out of STUDIO-435 so it could land alone).
 #
-# Seeded when STUDIO-435 made the phantoms actively harmful rather than merely
-# useless. Those stubs share filenames across every product a creator ships, so
-# once the models carried a clean character they became FILENAME bridges and
-# welded unrelated products together — measured as one group spanning **16**
-# characters (Athena, Cardinal, Leon, Sekhmet…) under RAYBOX Games. Cross-character
-# welding is the exact failure STUDIO-410 exists to prevent.
+# The phantoms were not merely useless, they welded unrelated products together:
+# one group spanning **16** characters (Athena, Cardinal, Leon, Sekhmet…) under
+# RAYBOX Games. Cross-character welding is the exact failure STUDIO-410 exists to
+# prevent.
+#
+# **How, precisely — measured 2026-09-07 by tracing the evidence ledger, because
+# the original note here guessed and guessed wrong.** It is not a FILENAME bridge
+# and never was. Each phantom sits at `<Character>/__MACOSX/<Character>`, so:
+#
+#   * its folder name IS the character name, and NAME evidence bridges every
+#     phantom to its real twin — 15 edges;
+#   * every phantom inherits `character='__MACOSX'` from the sibling vote one
+#     level up, and CHARACTER evidence chains all fifteen into one component —
+#     14 edges.
+#
+# Fifteen NAME plus fourteen CHARACTER, and **zero FILENAME**. The shared `._`
+# stub names never entered it: `merged.stl` is carried by 14 of RAYBOX's 18
+# models, which is 14 products against `_FILENAME_BUCKET_CAP` of 8, so the
+# generic-name guard (#639) correctly dropped it before comparison. Nor was there
+# a product boundary to stop the chain — `hierarchy_variant_grouping_enabled`
+# defaults off, so `grouping.py` passes `boundaries=None` and `_UnionFind`'s veto
+# is unreachable in the default mode.
 #
 # Matching is case-insensitive and tested against the basename, so this catches
 # `__MACOSX` at any depth. User patterns merge with these and can never remove
