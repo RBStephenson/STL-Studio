@@ -421,20 +421,22 @@ class TestCharacterKey:
         # their own name, and an end-anchored pattern reached none of them —
         # 85 folder names on the live library, all of which carried the creator's
         # name into Model.name and Model.character.
-        assert (character_key("1_4 Barbarella - Abe3D by Stopa", "Abe3d")
-                == "Barbarella by Stopa")
+        #
+        # Every input here uses a VERSION marker rather than a sculptor credit,
+        # so this stays a pure STUDIO-432 regression guard. Pinning it on a
+        # "by <sculptor>" name would measure 432 and 439 against each other's
+        # leftovers — the very sequencing trap 439's ticket warns about.
         assert character_key("1_4 Jean Grey - Abe3D v1.1", "Abe3d") == "Jean Grey v1"
-        assert (character_key("Ada Wong CA3D by Someone", "CA 3D Studios")
-                == "Ada Wong by Someone")
+        assert character_key("Ada Wong CA3D v2", "CA 3D Studios") == "Ada Wong v2"
 
     def test_mid_string_strip_keeps_the_separator(self):
         # The old pattern ended `\s*$`. Removing only the `$` — the obvious way to
         # "un-anchor" it — leaves the `\s*` eating the separator AFTER the tag as
-        # well as the one before it, welding the neighbours: "Barbarellaby Stopa".
+        # well as the one before it, welding the neighbours: "Barbarellav1".
         # `\s*$` has to go as a unit. This is the guard against it coming back.
-        key = character_key("Barbarella Abe3D by Stopa", "Abe3d")
-        assert "Barbarellaby" not in key
-        assert key == "Barbarella by Stopa"
+        key = character_key("Barbarella Abe3D v1", "Abe3d")
+        assert "Barbarellav1" not in key
+        assert key == "Barbarella v1"
 
     @pytest.mark.parametrize("folder,creator,expected", [
         # A lone word of a multi-word creator name must NOT be stripped, even when
@@ -450,6 +452,140 @@ class TestCharacterKey:
     def test_no_creator_name_unchanged(self):
         # Without a creator_name, existing behaviour is preserved.
         assert character_key("Ada Wong CA3D") == "Ada Wong CA3D"
+
+
+class TestAttributionClause:
+    """STUDIO-439. Several creators sign every folder they ship with the name of
+    the sculptor who made it — "1_4 Barbarella - Abe3D by Stopa". STUDIO-432
+    takes the shop's own tag out of the middle and stops there, leaving
+    "Barbarella by Stopa" in both Model.name and Model.character. Measured on the
+    live library: 87 models across 3 creators, 57 distinct keys."""
+
+    @pytest.mark.parametrize("key_in,expected", [
+        ("Barbarella by Stopa", "Barbarella"),
+        ("Dark Magician Girl by Rodrigo Soares", "Dark Magician Girl"),
+        # A multi-token credit with a lower-cased word inside it — the clause
+        # runs to the end of the key, it does not stop at the first non-capital.
+        ("Collab Models Goodies by Cast n Play", "Collab Models Goodies"),
+        # LA Figures signs with its own initials; "L.A." has already become
+        # "L A" by the time the clause rule sees it.
+        ("X Men Cyclops by L A", "X Men Cyclops"),
+    ])
+    def test_trailing_credit_removed(self, key_in, expected):
+        assert character_key(key_in) == expected
+
+    @pytest.mark.parametrize("key_in,expected", [
+        ("Gamora byLT3D", "Gamora"),
+        ("Marry Marvel Bombshell byDePaula", "Marry Marvel Bombshell"),
+        ("Selene Gallio byLucasTxr", "Selene Gallio"),
+    ])
+    def test_glued_credit_removed(self, key_in, expected):
+        # Six folder names on the live library put a hyphen where a space
+        # belonged ("Abe3D-byLT3D"), so `\bby\b` cannot reach the credit at all.
+        assert character_key(key_in) == expected
+
+    @pytest.mark.parametrize("key_in", [
+        "Red Byakuya",          # a real character whose name starts with "by"
+        "Red Bystander",
+        "Red Byrne",
+        "Something bypass",
+        "Thing Byzantine",
+    ])
+    def test_glued_widening_does_not_eat_real_words(self, key_in):
+        # Widening to `\bby\w*` would reach the six glued credits and also every
+        # word above. All three live glued credits capitalise the sculptor and
+        # English words starting with "by" do not, so the capital discriminates —
+        # but ONLY if it opts out of the pattern's own re.I, which is what
+        # (?-i:[A-Z]) is for. Without the scope, `[A-Z]` matches "a" under re.I
+        # and "Byakuya" walks straight through.
+        assert character_key(key_in) == key_in
+
+    def test_all_caps_glued_token_is_a_known_limit(self):
+        # Not an endorsement: "BYTECRUSHER" satisfies the capital guard and is
+        # cut. Zero live cases — the library holds exactly four `by*` tokens and
+        # the three glued ones are all sculptor credits. Pinned so the limit is
+        # discovered here rather than in someone's library.
+        assert character_key("Thing BYTECRUSHER") == "Thing"
+
+    @pytest.mark.parametrize("key_in,expected", [
+        ("Snake Eyes II by Ramses v1", "Snake Eyes II v1"),
+        ("Star Sapphire by Ronejr v1", "Star Sapphire v1"),
+        ("Mina Majikina by Davi FIX", "Mina Majikina FIX"),
+    ])
+    def test_trailing_version_or_fix_marker_survives(self, key_in, expected):
+        # 67 keys across five creators already keep a trailing marker where no
+        # sculptor is involved, so a greedy `\bby\b.*$` would invent a second,
+        # opposite policy for the same token. "Mina Majikina" decides it: Abe3d
+        # ships the fixed re-release spelled two ways ("Abe3D NSFW FIX" and
+        # "Abe3D by Davi FIX"), and only the marker-keeping rule makes the two
+        # agree. Greedy would group by "was a sculptor credited", which means
+        # nothing to a user.
+        assert character_key(key_in) == expected
+
+    def test_marker_keeping_makes_the_two_fix_releases_agree(self):
+        # The behaviour the case above exists to protect, stated as the outcome
+        # rather than the mechanism.
+        davi_fix = character_key("1_6 Mina Majikina - Abe3D by Davi FIX", "Abe3d")
+        nsfw_fix = character_key("1_6 Mina Majikina - Abe3D NSFW FIX", "Abe3d")
+        original = character_key("1_6 Mina Majikina - Abe3D by Davi", "Abe3d")
+        assert davi_fix == nsfw_fix == "Mina Majikina FIX"
+        assert original == "Mina Majikina"
+
+    def test_clause_only_key_is_not_emptied(self):
+        # Same empty-key guard STUDIO-432 relies on: the mandatory leading \s+
+        # means a key that IS the clause cannot match itself away. Measured: no
+        # key on the live library would be emptied by this rule.
+        assert character_key("by Stopa") == "by Stopa"
+
+    def test_leading_by_in_a_longer_key_is_not_a_clause(self):
+        assert character_key("by Stopa Barbarella") == "by Stopa Barbarella"
+
+    @pytest.mark.parametrize("key_in", [
+        "Dead by Daylight",
+        "dead by daylight",
+        "Dead by Daylight Trapper",     # exemption covers the whole key
+        "Death by Dice",
+    ])
+    def test_product_titles_containing_by_are_exempt(self, key_in):
+        # The rule cannot tell an attribution from a title that happens to
+        # contain "by", and no structural discriminator exists: capitalisation
+        # does not separate them, "is it a common English word" does not either
+        # ("by Jungles" is a real Abe3d sculptor), and requiring the creator's
+        # own tag in the same folder name costs 10 of 87 live strips, nine of
+        # them correct. So the escape hatch is an explicit list.
+        assert character_key(key_in) == key_in
+
+    def test_exemption_is_built_in_not_a_scan_rule(self):
+        # Deliberately NOT a ParserRules field. grouping_policy and
+        # product_context call character_key without rules by design, so a rule
+        # the scanner honoured and grouping did not would key one folder two
+        # ways. This pins that the exemption needs no rules argument to apply.
+        assert character_key("Dead by Daylight", "Some Creator") == "Dead by Daylight"
+
+    def test_clause_is_creator_independent(self):
+        # The credit names the sculptor, not the shop, so it goes with or
+        # without a creator_name. Death x Tiles' one case credits an entirely
+        # different studio ("by Cast n Play").
+        assert character_key("Glory by Marcio") == "Glory"
+        assert character_key("Glory by Marcio", "Abe3d") == "Glory"
+
+    @pytest.mark.parametrize("folder,creator,expected", [
+        ("1_4 Barbarella - Abe3D by Stopa", "Abe3d", "Barbarella"),
+        ("Air Force Bombshell Abe3D By Stopa", "Abe3d", "Air Force Bombshell"),
+        ("1_4 Gamora - Abe3D-byLT3D v1.1", "Abe3d", "Gamora v1"),
+        ("DIsney _ Hades by L.A. Figures", "LA Figures", "DIsney Hades"),
+    ])
+    def test_end_to_end_over_the_creator_tag_strip(self, folder, creator, expected):
+        # The composition is the point: 432 removes the shop's tag from the
+        # middle, then 439 removes the credit. Neither reaches this alone.
+        assert character_key(folder, creator) == expected
+
+    def test_spaced_creator_tag_still_survives(self):
+        # A fourth shape in this family, one key, owned by no ticket: Abe3d's
+        # only alias is "abe3d", so a folder spelling it "Abe 3D" keeps the tag
+        # even after the credit goes. Pinned as a known gap, not a target.
+        assert (character_key("1_6 Rei Ayanami - Abe 3D by Dangelo", "Abe3d")
+                == "Rei Ayanami Abe 3D")
 
 
 class TestMeshRepairVocabulary:
@@ -887,9 +1023,18 @@ class TestDisplayName:
 
     def test_strips_mid_string_creator_tag(self):
         # STUDIO-432 cause 1 reaches the displayed label too — display_name is
-        # built on character_key, so 89 Model.name values move with this.
+        # built on character_key, so 89 Model.name values moved with it. Pinned
+        # on a version marker rather than a sculptor credit so it keeps testing
+        # 432 alone (see the character_key test of the same name).
+        assert display_name("1_4 Jean Grey - Abe3D v1.1", "Abe3d") == "Jean Grey"
+
+    def test_strips_attribution_clause(self):
+        # STUDIO-439 reaches the displayed label for the same reason: 87
+        # Model.name values across 3 creators.
         assert (display_name("1_4 Barbarella - Abe3D by Stopa", "Abe3d")
-                == "Barbarella By Stopa")
+                == "Barbarella")
+        assert display_name("1_4 Gamora - Abe3D-byLT3D v1.1", "Abe3d") == "Gamora"
+        assert display_name("Dead by Daylight") == "Dead By Daylight"
 
     def test_falls_back_to_raw_when_empty(self):
         # Pure variant descriptor → nothing identifying → keep the raw folder name.

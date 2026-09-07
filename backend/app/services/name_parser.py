@@ -566,6 +566,59 @@ _VARIANT_JUNK = re.compile(
     re.I,
 )
 
+# STUDIO-439. A trailing "by <sculptor>" attribution clause. Several creators
+# sign every folder they ship — "1_4 Barbarella - Abe3D by Stopa" — and the
+# credit reaches Model.name and Model.character, neither of which is the place
+# for it.
+#
+# The clause STOPS at a trailing version/fix marker rather than swallowing it:
+# 67 keys across five creators already keep such a marker where no sculptor is
+# involved, so a greedy ".*$" would invent a second, opposite policy for the
+# same token. "Mina Majikina" is the case that decides it — Abe3d ships the
+# fixed re-release spelled two ways, and only the marker-keeping rule makes
+# them agree. `fix` is named here for the first time; nothing else in this
+# module knows the word, so it survives today by accident rather than policy.
+_CLAUSE_STOP = r"(?:v\d+(?:\.\d+)?|fix)"
+
+# The leading \s+ is the empty-key guard, the same one _creator_suffix_pattern
+# relies on: a key that IS the clause ("by Stopa") has no leading space and so
+# cannot match itself away.
+#
+# (?-i:[A-Z]) turns case-sensitivity back ON inside an re.I pattern, and that is
+# the entire reason the glued forms are reachable. Creators occasionally put a
+# hyphen where a space belonged ("Abe3D-byLT3D"), and \bby\b cannot match inside
+# "byLT3D". Widening to \bby\w* reaches those six but would also eat "Byakuya",
+# "Bystander" and "bypass" the day the library grows one. All three glued
+# credits capitalise the sculptor and English words starting with "by" do not,
+# so the capital is a free discriminator — but only if it opts out of the re.I
+# it lives under, which a bare [A-Z] does not.
+_ATTRIBUTION_CLAUSE = re.compile(
+    r"\s+by(?:(?-i:[A-Z])\w*)?\b"
+    r"(?:\s+(?!" + _CLAUSE_STOP + r"\b)\S+)*",
+    re.I,
+)
+
+# Product titles that contain "by" and are not attributions. The rule above
+# cannot tell "Dead by Daylight" from "Barbarella by Stopa", and there is no
+# structural discriminator — measured, not assumed:
+#   * capitalisation does not separate them (a title's last word is capitalised
+#     too), and neither does "is it a common English word" ("by Jungles" is a
+#     real Abe3d sculptor);
+#   * requiring the creator's own tag in the same folder name was measured at a
+#     cost of 10 of 87, nine of them correct strips — LA Figures signs eight
+#     folders "by L.A. Figures", and sparing those leaves "X Men Cyclops by L A".
+# So the escape hatch is an explicit list. It is deliberately a built-in rather
+# than a ParserRules field: grouping_policy and product_context call
+# character_key WITHOUT rules by design, and a rule the scanner honoured but
+# grouping did not would key one folder two ways.
+#
+# Nothing on the live library matches this today. It is seeded from the hazard,
+# not from a sighting — extend it when a real one turns up.
+_ATTRIBUTION_EXEMPT = re.compile(
+    r"\b(?:dead\s+by\s+daylight|death\s+by\s+dice)\b",
+    re.I,
+)
+
 
 def character_key(name: str, creator_name: str | None = None) -> str:
     """Normalise a folder name to its product identity for variant grouping.
@@ -579,15 +632,20 @@ def character_key(name: str, creator_name: str | None = None) -> str:
     (a pure variant descriptor such as "75mm Unsupported" or "15").
 
     When creator_name is supplied, a creator-name *tag* is removed wherever it appears
-    after the first token: "Ada Wong CA3D" collapses onto "Ada Wong", and
-    "Barbarella - Abe3D by Stopa" reduces to "Barbarella by Stopa" (the sculptor
-    credit is STUDIO-439's, not this function's). Only forms unlikely to
-    coincide with a real character word are stripped — a glued abbreviation of 2+
-    consecutive creator words ("CA 3D Studios" → "CA3D") or the full creator name. An
+    after the first token: "Ada Wong CA3D" collapses onto "Ada Wong". Only forms
+    unlikely to coincide with a real character word are stripped — a glued
+    abbreviation of 2+ consecutive creator words ("CA 3D Studios" → "CA3D") or the
+    full creator name. An
     individual word of a multi-word creator ("Dragon" from "Dragon Studios") is left
     alone, so "Red Dragon" keeps its identity. A tag that *starts* the key is left
     alone too (STUDIO-442). The strip is guarded: if nothing would
     remain, the key is left unchanged.
+
+    A trailing "by <sculptor>" attribution clause is then removed regardless of
+    creator (STUDIO-439), so "Barbarella - Abe3D by Stopa" reduces all the way to
+    "Barbarella". That strip is creator-independent on purpose — the clause credits
+    a sculptor, not the shop — and runs last, since the creator tag sits between
+    the character and the clause in every live spelling of this shape.
     """
     # Normalise underscores/dashes to spaces FIRST so the \b-anchored token regexes
     # fire — names like "AleCask_32mm_UnSupported" glue tokens together with "_",
@@ -612,6 +670,8 @@ def character_key(name: str, creator_name: str | None = None) -> str:
 
     if creator_name and key:
         key = _strip_creator_suffix(key, creator_name)
+    if key:
+        key = _strip_attribution_clause(key)
 
     return key
 
@@ -674,6 +734,22 @@ def _strip_creator_suffix(key: str, creator_name: str) -> str:
     if not pattern:
         return key
     stripped = pattern.sub("", key).strip()
+    return stripped if stripped else key
+
+
+def _strip_attribution_clause(key: str) -> str:
+    """Remove a trailing "by <sculptor>" credit from a grouping key.
+
+    Creator-independent: the clause names whoever sculpted the piece, which is
+    never part of the product's identity no matter which shop sells it. A key
+    listed in _ATTRIBUTION_EXEMPT is a product title rather than a credit and is
+    returned untouched — the exemption covers the whole key, so a title that also
+    carries a genuine credit keeps both, which errs toward preserving the user's
+    own name. Falls back to the original key when the result would be empty.
+    """
+    if _ATTRIBUTION_EXEMPT.search(key):
+        return key
+    stripped = _ATTRIBUTION_CLAUSE.sub("", key).strip()
     return stripped if stripped else key
 
 
