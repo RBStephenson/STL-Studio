@@ -3922,12 +3922,17 @@ class TestScanRules:
         rules = scanner.ScanRules.load(db)
 
         assert rules.pack_overrides == frozenset({"/lib/Creator/Pack"})
-        assert rules.ignore.patterns == ("wip",)
+        # User patterns append to the built-in defaults (STUDIO-435 seeded
+        # "__MACOSX"); they never replace them.
+        assert rules.ignore.patterns == ("__macosx", "wip")
 
     def test_load_on_an_empty_db_is_inert(self, db):
+        """"Inert" means no *user* configuration is applied. It stopped meaning
+        "no ignore patterns at all" when STUDIO-435 seeded the built-in defaults,
+        which are deliberately not user-removable."""
         rules = scanner.ScanRules.load(db)
         assert rules.pack_overrides == frozenset()
-        assert rules.ignore.patterns == ()
+        assert rules.ignore.patterns == ("__macosx",)
         assert rules.parser_rules == name_parser.ParserRules()
 
     def test_load_reads_tag_rules_and_parts_names(self, db):
