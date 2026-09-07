@@ -1554,6 +1554,61 @@ class TestVariantGrouping:
         assert {m.character for m in _models(db, creator)} == {
             "Auron - Final Fantasy X"}
 
+    def test_a_folder_naming_itself_parses_a_raw_name_that_carries_junk(
+            self, db, tmp_path):
+        """STUDIO-443: the raw folder name is the readable label only when that
+        spelling has nothing to strip.
+
+        Transcribed from the real tree that STUDIO-439 regressed. Before 439 the
+        folder's key was `April ONeil by Davi`, a strictly longer extension of
+        the inherited `April ONeil`, so the clean inherited value carried down.
+        439 shortened the key to exactly `April ONeil`, the strict-inequality
+        test stopped holding, and the folder named itself with a raw name
+        carrying a scale prefix, a creator tag and a sculptor credit — a better
+        key producing a worse label.
+
+        Model.character is a Reorganize `{character}` path token, so a wrong
+        value here is written to disk and read back as ground truth next scan.
+
+        The nested-variant child is load-bearing, not decoration. `own_character`
+        only reaches a model through recursion — every `_index_model` call site
+        passes the *inherited* character — so a folder with nothing to recurse
+        into is indexed at its own level and never exercises this branch. Same
+        shape as the sibling STUDIO-429 test above, for the same reason.
+        """
+        creator_dir = tmp_path / "Abe3d"
+        product = creator_dir / "April ONeil" / "1_6 April ONeil - Abe3D by Davi"
+        _stl(product)
+        _stl(product / "Alternative")
+        creator = make_creator(db, "Abe3d")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in _models(db, creator)} == {"April ONeil"}
+
+    def test_parsing_the_raw_name_reaches_a_folder_that_does_not_extend_its_ancestor(
+            self, db, tmp_path):
+        """The half of STUDIO-443 that lives outside the equality case.
+
+        The raw fallback also fires for a child whose key neither equals nor
+        extends what it inherited — the `Goblin Warrior` shape from the test
+        below, with the junk a real creator puts on it. Narrowing 443 to "keep
+        the inherited value when the two keys are equal" cannot reach this at
+        all, which is why that candidate measured 368 of 374 and was rejected.
+        """
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Set"
+        _stl(pack / "Orc")
+        _stl(pack / "Orc - Creator")
+        _stl(pack / "1_6 Goblin Warrior - Creator" / "Alternative")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        chars = {_rel(m, creator_dir): m.character for m in _models(db, creator)}
+        assert chars[str(Path("Set/1_6 Goblin Warrior - Creator/Alternative"))] \
+            == "Goblin Warrior"
+
     def test_an_unrelated_sibling_still_names_itself_however_short_the_inherited_key(
             self, db, tmp_path):
         """The other half of STUDIO-429's rule: inheriting is for folders that
