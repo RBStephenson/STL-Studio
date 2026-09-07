@@ -52,12 +52,14 @@ function Harness({
   rootId,
   defaultTemplate = SERVER_DEFAULT,
   inheritedTemplate,
+  keepEnabled,
 }: {
   initial?: string;
   onCommit?: () => void;
   rootId?: number;
   defaultTemplate?: string;
   inheritedTemplate?: string;
+  keepEnabled?: boolean;
 }) {
   const [value, setValue] = useState(initial);
   return (
@@ -68,6 +70,7 @@ function Harness({
       rootId={rootId}
       defaultTemplate={defaultTemplate}
       inheritedTemplate={inheritedTemplate}
+      keepEnabled={keepEnabled}
       scopeNote="Applies to this plan only."
     />
   );
@@ -162,6 +165,41 @@ describe("TemplateEditor presets", () => {
     render(<Harness initial="{creator}" />);
     await userEvent.click(screen.getByRole("button", { name: /Creator → Scale → Character → Title/ }));
     expect(field()).toHaveValue("{creator}/{scale?}/{character}/{title}");
+  });
+});
+
+describe("TemplateEditor keep token (STUDIO-431)", () => {
+  it("offers neither the chip nor the preset while the flag is off", () => {
+    render(<Harness />);
+    expect(screen.queryByRole("button", { name: "{keep?}" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Creator → Folder → Character → Title/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers the chip when the flag is on", async () => {
+    render(<Harness initial="{creator}" keepEnabled />);
+    await userEvent.click(screen.getByRole("button", { name: "{keep?}" }));
+    expect(field()).toHaveValue("{creator}{keep?}");
+  });
+
+  it("uses the optional form in the preset, for the same reason scale does", async () => {
+    // A required {keep} blocks every model with no folder level to keep, which
+    // on an unorganized library is all of them.
+    render(<Harness initial="{creator}" keepEnabled />);
+    await userEvent.click(
+      screen.getByRole("button", { name: /Creator → Folder → Character → Title/ }),
+    );
+    expect(field()).toHaveValue("{creator}/{keep?}/{character}/{title}");
+  });
+
+  it("explains the token in the help text only when it is available", () => {
+    const { unmount } = render(<Harness />);
+    expect(screen.queryByText(/folder a model already sits under/i)).not.toBeInTheDocument();
+    unmount();
+
+    render(<Harness keepEnabled />);
+    expect(screen.getByText(/folder a model already sits under/i)).toBeInTheDocument();
   });
 });
 

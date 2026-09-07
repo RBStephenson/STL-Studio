@@ -439,6 +439,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
                           onCommit={() => saveRootTemplate(r)}
                           rootId={r.id}
                           defaultTemplate={settings.reorganize_template_default}
+                          keepEnabled={settings.reorganize_keep_level_enabled}
                           inheritedTemplate={inheritedTemplate}
                           scopeNote={
                             <>
@@ -516,6 +517,7 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
                 onChange={setTemplateEdit}
                 onCommit={saveReorganizeTemplate}
                 defaultTemplate={settings.reorganize_template_default}
+                keepEnabled={settings.reorganize_keep_level_enabled}
                 scopeNote={
                   <>
                     <strong>Saved</strong> — used by Reorganize Library, new creator folders, and
@@ -639,6 +641,26 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
               Groups nested models such as Alternate into one package move. Reorganize
               normalizes the creator/character prefix while preserving every folder and
               companion file inside the release package. Ambiguous boundaries are blocked.
+            </p>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-3 cursor-pointer select-none mb-4 ml-6">
+          <input
+            type="checkbox"
+            checked={settings.reorganize_keep_level_enabled}
+            onChange={() => update({ reorganize_keep_level_enabled: !settings.reorganize_keep_level_enabled }).catch((e) => flash(errMsg(e) || "Could not update setting", "err"))}
+            className="mt-0.5 accent-indigo-500"
+          />
+          <div>
+            <p className="text-sm text-text-primary-alt2">Allow the folder-level token in templates</p>
+            <p className="text-xs text-text-secondary-alt mt-0.5">
+              Adds <code className="font-mono">{"{keep}"}</code> to the destination
+              template editor. It renders the folder a model already sits under, so a
+              level the template has no field for — a faction, a release wave, a project
+              year — survives a reorganize instead of being dropped. The level is skipped
+              when the destination already names it, so libraries filed by character are
+              unaffected. Has no effect while release packages are preserved above.
             </p>
           </div>
         </label>

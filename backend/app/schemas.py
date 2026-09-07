@@ -640,6 +640,15 @@ class AppSettingsRead(BaseModel):
     # Preserve each release/package subtree while normalizing only the
     # creator/character prefix. Default off until explicitly enabled.
     reorganize_package_mode_enabled: bool = False
+    # Makes the {keep} destination token available: renders the folder level the
+    # model already sits under, so a container level the template has no field
+    # for (faction, release wave, project year, pack) survives a reorganize
+    # instead of being dropped — 1504 of 3474 models on a real library
+    # (STUDIO-431). Default off; toggled from the Library settings tab. With it
+    # off, "{keep?}" drops its level and destinations render exactly as before.
+    # Note this token is inert under reorganize_package_mode_enabled, which
+    # builds its destination without consulting the template at all.
+    reorganize_keep_level_enabled: bool = False
     # AI-assisted suggestions (STUDIO-186) for reorganize preview entries the
     # deterministic pass can't classify (unclassifiable/collision): infers
     # creator/character/title from folder name + filenames via the same
@@ -715,6 +724,7 @@ class AppSettingsUpdate(BaseModel):
     reorganize_slugify_filenames: Optional[bool] = None
     reorganize_enabled: Optional[bool] = None
     reorganize_package_mode_enabled: Optional[bool] = None
+    reorganize_keep_level_enabled: Optional[bool] = None
     reorganize_ai_suggestions_enabled: Optional[bool] = None
     hierarchy_variant_grouping_enabled: Optional[bool] = None
     variant_sidebar_enabled: Optional[bool] = None

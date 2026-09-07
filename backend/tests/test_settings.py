@@ -38,6 +38,7 @@ DEFAULTS = {
     "reorganize_slugify_filenames": False,
     "reorganize_enabled": False,
     "reorganize_package_mode_enabled": False,
+    "reorganize_keep_level_enabled": False,
     "reorganize_ai_suggestions_enabled": False,
     "hierarchy_variant_grouping_enabled": False,
     "variant_sidebar_enabled": False,

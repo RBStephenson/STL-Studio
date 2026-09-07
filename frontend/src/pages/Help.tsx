@@ -935,6 +935,20 @@ const SECTIONS: Section[] = [
           means more collisions; the suffix field on each row is how you break them.
         </p>
         <p>
+          Every token above renders something the app knows <em>about</em> a model,
+          which leaves a gap: if you have organised a creator's folder by faction,
+          game system or release wave, no token names that level and a reorganize
+          drops it. Turn on <strong>Settings → Library → "Allow the folder-level
+          token in templates"</strong> to get <code>{"{keep}"}</code>, the folder a
+          model already sits under — <code>{"{creator}/{keep?}/{character}/{title}"}</code>{" "}
+          keeps your faction level and normalizes the rest. It skips the level when
+          the destination already names it (so a library filed by character is
+          unaffected, even if the folder spells the character differently), keeps
+          only one level, and does nothing while release packages are preserved.
+          Use the <code>?</code> form: a required <code>{"{keep}"}</code> blocks every
+          model with no folder level to keep.
+        </p>
+        <p>
           You don't have to type the template by hand. The Settings field and the one
           on this page use the same editor: <strong>token chips</strong> insert a token
           at the cursor, <strong>presets</strong> fill in a whole layout as a starting

@@ -14,6 +14,13 @@ const PREVIEW_DEBOUNCE_MS = 400;
 
 const TOKENS = ["{creator}", "{character}", "{scale}", "{title}"] as const;
 
+// Offered only when reorganize_keep_level_enabled is on (STUDIO-431). It is a
+// chip rather than a fifth entry above because the token is flagged, and the
+// `?` is not optional in practice: a required {keep} blocks every model with no
+// folder level to keep, the same way a required {scale} blocks every model with
+// no scale. The grammar still accepts both spellings.
+const KEEP_TOKEN = "{keep?}";
+
 // UI-only sugar: selecting one just fills the field, which stays editable.
 // Deliberately NOT a stored concept — nothing about a preset is persisted.
 //
@@ -21,7 +28,7 @@ const TOKENS = ["{creator}", "{character}", "{scale}", "{title}"] as const;
 // scanner auto-tags that most models don't carry, so a required `{scale}` blocks
 // most of a library at once. A one-click preset is exactly the wrong place to
 // hand someone that.
-const buildPresets = (defaultTemplate: string): { label: string; template: string; hint: string }[] => [
+const buildPresets = (defaultTemplate: string, keepEnabled: boolean): { label: string; template: string; hint: string }[] => [
   // Omitted entirely when the settings fetch failed and no default arrived —
   // a preset button that pastes an empty string is worse than one less preset,
   // and inventing a local fallback is the drift this ticket removed.
@@ -52,6 +59,13 @@ const buildPresets = (defaultTemplate: string): { label: string; template: strin
     template: "{creator}/{character}",
     hint: "Matches how package preservation places files.",
   },
+  ...(keepEnabled
+    ? [{
+        label: "Creator → Folder → Character → Title",
+        template: `{creator}/${KEEP_TOKEN}/{character}/{title}`,
+        hint: "Keeps the folder a model already sits under, skipped when there isn't one.",
+      }]
+    : []),
 ];
 
 interface Props {
@@ -78,6 +92,10 @@ interface Props {
   /** Says whether this field is saved or applies to one plan — the distinction
    *  existed in the code but nothing in the UI ever said so. */
   scopeNote: ReactNode;
+  /** `settings.reorganize_keep_level_enabled` (STUDIO-431): offers the `{keep?}`
+   *  chip and preset. Passed in rather than read from context here for the same
+   *  reason as `defaultTemplate` — this component's tests render it bare. */
+  keepEnabled?: boolean;
 }
 
 /** Destination-template editor: token chips, presets, inline validation, and a
@@ -90,8 +108,9 @@ interface Props {
  *  missing files and multi-directory models all need the disk, so a clean
  *  example is NOT a promise that a model will move. Only a built plan says that.
  */
-export default function TemplateEditor({ value, onChange, onCommit, rootId, defaultTemplate, inheritedTemplate, scopeNote }: Props) {
-  const presets = useMemo(() => buildPresets(defaultTemplate), [defaultTemplate]);
+export default function TemplateEditor({ value, onChange, onCommit, rootId, defaultTemplate, inheritedTemplate, scopeNote, keepEnabled = false }: Props) {
+  const presets = useMemo(() => buildPresets(defaultTemplate, keepEnabled), [defaultTemplate, keepEnabled]);
+  const tokens = useMemo(() => (keepEnabled ? [...TOKENS, KEEP_TOKEN] : [...TOKENS]), [keepEnabled]);
   const [preview, setPreview] = useState<TemplatePreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -179,7 +198,7 @@ export default function TemplateEditor({ value, onChange, onCommit, rootId, defa
     <div className="space-y-2" onBlur={handleBlur}>
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-xs text-text-secondary-alt mr-0.5">Insert</span>
-        {TOKENS.map((token) => (
+        {tokens.map((token) => (
           <button
             key={token}
             type="button"
@@ -210,6 +229,14 @@ export default function TemplateEditor({ value, onChange, onCommit, rootId, defa
         Separate levels with <code>/</code>. Add <code>?</code> to make a token optional
         (<code className="text-indigo-400">{"{scale?}"}</code>): its level is skipped for
         models with no value, instead of blocking them.
+        {keepEnabled && (
+          <>
+            {" "}
+            <code className="text-indigo-400">{"{keep?}"}</code> renders the folder a
+            model already sits under, and is skipped when the rest of the destination
+            already names it.
+          </>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">

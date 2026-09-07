@@ -28,7 +28,7 @@ from app.models import (
     PackOverride,
     ScanRoot,
 )
-from app.services import name_parser
+from app.services import layout, name_parser
 from app.services.path_sanitize import path_over_length, sanitize_segment, slug_filename
 from app.services.reorganize_template import (
     ReorganizeTemplateError,
@@ -39,6 +39,10 @@ from app.services.reorganize_template import (
 
 UNKNOWN_CREATOR = "_Unknown Creator"
 UNKNOWN_CHARACTER = "_Unknown Character"
+# Only ever reached by a REQUIRED "{keep}". The useful spelling is "{keep?}",
+# which drops its level instead — see _keep_candidate for when there is nothing
+# to keep, which is a normal state rather than a defect.
+UNKNOWN_KEEP = "_Unknown Folder"
 UNKNOWN_SCALE = "_Unknown Scale"
 _SCALE_TAG_RE = re.compile(r"^(\d{1,4}mm|1[:/\-_]\d{1,2})$", re.I)
 _SOURCE_SUFFIX_RE = re.compile(
@@ -156,6 +160,89 @@ def _scan_root_for(model_dir_key: str, root_keys: list[tuple[str, str]]) -> str 
     return None
 
 
+def _keep_candidate(m: Model, anchor: str | None, layout_template: str | None) -> str:
+    """The folder level ``{keep}`` would render for this model, or "" (STUDIO-431).
+
+    That level is the one directly BELOW the creator — the container the user
+    organised by, which no row field can express. It is deliberately not a fixed
+    index: a scan root's ``layout`` may put ``{tag}``/``{ignore}`` levels above
+    the creator, and reading the creator's depth from that template is the only
+    way to stay right for those roots.
+
+    Returns "" — meaning "nothing to keep", which drops the level for ``{keep?}``
+    — in three cases, all of which are the same statement: there is no container
+    level here to preserve.
+
+    * an **inbox** model, or one outside every scan root. It does not live under
+      the destination root yet, so its current path says nothing about how the
+      destination is organised.
+    * a model sitting directly under the creator (``Creator/Product``). This is
+      the unorganized zip-dump shape, and it is exactly the shape a reorganize
+      exists to fix — 569 models on the live library, every one of them left
+      alone by this token rather than having its mess preserved.
+    * the model's own folder is the level below the creator, i.e. there is
+      nothing *between* them. ``{title}`` already renders that folder, so
+      keeping it too would put the product level in twice.
+    """
+    if m.is_inbox or not anchor:
+        return ""
+    cur = _canon(m.folder_path or "")
+    ck, ak = _key(cur), _key(anchor)
+    if not (ck == ak or ck.startswith(ak + "/")):
+        return ""
+    rel = [s for s in cur[len(anchor):].split("/") if s]
+    try:
+        creator_depth = len(layout.parse_template(layout_template))
+    except layout.LayoutError:
+        # A malformed stored layout is the scanner's problem to report, not a
+        # reason to render a wrong destination. Fall back to the default shape.
+        creator_depth = len(layout.parse_template(None))
+    # rel[creator_depth - 1] is the creator. The level below it only counts when
+    # the model's own folder (rel[-1]) is deeper still.
+    return rel[creator_depth] if len(rel) > creator_depth + 1 else ""
+
+
+def _level_is_represented(
+    segment: str, rendered: list[str], creator_name: str,
+) -> bool:
+    """Is ``segment`` already somewhere in the rendered destination? (STUDIO-431)
+
+    This guard is what makes ``{keep}`` safe to switch on. Without it, a library
+    already organised as ``Creator/Character/Product`` renders
+    ``Abe3d/April ONeil/April ONeil/Bust`` — the same level twice, for all 1124
+    such models on the live library. With it, **zero** of them change.
+
+    The ``character_key`` half is not an optimisation, it is the reason the
+    guard holds up: the level on disk is often an older, messier spelling of the
+    value the destination renders. ``Abe3d/1_6 April ONeil - Abe3D by Davi``
+    keys to the same ``April ONeil`` that ``{character}`` now renders, so it
+    counts as represented and is not preserved — which is what stops this token
+    quietly reinstating the strings STUDIO-432, -439 and -443 removed.
+
+    It compares against what the template actually RENDERS, not against the
+    resolved field values. On ``{creator}/{keep?}/{title}`` — the substitute
+    form, where the passthrough takes the character's place — a values-based
+    test would find the character folder "represented" by a ``character`` value
+    that appears nowhere in that destination, and drop the very level the user
+    asked to keep.
+
+    Note this is not a resemblance test and must never become one: it asks
+    whether two strings name the same thing, never whether one folder is a pack
+    and another a product. That question is unanswered (STUDIO-412, -421, -424)
+    and a threshold on it was measured and refuted in STUDIO-445.
+    """
+    seg_key = _key(sanitize_segment(segment).value)
+    seg_char = name_parser.character_key(segment, creator_name).casefold()
+    for part in rendered:
+        if not part:
+            continue
+        if _key(sanitize_segment(part).value) == seg_key:
+            return True
+        if seg_char and name_parser.character_key(part, creator_name).casefold() == seg_char:
+            return True
+    return False
+
+
 def _stat_file(path: str) -> tuple[int, int, bool, bool]:
     """Return (size_bytes, mtime_ns, is_symlink, missing).
 
@@ -232,19 +319,29 @@ def _scale_value(auto_tags: list | None) -> str:
 
 def _manifest_scope(
     db: Session, root_id: int | None,
-) -> tuple[list[tuple[str, str]], Callable[[Model], str | None]]:
-    """Scan-root keys for `root_id` (all roots when None), plus the resolver
-    that picks an inbox model's managed destination root.
+) -> tuple[list[tuple[str, str]], Callable[[Model], str | None], dict[str, str]]:
+    """Scan-root keys for `root_id` (all roots when None), the resolver that
+    picks an inbox model's managed destination root, and each root's folder
+    LAYOUT keyed by root key.
 
     Extracted from `build_manifest` (STUDIO-401): the template-preview endpoint
     needs exactly this scope, and re-deriving it there is where a preview would
     silently diverge from the real manifest for inbox models with a source
     mapping. Reads rows; touches no filesystem.
+
+    The layout map is here for the same reason. ``{keep}`` has to know which
+    path level names the creator, and a root's ``layout`` may put ``{tag}`` or
+    ``{ignore}`` levels above it (services/layout.py) — so the level is not a
+    fixed index. Deriving it at each call site instead would put a second copy
+    of that reasoning in the preview endpoint, which is precisely the drift
+    STUDIO-401 extracted this function to prevent.
     """
     roots_q = db.query(ScanRoot)
     if root_id is not None:
         roots_q = roots_q.filter(ScanRoot.id == root_id)
-    root_keys = [(_canon(r.path), _key(r.path)) for r in roots_q.all() if r.path]
+    roots = [r for r in roots_q.all() if r.path]
+    root_keys = [(_canon(r.path), _key(r.path)) for r in roots]
+    layouts = {_key(r.path): (r.layout or layout.DEFAULT_TEMPLATE) for r in roots}
 
     # Managed destination root for inbox models: they live outside every scan
     # root, so they can't anchor their proposed path to a containing root the way
@@ -284,7 +381,7 @@ def _manifest_scope(
                 best_len, best = len(skey), lib
         return best if best is not None else primary_dest
 
-    return root_keys, _dest_for
+    return root_keys, _dest_for, layouts
 
 
 class TemplateResolver:
@@ -432,6 +529,7 @@ def build_manifest(
     model_ids: list[int] | None = None,
     slugify_filenames: bool = False,
     preserve_packages: bool = False,
+    keep_enabled: bool = False,
 ) -> Manifest:
     """Build the reorganize preview manifest. Raises ReorganizeTemplateError on
     a malformed template (caller maps to 4xx).
@@ -451,9 +549,12 @@ def build_manifest(
     lowercase/hyphenated (e.g. "Cold Giant.stl" -> "cold-giant.stl") — a
     separate, independent toggle from ``slugify_all``/``slugify_title``, which
     only ever touch directory segments. Gallery image filenames are left
-    untouched; this only applies to STL files."""
+    untouched; this only applies to STL files.
+
+    ``keep_enabled`` gates the ``{keep}`` token (STUDIO-431); it is inert unless
+    the resolved template actually references it."""
     overrides = overrides or {}
-    root_keys, _dest_for = _manifest_scope(db, root_id)
+    root_keys, _dest_for, layouts = _manifest_scope(db, root_id)
     resolver = TemplateResolver(db, template, root_keys)
     canonical_template = "/".join(resolver.fallback_segments)
 
@@ -479,7 +580,8 @@ def build_manifest(
                                         overrides.get(m.id), dest,
                                         slugify_title=slugify_title,
                                         slugify_all=slugify_all,
-                                        slugify_filenames=slugify_filenames))
+                                        slugify_filenames=slugify_filenames,
+                                        layouts=layouts, keep_enabled=keep_enabled))
 
     _detect_collisions(entries)
     if inbox_source is not None:
@@ -491,6 +593,7 @@ def build_manifest(
             entries, models, resolver, root_keys, pack_paths, overrides, _dest_for,
             slugify_title=slugify_title, slugify_all=slugify_all,
             slugify_filenames=slugify_filenames,
+            layouts=layouts, keep_enabled=keep_enabled,
         )
     _detect_overlaps(entries)
     return Manifest(template=canonical_template, entries=entries, _root_keys=[k for _, k in root_keys])
@@ -522,6 +625,7 @@ def build_template_preview(
     root_id: int | None = None,
     limit: int = 5,
     slugify_all: bool = False,
+    keep_enabled: bool = False,
 ) -> TemplatePreview:
     """Render ``template`` against a handful of real models, cheaply. Raises
     ReorganizeTemplateError on a malformed template (caller maps to 400).
@@ -544,7 +648,7 @@ def build_template_preview(
     search is O(models) in the worst case (no unclassifiable model exists), but
     it is pure CPU over rows already loaded.
     """
-    root_keys, dest_for = _manifest_scope(db, root_id)
+    root_keys, dest_for, layouts = _manifest_scope(db, root_id)
     resolver = TemplateResolver(db, template, root_keys)
     canonical_template = "/".join(resolver.fallback_segments)
     models = _models_for_scope(db, root_keys, root_id, with_files=False)
@@ -556,7 +660,7 @@ def build_template_preview(
         dest_root = dest_for(m)
         dest = _render_destination(
             m, resolver.segments_for(m, dest_root), root_keys, None, dest_root,
-            slugify_all=slugify_all,
+            slugify_all=slugify_all, layouts=layouts, keep_enabled=keep_enabled,
         )
         sample = TemplateSample(
             model_id=m.id,
@@ -598,6 +702,8 @@ def _auto_apply_import_suffixes(
     slugify_title: bool,
     slugify_all: bool,
     slugify_filenames: bool,
+    layouts: dict[str, str] | None = None,
+    keep_enabled: bool = False,
 ) -> list[Entry]:
     """Resolve import-apply collisions that have an unambiguous
     ``suggested_suffix`` by appending it to the title and rebuilding the
@@ -623,7 +729,8 @@ def _auto_apply_import_suffixes(
             dest = dest_for(m)
             e = _build_entry(m, resolver.segments_for(m, dest), root_keys, pack_paths, ov, dest,
                               slugify_title=slugify_title, slugify_all=slugify_all,
-                              slugify_filenames=slugify_filenames)
+                              slugify_filenames=slugify_filenames,
+                              layouts=layouts, keep_enabled=keep_enabled)
             changed = True
         rebuilt.append(e)
     if changed:
@@ -929,6 +1036,8 @@ def _render_destination(
     dest_root: str | None = None,
     slugify_title: bool = False,
     slugify_all: bool = False,
+    layouts: dict[str, str] | None = None,
+    keep_enabled: bool = False,
 ) -> RenderedDestination:
     """Render `segments` against one model's metadata to a destination path.
 
@@ -936,6 +1045,12 @@ def _render_destination(
     template-preview endpoint renders through *this* code and cannot drift into
     a second implementation of the grammar. Touches no filesystem: every value
     here comes from the model row, the scan-root rows, and the template.
+
+    ``layouts`` maps a scan-root key to that root's folder layout, and
+    ``keep_enabled`` gates the ``{keep}`` token (STUDIO-431). With the flag off,
+    ``{keep?}`` drops its level and the output is byte-identical to before the
+    token existed; a required ``{keep}`` falls back to its sentinel and blocks
+    the row, exactly as a required ``{scale}`` does for a model with no scale.
     """
     # User resolutions (Phase 2c) take precedence over model metadata and clear
     # the corresponding 'missing' flag.
@@ -945,6 +1060,23 @@ def _render_destination(
     ov_scale = (override.get("scale") or "").strip()
     ov_title = (override.get("title") or "").strip()
     ov_suffix = (override.get("suffix") or "").strip()
+    # No `ov_keep`, deliberately (STUDIO-431). {keep} renders a level that is
+    # already on disk; there is nothing for a user to resolve, and adding an
+    # override for it would turn a passthrough into a second place to author a
+    # folder name. The override list is creator/character/scale/title/suffix and
+    # stays that way.
+
+    # The model's anchor and current path are needed BEFORE the values below,
+    # because {keep} resolves from the path rather than the row — it is the one
+    # token that does. Everything here was previously computed after rendering;
+    # it moved rather than changed.
+    current_dir = _canon(m.folder_path or "")
+    cur_key = _key(m.folder_path or "")
+    scan_root = _scan_root_for(cur_key, root_keys)
+    # Inbox models live outside every scan root, so they anchor at the managed
+    # destination root rather than a containing root. In-library models anchor at
+    # the scan root that contains them (current behaviour).
+    anchor = dest_root if m.is_inbox else scan_root
 
     # Fields the template references, split by whether the reference is
     # REQUIRED or optional ("{scale?}"). Only a required reference can make a
@@ -1000,12 +1132,43 @@ def _render_destination(
         # for breaking a collision would silently do nothing.
         fell_back.discard("title")
 
+    # {keep}: the folder level already on disk (STUDIO-431). Resolved last
+    # because its guard needs the other values rendered first.
+    keep = ""
+    if keep_enabled:
+        keep = _keep_candidate(
+            m, anchor, (layouts or {}).get(_key(scan_root or "")))
+
     values = {
         "creator": creator_name,
         "character": character,
         "scale": scale,
         "title": title,
+        "keep": keep or UNKNOWN_KEEP,
     }
+
+    if keep:
+        # Two passes, and the first one is the guard. Render with {keep} dropped
+        # to see what the destination says WITHOUT it, then keep the level only
+        # if it is not already in there. Testing against rendered output rather
+        # than the values dict is what makes the substitute form
+        # "{creator}/{keep?}/{title}" behave: there, `character` holds a value
+        # the destination never renders, and a values-based test would drop the
+        # character folder for matching it.
+        probe = render_segments(segments, values, fell_back | {"keep"})
+        if _level_is_represented(keep, probe, creator_name):
+            keep = ""
+    if not keep:
+        fell_back.add("keep")
+        if "keep" in used_fields:
+            missing.append("keep")
+    # Re-seed after the guard, not before it. `fell_back` alone would leave a
+    # REQUIRED "{keep}" rendering the candidate the guard just rejected — so
+    # "{creator}/{keep}/{character}/{title}" over a character-organised library
+    # would quietly produce "Abe3d/Joker/Joker/Bust" instead of blocking the row
+    # the way a required "{scale}" does for a model with no scale.
+    values["keep"] = keep or UNKNOWN_KEEP
+
     rendered = render_segments(segments, values, fell_back)
 
     reserved = False
@@ -1027,14 +1190,8 @@ def _render_destination(
         over_len = over_len or sani.over_length
         safe_parts.append(sani.value)
 
-    current_dir = _canon(m.folder_path or "")
-    cur_key = _key(m.folder_path or "")
-    scan_root = _scan_root_for(cur_key, root_keys)
-
-    # Inbox models live outside every scan root, so they anchor at the managed
-    # destination root rather than a containing root. In-library models anchor at
-    # the scan root that contains them (current behaviour).
-    anchor = dest_root if m.is_inbox else scan_root
+    # `current_dir`, `cur_key`, `scan_root` and `anchor` are resolved near the
+    # top of this function, because {keep} needs them before rendering.
 
     # Destination is anchored at the resolved root; if we can't place it under a
     # known root we still render a relative proposal but flag the escape.
@@ -1080,6 +1237,8 @@ def _build_entry(
     slugify_title: bool = False,
     slugify_all: bool = False,
     slugify_filenames: bool = False,
+    layouts: dict[str, str] | None = None,
+    keep_enabled: bool = False,
 ) -> Entry:
     # Destination rendering lives in _render_destination so the cheap
     # template-preview endpoint shares this exact code (STUDIO-401). Unpacked
@@ -1087,6 +1246,7 @@ def _build_entry(
     dest = _render_destination(
         m, segments, root_keys, override, dest_root,
         slugify_title=slugify_title, slugify_all=slugify_all,
+        layouts=layouts, keep_enabled=keep_enabled,
     )
     proposed_dir = dest.proposed_dir
     current_dir = dest.current_dir

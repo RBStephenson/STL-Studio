@@ -45,8 +45,12 @@ def _get_creator(db, name):
 
 
 def _model(db, root_path, creator_name="Abe3D", character="Joker", title="Bust",
-           auto_tags=None, with_file=True):
-    folder = os.path.join(str(root_path), creator_name, character or "loose", title)
+           auto_tags=None, with_file=True, subdir=None):
+    """``subdir`` replaces the character level ON DISK while leaving
+    ``Model.character`` alone — the container-organised shape `{keep}` exists
+    for, where the folder above the product is not the character."""
+    level = subdir if subdir is not None else (character or "loose")
+    folder = os.path.join(str(root_path), creator_name, level, title)
     os.makedirs(folder, exist_ok=True)
     creator = _get_creator(db, creator_name)
     m = make_model(db, creator, name=title, character=character)
@@ -82,7 +86,8 @@ def _set_setting(db, key, value):
     db.commit()
 
 
-def _assert_no_drift(db, template, *, root_id=None, slugify_all=False):
+def _assert_no_drift(db, template, *, root_id=None, slugify_all=False,
+                     keep_enabled=False):
     """Every sample must match build_manifest's entry for the same model.
 
     Compared field by field against the real builder rather than against
@@ -91,9 +96,11 @@ def _assert_no_drift(db, template, *, root_id=None, slugify_all=False):
     """
     preview = reorganize.build_template_preview(
         db, template, root_id, limit=50, slugify_all=slugify_all,
+        keep_enabled=keep_enabled,
     )
     manifest = reorganize.build_manifest(
         db, template, root_id, slugify_all=slugify_all,
+        keep_enabled=keep_enabled,
     )
     by_id = {e.model_id: e for e in manifest.entries}
 
@@ -115,6 +122,24 @@ class TestAntiDrift:
         _root(db, tmp_path)
         _model(db, tmp_path)
         _assert_no_drift(db, "{creator}/{character}/{title}", slugify_all=False)
+
+    def test_matches_build_manifest_for_the_keep_token(self, db, tmp_path):
+        """STUDIO-431. `{keep}` resolves from the model's PATH rather than its
+        row, and the layout map it needs reaches the two builders by separate
+        arguments — so this is exactly the shape of change that drifts a preview
+        away from the manifest it is supposed to be previewing."""
+        _root(db, tmp_path)
+        _model(db, tmp_path, character="HDF APC", title="HDF APC",
+               subdir="Human Defense Force")
+        _assert_no_drift(db, "{creator}/{keep?}/{character}/{title}",
+                         keep_enabled=True)
+
+    def test_matches_build_manifest_with_the_keep_token_disabled(self, db, tmp_path):
+        _root(db, tmp_path)
+        _model(db, tmp_path, character="HDF APC", title="HDF APC",
+               subdir="Human Defense Force")
+        _assert_no_drift(db, "{creator}/{keep?}/{character}/{title}",
+                         keep_enabled=False)
 
     def test_matches_build_manifest_with_slugify_on(self, db, tmp_path):
         _root(db, tmp_path)

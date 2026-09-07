@@ -34,8 +34,24 @@ class TestParseTemplate:
             "{creator}", "{scale}", "{title}",
         ]
 
+    def test_keep_field_allowed(self):
+        """STUDIO-431. The grammar accepts {keep} unconditionally, even with the
+        feature flag off: gating it at PARSE time would turn a template the user
+        already saved into a 400 the moment they switched the flag back off. The
+        flag is honoured where the value is resolved instead."""
+        assert parse_template("{creator}/{keep?}/{character}/{title}") == [
+            "{creator}", "{keep?}", "{character}", "{title}",
+        ]
+        assert parse_template("{creator}/{keep}/{title}") == [
+            "{creator}", "{keep}", "{title}",
+        ]
+
     def test_unknown_field_rejected(self):
         with pytest.raises(ReorganizeTemplateError, match="Unknown template field"):
+            parse_template("{creator}/{franchise}")
+
+    def test_the_unknown_field_message_names_keep(self):
+        with pytest.raises(ReorganizeTemplateError, match=r"\{keep\}"):
             parse_template("{creator}/{franchise}")
 
     def test_unbalanced_brace_rejected(self):
@@ -100,6 +116,13 @@ class TestOptionalTokens:
         # Every model would render to the same path and collide with everything.
         with pytest.raises(ReorganizeTemplateError, match="at least one required"):
             parse_template("{creator?}/{scale?}")
+
+    def test_an_all_optional_template_is_still_rejected_with_keep(self):
+        """{keep} must not become a loophole in the one rule that stops every
+        model rendering to the same path — and it is the likeliest to be one,
+        since a container level looks like it distinguishes models."""
+        with pytest.raises(ReorganizeTemplateError, match="at least one required"):
+            parse_template("{creator?}/{keep?}")
 
     def test_dropped_optional_segment_renders_empty(self):
         segs = parse_template("{creator}/{scale?}/{title}")

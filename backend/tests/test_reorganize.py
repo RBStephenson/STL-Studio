@@ -10,6 +10,7 @@ from pathlib import Path
 
 from app.models import Creator, PackOverride, ReorganizeManifest, ScanRoot
 from app.services import reorganize
+from app.services.reorganize_template import parse_template
 from tests.conftest import make_creator, make_model, make_stl_file, set_reorganize_enabled
 
 
@@ -1021,3 +1022,212 @@ class TestCreatorScanDirFollowsItsRoot:
         target = reorganize.creator_scan_dir(db, "{creator}", "Abe 3D")
 
         assert target == reorganize._canon(str(root) + "/abe-3d")
+
+
+KEEP_TEMPLATE = "{creator}/{keep?}/{character}/{title}"
+
+
+def _model_at(db, tmp_path, rel_path, *, creator="Abe3D", character="Joker",
+              title="Bust", is_inbox=False):
+    """A model whose folder_path is `rel_path` under tmp_path."""
+    folder = tmp_path / rel_path
+    folder.mkdir(parents=True, exist_ok=True)
+    m = make_model(db, _get_creator(db, creator), name=title, character=character)
+    m.folder_path = str(folder)
+    m.title = title
+    m.is_inbox = is_inbox
+    db.commit()
+    return m
+
+
+def _render_model(db, tmp_path, m, *, template=KEEP_TEMPLATE, enabled=True):
+    """Render one model through the real `_render_destination`, with the scope
+    built by `_manifest_scope` so the layout wiring is under test too rather
+    than hand-assembled here. Returns (dest, path relative to tmp_path)."""
+    root_keys, dest_for, layouts = reorganize._manifest_scope(db, None)
+    dest = reorganize._render_destination(
+        m, parse_template(template), root_keys, None, dest_for(m),
+        layouts=layouts, keep_enabled=enabled,
+    )
+    prefix = reorganize._canon(str(tmp_path)) + "/"
+    assert dest.proposed_dir.startswith(prefix), dest.proposed_dir
+    return dest, dest.proposed_dir[len(prefix):]
+
+
+def _render(db, tmp_path, rel_path, *, template=KEEP_TEMPLATE, creator="Abe3D",
+            character="Joker", title="Bust", enabled=True):
+    m = _model_at(db, tmp_path, rel_path, creator=creator, character=character,
+                  title=title)
+    return _render_model(db, tmp_path, m, template=template, enabled=enabled)
+
+
+class TestKeepToken:
+    """STUDIO-431: `{keep}` renders the folder level already on disk.
+
+    The population is 1504 of 3474 models on the live library — a container
+    level (faction, release wave, project year, pack) that no model-row field
+    can express, so a destination built only from row fields drops it.
+    """
+
+    def test_a_container_level_survives(self, db, tmp_path):
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/Human Defense Force/HDF APC",
+                         character="HDF APC", title="HDF APC")
+        assert out == "Abe3D/Human Defense Force/HDF APC/HDF APC"
+
+    def test_a_character_organised_library_is_untouched(self, db, tmp_path):
+        """The guard, and the reason this token is safe to switch on. Without it
+        every already-correct library renders its character level twice."""
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/Joker/Bust")
+        assert out == "Abe3D/Joker/Bust"
+
+    def test_the_guard_sees_through_a_name_the_parser_rewrote(self, db, tmp_path):
+        """The folder on disk is an older, messier spelling of the value
+        `{character}` now renders. Matching on `character_key` is what stops
+        this token quietly reinstating the strings STUDIO-432/-439/-443 removed.
+        """
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/1_6 Joker - Abe3D by Dave/Bust")
+        assert out == "Abe3D/Joker/Bust"
+
+    def test_an_unorganized_zip_dump_has_nothing_to_keep(self, db, tmp_path):
+        """569 models on the live library sit directly under their creator. That
+        is the shape a reorganize exists to FIX, so the token must be inert."""
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/SomeDump")
+        assert out == "Abe3D/Joker/Bust"
+
+    def test_the_models_own_folder_is_not_kept(self, db, tmp_path):
+        """`{title}` already renders that folder; keeping it too would put the
+        product level in the path twice."""
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/Bust")
+        assert out == "Abe3D/Joker/Bust"
+
+    def test_the_flag_off_renders_exactly_as_before_the_token_existed(self, db, tmp_path):
+        """Same model, three renders: the token with the flag off must match the
+        template that never mentioned it, byte for byte."""
+        _root(db, tmp_path)
+        m = _model_at(db, tmp_path, "Abe3D/Human Defense Force/HDF APC",
+                      character="HDF APC", title="HDF APC")
+        _, off = _render_model(db, tmp_path, m, enabled=False)
+        _, no_token = _render_model(db, tmp_path, m,
+                                    template="{creator}/{character}/{title}")
+        _, on = _render_model(db, tmp_path, m, enabled=True)
+
+        assert off == no_token == "Abe3D/HDF APC/HDF APC"
+        assert on == "Abe3D/Human Defense Force/HDF APC/HDF APC"
+
+    def test_the_substitute_form_keeps_the_level_it_was_asked_to(self, db, tmp_path):
+        """`{creator}/{keep?}/{title}` puts the passthrough where `{character}`
+        would go. The guard must compare against what the template RENDERS — a
+        values-based test would find the folder "represented" by a `character`
+        value that appears nowhere in this destination and drop it."""
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/Joker/Bust",
+                         template="{creator}/{keep?}/{title}")
+        assert out == "Abe3D/Joker/Bust"
+
+    def test_it_finds_the_creator_under_a_custom_layout(self, db, tmp_path):
+        """A root's layout may put {tag}/{ignore} levels above the creator, so
+        the kept level is not a fixed index.
+
+        The same tree under the two layouts is what makes this discriminating.
+        Reading the level as a fixed `rel[1]` would pick `Abe3D` here, which the
+        guard then drops for matching `{creator}` — so a broken version renders
+        the default-layout answer and looks plausible.
+
+        (The destination has no `Sci-Fi` level either way: `layout` says how a
+        root's existing folders are READ, the reorganize template says where
+        models GO, and only the second one builds this path.)
+        """
+        db.add(ScanRoot(path=str(tmp_path), enabled=True, layout="{tag}/{creator}"))
+        db.commit()
+        rel = "Sci-Fi/Abe3D/Human Defense Force/HDF APC"
+        m = _model_at(db, tmp_path, rel, character="HDF APC", title="HDF APC")
+
+        _, tagged = _render_model(db, tmp_path, m)
+        assert tagged == "Abe3D/Human Defense Force/HDF APC/HDF APC"
+
+        db.query(ScanRoot).update({ScanRoot.layout: "{creator}"})
+        db.commit()
+        _, default_layout = _render_model(db, tmp_path, m)
+        assert default_layout == "Abe3D/HDF APC/HDF APC"
+
+    def test_an_inbox_model_keeps_nothing(self, db, tmp_path):
+        """It does not live under the destination root yet, so its current path
+        says nothing about how that library is organised."""
+        root = tmp_path / "library"
+        root.mkdir()
+        db.add(ScanRoot(path=str(root), enabled=True, is_writable=True))
+        db.commit()
+        inbox = tmp_path / "inbox" / "Some Pack" / "Bust"
+        inbox.mkdir(parents=True)
+        m = make_model(db, _get_creator(db, "Abe3D"), name="Bust", character="Joker")
+        m.folder_path = str(inbox)
+        m.title = "Bust"
+        m.is_inbox = True
+        db.commit()
+
+        root_keys, dest_for, layouts = reorganize._manifest_scope(db, None)
+        dest = reorganize._render_destination(
+            m, parse_template(KEEP_TEMPLATE), root_keys, None, dest_for(m),
+            layouts=layouts, keep_enabled=True,
+        )
+        assert dest.proposed_dir == reorganize._canon(str(root) + "/Abe3D/Joker/Bust")
+
+    def test_the_setting_defaults_off_and_round_trips(self, client, db):
+        assert client.get("/settings").json()["reorganize_keep_level_enabled"] is False
+        assert client.patch(
+            "/settings", json={"reorganize_keep_level_enabled": True}
+        ).status_code == 200
+        assert client.get("/settings").json()["reorganize_keep_level_enabled"] is True
+
+    def test_the_endpoint_honours_the_setting(self, client, db, tmp_path):
+        """The flag has to reach the renderer through the router, not just the
+        service signature — a default-valued parameter nobody passes is the
+        quiet way a feature flag ends up permanently off."""
+        _root(db, tmp_path)
+        # On disk the level above the product is the faction; the model's own
+        # character is the product. That difference is the whole population.
+        m = _model_with_file(db, tmp_path, character="Human Defense Force",
+                             title="HDF APC")
+        m.character = "HDF APC"
+        db.commit()
+        client.patch("/settings", json={
+            "reorganize_template": "{creator}/{keep?}/{character}/{title}",
+        })
+
+        off = client.get("/reorganize/preview").json()["entries"][0]["proposed_dir"]
+        client.patch("/settings", json={"reorganize_keep_level_enabled": True})
+        on = client.get("/reorganize/preview").json()["entries"][0]["proposed_dir"]
+
+        assert off.endswith("/abe3d/hdf-apc/hdf-apc")
+        assert on.endswith("/abe3d/human-defense-force/hdf-apc/hdf-apc")
+
+    def test_a_required_keep_with_nothing_to_keep_blocks_the_row(self, db, tmp_path):
+        """Consistent with a required `{scale}` on a model with no scale: the
+        sentinel renders and the row is unclassifiable. `{keep?}` is the useful
+        spelling and is what the preset and the docs steer to."""
+        _root(db, tmp_path)
+        dest, out = _render(db, tmp_path, "Abe3D/Bust",
+                            template="{creator}/{keep}/{character}/{title}")
+        assert dest.missing == ["keep"]
+        assert out == "Abe3D/_Unknown Folder/Joker/Bust"
+
+    def test_a_required_keep_blocks_rather_than_doubling_a_level(self, db, tmp_path):
+        """The guard fires for the required form too, so a template demanding a
+        level the destination already names blocks the row instead of quietly
+        rendering `Abe3D/Joker/Joker/Bust`.
+
+        Pinned because both readings are defensible and the choice should not be
+        incidental: blocking says "your template asks for something that isn't
+        meaningful here", which is the more useful thing for the row to say, and
+        it matches what a required `{scale}` does.
+        """
+        _root(db, tmp_path)
+        dest, out = _render(db, tmp_path, "Abe3D/Joker/Bust",
+                            template="{creator}/{keep}/{character}/{title}")
+        assert dest.missing == ["keep"]
+        assert out == "Abe3D/_Unknown Folder/Joker/Bust"

@@ -17,6 +17,16 @@ Reorganize grammar (levels separated by ``/``):
   ``{character}``  the model's character grouping
   ``{scale}``      the scanner-detected scale tag
   ``{title}``      the model's title (falls back to its folder name)
+  ``{keep}``       the folder level the model ALREADY sits under (STUDIO-431)
+
+``{keep}`` is the odd one out and deliberately so: every other token renders a
+value from the model ROW, while this one renders a level of the model's current
+PATH. That is the whole point — a container level (a faction, a release wave, a
+project year, a pack) is meaningful to the user and is expressible by no row
+field, so a destination built only from row fields drops it. Measured on a real
+library: 1504 of 3474 models, 43% of it. Because of that the destination is no
+longer a pure function of (row, template) when this token is used, which is a
+real cost and is why the token is opt-in rather than part of the default.
 
 A trailing ``?`` marks a token **optional** (``{scale?}``): when that field has
 no real value of its own the token contributes nothing, instead of rendering a
@@ -50,9 +60,10 @@ CREATOR = "creator"
 CHARACTER = "character"
 SCALE = "scale"
 TITLE = "title"
+KEEP = "keep"
 
 DEFAULT_TEMPLATE = "{creator}/{character}/{title}"
-VALID_FIELDS = (CREATOR, CHARACTER, SCALE, TITLE)
+VALID_FIELDS = (CREATOR, CHARACTER, SCALE, TITLE, KEEP)
 _VALID_FIELDS = set(VALID_FIELDS)
 # Group 2 is the optional marker: "{scale?}" -> ("scale", "?").
 _TOKEN_RE = re.compile(r"\{(\w+)(\?)?\}")
@@ -89,7 +100,7 @@ def parse_template(template: str | None) -> list[str]:
             if field not in _VALID_FIELDS:
                 raise ReorganizeTemplateError(
                     f"Unknown template field {{{field}}} — use "
-                    "{creator}, {character}, {scale} or {title}, "
+                    "{creator}, {character}, {scale}, {title} or {keep}, "
                     "optionally suffixed with ? (e.g. {scale?})"
                 )
         # A stray unmatched brace is a malformed token, not a literal.
@@ -103,7 +114,8 @@ def parse_template(template: str | None) -> list[str]:
         raise ReorganizeTemplateError("Template is empty after parsing")
     if not found_token:
         raise ReorganizeTemplateError(
-            "Template must reference at least one of {creator}, {character}, {scale} or {title}"
+            "Template must reference at least one of {creator}, {character}, "
+            "{scale}, {title} or {keep}"
         )
     if not found_required:
         raise ReorganizeTemplateError(
