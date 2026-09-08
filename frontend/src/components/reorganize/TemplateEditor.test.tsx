@@ -195,11 +195,11 @@ describe("TemplateEditor keep token (STUDIO-431)", () => {
 
   it("explains the token in the help text only when it is available", () => {
     const { unmount } = render(<Harness />);
-    expect(screen.queryByText(/folder a model already sits under/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/folder levels a model already sits under/i)).not.toBeInTheDocument();
     unmount();
 
     render(<Harness keepEnabled />);
-    expect(screen.getByText(/folder a model already sits under/i)).toBeInTheDocument();
+    expect(screen.getByText(/folder levels a model already sits under/i)).toBeInTheDocument();
   });
 });
 

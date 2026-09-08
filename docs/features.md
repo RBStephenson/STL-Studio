@@ -896,7 +896,7 @@ suffix field on each row is how you break them.
 folder name, and the optional form treats that as "no title", so those models
 sit one level up rather than getting a folder named after their source folder.
 
-#### Keeping a folder level the template can't name
+#### Keeping folder levels the template can't name
 
 Every token above renders something the app knows *about* a model. That leaves a
 gap: if you have organised a creator's folder by faction, game system, release
@@ -905,20 +905,28 @@ wave or project year, no token names that level, so a reorganize drops it —
 and the faction is gone.
 
 Turn on **Settings → Library → "Allow the folder-level token in templates"** and
-a fifth token appears: **`{keep}`**, the folder the model already sits under.
-`{creator}/{keep?}/{character}/{title}` keeps your faction level and normalizes
-everything else.
+a fifth token appears: **`{keep}`**, the folders the model already sits under —
+every level between the creator and the model's own folder, down to the first
+one the rest of the template names. `{creator}/{keep?}/{character}/{title}`
+keeps your faction level and normalizes everything else.
 
-Three things worth knowing:
+Four things worth knowing:
 
-- **It skips levels the destination already names.** If a creator is filed by
-  character — `Abe3D/Ada Wong/Bust` — the folder above the product *is* the
-  character, so `{keep?}` contributes nothing rather than repeating it. That
-  comparison ignores spelling, so a folder like
+- **It stops at the first level the destination already names, and does not
+  resume.** If a creator is filed by character — `Abe3D/Ada Wong/Bust` — the
+  folder above the product *is* the character, so `{keep?}` contributes nothing
+  rather than repeating it, and a release folder *beneath* the character stays
+  gone. That comparison ignores spelling, so a folder like
   `Abe3D/1_6 Ada Wong - Abe3D by Ronejr` still counts as "already named" and you
-  get the tidied `Abe3D/Ada Wong/…`, not the original folder name back.
-- **It keeps one level.** A model buried two container levels deep keeps the
-  outer one.
+  get the tidied `Abe3D/Ada Wong/…`, not the original folder name back. The same
+  comparison runs against the levels already kept, so a zip extracted into a
+  folder of its own name (`Starter Set/Starter Set/…`) is kept once.
+- **It keeps every container level, not just the outer one.**
+  `3DArtGuy/2025ProjectFolders/April2025_GrimdarkMonth/…` keeps the year and the
+  month.
+- **It must be a level of its own.** `{creator}/{keep?}/{title}` is fine;
+  `{creator}/pack-{keep?}/{title}` is rejected, because a token that renders
+  several levels has no sensible place to put the `pack-`.
 - **It does nothing under package preservation**, which builds its destination
   without consulting the template at all.
 

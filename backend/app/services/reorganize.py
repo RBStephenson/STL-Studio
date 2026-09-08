@@ -32,6 +32,7 @@ from app.services import layout, name_parser
 from app.services.path_sanitize import path_over_length, sanitize_segment, slug_filename
 from app.services.reorganize_template import (
     ReorganizeTemplateError,
+    mentions_keep,
     parse_template,
     render_segments,
     segment_fields,
@@ -40,9 +41,13 @@ from app.services.reorganize_template import (
 UNKNOWN_CREATOR = "_Unknown Creator"
 UNKNOWN_CHARACTER = "_Unknown Character"
 # Only ever reached by a REQUIRED "{keep}". The useful spelling is "{keep?}",
-# which drops its level instead — see _keep_candidate for when there is nothing
+# which drops its levels instead — see _keep_candidates for when there is nothing
 # to keep, which is a normal state rather than a defect.
 UNKNOWN_KEEP = "_Unknown Folder"
+# The kept levels travel through `render_segments` as ONE value, joined on "/".
+# Safe because no real folder name can contain it (sanitize_segment strips it),
+# and it is split back out only for the {keep} segment — see _render_destination.
+_KEEP_LEVEL_SEP = "/"
 UNKNOWN_SCALE = "_Unknown Scale"
 _SCALE_TAG_RE = re.compile(r"^(\d{1,4}mm|1[:/\-_]\d{1,2})$", re.I)
 _SOURCE_SUFFIX_RE = re.compile(
@@ -160,18 +165,22 @@ def _scan_root_for(model_dir_key: str, root_keys: list[tuple[str, str]]) -> str 
     return None
 
 
-def _keep_candidate(m: Model, anchor: str | None, layout_template: str | None) -> str:
-    """The folder level ``{keep}`` would render for this model, or "" (STUDIO-431).
+def _keep_candidates(m: Model, anchor: str | None, layout_template: str | None) -> list[str]:
+    """The folder levels ``{keep}`` may render for this model, outermost first
+    (STUDIO-431).
 
-    That level is the one directly BELOW the creator — the container the user
-    organised by, which no row field can express. It is deliberately not a fixed
-    index: a scan root's ``layout`` may put ``{tag}``/``{ignore}`` levels above
-    the creator, and reading the creator's depth from that template is the only
-    way to stay right for those roots.
+    Every level between the creator and the model's own folder — the containers
+    the user organised by, which no row field can express. The creator's depth
+    is deliberately not a fixed index: a scan root's ``layout`` may put
+    ``{tag}``/``{ignore}`` levels above the creator, and reading it from that
+    template is the only way to stay right for those roots.
 
-    Returns "" — meaning "nothing to keep", which drops the level for ``{keep?}``
-    — in three cases, all of which are the same statement: there is no container
-    level here to preserve.
+    These are CANDIDATES. ``_render_destination`` walks them with the guard and
+    keeps a prefix, so a release folder beneath a character never comes back.
+
+    Returns ``[]`` — meaning "nothing to keep", which drops the level for
+    ``{keep?}`` — in three cases, all of which are the same statement: there is
+    no container level here to preserve.
 
     * an **inbox** model, or one outside every scan root. It does not live under
       the destination root yet, so its current path says nothing about how the
@@ -185,11 +194,11 @@ def _keep_candidate(m: Model, anchor: str | None, layout_template: str | None) -
       keeping it too would put the product level in twice.
     """
     if m.is_inbox or not anchor:
-        return ""
+        return []
     cur = _canon(m.folder_path or "")
     ck, ak = _key(cur), _key(anchor)
     if not (ck == ak or ck.startswith(ak + "/")):
-        return ""
+        return []
     rel = [s for s in cur[len(anchor):].split("/") if s]
     try:
         creator_depth = len(layout.parse_template(layout_template))
@@ -197,9 +206,11 @@ def _keep_candidate(m: Model, anchor: str | None, layout_template: str | None) -
         # A malformed stored layout is the scanner's problem to report, not a
         # reason to render a wrong destination. Fall back to the default shape.
         creator_depth = len(layout.parse_template(None))
-    # rel[creator_depth - 1] is the creator. The level below it only counts when
-    # the model's own folder (rel[-1]) is deeper still.
-    return rel[creator_depth] if len(rel) > creator_depth + 1 else ""
+    # rel[creator_depth - 1] is the creator; rel[-1] is the model's own folder,
+    # which {title} already renders. Everything strictly between them is a
+    # candidate, and there is one only when the model sits deeper than the
+    # level directly below the creator.
+    return rel[creator_depth:-1] if len(rel) > creator_depth + 1 else []
 
 
 def _level_is_represented(
@@ -211,6 +222,14 @@ def _level_is_represented(
     already organised as ``Creator/Character/Product`` renders
     ``Abe3d/April ONeil/April ONeil/Bust`` — the same level twice, for all 1124
     such models on the live library. With it, **zero** of them change.
+
+    ``_render_destination`` asks it twice per candidate level. Against the
+    destination, a hit ENDS the walk: a level the template names is a boundary,
+    and anything beneath it — a release folder under a character — is exactly
+    what must not come back (measured at 197 already-correct models if it did).
+    Against the levels already kept, a hit SKIPS that one level and the walk
+    continues: a zip extracted into a folder of its own name, or a respelt copy
+    of the level above, is not a boundary.
 
     The ``character_key`` half is not an optimisation, it is the reason the
     guard holds up: the level on disk is often an older, messier spelling of the
@@ -1048,7 +1067,7 @@ def _render_destination(
 
     ``layouts`` maps a scan-root key to that root's folder layout, and
     ``keep_enabled`` gates the ``{keep}`` token (STUDIO-431). With the flag off,
-    ``{keep?}`` drops its level and the output is byte-identical to before the
+    ``{keep?}`` drops its levels and the output is byte-identical to before the
     token existed; a required ``{keep}`` falls back to its sentinel and blocks
     the row, exactly as a required ``{scale}`` does for a model with no scale.
     """
@@ -1132,11 +1151,11 @@ def _render_destination(
         # for breaking a collision would silently do nothing.
         fell_back.discard("title")
 
-    # {keep}: the folder level already on disk (STUDIO-431). Resolved last
+    # {keep}: the folder levels already on disk (STUDIO-431). Resolved last
     # because its guard needs the other values rendered first.
-    keep = ""
+    candidates: list[str] = []
     if keep_enabled:
-        keep = _keep_candidate(
+        candidates = _keep_candidates(
             m, anchor, (layouts or {}).get(_key(scan_root or "")))
 
     values = {
@@ -1144,30 +1163,46 @@ def _render_destination(
         "character": character,
         "scale": scale,
         "title": title,
-        "keep": keep or UNKNOWN_KEEP,
+        "keep": UNKNOWN_KEEP,
     }
 
-    if keep:
-        # Two passes, and the first one is the guard. Render with {keep} dropped
-        # to see what the destination says WITHOUT it, then keep the level only
-        # if it is not already in there. Testing against rendered output rather
-        # than the values dict is what makes the substitute form
+    kept: list[str] = []
+    if candidates:
+        # Two passes, and the first one is the guard. Render WITHOUT the {keep}
+        # segment to see what the destination says on its own, then walk the
+        # candidates from the creator down. A level the destination already
+        # names ends the walk — it is a boundary, and anything beneath it (a
+        # release folder under a character) is exactly what must not come
+        # back. A level that only repeats one already kept is skipped and the
+        # walk continues. Testing against rendered output rather than the
+        # values dict is what makes the substitute form
         # "{creator}/{keep?}/{title}" behave: there, `character` holds a value
         # the destination never renders, and a values-based test would drop the
         # character folder for matching it.
-        probe = render_segments(segments, values, fell_back | {"keep"})
-        if _level_is_represented(keep, probe, creator_name):
-            keep = ""
-    if not keep:
+        #
+        # The segment is REMOVED for the probe rather than dropped through
+        # `fell_back`: dropping only reaches an optional token, so a required
+        # "{keep}" would render its own candidate into the probe and read every
+        # level as already present — which is what made the required spelling
+        # block every row before this walk existed.
+        probe_segments = [seg for seg in segments if not mentions_keep(seg)]
+        probe = render_segments(probe_segments, values, fell_back)
+        for level in candidates:
+            if _level_is_represented(level, probe, creator_name):
+                break
+            if _level_is_represented(level, kept, creator_name):
+                continue
+            kept.append(level)
+    if not kept:
         fell_back.add("keep")
         if "keep" in used_fields:
             missing.append("keep")
-    # Re-seed after the guard, not before it. `fell_back` alone would leave a
-    # REQUIRED "{keep}" rendering the candidate the guard just rejected — so
-    # "{creator}/{keep}/{character}/{title}" over a character-organised library
-    # would quietly produce "Abe3d/Joker/Joker/Bust" instead of blocking the row
-    # the way a required "{scale}" does for a model with no scale.
-    values["keep"] = keep or UNKNOWN_KEEP
+    # Seeded after the guard, not before it: a REQUIRED "{keep}" must render the
+    # sentinel and block the row when the walk kept nothing, exactly as a
+    # required "{scale}" does for a model with no scale — never the candidate
+    # the guard just rejected, which would quietly produce "Abe3d/Joker/Joker/
+    # Bust" over a character-organised library.
+    values["keep"] = _KEEP_LEVEL_SEP.join(kept) or UNKNOWN_KEEP
 
     rendered = render_segments(segments, values, fell_back)
 
@@ -1185,10 +1220,17 @@ def _render_destination(
         do_slug = slugify_all or (
             slugify_title and any(f == "title" for f, _ in segment_fields(raw_seg))
         )
-        sani = sanitize_segment(part, slugify=do_slug)
-        reserved = reserved or sani.reserved_name
-        over_len = over_len or sani.over_length
-        safe_parts.append(sani.value)
+        # {keep} is the one token that renders MORE than one level, and they
+        # arrive joined on _KEEP_LEVEL_SEP. Expanded here, per level, so each
+        # goes through the same sanitize/slug pass a single-level segment does.
+        # Scoped to the {keep} segment on purpose: a `character` override can
+        # legitimately hold a "/" and must still sanitize down to ONE folder.
+        levels = part.split(_KEEP_LEVEL_SEP) if mentions_keep(raw_seg) else [part]
+        for level in levels:
+            sani = sanitize_segment(level, slugify=do_slug)
+            reserved = reserved or sani.reserved_name
+            over_len = over_len or sani.over_length
+            safe_parts.append(sani.value)
 
     # `current_dir`, `cur_key`, `scan_root` and `anchor` are resolved near the
     # top of this function, because {keep} needs them before rendering.

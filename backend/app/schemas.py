@@ -640,12 +640,14 @@ class AppSettingsRead(BaseModel):
     # Preserve each release/package subtree while normalizing only the
     # creator/character prefix. Default off until explicitly enabled.
     reorganize_package_mode_enabled: bool = False
-    # Makes the {keep} destination token available: renders the folder level the
-    # model already sits under, so a container level the template has no field
-    # for (faction, release wave, project year, pack) survives a reorganize
-    # instead of being dropped — 1504 of 3474 models on a real library
-    # (STUDIO-431). Default off; toggled from the Library settings tab. With it
-    # off, "{keep?}" drops its level and destinations render exactly as before.
+    # Makes the {keep} destination token available: renders the folder levels the
+    # model already sits under — every level between the creator and the model,
+    # down to the first one the rest of the template names — so a container
+    # level the template has no field for (faction, release wave, project year,
+    # pack) survives a reorganize instead of being dropped — 1504 of 3474 models
+    # on a real library (STUDIO-431). Default off; toggled from the Library
+    # settings tab. With it off, "{keep?}" drops its levels and destinations
+    # render exactly as before.
     # Note this token is inert under reorganize_package_mode_enabled, which
     # builds its destination without consulting the template at all.
     reorganize_keep_level_enabled: bool = False

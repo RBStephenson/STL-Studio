@@ -939,14 +939,17 @@ const SECTIONS: Section[] = [
           which leaves a gap: if you have organised a creator's folder by faction,
           game system or release wave, no token names that level and a reorganize
           drops it. Turn on <strong>Settings → Library → "Allow the folder-level
-          token in templates"</strong> to get <code>{"{keep}"}</code>, the folder a
-          model already sits under — <code>{"{creator}/{keep?}/{character}/{title}"}</code>{" "}
-          keeps your faction level and normalizes the rest. It skips the level when
-          the destination already names it (so a library filed by character is
-          unaffected, even if the folder spells the character differently), keeps
-          only one level, and does nothing while release packages are preserved.
-          Use the <code>?</code> form: a required <code>{"{keep}"}</code> blocks every
-          model with no folder level to keep.
+          token in templates"</strong> to get <code>{"{keep}"}</code>, the folders a
+          model already sits under — every level between the creator and the model,
+          down to the first one the rest of the template names.{" "}
+          <code>{"{creator}/{keep?}/{character}/{title}"}</code> keeps your faction
+          level, however deep, and normalizes the rest. It stops at the first level
+          the destination already names (so a library filed by character is
+          unaffected, even if the folder spells the character differently, and a
+          release folder beneath the character stays gone), must be a level of its
+          own in the template, and does nothing while release packages are
+          preserved. Use the <code>?</code> form: a required <code>{"{keep}"}</code>{" "}
+          blocks every model with no folder level to keep.
         </p>
         <p>
           You don't have to type the template by hand. The Settings field and the one

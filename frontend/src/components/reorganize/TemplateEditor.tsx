@@ -63,7 +63,7 @@ const buildPresets = (defaultTemplate: string, keepEnabled: boolean): { label: s
     ? [{
         label: "Creator → Folder → Character → Title",
         template: `{creator}/${KEEP_TOKEN}/{character}/{title}`,
-        hint: "Keeps the folder a model already sits under, skipped when there isn't one.",
+        hint: "Keeps the folders a model already sits under, skipped when there aren't any.",
       }]
     : []),
 ];
@@ -232,9 +232,9 @@ export default function TemplateEditor({ value, onChange, onCommit, rootId, defa
         {keepEnabled && (
           <>
             {" "}
-            <code className="text-indigo-400">{"{keep?}"}</code> renders the folder a
-            model already sits under, and is skipped when the rest of the destination
-            already names it.
+            <code className="text-indigo-400">{"{keep?}"}</code> renders the folder levels a
+            model already sits under, stopping at the first one the rest of the
+            destination already names.
           </>
         )}
       </div>
