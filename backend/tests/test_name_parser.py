@@ -448,18 +448,74 @@ class TestCharacterKey:
         # wrongly make the folder inherit its parent's character.
         assert character_key("CA3D", "CA 3D Studios") == "CA3D"
 
-    def test_creator_tag_leading_not_stripped(self):
-        # A tag that STARTS the key is left alone (STUDIO-442): there the creator's
-        # name is frequently part of the product name, so stripping it clobbers a
-        # real character. The live library's proof is the creator "Portal Gun",
-        # which ships a product folder named exactly "Portal Gun" — stripping a
-        # leading tag would leave nothing at all.
-        # (This test used to be named …_from_middle, which it never tested; the
-        # middle case is now covered below and behaves the opposite way.)
+    def test_creator_tag_leading_kept_without_delimiter(self):
+        # A tag that STARTS the key is kept unless the creator delimited it
+        # (STUDIO-442): there the creator's name is frequently part of the product
+        # name, so stripping it on sight clobbers a real character. The live
+        # library's proof is the creator "Portal Gun", which ships a product folder
+        # named exactly "Portal Gun" — stripping a leading tag would leave nothing.
+        # (Named …_not_stripped until 442 narrowed it, and …_from_middle before
+        # that, which it never tested.)
         assert character_key("CA3D Dragon", "CA 3D Studios") == "CA3D Dragon"
         assert character_key("Portal Gun", "Portal Gun") == "Portal Gun"
+        assert character_key("Groundeffected Spidey", "Groundeffected") == "Groundeffected Spidey"
         # Leading tag kept, trailing tag stripped, in one key.
         assert character_key("Ghamak Barbarian Ghamak", "Ghamak") == "Ghamak Barbarian"
+
+    def test_creator_tag_leading_stripped_when_delimited(self):
+        # STUDIO-442. A creator that stamps its own name on the front writes a
+        # separator after it, and that punctuation is the signal — the folder is
+        # saying "this part is the shop, that part is the product". 21 of the 31
+        # live tag-leading segments are written this way.
+        assert character_key(
+            "B3DSERK - Joker Statue 421mm (Non Supported)", "B3DSERK") == "Joker"
+        assert character_key("Wicked - Drax Knife 560mm", "Wicked") == "Drax Knife"
+        # Multi-word creator, and no space before the dash — both live spellings.
+        assert character_key(
+            "Death x Tiles -Caves & Caverns Props", "Death x Tiles") == "Caves & Caverns"
+
+    def test_leading_tag_gate_reads_the_raw_name_not_the_key(self):
+        # MUTANT: gate on the KEY instead of the raw folder name. character_key
+        # normalises "-" to a space before the tag is stripped, so by then the
+        # delimiter is gone and the gate never fires — every assertion in
+        # test_creator_tag_leading_stripped_when_delimited reverts. Pinned
+        # separately because the two names below differ ONLY by the delimiter and
+        # produce the same key up to that point.
+        assert character_key("B3DSERK - Superman Sculpture", "B3DSERK") == "Superman Sculpture"
+        assert character_key("B3DSERK Superman Sculpture", "B3DSERK") == "B3DSERK Superman Sculpture"
+
+    @pytest.mark.parametrize("name,creator,expected", [
+        # MUTANT: admit "_" (or "\s") to _LEADING_TAG_DELIM. Underscore is the
+        # general word separator across much of the library, so allowing it turns
+        # this rule into "always strip a leading tag" — the variant measured and
+        # rejected for producing 'TOY' and 'Set Ruins Of Terataya'.
+        ("GROUNDEFFECTED MINI TOY", "Groundeffected", "GROUNDEFFECTED TOY"),
+        ("Dm Stash Terrain Set - Ruins Of Terataya", "DM Stash", "Dm Stash Set Ruins Of Terataya"),
+        ("OXO3D_Figures_Jinx_Arcane_Split", "OXO3D", "OXO3D Jinx Arcane"),
+        ("3Dmoonn Weak Kingsley stl", "3DMOONN", "3Dmoonn Weak Kingsley"),
+    ])
+    def test_underscore_and_space_are_not_brand_delimiters(self, name, creator, expected):
+        # These four keep their creator tag on purpose. The rule is deliberately
+        # conservative: 10 of 31 live segments stay dirty rather than risk the
+        # names above losing their identity.
+        assert character_key(name, creator) == expected
+
+    def test_leading_tag_strip_cannot_empty_the_key(self):
+        # The empty-key fallback governs the leading rule too, and it has to guard
+        # each strip separately: here the suffix rule correctly reduces
+        # "Ghamak Ghamak" to "Ghamak", and the leading rule would then take the
+        # last word. A single shared guard would discard the suffix rule's correct
+        # work and hand back the untouched "Ghamak Ghamak".
+        # (The no-delimiter side of the guard is test_creator_tag_only_not_
+        # stripped_empty_guard — "CA3D" never reaches this path at all.)
+        assert character_key("Ghamak - Ghamak", "Ghamak") == "Ghamak"
+
+    def test_leading_tag_rule_is_inert_on_an_already_parsed_key(self):
+        # character_key is called on stored `character` values too (the scanner's
+        # own_key, product_context.product_key). Those are already normalised, so
+        # they carry no delimiter and the gate cannot fire — which is why
+        # product_key was measured at 0 changes across the live library.
+        assert character_key("B3DSERK Joker", "B3DSERK") == "B3DSERK Joker"
 
     def test_creator_tag_stripped_from_middle(self):
         # STUDIO-432 cause 1. Creators tack a sculptor credit or a version after
@@ -1186,15 +1242,25 @@ class TestKeyPreservesTokens:
     def test_a_partly_stripped_repeat_is_not_preserved(self):
         """Counts, not sets — and this is the case that proves the difference.
 
-        The creator tag is stripped after the first token but not at the start
-        (STUDIO-442), so one copy of "Groundeffected" goes and one stays. The
-        token SETS are then identical and a set comparison would call this name
-        junk-free, keeping a character that says the creator's name twice. Found
-        by measuring set-vs-count across all 6,315 live names: this is the only
-        name in the library where the two rules disagree.
+        One copy of "Groundeffected" goes and one stays, so the token SETS are
+        identical and a set comparison would call this name junk-free, keeping a
+        character that says the creator's name twice. Found by measuring
+        set-vs-count across all 6,315 live names: this is the only name in the
+        library where the two rules disagree. That is what this test is for, and
+        it is unchanged.
+
+        The character_key line below moved with STUDIO-442. It used to read
+        "Groundeffected — Spidey": the suffix rule took the second copy and the
+        leading rule did not exist, so the em dash was left stranded at the front
+        of the key (character_key normalises "-" and "_" to spaces but not "–" or
+        "—"). 442 strips the delimited leading stamp first, which consumes the
+        dash and leaves the second copy unreachable by the suffix rule — so the
+        key is now the product name the folder actually gives, "Groundeffected
+        Spidey". Strictly better, and the count-vs-set point it exists to prove is
+        untouched: two "Groundeffected" in, one out.
         """
         name = "Groundeffected — Groundeffected Spidey"
-        assert character_key(name, "Groundeffected") == "Groundeffected — Spidey"
+        assert character_key(name, "Groundeffected") == "Groundeffected Spidey"
         assert key_preserves_tokens(name, "Groundeffected") is False
 
     def test_a_repeat_the_key_keeps_whole_is_preserved(self):

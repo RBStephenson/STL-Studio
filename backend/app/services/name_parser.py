@@ -666,9 +666,11 @@ def character_key(name: str, creator_name: str | None = None) -> str:
     abbreviation of 2+ consecutive creator words ("CA 3D Studios" → "CA3D") or the
     full creator name. An
     individual word of a multi-word creator ("Dragon" from "Dragon Studios") is left
-    alone, so "Red Dragon" keeps its identity. A tag that *starts* the key is left
-    alone too (STUDIO-442). The strip is guarded: if nothing would
-    remain, the key is left unchanged.
+    alone, so "Red Dragon" keeps its identity. A tag that *starts* the key is
+    stripped only when the creator delimited it with a dash — "B3DSERK - Joker
+    Statue 421mm" keys to "Joker", while "Portal Gun" and "CA3D Dragon", where the
+    leading word is part of the product's name, keep it (STUDIO-442). The strip is
+    guarded: if nothing would remain, the key is left unchanged.
 
     A trailing "by <sculptor>" attribution clause is then removed regardless of
     creator (STUDIO-439), so "Barbarella - Abe3D by Stopa" reduces all the way to
@@ -698,7 +700,9 @@ def character_key(name: str, creator_name: str | None = None) -> str:
     key = re.sub(r"[\s()\[\].]+", " ", base).strip(" -_()[]")
 
     if creator_name and key:
-        key = _strip_creator_suffix(key, creator_name)
+        # `name`, not `spaced` — the leading-tag rule reads the creator's own
+        # delimiter, which the "[_-] -> space" normalisation above has erased.
+        key = _strip_creator_tag(key, creator_name, name)
     if key:
         key = _strip_attribution_clause(key)
 
@@ -706,17 +710,22 @@ def character_key(name: str, creator_name: str | None = None) -> str:
 
 
 @lru_cache(maxsize=256)
-def _creator_suffix_pattern(creator_name: str) -> re.Pattern | None:
-    """Compile a regex matching a creator-name tag anywhere but the start of a key.
+def _creator_aliases(creator_name: str) -> str | None:
+    """The regex alternation of spellings a creator tag may take, longest first.
 
-    Two forms are stripped, both unlikely to collide with a real character word:
+    Two forms count as a tag, both unlikely to collide with a real character word:
       * a glued concatenation of 2+ consecutive creator words — the abbreviation
         case ("CA 3D Studios" → "CA3D", "3DStudios", "CA3DStudios"); and
       * the creator's full name spelled out ("CA 3D Studios").
-    A lone word is stripped ONLY when it is the creator's *entire* name (e.g.
+    A lone word is a tag ONLY when it is the creator's *entire* name (e.g.
     "Ghamak"). Individual words of a multi-word name ("Dragon" from "Dragon
-    Studios") are deliberately NOT stripped, so a character whose name ends in such
-    a word ("Red Dragon") keeps its identity. Cached per creator name.
+    Studios") deliberately are not, so a character whose name ends in such a word
+    ("Red Dragon") keeps its identity.
+
+    Extracted from _creator_suffix_pattern by STUDIO-442 so the leading-tag rule
+    below matches on exactly the same vocabulary. Two hand-kept alias lists would
+    drift, and a tag the two halves disagreed about would key one folder two ways.
+    Cached per creator name.
     """
     tokens = [t for t in re.split(r"[\s\-_]+", creator_name.lower()) if t]
     if not tokens:
@@ -732,7 +741,15 @@ def _creator_suffix_pattern(creator_name: str) -> re.Pattern | None:
         # The full name spelled out with spaces.
         aliases.add(" ".join(tokens))
     # Longest first so the alternation prefers the most specific match.
-    alts = "|".join(re.escape(a) for a in sorted(aliases, key=len, reverse=True))
+    return "|".join(re.escape(a) for a in sorted(aliases, key=len, reverse=True))
+
+
+@lru_cache(maxsize=256)
+def _creator_suffix_pattern(creator_name: str) -> re.Pattern | None:
+    """Compile a regex matching a creator-name tag anywhere but the start of a key."""
+    alts = _creator_aliases(creator_name)
+    if not alts:
+        return None
     # STUDIO-432 cause 1. The tag is matched WHEREVER it occurs, not only at the
     # end. Creators routinely tack a sculptor credit or a version after their own
     # name — "1_4 Barbarella - Abe3D by Stopa" — and an end-anchored pattern misses
@@ -742,10 +759,11 @@ def _creator_suffix_pattern(creator_name: str) -> re.Pattern | None:
     # The leading \s+ is load-bearing twice over, and is why "un-anchor" does not
     # mean "match anywhere". It is the empty-key guard (a key that is nothing BUT
     # the tag has no leading space, so it cannot match), and it keeps a tag that
-    # *starts* the key out of scope — there the creator's name is often part of the
-    # product name, and the live library proves it: the creator "Portal Gun" ships
-    # a product folder named exactly "Portal Gun", which a leading strip would
-    # reduce to nothing. That half is STUDIO-442, 31 folder names.
+    # *starts* the key out of THIS pattern's scope. A leading tag is not simply
+    # stripped, because there the creator's name is often part of the product name
+    # — the creator "Portal Gun" ships a product folder named exactly "Portal Gun".
+    # STUDIO-442 handles that case separately and on a different signal; see
+    # _creator_leading_pattern below.
     #
     # The trailing \s* went with the anchor, and must not come back. It never did
     # anything — `key` is already stripped before it reaches here — but unanchored
@@ -755,10 +773,115 @@ def _creator_suffix_pattern(creator_name: str) -> re.Pattern | None:
     return re.compile(r"(?:\s+\b(?:" + alts + r")\b)+", re.I)
 
 
-def _strip_creator_suffix(key: str, creator_name: str) -> str:
-    """Remove creator-tag tokens from a grouping key.
-    Falls back to the original key when the result would be empty.
+# STUDIO-442. The dash family, and only the dash family, marks a leading creator
+# tag as a BRAND STAMP rather than part of the product's name.
+#
+# "_" is deliberately excluded even though it reaches one more live folder
+# (OXO3D_Figures_Jinx_Arcane_Split). Underscore is the general word separator
+# across a large slice of the library, so admitting it makes this rule degenerate
+# into "always strip a leading tag" on any underscore-named folder — which is the
+# variant that was measured and rejected. ":" and "|" are excluded for the
+# opposite reason: no live folder uses either after a tag, so shipping them would
+# be an untested widening.
+#
+# The dash stays backslash-escaped so both character classes below can interpolate
+# these chars without the "_-–" in one of them parsing as a (reversed, invalid)
+# range.
+_LEADING_TAG_DELIM_CHARS = r"\-–—"
+_LEADING_TAG_DELIM = r"[" + _LEADING_TAG_DELIM_CHARS + r"]"
+
+
+@lru_cache(maxsize=256)
+def _creator_leading_pattern(creator_name: str) -> re.Pattern | None:
+    """Compile a regex matching a creator tag at the START of a key.
+
+    Anchored where _creator_suffix_pattern's \\s+ cannot reach. Stripping is gated
+    by _leads_with_delimited_tag, never applied on this pattern alone.
+
+    ONE tag, not a run of them: the gate proves a single brand stamp, and a second
+    copy of the name after it is product identity. "Groundeffected — Groundeffected
+    Spidey" keys to "Groundeffected Spidey" — the stamp goes, the product keeps the
+    name it was actually given.
+
+    The trailing class carries the dash family as well as space and underscore, so
+    the delimiter the gate matched on is consumed with the tag. Without it an em
+    dash survives into the key ("— Spidey"): character_key normalises "-" and "_"
+    to spaces but leaves "–" and "—" untouched, so they reach here intact.
     """
+    alts = _creator_aliases(creator_name)
+    if not alts:
+        return None
+    return re.compile(
+        r"^\b(?:" + alts + r")\b[\s_" + _LEADING_TAG_DELIM_CHARS + r"]*", re.I
+    )
+
+
+@lru_cache(maxsize=256)
+def _creator_delimited_prefix(creator_name: str) -> re.Pattern | None:
+    """Compile the gate: creator tag, then a dash, then something else.
+
+    Matched against the RAW folder name, not the key — character_key normalises
+    "-" to a space long before the tag is stripped, so by then the evidence this
+    rule depends on is already gone.
+    """
+    alts = _creator_aliases(creator_name)
+    if not alts:
+        return None
+    return re.compile(
+        r"^\s*(?:" + alts + r")\s*" + _LEADING_TAG_DELIM + r"+\s*\S", re.I
+    )
+
+
+def _leads_with_delimited_tag(raw_name: str, creator_name: str) -> bool:
+    """True when the creator stamped its own name on the front, dash and all.
+
+    STUDIO-442. A creator tag that STARTS a key cannot be stripped on sight: the
+    creator "Portal Gun" ships a product folder named exactly "Portal Gun", and
+    stripping that leaves nothing. So the question is not "is this a tag" but "is
+    this a tag rather than part of the name", and the creator's own punctuation
+    answers it. A brand stamp is written with a separator after it —
+    "B3DSERK - Batman Adam West Statue 338mm" — while a product name that happens
+    to begin with the creator's name is not ("Portal Gun", "Groundeffected Spidey").
+
+    Measured on the live library rather than assumed: of the 31 folder-name
+    segments whose key leads with the creator's tag, this gate claims 21 and
+    leaves 10. The rejected alternative — strip whenever anything survives, using
+    the existing empty-key fallback as the only guard — reaches 23 but turns
+    "GROUNDEFFECTED MINI TOY" into "TOY", "Dm Stash Terrain Set - Ruins Of
+    Terataya" into "Set Ruins Of Terataya", and "CA3D Dragon" into "Dragon".
+    Leaving 10 keys dirty is the price of not doing that.
+    """
+    pattern = _creator_delimited_prefix(creator_name)
+    return bool(pattern and pattern.match(raw_name))
+
+
+def _strip_creator_tag(key: str, creator_name: str, raw_name: str | None = None) -> str:
+    """Remove creator-tag tokens from a grouping key.
+
+    Two rules with two different burdens of proof. A tag anywhere but the start is
+    stripped on sight (STUDIO-432); a tag at the start is stripped only when
+    raw_name shows the creator delimited it (STUDIO-442). raw_name is the
+    unnormalised folder name and is optional — callers that pass an already-parsed
+    key have no delimiter left to offer, and correctly get the suffix rule alone.
+
+    The LEADING rule runs first, and the order is load-bearing. Run the other way
+    round on "Groundeffected — Groundeffected Spidey", the suffix rule eats the
+    second copy (it is the one with a space in front of it) and the leading rule
+    then takes the first, leaving "Spidey" — the product's actual name destroyed
+    from both ends. Leading-first removes the stamp, after which the survivor no
+    longer has a space before it and the suffix rule cannot reach it: the key is
+    "Groundeffected Spidey", which is what the folder says it is.
+
+    Each strip falls back independently when it would empty the key. A single
+    combined guard would let the leading rule undo the suffix rule's correct work
+    and hand back the untouched original.
+    """
+    if raw_name is not None and _leads_with_delimited_tag(raw_name, creator_name):
+        leading = _creator_leading_pattern(creator_name)
+        if leading:
+            lead_stripped = leading.sub("", key).strip()
+            if lead_stripped:
+                key = lead_stripped
     pattern = _creator_suffix_pattern(creator_name)
     if not pattern:
         return key
