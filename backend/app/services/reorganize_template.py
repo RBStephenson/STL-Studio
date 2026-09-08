@@ -17,16 +17,20 @@ Reorganize grammar (levels separated by ``/``):
   ``{character}``  the model's character grouping
   ``{scale}``      the scanner-detected scale tag
   ``{title}``      the model's title (falls back to its folder name)
-  ``{keep}``       the folder level the model ALREADY sits under (STUDIO-431)
+  ``{keep}``       the folder levels the model ALREADY sits under (STUDIO-431)
 
 ``{keep}`` is the odd one out and deliberately so: every other token renders a
-value from the model ROW, while this one renders a level of the model's current
-PATH. That is the whole point — a container level (a faction, a release wave, a
-project year, a pack) is meaningful to the user and is expressible by no row
-field, so a destination built only from row fields drops it. Measured on a real
-library: 1504 of 3474 models, 43% of it. Because of that the destination is no
-longer a pure function of (row, template) when this token is used, which is a
-real cost and is why the token is opt-in rather than part of the default.
+value from the model ROW, while this one renders levels of the model's current
+PATH — every level between the creator and the model's own folder, down to the
+first one the rest of the template names. That is the whole point — a container
+level (a faction, a release wave, a project year, a pack) is meaningful to the
+user and is expressible by no row field, so a destination built only from row
+fields drops it. Measured on a real library: 1504 of 3474 models, 43% of it.
+Because of that the destination is no longer a pure function of (row, template)
+when this token is used, which is a real cost and is why the token is opt-in
+rather than part of the default. And because it renders MORE than one level it
+must be a segment of its own: ``pack-{keep?}`` is rejected, since the literal
+would have to attach to the first level only.
 
 A trailing ``?`` marks a token **optional** (``{scale?}``): when that field has
 no real value of its own the token contributes nothing, instead of rendering a
@@ -108,6 +112,15 @@ def parse_template(template: str | None) -> list[str]:
             raise ReorganizeTemplateError(
                 f"Malformed template segment {seg!r} — unbalanced braces"
             )
+        # {keep} renders MORE than one level (STUDIO-431), so literal text or a
+        # second token beside it has no clean meaning — the literal would attach
+        # to the first level only. Rejected here rather than rendered oddly.
+        if mentions_keep(seg) and not _TOKEN_RE.fullmatch(seg):
+            raise ReorganizeTemplateError(
+                "{keep} must be a segment of its own — write "
+                "{creator}/{keep?}/{title}, not {creator}/pack-{keep?}/{title} "
+                f"(got {seg!r})"
+            )
         segments.append(seg)
 
     if not segments:
@@ -142,6 +155,17 @@ def segment_fields(segment: str, validate: bool = True) -> list[tuple[str, bool]
     if validate:
         found = [(f, opt) for f, opt in found if f in _VALID_FIELDS]
     return found
+
+
+def mentions_keep(segment: str) -> bool:
+    """Does this parsed segment reference ``{keep}``, in either spelling?
+
+    The one token that renders more than one level, so three places have to
+    single it out: the parser (it must be a segment of its own), the render
+    probe (the segment is removed, not dropped) and the level expansion. One
+    predicate, so the three cannot drift apart.
+    """
+    return any(f == KEEP for f, _ in segment_fields(segment, validate=False))
 
 
 def render_segments(

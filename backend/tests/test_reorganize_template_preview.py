@@ -134,6 +134,16 @@ class TestAntiDrift:
         _assert_no_drift(db, "{creator}/{keep?}/{character}/{title}",
                          keep_enabled=True)
 
+    def test_matches_build_manifest_for_two_kept_levels(self, db, tmp_path):
+        """STUDIO-431 part two. `{keep}` now renders SEVERAL levels from one
+        token, expanded after the template renders — the preview and the
+        manifest must expand them identically."""
+        _root(db, tmp_path)
+        _model(db, tmp_path, character="HDF APC", title="HDF APC",
+               subdir="Human Defense Force/Vehicles")
+        _assert_no_drift(db, "{creator}/{keep?}/{character}/{title}",
+                         keep_enabled=True)
+
     def test_matches_build_manifest_with_the_keep_token_disabled(self, db, tmp_path):
         _root(db, tmp_path)
         _model(db, tmp_path, character="HDF APC", title="HDF APC",

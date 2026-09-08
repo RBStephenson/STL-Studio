@@ -313,9 +313,10 @@ export interface AppSettings {
   // Preserve complete release/package subtrees beneath the normalized
   // creator/character prefix. Off by default.
   reorganize_package_mode_enabled: boolean;
-  // Makes the {keep} destination token available: renders the folder level a
-  // model already sits under, so a container level the template has no field
-  // for (faction, release wave, project year, pack) survives a reorganize.
+  // Makes the {keep} destination token available: renders the folder levels a
+  // model already sits under, down to the first one the rest of the template
+  // names, so container levels the template has no field for (faction, release
+  // wave, project year, pack) survive a reorganize however deep they sit.
   // Off by default; inert under package mode, which ignores the template.
   reorganize_keep_level_enabled: boolean;
   // AI-assisted suggestions (STUDIO-186) for reorganize entries the

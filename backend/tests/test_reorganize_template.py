@@ -54,6 +54,21 @@ class TestParseTemplate:
         with pytest.raises(ReorganizeTemplateError, match=r"\{keep\}"):
             parse_template("{creator}/{franchise}")
 
+    def test_keep_must_be_a_segment_of_its_own(self):
+        """STUDIO-431. `{keep}` renders more than one folder level, so literal
+        text or a second token beside it has no clean meaning — the literal
+        would attach to the first level only. Rejected at parse time, like the
+        all-optional rule."""
+        with pytest.raises(ReorganizeTemplateError, match="segment of its own"):
+            parse_template("{creator}/pack-{keep?}/{title}")
+        with pytest.raises(ReorganizeTemplateError, match="segment of its own"):
+            parse_template("{creator}/{keep?}{scale?}/{title}")
+        with pytest.raises(ReorganizeTemplateError, match="segment of its own"):
+            parse_template("{creator}/{keep}-x/{title}")
+        assert parse_template("{creator}/{keep?}/{title}") == [
+            "{creator}", "{keep?}", "{title}",
+        ]
+
     def test_unbalanced_brace_rejected(self):
         with pytest.raises(ReorganizeTemplateError, match="unbalanced braces"):
             parse_template("{creator}/{title")

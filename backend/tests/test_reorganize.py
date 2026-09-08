@@ -1040,14 +1040,15 @@ def _model_at(db, tmp_path, rel_path, *, creator="Abe3D", character="Joker",
     return m
 
 
-def _render_model(db, tmp_path, m, *, template=KEEP_TEMPLATE, enabled=True):
+def _render_model(db, tmp_path, m, *, template=KEEP_TEMPLATE, enabled=True,
+                  slugify_all=False):
     """Render one model through the real `_render_destination`, with the scope
     built by `_manifest_scope` so the layout wiring is under test too rather
     than hand-assembled here. Returns (dest, path relative to tmp_path)."""
     root_keys, dest_for, layouts = reorganize._manifest_scope(db, None)
     dest = reorganize._render_destination(
         m, parse_template(template), root_keys, None, dest_for(m),
-        layouts=layouts, keep_enabled=enabled,
+        slugify_all=slugify_all, layouts=layouts, keep_enabled=enabled,
     )
     prefix = reorganize._canon(str(tmp_path)) + "/"
     assert dest.proposed_dir.startswith(prefix), dest.proposed_dir
@@ -1055,10 +1056,11 @@ def _render_model(db, tmp_path, m, *, template=KEEP_TEMPLATE, enabled=True):
 
 
 def _render(db, tmp_path, rel_path, *, template=KEEP_TEMPLATE, creator="Abe3D",
-            character="Joker", title="Bust", enabled=True):
+            character="Joker", title="Bust", enabled=True, slugify_all=False):
     m = _model_at(db, tmp_path, rel_path, creator=creator, character=character,
                   title=title)
-    return _render_model(db, tmp_path, m, template=template, enabled=enabled)
+    return _render_model(db, tmp_path, m, template=template, enabled=enabled,
+                         slugify_all=slugify_all)
 
 
 class TestKeepToken:
@@ -1231,3 +1233,117 @@ class TestKeepToken:
                             template="{creator}/{keep}/{character}/{title}")
         assert dest.missing == ["keep"]
         assert out == "Abe3D/_Unknown Folder/Joker/Bust"
+
+
+class TestKeepWalksEveryLevel:
+    """STUDIO-431, part two: `{keep}` renders every level between the creator
+    and the model's own folder, down to the first one the destination already
+    names — not just the one directly below the creator.
+
+    Simulated on the live library before it was built (ticket comment 10659):
+    the walk touches no model the one-level token did not already touch, and
+    deepens 623 of them by 860 levels. The population is real organisation —
+    `3DArtGuy/2025ProjectFolders/April2025_GrimdarkMonth/…`, Mod Innovations
+    packs three deep — and it resolves 79 destination collisions the one-level
+    token left behind, creating none.
+    """
+
+    def test_two_container_levels_survive(self, db, tmp_path):
+        """The ticket's own example. One-level `{keep}` kept the year and lost
+        the month."""
+        _root(db, tmp_path)
+        m = _model_at(db, tmp_path,
+                      "Abe3D/2025ProjectFolders/April2025_GrimdarkMonth/BloodHost",
+                      character="BloodHost", title="BloodHost")
+        _, on = _render_model(db, tmp_path, m)
+        _, off = _render_model(db, tmp_path, m, enabled=False)
+        assert on == "Abe3D/2025ProjectFolders/April2025_GrimdarkMonth/BloodHost/BloodHost"
+        assert off == "Abe3D/BloodHost/BloodHost"
+
+    def test_three_levels_survive(self, db, tmp_path):
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path,
+                         "Abe3D/Pro Pack Two/Half Drawers/Left Side/L Half",
+                         character="L Half", title="L Half")
+        assert out == "Abe3D/Pro Pack Two/Half Drawers/Left Side/L Half/L Half"
+
+    def test_the_walk_stops_at_the_first_named_level_and_does_not_resume(self, db, tmp_path):
+        """A release folder BELOW the character is the one thing this must not
+        put back. Reinserting every unrepresented level would — measured at 197
+        already-correct models, 188 of them with a junk level restored — so the
+        walk stops at the first level the destination names and never resumes.
+        """
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path,
+                         "Abe3D/Human Defense Force/Joker/Joker - Abe3D (STL Only)/Bust")
+        assert out == "Abe3D/Human Defense Force/Joker/Bust"
+
+    def test_a_character_organised_library_with_a_release_folder_is_untouched(self, db, tmp_path):
+        """Same rule, from the other side: the level directly below the creator
+        IS the character, so the walk stops before it starts and the release
+        folder under it stays gone. This is the 1124-model shape that must not
+        change."""
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/Joker/Joker - Abe3D (STL Only)/Bust")
+        assert out == "Abe3D/Joker/Bust"
+
+    def test_a_same_named_wrapper_is_skipped_not_stopped(self, db, tmp_path):
+        """A zip extracted into a folder of its own name. The guard also sees the
+        levels already kept, so the second `Starter Set` is skipped — and it is
+        a skip, not a stop, because a same-name wrapper is not a product
+        boundary and `Accessories` below it is still worth keeping."""
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/Starter Set/Starter Set/Accessories/Dice",
+                         character="Dice", title="Dice")
+        assert out == "Abe3D/Starter Set/Accessories/Dice/Dice"
+
+    def test_a_respelt_kept_level_is_skipped(self, db, tmp_path):
+        """The kept-levels half of the guard matches on `character_key` too, the
+        same way the destination half does: `1_6 Santa - Abe3D` names the
+        `Santa` already kept above it, so it contributes nothing."""
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/Santa/1_6 Santa - Abe3D/sleigh",
+                         character="sleigh", title="Sleigh")
+        assert out == "Abe3D/Santa/sleigh/Sleigh"
+
+    def test_a_required_keep_renders_every_level(self, db, tmp_path):
+        """The required spelling has to work when there IS something to keep.
+        Before this the guard probed a render that already contained the
+        candidate — a required `{keep}` is never dropped from a probe — so the
+        level always read as represented and a required `{keep}` blocked every
+        row. Nothing pinned that, because every earlier test of the required
+        form expected a block."""
+        _root(db, tmp_path)
+        dest, out = _render(db, tmp_path,
+                            "Abe3D/2025ProjectFolders/April2025_GrimdarkMonth/BloodHost",
+                            template="{creator}/{keep}/{character}/{title}",
+                            character="BloodHost", title="BloodHost")
+        assert dest.missing == []
+        assert out == "Abe3D/2025ProjectFolders/April2025_GrimdarkMonth/BloodHost/BloodHost"
+
+    def test_slugify_all_slugs_every_kept_level(self, db, tmp_path):
+        """The kept levels arrive as one rendered part and are expanded into
+        several; each one has to go through the same sanitize/slug pass a
+        single-level segment would."""
+        _root(db, tmp_path)
+        _, out = _render(db, tmp_path, "Abe3D/Project Folders/April 2025/Blood Host",
+                         character="Blood Host", title="Blood Host", slugify_all=True)
+        assert out == "abe3d/project-folders/april-2025/blood-host/blood-host"
+
+    def test_a_character_override_with_a_slash_stays_one_level(self, db, tmp_path):
+        """The level expansion is scoped to `{keep}`. A user-typed override can
+        hold a "/", and it must keep sanitizing down to one folder rather than
+        quietly becoming two."""
+        _root(db, tmp_path)
+        m = _model_at(db, tmp_path, "Abe3D/Human Defense Force/HDF APC",
+                      character="HDF APC", title="HDF APC")
+        root_keys, dest_for, layouts = reorganize._manifest_scope(db, None)
+        dest = reorganize._render_destination(
+            m, parse_template(KEEP_TEMPLATE), root_keys, {"character": "A/B"},
+            dest_for(m), layouts=layouts, keep_enabled=True,
+        )
+        prefix = reorganize._canon(str(tmp_path)) + "/"
+        rel = dest.proposed_dir[len(prefix):]
+        assert rel.count("/") == 3, rel
+        assert rel.startswith("Abe3D/Human Defense Force/")
+        assert "A/B" not in rel

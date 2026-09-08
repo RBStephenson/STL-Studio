@@ -656,11 +656,12 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
             <p className="text-sm text-text-primary-alt2">Allow the folder-level token in templates</p>
             <p className="text-xs text-text-secondary-alt mt-0.5">
               Adds <code className="font-mono">{"{keep}"}</code> to the destination
-              template editor. It renders the folder a model already sits under, so a
-              level the template has no field for — a faction, a release wave, a project
-              year — survives a reorganize instead of being dropped. The level is skipped
-              when the destination already names it, so libraries filed by character are
-              unaffected. Has no effect while release packages are preserved above.
+              template editor. It renders the folders a model already sits under, so
+              levels the template has no field for — a faction, a release wave, a project
+              year, however deep — survive a reorganize instead of being dropped. It stops
+              at the first level the destination already names, so libraries filed by
+              character are unaffected. Has no effect while release packages are
+              preserved above.
             </p>
           </div>
         </label>
