@@ -309,6 +309,43 @@ class TestCharacterKey:
         assert character_key("Motoko_No_Supported") == "Motoko"
         assert character_key("No_Supported Motoko") == "Motoko"
 
+    def test_non_supported_is_one_token(self):
+        # STUDIO-440: the same negation spelled "non". The adjective stripped and
+        # the negator survived, so a user-visible name ended in a dangling "Non":
+        # "B3DSERK - Joker Statue 421mm (Non Supported)" -> "B3DSERK Joker Non".
+        assert character_key("Non Supported") == ""
+        assert character_key("B3DSERK - Joker Statue 421mm (Non Supported)") == "B3DSERK Joker"
+        assert character_key("Non Supported Motoko") == "Motoko"
+
+    @pytest.mark.parametrize("name", [
+        "Motoko_NoSupport", "Motoko NoSupported", "Motoko NoSupports",
+        "Motoko NonSupported",
+    ])
+    def test_glued_negation_still_stripped(self, name):
+        # STUDIO-440 removed the separate "nosupport(?:ed|s)?" alternative: the
+        # "*" in "non?[\\s_-]*support…" matches ZERO separators, so the glued
+        # spelling was covered twice. These pin that it still is.
+        assert character_key(name) == "Motoko"
+
+    def test_non_supported_survives_a_separator_run(self):
+        # STUDIO-440: one live folder writes the pair as "Non  -  Supported".
+        # character_key normalises "-" to a space but leaves the doubles, so the
+        # rule has to span a RUN of separators, not a single optional one.
+        assert character_key("Wicked - Drax Statue 380mm Non  - Supported") == "Wicked Drax"
+        assert character_key("Non  -  Supported") == ""
+
+    @pytest.mark.parametrize("name,expected", [
+        # STUDIO-440: stripping the pair as ONE unit is what makes it safe — a
+        # lone "no"/"non" must never match, or every one of these loses a word.
+        ("Batman 1966 Statue No Cape", "Batman No Cape"),
+        ("No Studs", "No Studs"),
+        ("Non Player Character", "Non Player Character"),
+        ("Nonsuch Palace", "Nonsuch Palace"),
+        ("No Mans Land", "No Mans Land"),
+    ])
+    def test_bare_negator_is_never_stripped(self, name, expected):
+        assert character_key(name) == expected
+
     @pytest.mark.parametrize("name", [
         "Unsupported", "Supported_Solid", "75mm Unsupported", "Presupported", "Solid",
         "Full_cutted", "Full cutted", "Full cut",
@@ -934,6 +971,17 @@ class TestSupportStatus:
         ("No_Supported", "unsupported"),
         ("Dragon No_Supported", "unsupported"),
         ("Dragon NoSupported", "unsupported"),
+        # Glued, with the separate "nosupport…" alternative removed (STUDIO-440).
+        ("Dragon NonSupported", "unsupported"),
+        ("Dragon NoSupports", "unsupported"),
+        # The same negation spelled "non" (STUDIO-440). Read as "supported" on 9
+        # live models before this — a folder that says NOT SUPPORTED recorded as
+        # supported, which is 441's bug in a third spelling. The last one keeps
+        # the live "Non  -  Supported" separator run honest.
+        ("B3DSERK - Joker Statue 421mm (Non Supported)", "unsupported"),
+        ("Non Supported", "unsupported"),
+        ("Dragon Non-Supported", "unsupported"),
+        ("Wicked - Drax Statue 380mm Non  - Supported", "unsupported"),
         ("Dragon Pre-Supported", "pre-supported"),
         ("Dragon presupported", "pre-supported"),
         ("Dragon_PreSup", "pre-supported"),
@@ -949,6 +997,14 @@ class TestSupportStatus:
     def test_unsupported_not_read_as_supported(self):
         # "supported" is a substring of "unsupported"; ordering must not misread it.
         assert support_status("Crimson Wings APC unsupported") == "unsupported"
+
+    @pytest.mark.parametrize("name", [
+        "Batman 1966 Statue No Cape", "No Studs", "Non Player Character",
+        "Nonsuch Palace", "No Mans Land",
+    ])
+    def test_bare_negator_reports_no_status(self, name):
+        # STUDIO-440: a lone "no"/"non" is a real product word, never a status.
+        assert support_status(name) is None
 
 
 class TestCutStatus:

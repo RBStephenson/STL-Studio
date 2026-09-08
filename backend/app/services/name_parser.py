@@ -271,7 +271,17 @@ _SUPPORT_STATUS_RULES: list[tuple[re.Pattern, str]] = [
     # rule stopped at "no support", the trailing "ed" broke the \b, and the name
     # fell through to the plain rule below — a folder that says NO supports was
     # read as "supported".
-    (re.compile(r"\b(?:un[\s_-]?supported|no[\s_-]?support(?:ed|s)?|nosupport(?:ed|s)?)\b", re.I),
+    #
+    # "non" is the same negation spelled a third way, and it failed the same way
+    # (STUDIO-440): "(Non Supported)" was read as "supported" on 9 live models.
+    # The optional "n" folds it into the existing alternative rather than adding
+    # a second one, and "*" instead of "?" spans a run of separators — one live
+    # folder writes the pair as "Non  -  Supported", which _spaced() leaves as
+    # several spaces. A bare "non"/"no" is never matched on its own: the pair is
+    # one unit, which is what keeps "No Cape" and "Non Player Character" intact.
+    # The separate glued alternative ("nosupported") went with the same change —
+    # "*" matches zero separators, so it was covered twice.
+    (re.compile(r"\b(?:un[\s_-]?supported|non?[\s_-]*support(?:ed|s)?)\b", re.I),
      "unsupported"),
     (re.compile(r"\b(?:pre[\s_-]?supported|presupport(?:ed)?|pre[\s_-]?sup|presup)\b", re.I), "pre-supported"),
     (re.compile(r"\bsupport(?:ed|s)?\b", re.I), "supported"),
@@ -518,7 +528,18 @@ _SUPPORT_FORMAT = re.compile(
     # "no supported" as a unit, same reason as _SUPPORT_STATUS_RULES (STUDIO-441):
     # without the "ed" alternative only "Supported" went and "No" stayed behind
     # as the key ("No_Supported" -> "No").
-    r"no[\s_-]?support(?:ed|s)?|nosupport(?:ed|s)?|"
+    #
+    # The optional "n" covers the third spelling of the same negation, which
+    # orphaned its negator exactly the same way (STUDIO-440): "B3DSERK - Joker
+    # Statue 421mm (Non Supported)" keyed to "B3DSERK Joker Non". "*" rather than
+    # "?" because one live folder separates the pair with a dash and a double
+    # space ("Non  -  Supported"), which character_key normalises to several
+    # spaces before this runs. Stripping the pair as ONE unit is what makes it
+    # safe — a lone "no"/"non" never matches, so "No Cape", "No Studs",
+    # "Non Player Character" and "Nonsuch Palace" all keep their identity.
+    # The separate glued alternative ("nosupported") went with the same change:
+    # "*" matches zero separators, so it was already covered by this one.
+    r"non?[\s_-]*support(?:ed|s)?|"
     r"solid|hollow|"
     # Mesh-repair state (STUDIO-428). Creators who ship a fixed mesh beside the
     # sculptor's untouched one name the pair "<Character>_STL_Original" /
