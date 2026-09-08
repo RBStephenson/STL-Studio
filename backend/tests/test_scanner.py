@@ -1804,11 +1804,12 @@ class TestVariantGrouping:
             for leaf in ("ExtraStrong Modi Bolts", "Modi Bolts",
                          "Modi Bolts with Locks", "Modi locks")
         } == {
-            # Qualified by the container's RAW name (STUDIO-287), which this
-            # change does not touch — `qualifier_from_folder` deliberately skips
-            # the strip pipeline, so the container keeps "Original" in the label
-            # even though its grouping key no longer carries it.
-            "ExtraStrong Modi Bolts": "Modi Bolts Original — ExtraStrong Modi Bolts",
+            # Prefixed by `_disambiguate_colliding_characters`, because the same
+            # leaf name sits under `Modi Pop Bolts` too. The prefix is the
+            # container's KEY, not its raw name (STUDIO-441): "Original" is the
+            # prep word STUDIO-428 taught the key to drop, so the raw spelling
+            # carries junk and STUDIO-443's rule spells the prefix parsed.
+            "ExtraStrong Modi Bolts": "Modi Bolts — ExtraStrong Modi Bolts",
             "Modi Bolts": "Modi Bolts",
             "Modi Bolts with Locks": "Modi Bolts with Locks",
             "Modi locks": "Modi locks",
@@ -5571,3 +5572,189 @@ class TestScanSummaryReportsFailedCreators:
             "a clean run must stay clean — an unconditional suffix would cry wolf "
             "on every scan"
         )
+
+
+# ---------------------------------------------------------------------------
+# Collision disambiguation splits by parent IDENTITY, not parent spelling
+# (STUDIO-441)
+# ---------------------------------------------------------------------------
+
+class TestCollisionsSplitByParentIdentity:
+    """`_disambiguate_colliding_characters` exists for two INDEPENDENT leaves
+    that share a folder name under unrelated parents. Judged by raw parent
+    name, two support-state folders of one product counted as unrelated and
+    the pass named the product after its support state: 97 models on the
+    live library, 50 of them carrying a structural word or a version marker
+    as identity. Parents are now bucketed by product identity: none for a
+    structural or creator-root parent, `character_key` for the rest. Every
+    tree below is the live shape that produced the defect, not a sketch."""
+
+    @staticmethod
+    def _by_leaf(db, creator, leaf: str) -> list[Model]:
+        return [m for m in _models(db, creator) if Path(m.folder_path).name == leaf]
+
+    def test_support_state_parents_are_one_product(self, db, tmp_path):
+        """The ticket's headline: `Supported/Motoko` and `No_Supported/Motoko`.
+        Afterwards neither `name` nor `character` may carry a support word."""
+        creator_dir = tmp_path / "Tanuki Figures"
+        pack = creator_dir / "Motoko_TanukiFigures"
+        _stl(pack / "Supported" / "Motoko")
+        _stl(pack / "No_Supported" / "Motoko")
+        _stl(pack / "No_Supported" / "Merged")
+        creator = make_creator(db, "Tanuki Figures")
+
+        _walk(db, creator, creator_dir)
+
+        motoko = self._by_leaf(db, creator, "Motoko")
+        assert len(motoko) == 2
+        assert {m.character for m in motoko} == {"Motoko"}
+        assert {m.name for m in motoko} == {"Motoko"}
+
+    # Scale-variant parents (`1_4 Star Sapphire …` / `1_6 Star Sapphire …`,
+    # comment 10650) are pinned at the helper level below: the live tree that
+    # produces that collision does not reproduce in a sandbox walk — a release
+    # folder with a `Base` and a `character` child folds into one model here —
+    # and the live pair's collapse was measured through the real function on a
+    # snapshot instead (data/studio-441-sim.py).
+
+    def test_release_folders_that_differ_by_support_state_are_one_product(self, db, tmp_path):
+        """`02 - Grim Realms Supported` / `02 - Grim Realms Unsupported`: not
+        structural (they name a release), but they key to the same product."""
+        creator_dir = tmp_path / "Titan Forge Miniatures"
+        models = creator_dir / "52 - OCTOBER 2024 REANIMATION" / "Models"
+        for state in ("Supported", "Unsupported"):
+            _stl(models / f"02 - Grim Realms {state}" / "Celestial Squad")
+            _stl(models / f"02 - Grim Realms {state}" / "Mistral Squad")
+        creator = make_creator(db, "Titan Forge Miniatures")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in self._by_leaf(db, creator, "Celestial Squad")} == {"Celestial Squad"}
+        assert {m.character for m in self._by_leaf(db, creator, "Mistral Squad")} == {"Mistral Squad"}
+
+    def test_a_parts_word_parent_has_no_identity(self, db, tmp_path):
+        """The mutation detector the ticket asks for. `character_key("Arms")`
+        is "Arms" — only the structural test knows a parts folder names no
+        product — so removing that test turns this red: the two `Arms` leaves
+        come back as `Arms — Speed Arms`. (A Motoko-shaped test cannot detect
+        the same mutation once `character_key` erases support words itself.)"""
+        creator_dir = tmp_path / "Mod Innovations"
+        for box in ("Modi Boxi Large _014c", "Modi Boxi Medium _014"):
+            for part in ("Flat Arms", "Speed Arms", "Step Arms"):
+                _stl(creator_dir / box / "Arms" / part)
+        _stl(creator_dir / "Modi Boxi Small _014" / "Speed Arms")
+        creator = make_creator(db, "Mod Innovations")
+
+        _walk(db, creator, creator_dir)
+
+        speed = self._by_leaf(db, creator, "Speed Arms")
+        assert len(speed) == 3
+        assert sorted(m.character for m in speed) == [
+            "Modi Boxi Small — Speed Arms", "Speed Arms", "Speed Arms",
+        ]
+
+    def test_junk_in_a_parent_is_parsed_out_of_the_prefix(self, db, tmp_path):
+        """Genuinely different parents are still told apart, but the prefix is
+        spelt the way STUDIO-443 spells a raw folder name: `_014` is a version
+        marker, not identity, so it does not reach `character`."""
+        creator_dir = tmp_path / "Mod Innovations"
+        _stl(creator_dir / "Modi Boxi XL _014" / "Lids")
+        _stl(creator_dir / "Modi Boxi Medium _014" / "Lids")
+        creator = make_creator(db, "Mod Innovations")
+
+        _walk(db, creator, creator_dir)
+
+        lids = self._by_leaf(db, creator, "Lids")
+        assert {m.character for m in lids} == {"Modi Boxi XL — Lids", "Modi Boxi Medium — Lids"}
+        assert {m.name for m in lids} == {"Modi Boxi XL — Lids", "Modi Boxi Medium — Lids"}
+
+    def test_clean_parents_keep_their_spelling(self, db, tmp_path):
+        """Acceptance: `April2024_GrimdarkMonth` / `October2024_GrimdarkMonth`
+        are two releases and stay disambiguated, spelt as typed — the raw name
+        carries no junk, so it is the readable label (STUDIO-443's rule)."""
+        creator_dir = tmp_path / "3DArtGuy"
+        projects = creator_dir / "2024ProjectFolders"
+        _stl(projects / "April2024_GrimdarkMonth" / "UsefulKitbashItems")
+        _stl(projects / "October2024_GrimdarkMonth" / "UsefulKitbashItems")
+        creator = make_creator(db, "3DArtGuy")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in self._by_leaf(db, creator, "UsefulKitbashItems")} == {
+            "April2024_GrimdarkMonth — UsefulKitbashItems",
+            "October2024_GrimdarkMonth — UsefulKitbashItems",
+        }
+
+    def test_a_real_branch_beside_support_states_is_still_told_apart(self, db, tmp_path):
+        """Mixed: two support-state parents and one real branch. The real
+        branch is prefixed; the support-state pair keeps the bare character,
+        because there the product IS the character."""
+        creator_dir = tmp_path / "Creator"
+        pack = creator_dir / "Echo Pack"
+        for branch in ("Supported", "Unsupported", "Alt Colors"):
+            _stl(pack / branch / "Echo")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        assert sorted(m.character for m in self._by_leaf(db, creator, "Echo")) == [
+            "Alt Colors — Echo", "Echo", "Echo",
+        ]
+
+    def test_the_creator_folder_is_not_a_branch(self, db, tmp_path):
+        """A model sitting directly under the creator has no parent identity —
+        the creator folder is where products live, not a product — so it keeps
+        the bare character and only the model under a real branch is prefixed.
+        (Live: `Groundeffected/Groundeffected Spidey` was labelled
+        `Groundeffected — Groundeffected Spidey`.)"""
+        creator_dir = tmp_path / "Groundeffected"
+        _stl(creator_dir / "Groundeffected Spidey")
+        _stl(creator_dir / "Spider-Man" / "Groundeffected Spidey")
+        creator = make_creator(db, "Groundeffected")
+
+        _walk(db, creator, creator_dir)
+
+        assert {m.character for m in self._by_leaf(db, creator, "Groundeffected Spidey")} == {
+            "Groundeffected Spidey", "Spider-Man — Groundeffected Spidey",
+        }
+
+
+class TestParentIdentityHelpers:
+    """The two pure helpers behind the pass, pinned on the live spellings."""
+
+    def test_structural_and_creator_root_parents_have_no_identity(self, tmp_path):
+        rules = scanner.ScanRules().parser_rules
+        boundary = tmp_path / "Creator"
+        for parent in ("Supported", "No_Supported", "Presupported", "Arms", "STL"):
+            assert scanner._parent_identity(boundary / "Pack" / parent, boundary, "Creator", rules) == ""
+        assert scanner._parent_identity(boundary, boundary, "Creator", rules) == ""
+
+    @pytest.mark.parametrize("a, b", [
+        ("1_4 Star Sapphire - Abe3D by Ronejr v1.1", "1_6 Star Sapphire - Abe3D by Ronejr v1.1"),
+        ("02 - Grim Realms Supported", "02 - Grim Realms Unsupported"),
+        ("Modi Boxi XL _014", "modi boxi xl_014"),
+    ])
+    def test_variants_of_one_product_share_an_identity(self, tmp_path, a, b):
+        rules = scanner.ScanRules().parser_rules
+        boundary = tmp_path / "Creator"
+        left = scanner._parent_identity(boundary / a, boundary, "Creator", rules)
+        assert left
+        assert left == scanner._parent_identity(boundary / b, boundary, "Creator", rules)
+
+    @pytest.mark.parametrize("a, b", [
+        ("April2024_GrimdarkMonth", "October2024_GrimdarkMonth"),
+        ("Mult Color Filament", "One Color Filament"),
+        ("Modi Boxi XL _014", "Modi Boxi Small _014"),
+    ])
+    def test_different_products_have_different_identities(self, tmp_path, a, b):
+        rules = scanner.ScanRules().parser_rules
+        boundary = tmp_path / "Creator"
+        assert (scanner._parent_identity(boundary / a, boundary, "Creator", rules)
+                != scanner._parent_identity(boundary / b, boundary, "Creator", rules))
+
+    def test_prefix_keeps_a_clean_spelling_and_parses_a_junk_one(self):
+        assert scanner._collision_prefix({"April2024_GrimdarkMonth"}, "3DArtGuy") == "April2024_GrimdarkMonth"
+        assert scanner._collision_prefix({"Modi Boxi XL _014"}, "Mod Innovations") == "Modi Boxi XL"
+        # Two spellings under one identity differ only by junk: the key is the
+        # honest common form, whichever spelling happens to sort first.
+        assert scanner._collision_prefix({"Modi Boxi XL _014", "Modi Boxi XL"}, "Mod Innovations") == "Modi Boxi XL"

@@ -271,6 +271,32 @@ class TestCollisions:
         assert all(e["eligible"] is False for e in entries)
         assert {e["suggested_suffix"] for e in entries} == {"supported", "unsupported"}
 
+    def test_support_state_in_the_folder_above_suggests_a_suffix(self, client, db, tmp_path):
+        """STUDIO-441: `Supported/Motoko` and `Unsupported/Motoko` are one
+        product, and the scanner no longer folds the support word into the
+        model's identity to keep their destinations apart — so the reorganize
+        reads it from the folder directly above the model instead."""
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Motoko", filename="a.stl", subdir="Supported/Motoko")
+        _model_with_file(db, tmp_path, title="Motoko", filename="b.stl", subdir="No_Supported/Motoko")
+
+        entries = client.get("/reorganize/preview").json()["entries"]
+
+        assert all(e["collision"] for e in entries)
+        assert {e["suggested_suffix"] for e in entries} == {"supported", "unsupported"}
+
+    def test_a_support_word_two_levels_up_is_not_a_suggestion(self, client, db, tmp_path):
+        """One level only: a support word further up describes a whole release,
+        not this model, so it must not be offered as this model's suffix."""
+        _root(db, tmp_path)
+        _model_with_file(db, tmp_path, title="Motoko", filename="a.stl", subdir="Supported/Pack/Motoko")
+        _model_with_file(db, tmp_path, title="Motoko", filename="b.stl", subdir="Unsupported/Pack/Motoko")
+
+        entries = client.get("/reorganize/preview").json()["entries"]
+
+        assert all(e["collision"] for e in entries)
+        assert all(e["suggested_suffix"] is None for e in entries)
+
 
 class TestSiblingFilenameCollision:
     """Two distinct source filenames can collapse to the identical
