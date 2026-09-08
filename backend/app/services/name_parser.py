@@ -267,7 +267,12 @@ def extract_character_name(folder_name: str) -> str:
 # Order matters: more specific statuses are tested first so "unsupported" and
 # "pre-supported" are never misread as plain "supported".
 _SUPPORT_STATUS_RULES: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"\b(?:un[\s_-]?supported|no[\s_-]?supports?|nosupports?)\b", re.I), "unsupported"),
+    # "no supported" is one unit (STUDIO-441): before the "ed" alternative the
+    # rule stopped at "no support", the trailing "ed" broke the \b, and the name
+    # fell through to the plain rule below — a folder that says NO supports was
+    # read as "supported".
+    (re.compile(r"\b(?:un[\s_-]?supported|no[\s_-]?support(?:ed|s)?|nosupport(?:ed|s)?)\b", re.I),
+     "unsupported"),
     (re.compile(r"\b(?:pre[\s_-]?supported|presupport(?:ed)?|pre[\s_-]?sup|presup)\b", re.I), "pre-supported"),
     (re.compile(r"\bsupport(?:ed|s)?\b", re.I), "supported"),
 ]
@@ -510,7 +515,10 @@ _STRUCTURAL_EXACT: set[str] = {
 _SUPPORT_FORMAT = re.compile(
     r"\b("
     r"un[\s_-]?supported|presupport(?:ed)?|unsupported|support(?:ed|s)?|presup|pre|"
-    r"no[\s_-]?supports?|nosupports?|"
+    # "no supported" as a unit, same reason as _SUPPORT_STATUS_RULES (STUDIO-441):
+    # without the "ed" alternative only "Supported" went and "No" stayed behind
+    # as the key ("No_Supported" -> "No").
+    r"no[\s_-]?support(?:ed|s)?|nosupport(?:ed|s)?|"
     r"solid|hollow|"
     # Mesh-repair state (STUDIO-428). Creators who ship a fixed mesh beside the
     # sculptor's untouched one name the pair "<Character>_STL_Original" /

@@ -633,8 +633,11 @@ gallery images plus any images sitting directly alongside its own STLs.
 If two variants would otherwise land on the identical destination path (they
 share the same Creator/Title), Import auto-resolves the collision by
 appending the distinguishing "supported"/"unsupported" suffix to the folder
-name — no manual intervention needed. This is scoped to Import only; the
-Reorganize page still only *suggests* a disambiguating suffix for you to
+name — no manual intervention needed. The suffix is read from the variant's
+own folder name, or, when that carries no support word, from the folder
+directly above it (`Supported/Motoko` / `Unsupported/Motoko` — the same
+product shipped in two support-state folders). This is scoped to Import only;
+the Reorganize page still only *suggests* a disambiguating suffix for you to
 confirm, never applies one automatically.
 
 ### Notes

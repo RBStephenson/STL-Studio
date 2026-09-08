@@ -302,6 +302,13 @@ class TestCharacterKey:
         assert character_key("Crimson Wings APC supported") == "Crimson Wings APC"
         assert character_key("Crimson Wings APC unsupported") == "Crimson Wings APC"
 
+    def test_no_supported_is_one_token(self):
+        # STUDIO-441: "No_Supported" keyed to "No" — the alternation knew
+        # "no support(s)" but not "no supported", so only the second word went.
+        assert character_key("No_Supported") == ""
+        assert character_key("Motoko_No_Supported") == "Motoko"
+        assert character_key("No_Supported Motoko") == "Motoko"
+
     @pytest.mark.parametrize("name", [
         "Unsupported", "Supported_Solid", "75mm Unsupported", "Presupported", "Solid",
         "Full_cutted", "Full cutted", "Full cut",
@@ -921,6 +928,12 @@ class TestSupportStatus:
         ("Dragon un-supported", "unsupported"),
         ("Dragon_No_Supports", "unsupported"),
         ("Dragon NoSupport", "unsupported"),
+        # "no supported" as a unit (STUDIO-441): read as "supported" before,
+        # because the rule stopped at "no support" and the trailing "ed" broke
+        # the word boundary — so the name fell through to the plain rule.
+        ("No_Supported", "unsupported"),
+        ("Dragon No_Supported", "unsupported"),
+        ("Dragon NoSupported", "unsupported"),
         ("Dragon Pre-Supported", "pre-supported"),
         ("Dragon presupported", "pre-supported"),
         ("Dragon_PreSup", "pre-supported"),

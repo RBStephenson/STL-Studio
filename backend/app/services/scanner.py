@@ -1769,12 +1769,18 @@ def _walk_for_models(
     # time (a real destination-collision incident: "Mult Color Filament"
     # could never import because "One Color Filament" already claimed
     # "EchoMasteryTracker"'s destination). Only run this once per top-level
-    # walk, scoped to what this walk just touched.
+    # walk, scoped to what this walk just touched. Branches are told apart by
+    # the parents' product identity, not their spelling (STUDIO-441).
     if is_creator_root:
-        _disambiguate_colliding_characters(db, creator.id, folder)
+        _disambiguate_colliding_characters(db, creator, folder, rules.parser_rules)
 
 
-def _disambiguate_colliding_characters(db: Session, creator_id: int, boundary: Path) -> None:
+def _disambiguate_colliding_characters(
+    db: Session,
+    creator: Creator,
+    boundary: Path,
+    parser_rules: name_parser.ParserRules,
+) -> None:
     """Rename characters that collided across distinct branches of this walk.
 
     Only a model whose character was assigned fresh at its OWN leaf level —
@@ -1789,12 +1795,38 @@ def _disambiguate_colliding_characters(db: Session, creator_id: int, boundary: P
     *independent* leaves — each carrying nothing but its own name, reached
     via two different, unrelated parents — are a real collision.
 
+    "Unrelated" is judged by the parents' PRODUCT IDENTITY, not their spelling
+    (STUDIO-441). Split by raw parent name, ``Supported/Motoko`` and
+    ``No_Supported/Motoko`` — one product in two support states — became two
+    products named after their support state, the inverse of what this pass
+    is for: 97 models on a 3474-model library, 50 of them carrying a
+    structural word or a version marker as identity. So parents are bucketed
+    by ``_parent_identity``: a structural or creator-root parent has none, any
+    other parent's is its ``character_key``. One identity across the group
+    means variants of one product — ``1_4 …``/``1_6 …`` scale folders,
+    ``02 - Grim Realms Supported``/``… Unsupported`` — and nothing is renamed;
+    the destination collision that leaves is the reorganize's to flag, which
+    it does, and its suffix suggestion reads the parent's support state for
+    exactly this shape. Two or more identities are a real collision: members
+    under an identity-less parent keep the bare character (the product IS the
+    character there), the rest are prefixed with the parent, spelt the way
+    STUDIO-443 spells a raw folder name — raw only while it carries no junk,
+    otherwise its key — so ``Modi Boxi XL _014`` prefixes as ``Modi Boxi XL``
+    while ``April2024_GrimdarkMonth`` stays as typed.
+
+    Walking UP to the nearest non-structural ancestor instead (the ticket's
+    first option, and what ``_index_model``'s name loop does) was measured on
+    the same library and rejected: it differs on nine models and every one is
+    worse — it manufactures composites on models this pass never touched
+    (``…/Arms/Flat Arms`` under two box sizes) and splits groups the grouper
+    already holds together.
+
     Scoped to models under ``boundary`` only — a wider, whole-creator sweep
     would risk renaming unrelated models from an earlier, separate scan that
     happen to legitimately share a character (same product name used across
     two different packs)."""
     models = [
-        m for m in db.query(Model).filter(Model.creator_id == creator_id).all()
+        m for m in db.query(Model).filter(Model.creator_id == creator.id).all()
         if m.folder_path and _is_within_boundary(m.folder_path, boundary)
     ]
     groups: dict[str, list[Model]] = {}
@@ -1806,13 +1838,19 @@ def _disambiguate_colliding_characters(db: Session, creator_id: int, boundary: P
     for character, group in groups.items():
         if len(group) < 2:
             continue
-        by_parent: dict[str, list[Model]] = {}
+        by_identity: dict[str, list[Model]] = {}
+        spellings: dict[str, set[str]] = {}
         for m in group:
-            by_parent.setdefault(Path(m.folder_path).parent.name, []).append(m)
-        if len(by_parent) < 2:
-            continue  # one shared parent — an intentional grouped variant set
-        for parent_name, members in by_parent.items():
-            label = f"{parent_name} — {character}"
+            parent = Path(m.folder_path).parent
+            identity = _parent_identity(parent, boundary, creator.name, parser_rules)
+            by_identity.setdefault(identity, []).append(m)
+            spellings.setdefault(identity, set()).add(parent.name)
+        if len(by_identity) < 2:
+            continue  # one product: one shared parent, or variants of it
+        for identity, members in by_identity.items():
+            if not identity:
+                continue  # structural parents: the bare character IS the product
+            label = f"{_collision_prefix(spellings[identity], creator.name)} — {character}"
             for m in members:
                 if m.name == m.character:
                     m.name = label
@@ -1820,6 +1858,40 @@ def _disambiguate_colliding_characters(db: Session, creator_id: int, boundary: P
                 changed = True
     if changed:
         db.commit()
+
+
+def _parent_identity(
+    parent: Path,
+    boundary: Path,
+    creator_name: str,
+    parser_rules: name_parser.ParserRules,
+) -> str:
+    """Case-folded product identity of a colliding model's parent folder.
+
+    "" when the parent names no product: it is the creator folder itself (a
+    model sitting directly under the creator has no branch above it), or a
+    structural level — a support state, a parts word, a format folder. The
+    structural test is not redundant with ``character_key``: the key erases
+    support words on its own, but keeps parts words (``Arms``), and a parts
+    folder is exactly as identity-free as a ``Supported`` one.
+    """
+    if parent == boundary or name_parser.is_structural_folder(parent.name, parser_rules):
+        return ""
+    return name_parser.character_key(parent.name, creator_name).casefold()
+
+
+def _collision_prefix(spellings: set[str], creator_name: str) -> str:
+    """The label prefix for one parent identity.
+
+    STUDIO-443's rule for a raw folder name: keep the spelling only while it is
+    the sole spelling and carries no junk, else use the key. Two spellings that
+    share an identity differ only by junk, and the key is the honest common
+    form of both.
+    """
+    raw = min(spellings)
+    if len(spellings) == 1 and name_parser.key_preserves_tokens(raw, creator_name):
+        return raw
+    return name_parser.character_key(raw, creator_name)
 
 
 def _index_model(

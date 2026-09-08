@@ -1568,14 +1568,25 @@ def _source_suffix(source_dir: str) -> str | None:
     folders ("... (supported)" / "... (unsupported)") that don't match the
     Alt/V2/Version pattern above but are just as reliable a distinguishing
     signal (#1087) — common when a single pack's Approach-B/single-pack scan
-    lands two variants of the same product in one collision group."""
-    leaf = _canon(source_dir).rsplit("/", 1)[-1].strip()
+    lands two variants of the same product in one collision group.
+
+    When the model's own folder carries no signal, the folder directly above
+    it is asked the same support-status question (STUDIO-441): a creator who
+    ships ``Supported/Motoko`` and ``Unsupported/Motoko`` puts the variant
+    word one level up, and the scanner no longer folds that word into the
+    model's identity to keep the two destinations apart — so the suffix is
+    where it has to surface. One level only: a support word further up
+    describes a whole release, not this model."""
+    parts = [p.strip() for p in _canon(source_dir).rsplit("/", 2)]
+    leaf = parts[-1]
     if not leaf:
         return None
     if _SOURCE_SUFFIX_RE.fullmatch(leaf):
         suffix = sanitize_segment(leaf, slugify=True).value
         return suffix or None
     status = name_parser.support_status(leaf)
+    if not status and len(parts) >= 2:
+        status = name_parser.support_status(parts[-2])
     if status:
         return sanitize_segment(status, slugify=True).value or None
     return None
