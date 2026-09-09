@@ -152,6 +152,11 @@ class ScanStatus(BaseModel):
     # assume a complete walk were skipped. Sample is capped server-side.
     read_failures: int = 0
     read_failure_samples: list[str] = []
+    # Models this run newly flagged for review (STUDIO-438) — NOT the size of the
+    # Triage queue, which is durable and therefore carry-over plus new. This is
+    # the number STUDIO-437's whole-library integrity check is stated against: a
+    # second scan over a fully-indexed library must report 0.
+    flagged_for_review: int = 0
 
 
 class CollectionBase(BaseModel):

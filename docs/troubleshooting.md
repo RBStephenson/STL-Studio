@@ -172,10 +172,42 @@ once the scan can read everything.
 
 ## Models are flagged "needs review"
 
-That's the scanner saying "I wasn't sure this folder is a real model." Work
-through them in the [Triage queue](features.md#triage-queue) — dismiss the ones
-that are fine, skip the ones you're unsure about. The flag clears automatically
-for models that have STL files once they're confirmed.
+That's the scanner saying "I couldn't work out what to call this." A model is
+flagged when its final name still carries no identity of its own — a bare
+`Bases`, `STL` or `RPG Bases` — after every naming rule has had a go at it. In
+practice that means a folder whose name is all structural words, sitting
+somewhere that gave the scanner nothing better to name it after.
+
+It is **not** a judgement about whether the folder is a real model, and a
+well-organised library flags very few. A product folder whose meshes live in a
+`STL` or `Supported STL` subfolder is a perfectly normal layout and is never
+flagged.
+
+Work through them in the [Triage queue](features.md#triage-queue) — dismiss the
+ones that are fine, or give the folder a more descriptive name on disk and
+rescan.
+
+**The queue is durable.** Anything you haven't reviewed stays in it across
+rescans, so you can leave it and come back. Dismissing an item is permanent: a
+model is only ever flagged when it is first indexed, never again.
+
+### Checking the scanner found everything
+
+Because a model is only flagged on first index, the scan status field
+`flagged_for_review` — the number flagged *during that run*, shown in the
+completion summary — doubles as a whole-library integrity check:
+
+> Wipe the model data, scan, then scan again. The second scan's
+> `flagged_for_review` must be **0**.
+
+Anything else means the first scan failed to index some creators, so their
+models were still new on the second pass. This is the cheapest check available
+that the scan is complete: it needs no logs and no database access, just the
+number the scan already reports when it finishes.
+
+Note it is the *newly flagged* count that must be zero, not the size of the
+Triage queue — the queue persists across scans by design, so its total is
+whatever you haven't reviewed yet plus anything new.
 
 ## The scan seems stuck or slow
 
