@@ -1052,6 +1052,12 @@ export interface ScanStatus {
   read_failures?: number;
   /** Capped sample of unreadable paths, for diagnostics. */
   read_failure_samples?: string[];
+  /**
+   * Models this run newly flagged for review — not the size of the Triage queue,
+   * which persists across scans. A second scan over a fully-indexed library
+   * reports 0 here (STUDIO-438).
+   */
+  flagged_for_review?: number;
 }
 
 export interface Collection {

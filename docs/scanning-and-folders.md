@@ -232,11 +232,20 @@ next scan. See [Scan rules](features.md#scan-rules) for the full description:
 
 ## needs_review
 
-When the scanner finds a folder it isn't confident about — no name signals and no
-STL files directly inside it (only found recursively) — it flags the model
-`needs_review` so you can confirm or fix it in the
-[Triage queue](features.md#triage-queue). Models that clearly have STL files are
-never flagged, and the flag is cleared automatically once a model is confirmed.
+When a newly-indexed model ends up with a name that carries no identity of its
+own — a bare `Bases`, `STL` or `RPG Bases` — the scanner flags it `needs_review`
+so you can confirm or fix it in the [Triage queue](features.md#triage-queue).
+
+The question is asked *after* every naming rule above has run, so it only fires
+on the folders that all of them failed to name. A product folder whose meshes sit
+in a `STL` or `Supported STL` subfolder is an ordinary layout and is never
+flagged; on a well-organised library the queue is close to empty.
+
+The queue is durable. A model is flagged only when it is **first indexed**, which
+means an item you haven't reviewed survives every rescan, and one you dismiss
+never comes back. The number flagged during a given run is reported separately in
+the scan status as `flagged_for_review` — see
+[checking the scanner found everything](troubleshooting.md#checking-the-scanner-found-everything).
 
 ## Full scan vs. per-creator rescan
 

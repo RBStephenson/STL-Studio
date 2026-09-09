@@ -20,7 +20,9 @@ Leaf detection priority:
   3. Folder contains STLs and has no children with STLs (deepest fallback)
 
 Auto-tags are generated from detected scale, type, and modifier tokens.
-needs_review=True is set when confidence is low.
+needs_review=True is set on a brand-new model whose final derived name carries no
+product identity of its own ("Bases", "STL") — i.e. one that every naming fixup
+had a go at and none could name. It is NOT a confidence threshold (STUDIO-438).
 
 Transaction and failure policy (STUDIO-233)
 -------------------------------------------
@@ -46,17 +48,16 @@ Session ownership
     (STUDIO-396).
 
 Commit boundaries, by phase
-  * full scan      one commit after the pre-scan needs_review clear, then one
-                   per scan root after its walk; inside each root's regroup
-                   pass, one commit PER CREATOR (STUDIO-396) and a final one
-                   covering prune_empty_groups; prunes commit individually.
-  * creator rescan one after the needs_review clear, then one per model from
-                   _index_model as the walk proceeds -- each model's STL rows
-                   are RECONCILED inside that model's own commit: rows whose
-                   file is gone are dropped, rows that still exist are left
-                   alone with their user-owned metadata intact (STUDIO-397 put
-                   this per model; STUDIO-398 made it a reconcile rather than a
-                   wipe) -- then one for the missing-folder sweep, and one at
+  * full scan      one commit per scan root after its walk; inside each root's
+                   regroup pass, one commit PER CREATOR (STUDIO-396) and a final
+                   one covering prune_empty_groups; prunes commit individually.
+  * creator rescan one per model from _index_model as the walk proceeds -- each
+                   model's STL rows are RECONCILED inside that model's own
+                   commit: rows whose file is gone are dropped, rows that still
+                   exist are left alone with their user-owned metadata intact
+                   (STUDIO-397 put this per model; STUDIO-398 made it a
+                   reconcile rather than a wipe) -- then one for the
+                   missing-folder sweep, and one at
                    the end covering the phantom prune and regrouping.
   * inbox          after creator resolution, after grouping, and after the
                    single-pack stale-path prune.
@@ -112,7 +113,7 @@ from datetime import datetime
 from pathlib import Path
 from sqlalchemy.orm import Session
 
-from sqlalchemy import text as _sqltext, func, or_
+from sqlalchemy import func, or_
 
 from app.database import SessionLocal
 from app.models import Creator, Model, STLFile, ScanRoot, ModelTag, CollectionModel, PackOverride
@@ -288,6 +289,14 @@ def get_status() -> dict:
         # total — and the prunes that depend on a complete walk were skipped.
         "read_failures": prog.get("read_failures", 0),
         "read_failure_samples": prog.get("read_failure_samples", []),
+        # Models this run flagged for review (STUDIO-438). Deliberately "newly
+        # flagged during THIS scan", not the size of the Triage queue: the queue
+        # is durable now, so its total is carry-over plus new and says nothing
+        # about the run. This is the number STUDIO-437's whole-library integrity
+        # check is stated against — wipe, scan, scan again, and the second scan's
+        # flagged_for_review must be 0, because the flag only fires on models that
+        # are new to the database.
+        "flagged_for_review": prog.get("flagged_for_review", 0),
     }
 
 
@@ -348,26 +357,29 @@ def _full_scan(job: JobHandle, db: Session | None = None):
     global _active
     _active = job
     job.update(message="starting", models_found=0, files_found=0, cancelled=False, offline_roots=[],
-               read_failures=0, read_failure_samples=[])
+               read_failures=0, read_failure_samples=[], flagged_for_review=0)
     try:
         _db = db or SessionLocal()
         own_db = db is None
         try:
             rules = ScanRules.load(_db)
 
-            # Clear needs_review for any model that already has indexed STL files —
-            # those are confirmed real products that were over-eagerly flagged.
-            result = _db.execute(_sqltext(
-                """
-                UPDATE models SET needs_review = 0
-                WHERE needs_review = 1
-                  AND id IN (SELECT DISTINCT model_id FROM stl_files)
-                """
-            ))
-            cleared = result.rowcount
-            _db.commit()
-            if cleared:
-                logger.info(f"Pre-scan: cleared needs_review on {cleared} previously-indexed models")
+            # There is deliberately NO pre-scan needs_review clear here anymore
+            # (STUDIO-438). It used to blank the flag on every already-indexed
+            # model at scan start, and its own comment admitted why: it existed to
+            # stop the old flagging rule re-raising the same false positives every
+            # run. It was a workaround for a broken rule, not a feature — and it
+            # made the queue useless as a work list, because anything a human had
+            # not got to yet vanished on the next scan. Measured on the live
+            # library 2026-09-09: 644 flagged on the first scan, `Pre-scan:
+            # cleared needs_review on 644 previously-indexed models` in the log,
+            # and 0 of 3474 still flagged afterwards. Erased, not reviewed.
+            #
+            # Nothing replaces it, and nothing needs to: the flag is only ever set
+            # for `is_new` models (see _index_model), and `is_new` is
+            # `model is None` after a folder_path lookup — so an existing model is
+            # never re-flagged, an unreviewed one survives every rescan, and a
+            # dismissed one stays dismissed. No new column required.
 
             # Captured BEFORE any root is walked and used as the new last_scanned
             # baseline (not each root's post-walk timestamp): a file changed
@@ -445,6 +457,9 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 )
                 if removed:
                     summary += f", {removed} removed"
+                flagged = prog.get("flagged_for_review", 0)
+                if flagged:
+                    summary += f", {flagged} flagged for review"
                 # A run that lost creator walks is NOT an unqualified success: those
                 # creators are partially indexed or empty, so the model count is a
                 # floor. Saying only "done" is what made STUDIO-437 look like a small
@@ -959,7 +974,7 @@ def _creator_scan(job: JobHandle, creator_id: int):
     global _active
     _active = job
     job.update(message="starting", models_found=0, files_found=0, cancelled=False,
-               read_failures=0, read_failure_samples=[])
+               read_failures=0, read_failure_samples=[], flagged_for_review=0)
     try:
         db = SessionLocal()
         try:
@@ -970,15 +985,9 @@ def _creator_scan(job: JobHandle, creator_id: int):
 
             rules = ScanRules.load(db)
 
-            # Clear stale needs_review on this creator's already-indexed models.
-            db.execute(_sqltext(
-                """
-                UPDATE models SET needs_review = 0
-                WHERE needs_review = 1 AND creator_id = :cid
-                  AND id IN (SELECT DISTINCT model_id FROM stl_files)
-                """
-            ), {"cid": creator_id})
-            db.commit()
+            # No needs_review clear here either — same reasoning as the full scan
+            # (STUDIO-438). A creator rescan must not empty the review queue for
+            # that creator; an unreviewed item survives it.
 
             dirs = _creator_dirs_for(creator, db)
             if not dirs:
@@ -1048,6 +1057,9 @@ def _creator_scan(job: JobHandle, creator_id: int):
                 )
                 if removed:
                     summary += f", {removed} removed"
+                flagged = prog.get("flagged_for_review", 0)
+                if flagged:
+                    summary += f", {flagged} flagged for review"
                 job.update(state=JobState.DONE, message=summary)
         finally:
             db.close()
@@ -2085,6 +2097,29 @@ def _index_model(
             # honour it — do not reintroduce shape-based inference. (STUDIO-290)
             model.name = clean_name
 
+        # Triage (STUDIO-438). Flag a brand-new model whose FINAL derived name
+        # carries no product identity of its own — "Bases", "STL", "RPG Bases".
+        # Asked here, after the structural-leaf rename and the generic-name
+        # qualifier above (STUDIO-287/289) have each had their chance: those fix
+        # the overwhelming majority, and what survives them is precisely the set
+        # nothing in the pipeline could name. That is the question Triage exists
+        # to ask.
+        #
+        # This deliberately does NOT consult auto_signals.confidence, which the
+        # previous rule compared against 0.25. Measured on a 3474-model library
+        # (2026-09-09): that rule flagged 644 models with a true-positive rate of
+        # ZERO — every one was the pre-supported-pack layout
+        # (<Character>/STL, <Character>/Supported LYS), which is the ideal shape,
+        # not an ambiguous one. Worse, confidence is orthogonal to the defect
+        # rather than merely quantised: the genuinely unnameable models score
+        # 0.2, 0.65, 0.7, 0.9 and 1.0, because a container or accessory folder's
+        # name is RICH in the scale/parts vocabulary the parser rewards
+        # ("STL" scores 0.7 for being a recognised parts name). A low-confidence
+        # threshold cannot ever select them. Do not reintroduce one.
+        if is_new and name_parser.is_generic_name(clean_name, parser_rules):
+            model.needs_review = True
+            _bump(flagged_for_review=1)
+
         # Scanner-owned structured variant attributes (support/cut/slicer/version).
         # Kept separate from user-set custom_attributes so a rescan never clobbers
         # user edits. Recomputed every scan so parser improvements propagate.
@@ -2102,15 +2137,6 @@ def _index_model(
         # passes auto_signals, so this also covers the layout-tags-only case.
         if auto_signals:
             model.auto_tags = _merge_auto_tags(auto_signals.auto_tags, layout_tags)
-            # Only flag needs_review for brand-new models that look genuinely
-            # ambiguous: no name/type signals AND no direct STL files in this
-            # folder (only found recursively). Existing models are cleared at
-            # scan start if they have STL files, so we avoid re-flagging the
-            # same false positives on every rescan.
-            if is_new and auto_signals.confidence < 0.25:
-                has_direct_stls = _has_stls(folder, recurse=False)
-                if not has_direct_stls:
-                    model.needs_review = True
 
         if not folder_unchanged:
             gallery_boundary = (

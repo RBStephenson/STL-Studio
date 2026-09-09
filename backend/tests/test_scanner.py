@@ -3012,7 +3012,7 @@ class TestScanCompletionSummary:
 
         assert scanner._prune_phantoms(db) == 0
 
-    def _run_with_stubs(self, db, tmp_path, monkeypatch, *, models, files, removed):
+    def _run_with_stubs(self, db, tmp_path, monkeypatch, *, models, files, removed, flagged=0):
         """Run scan_all_roots with the root walk and prunes stubbed out, so we can
         assert the completion-summary message without touching the real DB engine
         the worker threads would otherwise use."""
@@ -3023,7 +3023,8 @@ class TestScanCompletionSummary:
         def fake_scan_root(root, _db, _rules):
             # Counters live on the active job handle now; _bump adds to the
             # zero-initialised progress the scan set at start.
-            scanner._bump(models_found=models, files_found=files)
+            scanner._bump(models_found=models, files_found=files,
+                          flagged_for_review=flagged)
             return set()
 
         monkeypatch.setattr(scanner, "_scan_root", fake_scan_root)
@@ -3044,6 +3045,18 @@ class TestScanCompletionSummary:
     def test_summary_omits_removed_when_zero(self, db, tmp_path, monkeypatch):
         status = self._run_with_stubs(db, tmp_path, monkeypatch, models=4, files=9, removed=0)
         assert status["message"] == "done — 4 models, 9 files"
+
+    def test_summary_and_status_report_newly_flagged(self, db, tmp_path, monkeypatch):
+        status = self._run_with_stubs(db, tmp_path, monkeypatch, models=6, files=20,
+                                      removed=0, flagged=3)
+        assert status["message"] == "done — 6 models, 20 files, 3 flagged for review"
+        assert status["flagged_for_review"] == 3
+
+    def test_summary_omits_flagged_when_zero(self, db, tmp_path, monkeypatch):
+        status = self._run_with_stubs(db, tmp_path, monkeypatch, models=6, files=20,
+                                      removed=0, flagged=0)
+        assert status["message"] == "done — 6 models, 20 files"
+        assert status["flagged_for_review"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -3355,6 +3368,178 @@ class TestGenericNameQualification:
         assert "Gridrunner" in names
         assert "Grim Realms" in names
         assert not any(n.startswith("October 2024") for n in names)
+
+
+class TestTriageFlag:
+    """STUDIO-438: needs_review asks one question — did this model end up with a
+    usable name? It is asked of the FINAL name, after the structural-leaf rename
+    and the generic-name qualifier above have each had their chance.
+
+    The rule it replaces compared ``auto_signals.confidence`` against 0.25 and
+    additionally required no direct STLs. Measured on a 3474-model library
+    (2026-09-09) that flagged 644 models at a true-positive rate of zero — every
+    one of them the ordinary pre-supported-pack layout, which
+    ``test_presupported_pack_layout_is_not_flagged`` now pins as the normal case
+    it must never fire on.
+    """
+
+    def _model_named(self, db, creator, name):
+        return next(m for m in _models(db, creator) if m.name == name)
+
+    def test_unnameable_leaf_is_flagged(self, db, tmp_path):
+        # {creator}/RPG Bases/RPG Bases Supported — every token is a parts word at
+        # both levels, so the structural-leaf rename falls back to the release and
+        # the qualifier has nothing non-generic to qualify with. Nothing in the
+        # pipeline can name it; that is exactly the review case.
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "RPG Bases" / "RPG Bases Supported", name="b.stl")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        model = self._model_named(db, creator, "RPG Bases")
+        assert model.needs_review is True
+
+    def test_presupported_pack_layout_is_not_flagged(self, db, tmp_path):
+        """The 644-false-positive shape. A plainly-named product whose meshes sit
+        in a parts subfolder is the IDEAL layout, and must never reach Triage.
+
+        This fails on the pre-STUDIO-438 rule: "Absolute Batman" carries no
+        scale/type/modifier token (confidence 0.2) and holds no direct STLs, which
+        satisfied both of the old conditions.
+        """
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "Absolute Batman" / "STL", name="b.stl")
+        _stl(creator_dir / "Absolute Batman" / "Supported STL", name="c.stl")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+
+        model = self._model_named(db, creator, "Absolute Batman")
+        assert model.needs_review is False
+
+    def test_dismissed_model_is_not_reflagged_by_a_rescan(self, db, tmp_path):
+        """A user-dismissed item stays dismissed. Guaranteed by the `is_new` gate
+        rather than by a second column: an existing row is never re-flagged."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "RPG Bases" / "RPG Bases Supported", name="b.stl")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)
+        model = self._model_named(db, creator, "RPG Bases")
+        assert model.needs_review is True
+
+        model.needs_review = False   # the user dismisses it in Triage
+        db.commit()
+
+        _walk(db, creator, creator_dir)
+
+        assert self._model_named(db, creator, "RPG Bases").needs_review is False
+
+    def test_unreviewed_flag_survives_a_full_scan(self, db, tmp_path, monkeypatch):
+        """The durable-queue half of STUDIO-438.
+
+        Fails on the pre-fix code, where _full_scan opened with an unconditional
+        `UPDATE models SET needs_review = 0 ... WHERE id IN (SELECT model_id FROM
+        stl_files)` — so anything a human had not reviewed before the next scan
+        was silently gone.
+        """
+        from app.models import ScanRoot
+        from tests.conftest import make_model, make_stl_file
+
+        creator = make_creator(db, "Creator")
+        model = make_model(db, creator, name="RPG Bases")
+        model.needs_review = True
+        make_stl_file(db, model)          # the clear only ever hit models WITH stl rows
+        db.add(ScanRoot(path=str(tmp_path), enabled=True))
+        db.commit()
+        model_id = model.id
+
+        monkeypatch.setattr(scanner, "_scan_root", lambda *a, **k: set())
+        monkeypatch.setattr(scanner, "_prune_stale_models", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_stale_paths", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "_prune_slicer_files", lambda *a, **k: None)
+        monkeypatch.setattr(scanner, "_prune_phantoms", lambda *a, **k: 0)
+        monkeypatch.setattr(scanner, "prune_empty_creators", lambda *a, **k: None)
+
+        scanner.scan_all_roots(db)
+
+        db.expire_all()
+        assert db.get(Model, model_id).needs_review is True
+
+    def test_walk_counts_what_it_newly_flagged(self, db, tmp_path):
+        """The count STUDIO-437's integrity check is restated against."""
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "RPG Bases" / "RPG Bases Supported", name="b.stl")
+        _stl(creator_dir / "Absolute Batman" / "STL", name="c.stl")
+        creator = make_creator(db, "Creator")
+
+        job = JobHandle(key="triage-count", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._active = job
+        try:
+            _walk(db, creator, creator_dir)
+        finally:
+            scanner._active = None
+
+        # One unnameable leaf, one perfectly ordinary pack — exactly one flag.
+        assert job.payload()["progress"]["flagged_for_review"] == 1
+
+    def test_a_second_scan_over_an_indexed_library_flags_nothing(self, db, tmp_path):
+        """STUDIO-437's whole-library integrity check, restated.
+
+        It used to be "the second scan's Triage COUNT must be 0", which worked
+        only because the queue erased itself. With a durable queue that total is
+        carry-over plus new, so the check is now stated against the number newly
+        flagged this run — which stays 0 for the same underlying reason (the flag
+        only fires on models new to the database).
+        """
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "RPG Bases" / "RPG Bases Supported", name="b.stl")
+        creator = make_creator(db, "Creator")
+
+        _walk(db, creator, creator_dir)   # first pass indexes it
+
+        job = JobHandle(key="triage-second", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._active = job
+        try:
+            _walk(db, creator, creator_dir)
+        finally:
+            scanner._active = None
+
+        assert job.payload()["progress"].get("flagged_for_review", 0) == 0
+        # ...and the item flagged by the first pass is still in the queue.
+        assert self._model_named(db, creator, "RPG Bases").needs_review is True
+
+    def test_creator_rescan_flags_and_reports_it(self, db, tmp_path, monkeypatch):
+        """The per-creator rescan is a second entry point into the same rule, with
+        its own completion summary — covered separately because it used to carry
+        its own needs_review clear too."""
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(bind=db.get_bind())
+        monkeypatch.setattr(scanner, "SessionLocal", Session)
+        monkeypatch.setattr(scanner.ScanRules, "load", classmethod(lambda cls, _db: cls()))
+        monkeypatch.setattr(scanner.write_lock, "release_scan", lambda: None)
+        monkeypatch.setattr(scanner.grouping, "regroup_creator", lambda _db, _cid: None)
+        monkeypatch.setattr(scanner.grouping, "prune_empty_groups", lambda _db: 0)
+
+        creator_dir = tmp_path / "Creator"
+        _stl(creator_dir / "RPG Bases" / "RPG Bases Supported", name="b.stl")
+        creator = make_creator(db, "Creator")
+        db.commit()
+        monkeypatch.setattr(
+            scanner, "_creator_dirs_for", lambda _c, _db: [(creator_dir, [], False)]
+        )
+
+        job = JobHandle(key="rescan-triage", _lock=threading.Lock(), state=JobState.RUNNING)
+        scanner._creator_scan(job, creator.id)
+
+        payload = job.payload()
+        assert payload["state"] == "done"
+        assert "1 flagged for review" in payload["message"]
+
+        db.expire_all()
+        assert self._model_named(db, creator, "RPG Bases").needs_review is True
 
 
 class TestCaseInsensitiveIdentity:
@@ -5219,10 +5404,11 @@ class TestScannerTransactionSemantics:
         writes: list[str] = []
 
         # Match writes that TARGET stl_files, not any statement that merely
-        # mentions it: the pre-scan needs_review clear is an UPDATE on `models`
-        # whose subquery reads stl_files, and a looser substring check counts it
-        # as a write. It is the only false positive here, and it is the reason
-        # this matches on the statement's opening clause instead.
+        # mentions it. The known false positive used to be the pre-scan
+        # needs_review clear — an UPDATE on `models` whose subquery read
+        # stl_files — which STUDIO-438 removed. Matching on the statement's
+        # opening clause is kept regardless: it is the correct way to ask this
+        # question, and it keeps the test honest if such a statement returns.
         targets = ("insert into stl_files", "delete from stl_files", "update stl_files")
 
         def _record(conn, cursor, statement, params, context, executemany):

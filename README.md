@@ -202,7 +202,7 @@ The **Paint Shelf** is always available in the nav. Enabling **Settings → Pain
 - **Parallel** — scans up to 4 creator directories concurrently for faster indexing on large libraries
 - Incremental — skips unchanged folders (mtime check), caches STL file walks
 - Cancel button; Library auto-refreshes on completion
-- On each rescan, `needs_review` is cleared for any model that already has indexed STL files (reduces false-positive review queue)
+- The `needs_review` queue is durable across rescans — a model is flagged only when first indexed, so unreviewed items persist and dismissed ones never return; the per-run count is reported as `flagged_for_review`
 - Tag index kept in sync via normalized `model_tags` table for fast filtering
 
 ### In-app Help

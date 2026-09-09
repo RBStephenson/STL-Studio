@@ -441,15 +441,21 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          A keyboard-driven review screen for models the scanner flagged as uncertain
-          (<code>needs_review</code>). Work through them quickly:
+          A keyboard-driven review screen for models the scanner couldn't name
+          (<code>needs_review</code>) — ones left with a bare structural name like
+          "Bases" or "STL" after every naming rule has been applied. Work through
+          them quickly:
         </p>
         <ul className="not-prose flex flex-col gap-1.5">
           <li className="flex items-center gap-2"><Kbd>→ / Space</Kbd> dismiss (looks fine)</li>
           <li className="flex items-center gap-2"><Kbd>S</Kbd> skip</li>
           <li className="flex items-center gap-2"><Kbd>←</Kbd> go back</li>
         </ul>
-        <p>The nav shows a live count of how many models still need review.</p>
+        <p>
+          The nav shows a live count of how many models still need review. The queue
+          is durable — models are flagged only when first indexed, so anything you
+          haven't reviewed stays put across rescans, and dismissing is permanent.
+        </p>
       </>
     ),
   },

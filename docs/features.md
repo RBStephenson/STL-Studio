@@ -496,14 +496,21 @@ applies the same field set, including gallery images under the same rule.
 
 ## Triage queue
 
-A keyboard-driven review screen at **/triage** for models the scanner flagged as
-uncertain (`needs_review`). Work through them quickly:
+A keyboard-driven review screen at **/triage** for models the scanner couldn't
+name (`needs_review`) — ones whose final name is still a bare structural word
+like `Bases` or `STL` after every naming rule has been applied. Work through them
+quickly:
 
 - `→` / **Space** = dismiss (looks fine)
 - `S` = skip
 - `←` = go back
 
 The nav shows a live count of how many models still need review.
+
+The queue is durable: models are flagged only when first indexed, so anything you
+haven't got to stays put across rescans, and dismissing something is permanent.
+A tidy library flags very few — see
+[models are flagged "needs review"](troubleshooting.md#models-are-flagged-needs-review).
 
 ## Collections
 
