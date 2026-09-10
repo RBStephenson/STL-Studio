@@ -264,6 +264,130 @@ class TestParseFolder:
 
 
 # ---------------------------------------------------------------------------
+# STUDIO-434 — part-numbered filenames are not scale ratios
+# ---------------------------------------------------------------------------
+
+class TestPartNumberedFilenames:
+    """A ratio-shaped token in a FILE name is usually a part index.
+
+    Measured on the live library: 1:2 and 1:3 were 100% filename-sourced and
+    1:1 was 54 of 55. The rule lives on parse_folder's filename path only.
+    """
+
+    def test_numerator_run_is_not_a_scale(self):
+        """The ticket's own acceptance case: "part 1 of 2" beside "part 2 of 2"."""
+        sig = parse_folder(
+            "/creator/Trapjaw/Repaired",
+            filenames=["base_1-2.stl", "base_2-2.stl"],
+        )
+        assert sig.scales == []
+
+    def test_letter_glued_run_is_not_a_scale(self):
+        """The library's dominant shape: the "1" glued on, denominator running."""
+        sig = parse_folder(
+            "/creator/Alucard",
+            filenames=["base_cut1-1.stl", "base_cut1-2.stl", "base_cut1-3.stl"],
+        )
+        assert sig.scales == []
+
+    def test_folder_scale_survives_part_numbered_filenames(self):
+        """A real folder-name scale is untouched by junk in its own filenames."""
+        sig = parse_folder(
+            "/creator/Alita/1_4scale Alita Battle Angel",
+            filenames=["base1-1.stl", "base1-2.stl", "wing_left1-1.stl"],
+        )
+        assert sig.scales == ["1:4"]
+
+    def test_leading_ratio_token_in_filename_is_a_scale(self):
+        """The genuine filename-only scale: one part offered at two scales."""
+        sig = parse_folder(
+            "/creator/Gamora/Left Arm fix",
+            filenames=["1_4 Left_Arm.stl", "1_6 Left_Arm.stl"],
+        )
+        assert "1:4" in sig.scales
+        assert "1:6" in sig.scales
+
+    def test_part_index_landing_on_a_plausible_scale_is_still_rejected(self):
+        """One motorcycle cut into ~24 parts hits nearly every statue scale.
+
+        This is why a denominator floor cannot be the rule on its own — every
+        one of these denominators is otherwise a legitimate print scale.
+        """
+        sig = parse_folder(
+            "/creator/Kaneda/motorcycle",
+            filenames=["bike1-4.stl", "bike1-6.stl", "bike1-12.stl", "bike1-24.stl"],
+        )
+        assert sig.scales == []
+
+    def test_zero_padded_part_index_is_not_a_scale(self):
+        """_SCALE_RATIO captures "02", so "divider_1_02Lyrs" tagged a model 1:02.
+
+        The tag does not even collapse into 1:2 — the live library carried both
+        as separate auto-tags. Here the numbers are an item index and a layer
+        count, and the siblings numbered 2 and 3 are what condemns the folder.
+        """
+        sig = parse_folder(
+            "/creator/Modi Boxi/M_Pro_DIY_divider_02Lyrs",
+            filenames=[
+                "M_DIY_divider_1_02Lyrs.stl",
+                "M_DIY_divider_2_02Lyrs.stl",
+                "M_DIY_divider_3_02Lyrs.stl",
+            ],
+        )
+        assert sig.scales == []
+
+    def test_mid_name_ratio_kept_when_folder_does_not_part_number(self):
+        """No part-numbering evidence and a real denominator: keep it."""
+        sig = parse_folder(
+            "/creator/Bane",
+            filenames=["BANE_FULLBASE_1-6.stl"],
+        )
+        assert sig.scales == ["1:6"]
+
+    def test_part_numbering_verdict_covers_the_whole_folder(self):
+        """One prefix's run condemns a differently-prefixed sibling too.
+
+        `cape_cut_1-1` shares no prefix with `base_cut1-2`, but it is the same
+        creator convention. A per-file rule misses it; the verdict is folder-wide.
+        """
+        sig = parse_folder(
+            "/creator/Alucard/1_6scale Alucard CA3D",
+            filenames=["base_cut1-1.stl", "base_cut1-2.stl", "cape_cut_1-1.stl"],
+        )
+        assert sig.scales == ["1:6"]
+
+    def test_rejected_ratio_leaves_no_phantom_statue_type(self):
+        """Filtering must happen at collection, not by stripping the tag after.
+
+        _parse_text infers "statue" from _STATUE_SCALES *after* gathering scales,
+        so a late strip would drop the 1:4 and leave a "statue" type behind —
+        product signal derived from a part index, with the tag no longer visible
+        to show where it came from.
+        """
+        sig = parse_folder(
+            "/creator/Kaneda/motorcycle",
+            filenames=["bike1-4.stl", "bike1-6.stl"],
+        )
+        assert "statue" not in sig.types
+        assert not sig.is_product
+
+    def test_parse_is_not_narrowed_by_the_filename_rule(self):
+        """Disjointness: the shared regex must be untouched.
+
+        _SCALE_RATIO also drives _strip_signal_tokens, which feeds character_key.
+        A letter-glued FOLDER name is a genuine scale five times out of six in the
+        live library, so the rule must not reach parse().
+        """
+        assert parse("Warrior 1-6").scales == ["1:6"]
+        assert parse("Base1-6 Scale CA3D").scales == ["1:6"]
+        assert parse("Scale1-6_Blonde_Blazer_CA3D").scales == ["1:6"]
+
+    def test_folder_name_ratio_still_reaches_a_folder_with_no_files(self):
+        sig = parse_folder("/creator/1-6 scale Ares", filenames=[])
+        assert sig.scales == ["1:6"]
+
+
+# ---------------------------------------------------------------------------
 # extract_character_name
 # ---------------------------------------------------------------------------
 

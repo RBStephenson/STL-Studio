@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 @dataclass
@@ -75,6 +75,32 @@ _STATUE_SCALES = {"1:4", "1:5", "1:6", "1:8", "1:9", "1:10", "1:12"}
 
 # Normalise "1_12scale" / "1:6Scale" → "1_12 scale" before ratio regex runs
 _SCALE_GLUED = re.compile(r"((?<!\d)1[-/:\s_]\d{1,2})(scale)\b", re.I)
+
+# STUDIO-434: a ratio-shaped token inside a FILE name is usually a part index,
+# not a scale. Creators number cut parts two ways — "base_cut1-1/1-2/1-3" (the
+# "1" glued to the word, denominator incrementing) and "base_1-2"/"base_2-2"
+# (numerator incrementing) — and both land in _SCALE_RATIO. Measured on the live
+# library: 1:2 and 1:3 were 100% filename-sourced, 1:1 was 54 of 55, and a
+# zero-padded family (1:00–1:05, 44 models) existed only there.
+#
+# This is deliberately NOT a change to _SCALE_RATIO itself. Six folder-sourced
+# ratios are letter-glued and five of those are genuine ("Base1-6 Scale CA3D"),
+# and _SCALE_RATIO also drives _strip_signal_tokens, which feeds character_key —
+# narrowing the shared pattern would move grouping for reasons unrelated to this
+# bug. The rule is applied ONLY on parse_folder's filename path.
+
+# A ratio-shaped token whose numerator is not 1 ("base_2-2"): positive evidence
+# that the folder numbers its parts rather than naming a scale.
+_PART_INDEX_SIBLING = re.compile(r"(?<!\d)([2-9]|[1-9]\d)[-/:\s_]\d{1,2}(?!\d)")
+
+# Denominators that name a real print scale. Consulted only for a mid-name
+# filename ratio in a folder showing no part-numbering, because part indices land
+# on these by accident: one motorcycle cut into ~24 parts yields bike1-4, bike1-6,
+# bike1-10, bike1-12, bike1-16, bike1-20 and bike1-24, every one of them a
+# plausible-looking statue or kit scale.
+_FILENAME_SCALE_DENOMINATORS = _STATUE_SCALES | {
+    "1:16", "1:18", "1:20", "1:24", "1:32", "1:35", "1:48", "1:72",
+}
 
 # ---------------------------------------------------------------------------
 # Type keywords
@@ -194,9 +220,10 @@ def parse_folder(
 
     # Merge signals from file names
     if filenames:
-        for fname in filenames:
-            stem = Path(fname).stem
-            child = _parse_text(stem, rules)
+        stems = [Path(fname).stem for fname in filenames]
+        ratio_ok = _filename_ratio_filter(stems)
+        for stem in stems:
+            child = _parse_text(stem, rules, ratio_ok=ratio_ok)
             _merge_into(primary, child)
 
     # Merge signals from parent folders (lower priority — don't override
@@ -1054,7 +1081,60 @@ def is_type_worded_name(name: str, rules: ParserRules | None = None) -> bool:
 # Internals
 # ---------------------------------------------------------------------------
 
-def _parse_text(text: str, rules: ParserRules) -> NameSignals:
+def _filename_ratio_filter(stems: list[str]) -> Callable[[re.Match], bool]:
+    """Decide, for one folder's files, which ratio matches are really scales.
+
+    STUDIO-434. Three clauses, each measured against the live library:
+
+      1. The leading token of a filename is a scale. That is what a genuine
+         filename-only scale looks like — "1_4 Left_Arm" beside "1_6 Left_Arm",
+         the same part offered at two scales.
+      2. Otherwise, if this folder numbers its parts anywhere — a ratio glued to
+         a word ("base_cut1-2"), or a sibling carrying a numerator other than 1
+         ("base_2-2") — then no mid-name ratio in it is a scale.
+      3. Otherwise keep it only if the denominator names a real print scale.
+         Plausibility is consulted last and only here, once clause 2 has removed
+         the folders in which part indices masquerade as plausible scales.
+
+    The verdict is computed once per folder, so a run like base_cut1-1/1-2/1-3
+    condemns the whole folder rather than being re-derived per file.
+    """
+    part_numbered = False
+    for stem in stems:
+        normalised = _SCALE_GLUED.sub(r"\1 \2", stem)
+        if _PART_INDEX_SIBLING.search(normalised):
+            part_numbered = True
+            break
+        if any(
+            m.start() > 0 and normalised[m.start() - 1].isalpha()
+            for m in _SCALE_RATIO.finditer(normalised)
+        ):
+            part_numbered = True
+            break
+
+    def _ratio_is_scale(match: re.Match) -> bool:
+        if match.start() == 0:
+            return True
+        if part_numbered:
+            return False
+        return f"1:{match.group(1)}" in _FILENAME_SCALE_DENOMINATORS
+
+    return _ratio_is_scale
+
+
+def _parse_text(
+    text: str,
+    rules: ParserRules,
+    ratio_ok: Callable[[re.Match], bool] | None = None,
+) -> NameSignals:
+    """Analyse one name string.
+
+    ``ratio_ok`` filters _SCALE_RATIO matches at collection time and is supplied
+    only by parse_folder's filename path (STUDIO-434). It must run here rather
+    than stripping the tag afterwards: the statue inference below reads
+    sig.scales, so a rejected "1:4" that was filtered late would still leave a
+    phantom "statue" type behind — product signal the caller would then act on.
+    """
     sig = NameSignals()
     lower = text.lower().strip()
 
@@ -1063,6 +1143,8 @@ def _parse_text(text: str, rules: ParserRules) -> NameSignals:
     text = _SCALE_GLUED.sub(r"\1 \2", text)
 
     for m in _SCALE_RATIO.finditer(text):
+        if ratio_ok is not None and not ratio_ok(m):
+            continue
         tag = f"1:{m.group(1)}"
         if tag not in sig.scales:
             sig.scales.append(tag)

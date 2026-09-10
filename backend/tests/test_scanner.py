@@ -1722,17 +1722,23 @@ class TestVariantGrouping:
         """
         creator_dir = tmp_path / "ZEZ Studios"
         char = creator_dir / "Trapjaw"
-        # Transcribed rather than reduced to one dummy STL each, because the file
-        # list is load-bearing twice over. `base_1-2_0.stl` is a two-part base,
-        # but `_SCALE_RATIO` reads "1-2" as a 1:2 scale, so `parse_folder` calls
-        # the Repaired folder a product and it becomes a boundary child with a
-        # model of its own — which is the only reason there is a stray character
-        # here to fix. A one-file stand-in makes the folder vanish into its parent
-        # and the test then passes against any code at all.
+        # The file list is load-bearing and must not be reduced to one dummy STL.
+        # `1_6 base_0.stl` is what makes the Repaired folder a product at all, so
+        # it becomes a boundary child with a model of its own — which is the only
+        # reason there is a stray character here to fix. Without it the folder
+        # vanishes into its parent and this test passes against any code at all.
+        #
+        # STUDIO-434 note: that promoting signal used to be `base_1-2_0.stl`,
+        # read as a bogus 1:2 scale. Once part-numbered filenames stopped
+        # counting, this test would have gone quietly vacuous, so the promotion
+        # is now carried by a GENUINE filename scale (a leading ratio token,
+        # which 434 keeps on purpose). The sibling case where the only signal is
+        # part numbering is pinned by the test below.
         parts = ["base_1-2", "base_2-2", "head", "torso", "left_arm", "full_base"]
         for p in parts:
             _stl(char / "trap jaw 1-6", f"{p}.stl")
             _stl(char / "trap jaw 1-6" / "Repaired", f"{p}_0.stl")
+        _stl(char / "trap jaw 1-6" / "Repaired", "1_6 base_0.stl")
         _stl(char / "trapjaw bust")
         creator = make_creator(db, "ZEZ Studios")
 
@@ -1748,6 +1754,42 @@ class TestVariantGrouping:
         parent = chars[str(Path("Trapjaw/trap jaw 1-6"))]
         assert name_parser.character_key(repaired) == name_parser.character_key(
             parent) != "", chars
+
+    def test_a_repaired_level_with_only_part_numbered_files_is_absorbed(
+            self, db, tmp_path):
+        """STUDIO-434, and the other half of the test above.
+
+        The real `ZEZ Studios/Trapjaw/trap jaw 1-6/Repaired` holds no genuine
+        scale — its only product signal was `base_1-2_0.stl`, a two-part base
+        that `_SCALE_RATIO` read as a 1:2. It is a repaired copy of the model
+        above it, not a product of its own, and it was a separate model purely
+        because of that misread.
+
+        Once part-numbered filenames stop counting it has no signal left, stops
+        qualifying as a boundary child, and folds into its parent. Asserting the
+        tag movement as well as the count: the parent must keep the 1:6 its own
+        folder name supplies and lose the 1:2 it never had, which is what
+        distinguishes "absorbed because 434 worked" from "absorbed by accident".
+        """
+        creator_dir = tmp_path / "ZEZ Studios"
+        char = creator_dir / "Trapjaw"
+        parts = ["base_1-2", "base_2-2", "head", "torso", "left_arm", "full_base"]
+        for p in parts:
+            _stl(char / "trap jaw 1-6", f"{p}.stl")
+            _stl(char / "trap jaw 1-6" / "Repaired", f"{p}_0.stl")
+        _stl(char / "trapjaw bust")
+        creator = make_creator(db, "ZEZ Studios")
+
+        _walk(db, creator, creator_dir)
+
+        by_path = {_rel(m, creator_dir): m for m in _models(db, creator)}
+        assert str(Path("Trapjaw/trap jaw 1-6/Repaired")) not in by_path, by_path
+        assert len(by_path) == 2, by_path
+        assert "Repaired" not in {m.character for m in by_path.values()}, by_path
+
+        parent = by_path[str(Path("Trapjaw/trap jaw 1-6"))]
+        assert "1:6" in (parent.auto_tags or []), parent.auto_tags
+        assert "1:2" not in (parent.auto_tags or []), parent.auto_tags
 
     def test_a_container_named_original_still_holds_distinct_products(
             self, db, tmp_path):
