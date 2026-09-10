@@ -208,6 +208,13 @@ From folder and file names, the scanner auto-detects and tags:
   `terrain`, and more.
 - **Modifiers** — `pre-supported`, `uncut`, `NSFW`, `pin-up`, etc.
 
+A ratio in a **file** name only counts as a scale when it leads the name
+(`1_6 base.stl`), or when its denominator is a real print scale and the folder
+is not numbering its parts. Otherwise it is treated as a part index
+(`base_1-2`, `base_cut1-3`) and ignored, so a model cut into numbered pieces no
+longer picks up a scale tag for every piece. Ratios in **folder** names are
+always read as scales.
+
 Collector-scale ratios (1:4 through 1:12) also auto-add the **`statue`** tag,
 since figures at those scales are statues by convention.
 
