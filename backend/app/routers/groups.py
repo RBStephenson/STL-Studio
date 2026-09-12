@@ -15,6 +15,7 @@ from app.schemas import (
     VariantGroupRead, GroupingStrategyBody,
 )
 from app.services import scanner, grouping, grouping_strategy
+from app.routers._busy import require_library_idle
 from app.utils import utcnow, like_escape
 
 
@@ -192,9 +193,8 @@ def _prune_empty_group(db: Session, group_id: int | None) -> None:
 def merge_group(body: GroupMergeBody, db: Session = Depends(get_db)):
     """Merge models into one manual variant group. Creates the group when
     group_id is omitted, else extends it. Marks the group manual so a rescan
-    won't undo it. 409 while a scan is running."""
-    if scanner.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
+    won't undo it. 409 while the library is busy (scan, reorganize, or install)."""
+    require_library_idle()
     ids = list(dict.fromkeys(body.model_ids))
     if len(ids) < 2 and body.group_id is None:
         raise HTTPException(status_code=400, detail="Need at least two models to form a group.")
@@ -243,9 +243,8 @@ def merge_group(body: GroupMergeBody, db: Session = Depends(get_db)):
 def split_group(group_id: int, body: GroupSplitBody, db: Session = Depends(get_db)):
     """Remove members from a group (they become ungrouped). The remaining group is
     marked manual so the split sticks across rescans. Dissolves the group if it
-    drops below two members. 409 while a scan is running."""
-    if scanner.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
+    drops below two members. 409 while the library is busy (scan, reorganize, or install)."""
+    require_library_idle()
     group = db.get(VariantGroup, group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found.")
@@ -272,8 +271,7 @@ def split_group(group_id: int, body: GroupSplitBody, db: Session = Depends(get_d
 @router.patch("/groups/{group_id}", response_model=VariantGroupRead)
 def patch_group(group_id: int, body: GroupPatchBody, db: Session = Depends(get_db)):
     """Relabel a group or set its representative. Marks the group manual."""
-    if scanner.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
+    require_library_idle()
     group = db.get(VariantGroup, group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found.")
@@ -305,9 +303,8 @@ def set_grouping_strategy(body: GroupingStrategyBody, db: Session = Depends(get_
     """Set a per-subtree grouping strategy (#618). "off" leaves the subtree's
     models ungrouped; "auto" clears the override (restores the proposal engine).
     Re-runs the engine for affected creators so the change shows immediately.
-    409 while a scan is running."""
-    if scanner.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
+    409 while the library is busy (scan, reorganize, or install)."""
+    require_library_idle()
     try:
         strategy = grouping_strategy.parse_strategy(body.strategy)
     except ValueError:

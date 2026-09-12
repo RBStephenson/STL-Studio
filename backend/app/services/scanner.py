@@ -277,6 +277,15 @@ def get_status() -> dict:
     prog = payload["progress"]
     return {
         "running": payload["state"] == JobState.RUNNING.value,
+        # Whether the library is WRITABLE, which is a different question from
+        # whether a scan job is running, and the only one a caller about to write
+        # actually cares about (STUDIO-450). `running` is job state and stays job
+        # state — it drives the poll loop and the Scan/Cancel button, which must
+        # not offer to cancel a reorganize apply. `busy` is the write lock, so it
+        # covers apply, undo and install (which no scan job can see) and stays
+        # True through a cancelled scan's unwind, when the job has already reached
+        # its terminal state but the worker still holds the lock.
+        "busy": write_lock.is_held(),
         "message": payload["message"] or "idle",
         "models_found": prog.get("models_found", 0),
         "files_found": prog.get("files_found", 0),
@@ -404,7 +413,17 @@ def _full_scan(job: JobHandle, db: Session | None = None):
                 # AND walked with no creator failures this run. Otherwise keep the
                 # prior last_scanned so the next scan re-checks everything it may
                 # have missed while offline/failing (STUDIO-295).
-                if not root_failed and _root_available(root.path):
+                #
+                # A CANCELLED run belongs on that same list and was missing from it
+                # (STUDIO-450). Cancel unwinds mid-root, so the walk that just
+                # returned covered only part of it. Advancing the baseline then
+                # hides real work from the next scan: a folder already in the
+                # database, modified after the prior baseline but never reached by
+                # this run, has an mtime below the new floor and reads as unchanged.
+                # Newly-added folders are unaffected — the mtime skip also requires
+                # an existing model row — so the cost is stale STL rows on an
+                # already-indexed folder until something touches it again.
+                if not root_failed and not _cancelled() and _root_available(root.path):
                     root.last_scanned = scan_start
                 _db.commit()
 
@@ -1278,9 +1297,22 @@ def _scan_root(root: ScanRoot, db: Session, rules: ScanRules) -> set[int]:
     # per creator-dir) raced across sessions and left orphaned/duplicate groups
     # (#639). Sequential single-session regrouping is race-free. Manual groups are
     # preserved; empty auto groups are pruned.
+    #
+    # Cancellable (STUDIO-450). On a large root this loop is the bulk of a
+    # cancel's delay: the walk stops within a creator, but regrouping then ran to
+    # completion for every creator in the root while the write lock was still
+    # held, so a cancel took roughly a minute to actually free the library.
+    # Breaking out is safe precisely because of the per-creator commit below —
+    # creators already regrouped are durable, the rest keep the groups they had,
+    # and the next scan re-derives auto groups wholesale while leaving manual ones
+    # alone. `prune_empty_groups` is inside the same skip: it is a post-scan
+    # tidy-up for a pass that did not finish, and running it is more of the work
+    # the user just asked to stop.
     group_db = SessionLocal()
     try:
         for cid in dict.fromkeys(creator_ids.values()):
+            if _cancelled():
+                break
             try:
                 grouping.regroup_creator(group_db, cid)
                 # Commit per creator so one creator's failure cannot reach the
@@ -1294,8 +1326,9 @@ def _scan_root(root: ScanRoot, db: Session, rules: ScanRules) -> set[int]:
             except Exception:
                 logger.exception(f"Error regrouping creator id={cid}")
                 group_db.rollback()
-        grouping.prune_empty_groups(group_db)
-        group_db.commit()
+        if not _cancelled():
+            grouping.prune_empty_groups(group_db)
+            group_db.commit()
     finally:
         group_db.close()
 

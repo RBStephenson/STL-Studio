@@ -1038,6 +1038,15 @@ export interface DirListing {
 
 export interface ScanStatus {
   running: boolean;
+  /**
+   * Whether the library write lock is held by anything — a scan, a reorganize
+   * apply/undo, or an install (STUDIO-450). Not the same question as `running`,
+   * which is scan job state: `running` is false for a whole apply, and it goes
+   * false while a cancelled scan is still unwinding with the lock held. Anything
+   * that tells the user the library is idle, or offers an action that writes,
+   * reads this one.
+   */
+  busy?: boolean;
   message: string;
   models_found: number | null;
   files_found: number | null;

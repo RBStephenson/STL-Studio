@@ -216,7 +216,24 @@ whatever you haven't reviewed yet plus anything new.
 - Scanning across a slow **external/USB drive or NAS** is limited by that drive's
   speed, not the app.
 - You can **Cancel** a scan at any time; already-indexed models are kept.
+  Cancelling is cooperative, so the scan stops at its next safe point rather than
+  instantly — the button changes to **Finishing up…** while it unwinds. Actions
+  that write to the library stay disabled until that clears, which is normal and
+  usually only takes a moment.
 - For routine updates, prefer a **per-creator rescan** over a full scan.
+
+## "The library is busy" when nothing looks like it's running
+
+The app refuses writes — a rescan, a group edit, a bulk tag change, a database
+reset — while something else is already changing the library. That's any of a
+scan, a **Reorganize apply or undo**, or an **Install**, not just a scan, so you
+can see this when no scan is in progress.
+
+Wait for the indicator (**Finishing up…** after a cancelled scan, **Library
+busy…** otherwise) to clear, then try again. A large Reorganize apply or Install
+can legitimately hold the library for a while — don't interrupt one mid-move.
+Only if it persists with no scan, Reorganize, or Install in progress is a restart
+worth trying.
 
 ## Scale or type tags are wrong/missing
 

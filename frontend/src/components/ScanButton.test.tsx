@@ -67,3 +67,80 @@ describe("ScanButton completion notification (#283)", () => {
     expect(toastMock).not.toHaveBeenCalled();
   });
 });
+
+describe("ScanButton while the write lock outlives the scan job (STUDIO-450)", () => {
+  beforeEach(() => {
+    statusMock.mockReset();
+    toastMock.mockReset();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  it("says Finishing up and refuses the click while a cancelled scan unwinds", async () => {
+    // The reported bug: the job has reached its terminal state, so `running` is
+    // false — but the worker still holds the write lock, so every write 409s.
+    // An enabled "Scan Library" here is the screen contradicting the API.
+    statusMock.mockResolvedValue({
+      running: false, busy: true, cancelled: true, message: "cancelled",
+    });
+
+    render(<ScanButton />);
+    await flush();
+
+    expect(screen.getByText(/Finishing up…/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Scan Library/ })).toBeDisabled();
+  });
+
+  it("says Library busy for a lock holder that is not a cancelled scan", async () => {
+    // A reorganize apply/undo or an install. "Finishing up" would misdescribe it
+    // — nothing of the user's is finishing, something else is holding the library.
+    statusMock.mockResolvedValue({
+      running: false, busy: true, cancelled: false, message: "idle",
+    });
+
+    render(<ScanButton />);
+    await flush();
+
+    expect(screen.getByText(/Library busy…/)).toBeInTheDocument();
+    expect(screen.queryByText(/Finishing up…/)).toBeNull();
+    expect(screen.getByRole("button", { name: /Scan Library/ })).toBeDisabled();
+  });
+
+  it("holds the completion toast until busy clears, not when running clears", async () => {
+    statusMock
+      .mockResolvedValueOnce({ running: true, busy: true, message: "scanning…" })
+      .mockResolvedValueOnce({
+        running: false, busy: true, cancelled: true, message: "cancelled",
+      })
+      .mockResolvedValue({
+        running: false, busy: false, cancelled: true, message: "cancelled",
+      });
+
+    render(<ScanButton />);
+    await flush();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await flush();
+    expect(toastMock).not.toHaveBeenCalled();
+    expect(screen.getByText(/Finishing up…/)).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await flush();
+    expect(toastMock).toHaveBeenCalledWith("cancelled", "success");
+    expect(screen.queryByText(/Finishing up…/)).toBeNull();
+    expect(screen.getByRole("button", { name: /Scan Library/ })).not.toBeDisabled();
+  });
+
+  it("leaves the button enabled when the library is genuinely idle", async () => {
+    statusMock.mockResolvedValue({ running: false, busy: false, message: "idle" });
+
+    render(<ScanButton />);
+    await flush();
+
+    expect(screen.queryByText(/Finishing up…/)).toBeNull();
+    expect(screen.getByRole("button", { name: /Scan Library/ })).not.toBeDisabled();
+  });
+});

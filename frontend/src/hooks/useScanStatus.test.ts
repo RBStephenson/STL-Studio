@@ -56,6 +56,50 @@ describe("useScanStatus", () => {
     expect(toastMock).toHaveBeenCalledWith("done — 2 models", "success");
   });
 
+  // STUDIO-450: `running` is scan job state; `busy` is the write lock. The hook
+  // has to hold its "still working" state on the lock, not the job, or it goes
+  // idle while the next click is still guaranteed a 409.
+  it("keeps polling and defers completion while busy outlives running", async () => {
+    statusMock
+      .mockResolvedValueOnce({ running: true, busy: true, message: "scanning…" })
+      // Cancelled: the job is terminal but the worker still holds the lock.
+      .mockResolvedValueOnce({ running: false, busy: true, message: "cancelled" })
+      .mockResolvedValue({ running: false, busy: false, message: "cancelled" });
+    const onScanComplete = vi.fn();
+    const { result } = renderHook(() => useScanStatus(onScanComplete));
+    await flush();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await flush();
+    expect(result.current.finishing).toBe(true);
+    expect(onScanComplete).not.toHaveBeenCalled();
+    expect(toastMock).not.toHaveBeenCalled();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await flush();
+    expect(result.current.finishing).toBe(false);
+    expect(onScanComplete).toHaveBeenCalledTimes(1);
+    expect(toastMock).toHaveBeenCalledWith("cancelled", "success");
+  });
+
+  it("does not announce a scan for a busy spell no scan caused", async () => {
+    // A reorganize apply holds the lock with no scan job anywhere. The hook must
+    // track it (so controls stay disabled) without inventing a finished scan.
+    statusMock
+      .mockResolvedValueOnce({ running: false, busy: true, message: "idle" })
+      .mockResolvedValue({ running: false, busy: false, message: "idle" });
+    const onScanComplete = vi.fn();
+    const { result } = renderHook(() => useScanStatus(onScanComplete));
+    await flush();
+    expect(result.current.finishing).toBe(true);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await flush();
+    expect(result.current.finishing).toBe(false);
+    expect(onScanComplete).not.toHaveBeenCalled();
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+
   it("start() calls api.scan.start and updates status", async () => {
     statusMock.mockResolvedValue({ running: false, message: "" });
     startMock.mockResolvedValue({ running: true, message: "scanning…", models_found: 0 });

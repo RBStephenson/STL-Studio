@@ -286,6 +286,11 @@ class TestScanLaunchBusy:
         r = client.post("/scan/start")
         assert r.status_code == 200
         assert r.json()["running"] is True
+        # start_full_scan took the write lock to return True, so the launch
+        # payload has to say the library is busy (STUDIO-450). Defaulting it to
+        # False here would seed the UI with the stale-idle state this ticket is
+        # about, before the first poll could correct it.
+        assert r.json()["busy"] is True
 
     def test_creator_scan_busy_returns_409(self, client, db, monkeypatch):
         from app.models import Creator

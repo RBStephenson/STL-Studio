@@ -4,8 +4,10 @@ These operate directly on the SQLite database file. Backup uses SQLite's online
 backup API to capture a consistent snapshot (folding in any WAL contents);
 restore swaps a validated upload in for the live file; reset wipes all data and
 recreates an empty schema. Restore and reset run under the library write lock and
-are refused (409) while a scan, reorganize apply, or undo is in progress, to avoid
-corrupting an in-flight write or leaving on-disk files and DB rows diverged.
+are refused (409) while a scan, reorganize apply/undo, or install is in progress,
+to avoid corrupting an in-flight write or leaving on-disk files and DB rows
+diverged. The pre-check reads that same lock (STUDIO-450), so it can no longer
+pass a request the lock is about to refuse.
 """
 
 import os
@@ -21,8 +23,9 @@ from fastapi.responses import FileResponse
 
 from app.database import Base, engine
 from app.config import settings
-from app.services import scanner
+from app.services import write_lock
 from app.services.write_lock import LibraryBusy, library_write
+from app.routers._busy import require_library_idle
 
 router = APIRouter(prefix="/database", tags=["database"])
 log = logging.getLogger(__name__)
@@ -52,10 +55,12 @@ def _db_path() -> Path:
 
 
 def _require_idle():
-    if scanner.get_status()["running"]:
-        raise HTTPException(
-            409, "A scan is currently running — wait for it to finish or cancel it first"
-        )
+    """Refuse a maintenance op while the library write lock is held (STUDIO-450).
+
+    Gates on the lock rather than scan job state, so this pre-check and the
+    ``library_write`` behind it can no longer disagree. See ``routers/_busy``.
+    """
+    require_library_idle()
 
 
 def _integrity_check(path: Path) -> str:
@@ -235,7 +240,7 @@ def repair_database():
 
             after = _integrity_check(db_path)
     except LibraryBusy:
-        raise HTTPException(409, "Library is busy â€” a scan, apply, or undo is in progress")
+        raise HTTPException(409, write_lock.BUSY_DETAIL)
     except sqlite3.Error as e:
         raise HTTPException(500, f"Database repair failed: {e}")
 
@@ -302,7 +307,7 @@ async def restore_database(file: UploadFile = File(...)):
             _migrate_schema()
     except LibraryBusy:
         _safe_unlink(tmp)
-        raise HTTPException(409, "Library is busy — a scan, apply, or undo is in progress")
+        raise HTTPException(409, write_lock.BUSY_DETAIL)
     return {"ok": True, "snapshot": str(snapshot) if snapshot else None, "warning": warning}
 
 
@@ -318,7 +323,7 @@ def reset_database():
             snapshot = _snapshot_db("reset")
             _replace_with_empty_database(snapshot)
     except LibraryBusy:
-        raise HTTPException(409, "Library is busy — a scan, apply, or undo is in progress")
+        raise HTTPException(409, write_lock.BUSY_DETAIL)
     return {"ok": True, "snapshot": str(snapshot) if snapshot else None}
 
 

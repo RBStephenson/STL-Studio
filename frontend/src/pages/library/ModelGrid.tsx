@@ -80,6 +80,13 @@ interface ModelGridProps {
   onClearFilters: () => void;
   onScanLibrary: () => void;
   scanRunning: boolean;
+  /**
+   * The library write lock is held by something — a scan, a cancelled scan still
+   * unwinding, or a Reorganize/Install (STUDIO-450). Disables the action without
+   * claiming a scan is running, which `scanRunning` alone would: it drives the
+   * "Scanning… N models" label, and only a real scan should wear that.
+   */
+  libraryBusy?: boolean;
   scanModelsFound?: number;
   models: Model[];
   selection: Set<number>;
@@ -133,7 +140,7 @@ function CardGrid({
 
 export default function ModelGrid(props: ModelGridProps) {
   const {
-    loading, isError, onRetry, onClearFilters, onScanLibrary, scanRunning, scanModelsFound,
+    loading, isError, onRetry, onClearFilters, onScanLibrary, scanRunning, libraryBusy, scanModelsFound,
     models, gridRef, dndEnabled, dndSensors, dndAnnouncements,
     onDragStart, onDragEnd, onDragCancel, draggingModel, dragCount,
   } = props;
@@ -177,7 +184,7 @@ export default function ModelGrid(props: ModelGridProps) {
           label: scanRunning ? `Scanning… ${scanModelsFound ?? 0} models` : "Scan library",
           onClick: onScanLibrary,
           icon: RefreshCw,
-          disabled: scanRunning,
+          disabled: scanRunning || !!libraryBusy,
         }}
       />
     );

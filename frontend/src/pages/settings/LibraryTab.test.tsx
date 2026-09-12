@@ -522,4 +522,25 @@ describe("LibraryTab per-scan-root destination template", () => {
       "Any scan location that sets its own Destination above uses that instead",
     );
   });
+
+  // STUDIO-450: every control in this block writes to the library, so the gate
+  // has to be the write lock rather than the scan job. `busy` without `running`
+  // is a cancelled scan still unwinding, or a Reorganize/Install holding it.
+  it("locks the controls while the library is busy with no scan running", async () => {
+    scanStatusMock.mockResolvedValue({ running: false, busy: true, message: "cancelled" });
+    renderWithRoots([mkRoot()]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("library-controls")).toHaveStyle({ pointerEvents: "none" }),
+    );
+  });
+
+  it("leaves the controls usable when the library is genuinely idle", async () => {
+    scanStatusMock.mockResolvedValue({ running: false, busy: false, message: "idle" });
+    renderWithRoots([mkRoot()]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("library-controls")).not.toHaveStyle({ pointerEvents: "none" }),
+    );
+  });
 });

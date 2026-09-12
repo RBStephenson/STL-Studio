@@ -675,17 +675,42 @@ class TestBatchFromUrlEndpoint:
         assert resp.status_code == 400
 
     def test_409_when_scan_running(self, client, db, thumb_dir, monkeypatch):
-        from app.services import scanner
+        """STUDIO-450: the gate reads the write lock, so the simulation takes the
+        lock a real scan holds rather than only faking the status it reports."""
+        from app.services import scanner, write_lock
         creator = make_creator(db)
         m = make_model(db, creator, name="M")
         db.commit()
 
         monkeypatch.setattr(scanner, "get_status", lambda: {"running": True})
-        resp = client.post(
-            "/models/group/thumbnail/from-url",
-            json={"model_ids": [m.id], "url": "https://cdn.example.com/x.png"},
-        )
+        assert write_lock.try_acquire_for_scan() is True
+        try:
+            resp = client.post(
+                "/models/group/thumbnail/from-url",
+                json={"model_ids": [m.id], "url": "https://cdn.example.com/x.png"},
+            )
+        finally:
+            write_lock.release_scan()
         assert resp.status_code == 409
+        assert "scan is currently running" in resp.json()["detail"]
+
+    def test_409_while_a_reorganize_holds_the_lock_with_no_scan_running(
+        self, client, db, thumb_dir
+    ):
+        """No scan job exists during an apply/undo/install, so the old status gate
+        waved this through — writing thumbnails onto models mid-move."""
+        from app.services import write_lock
+        creator = make_creator(db)
+        m = make_model(db, creator, name="M")
+        db.commit()
+
+        with write_lock.library_write("reorganize_apply"):
+            resp = client.post(
+                "/models/group/thumbnail/from-url",
+                json={"model_ids": [m.id], "url": "https://cdn.example.com/x.png"},
+            )
+        assert resp.status_code == 409
+        assert "busy" in resp.json()["detail"].lower()
 
 
 class TestImageCacheControl:

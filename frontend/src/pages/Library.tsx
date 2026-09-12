@@ -569,6 +569,7 @@ export default function Library() {
           onClearFilters={clearFilters}
           onScanLibrary={emptyStateScan.start}
           scanRunning={!!emptyStateScan.status?.running}
+          libraryBusy={emptyStateScan.busy}
           scanModelsFound={emptyStateScan.status?.models_found ?? undefined}
           models={models}
           selection={selection}
