@@ -3,6 +3,7 @@ import { FolderOpen, Package, Check, AlertCircle, Loader2, PackagePlus, ScanLine
 import { api } from "../api/client";
 import type { Creator, InstallResult, Library } from "../api/types";
 import FolderPicker from "../components/FolderPicker";
+import { joinLibraryPath } from "../utils/libraryPath";
 
 type Phase = "idle" | "installing" | "installed" | "error";
 type ScanPhase = "idle" | "scanning" | "done" | "error";
@@ -60,8 +61,10 @@ export default function InstallPage() {
     ? newCreatorName.trim()
     : creators.find((c) => c.id === creatorId)?.name ?? "";
 
+  // Joined with the library's own separator so the preview matches the host OS
+  // and the native path the success line reports back (STUDIO-452).
   const destinationPreview = selectedLibrary && creatorName && character.trim()
-    ? `${selectedLibrary.path}/${creatorName}/${character.trim()}`
+    ? joinLibraryPath(selectedLibrary.path, creatorName, character.trim())
     : null;
 
   const canInstall = !!sourcePath && !!selectedLibrary && !!creatorName && !!character.trim();
