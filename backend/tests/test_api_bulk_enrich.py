@@ -5,6 +5,7 @@ and test_api_models.py for the durable-group merge/split/patch endpoints."""
 from unittest.mock import patch
 
 from app.models import Creator
+from app.services import write_lock
 from tests.conftest import make_creator, make_model
 
 
@@ -200,10 +201,35 @@ class TestBulkEnrich:
         assert db.query(Creator).filter_by(id=creator.id).first() is not None
 
     def test_409_when_scan_running(self, client, db):
-        """Returns 409 when a scan is in progress, matching set-group / batch-set-group behaviour."""
+        """Returns 409 when a scan is in progress, matching set-group / batch-set-group behaviour.
+
+        STUDIO-450: the gate reads the write lock now, not scan job state, so the
+        simulation has to take the lock a real scan holds. Patching the status
+        alone no longer stands in for a busy library — and that gap WAS the bug:
+        a status saying idle while the lock was still held let this write through
+        into the pass it was meant to be excluded from.
+        """
         _, a, _, _ = _setup(db)
-        # Patch at the source module so it's robust to which router owns the
-        # endpoint (bulk_enrich lives in routers/tags.py after STUDIO-58).
-        with patch("app.services.scanner.get_status", return_value={"running": True}):
+        assert write_lock.try_acquire_for_scan() is True
+        try:
+            # Patch at the source module so it's robust to which router owns the
+            # endpoint (bulk_enrich lives in routers/tags.py after STUDIO-58).
+            with patch("app.services.scanner.get_status", return_value={"running": True}):
+                r = client.patch("/models/bulk/enrich", json={"ids": [a.id], "notes": "n"})
+        finally:
+            write_lock.release_scan()
+        assert r.status_code == 409
+        assert "scan is currently running" in r.json()["detail"]
+
+    def test_409_while_a_reorganize_holds_the_lock_with_no_scan_running(self, client, db):
+        """The case the old scan-status gate let straight through (STUDIO-450).
+
+        A reorganize apply, undo or install holds the write lock while no scan job
+        exists, so ``running`` is False for its whole duration — and this endpoint
+        happily rewrote creator/tag rows underneath a move in flight.
+        """
+        _, a, _, _ = _setup(db)
+        with write_lock.library_write("reorganize_apply"):
             r = client.patch("/models/bulk/enrich", json={"ids": [a.id], "notes": "n"})
         assert r.status_code == 409
+        assert "busy" in r.json()["detail"].lower()

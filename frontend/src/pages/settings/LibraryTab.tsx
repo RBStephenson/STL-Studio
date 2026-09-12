@@ -63,8 +63,10 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
   const [openTemplateRoot, setOpenTemplateRoot] = useState<number | null>(null);
   const [rootTemplateEdits, setRootTemplateEdits] = useState<Record<number, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
-  const { status: scanStatus } = useScanStatus(onRootsChanged);
-  const scanning = !!scanStatus?.running;
+  // `busy` gates on the write lock, not the scan job (STUDIO-450): a cancelled
+  // scan still unwinding, or a reorganize apply/install, holds the library just
+  // as hard, and every control this disables writes to it.
+  const { busy: scanning } = useScanStatus(onRootsChanged);
 
   const saveReorganizeTemplate = async () => {
     const next = (templateEdit ?? settings.reorganize_template).trim();
@@ -206,7 +208,10 @@ export default function LibraryTab({ roots, loading, onRootsChanged }: Props) {
     <div>
       <FlashBanner success={success} error={error} />
 
-      <div style={scanning ? { opacity: 0.45, pointerEvents: "none" } : undefined}>
+      <div
+        data-testid="library-controls"
+        style={scanning ? { opacity: 0.45, pointerEvents: "none" } : undefined}
+      >
 
       {/* Add new root */}
       <section className="mb-8">

@@ -71,6 +71,16 @@ describe("ModelGrid", () => {
     expect(btn).toBeDisabled();
   });
 
+  it("disables the button without claiming a scan when the library is merely busy (STUDIO-450)", () => {
+    // A Reorganize apply/install, or a cancelled scan still unwinding, holds the
+    // write lock: the click would 409, but nothing is scanning, so the label must
+    // not say so.
+    renderGrid({ models: [], scanRunning: false, libraryBusy: true });
+    const btn = screen.getByRole("button", { name: /Scan library/ });
+    expect(btn).toBeDisabled();
+    expect(screen.queryByText(/Scanning…/)).toBeNull();
+  });
+
   it("shows the error state when isError is true", () => {
     renderGrid({ isError: true });
     expect(screen.getByText("Couldn't load your library")).toBeInTheDocument();

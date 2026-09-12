@@ -690,7 +690,8 @@ can:
 - Click a creator to browse just their models in the Library.
 - **Rescan** a single creator — a targeted scan of just that creator's folder.
   Because you usually add models one creator at a time, this is much faster than
-  a full library scan. The button is disabled while any scan is running.
+  a full library scan. The button is disabled while the library is busy — a scan
+  running, a cancelled scan still finishing, or a Reorganize/Install in progress.
 - **Enrich from web** — match a creator's online storefront listings against
   your local models, then fetch each matched product's **full detail** and
   bulk-apply the complete metadata set: title, description, tags, category,

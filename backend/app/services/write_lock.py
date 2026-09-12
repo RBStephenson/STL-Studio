@@ -39,6 +39,18 @@ class LibraryBusy(Exception):
     undo holds it)."""
 
 
+# The one message every "you can't write right now" refusal uses (STUDIO-450).
+# Shared so the app can't develop a second vocabulary for the same state — the
+# original bug was two answers to one question, and two wordings is how that
+# starts again. Deliberately names the whole set of holders rather than guessing
+# at one: the lock does not record which op took it (the apply/undo marker does,
+# but a scan writes none), so naming "a scan" specifically would be a guess.
+BUSY_DETAIL = (
+    "The library is busy — a scan, import, reorganize, or install is in progress. "
+    "Try again in a moment."
+)
+
+
 def data_dir() -> Path:
     """Directory the SQLite DB lives in — where the marker and undo log belong.
 
@@ -88,6 +100,24 @@ def _clear_marker() -> None:
         _marker_path().unlink()
     except OSError:
         pass
+
+
+def is_held() -> bool:
+    """True while ANY holder — scan, apply, undo, install — owns the lock.
+
+    The one honest answer to "would a write be refused right now" (STUDIO-450).
+    The scan job state is not that answer and never was: it flips to a terminal
+    state on its own schedule, it says nothing at all about a reorganize apply or
+    an install, and a cooperative cancel keeps the lock through its whole unwind.
+    Anything that gates a write, or tells the user whether the library is
+    writable, reads this.
+
+    Advisory by nature — the lock can be taken the instant after this returns
+    False, which is why ``library_write`` still does the real acquire and every
+    caller still handles :class:`LibraryBusy`. This exists so the *reported*
+    state and the *enforced* state come from the same place.
+    """
+    return _LOCK.locked()
 
 
 def try_acquire_for_scan() -> bool:

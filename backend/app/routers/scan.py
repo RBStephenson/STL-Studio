@@ -169,7 +169,10 @@ def start_scan(db: Session = Depends(get_db)):
     if not scanner.start_full_scan():
         raise HTTPException(status_code=409, detail="Library is busy — a scan or reorganize is in progress")
 
-    return ScanStatus(running=True, message="scan started")
+    # busy=True is not cosmetic: start_full_scan just took the write lock, and a
+    # payload saying otherwise would seed the UI with the exact stale-idle state
+    # this ticket is about (STUDIO-450).
+    return ScanStatus(running=True, busy=True, message="scan started")
 
 
 @router.post("/creator/{creator_id}", response_model=ScanStatus)
@@ -186,7 +189,7 @@ def start_creator_scan(creator_id: int, db: Session = Depends(get_db)):
     if not scanner.start_creator_scan(creator_id):
         raise HTTPException(status_code=409, detail="Library is busy — a scan or reorganize is in progress")
 
-    return ScanStatus(running=True, message=f"scanning {creator.name}")
+    return ScanStatus(running=True, busy=True, message=f"scanning {creator.name}")
 
 
 @router.post("/cancel")
@@ -255,7 +258,7 @@ def start_inbox_scan(body: InboxScanRequest, db: Session = Depends(get_db)):
             detail="Library is busy — reorganize in progress, try again shortly",
         )
 
-    return ScanStatus(running=True, message="importing")
+    return ScanStatus(running=True, busy=True, message="importing")
 
 
 @router.get("/status", response_model=ScanStatus)

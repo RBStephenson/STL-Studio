@@ -12,6 +12,12 @@ export function useScanStatus(onScanComplete?: () => void) {
   const wasRunningRef = useRef(false);
   const { toast } = useToast();
 
+  // The library is unusable for writes while EITHER is true (STUDIO-450).
+  // Polling on `running` alone stopped the moment a cancelled scan reached its
+  // terminal state, which is well before the worker releases the write lock —
+  // so the UI went idle, invited the next action, and that action got a 409.
+  const active = !!(status?.running || status?.busy);
+
   useEffect(() => {
     api.scan.status().then(setStatus).catch(() => {});
   }, []);
@@ -20,9 +26,14 @@ export function useScanStatus(onScanComplete?: () => void) {
     if (status?.running) {
       wasRunningRef.current = true;
       setCancelling(false);
-    } else {
-      // running → idle: announce the backend's completion summary (#283).
-      // `status.message` carries "done — N models, M files[, P removed]" (#223).
+    }
+    if (!active) {
+      // A scan ran and the library is writable again: announce the backend's
+      // completion summary (#283). `status.message` carries "done — N models,
+      // M files[, P removed]" (#223). Gated on wasRunningRef so a reorganize
+      // apply — which makes the library busy without any scan — never reports
+      // itself as a finished scan, and deferred until `busy` clears so
+      // onScanComplete refetches settled data rather than mid-regroup rows.
       if (wasRunningRef.current) {
         wasRunningRef.current = false;
         toast(status?.message || "Scan complete.", "success");
@@ -34,7 +45,7 @@ export function useScanStatus(onScanComplete?: () => void) {
       api.scan.status().then(setStatus).catch(() => {});
     }, 2000);
     return () => clearInterval(interval);
-  }, [status?.running, status?.message, onScanComplete, toast]);
+  }, [active, status?.running, status?.message, onScanComplete, toast]);
 
   const start = async () => {
     try {
@@ -54,5 +65,10 @@ export function useScanStatus(onScanComplete?: () => void) {
     }
   };
 
-  return { status, cancelling, start, cancel };
+  /** True while the write lock is held but no scan job is running — a cancelled
+   *  scan unwinding, or a reorganize/install holding the library. Controls that
+   *  would write must stay disabled here even though nothing is "scanning". */
+  const finishing = !!(status?.busy && !status?.running);
+
+  return { status, cancelling, finishing, busy: active, start, cancel };
 }

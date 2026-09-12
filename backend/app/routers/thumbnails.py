@@ -21,6 +21,7 @@ from app.services.thumbnails import (
     download_thumbnail, fetch_image_bytes, store_thumbnail,
 )
 from app.services import scanner
+from app.routers._busy import require_library_idle
 from app.services.path_guard import assert_within_roots
 from app.services.path_sanitize import sanitize_segment
 from app.utils import utcnow
@@ -56,14 +57,14 @@ async def batch_thumbnail_from_url(body: BatchThumbnailFromUrl, db: Session = De
     On a download failure we fall back to storing the bare URL on every member
     and clearing their local paths — the same graceful degradation the single
     from-url path uses (#285) — so the UI can still try to render directly.
-    Unknown ids are skipped and reported. 409 if a scan is running, since it
-    would overwrite character/grouping mid-write.
+    Unknown ids are skipped and reported. 409 while the library is busy (scan,
+    reorganize, or install), since either would overwrite character/grouping
+    mid-write.
 
     Registered BEFORE `/{model_id}/thumbnail/from-url` so the literal `group`
     segment isn't captured as a model_id (FastAPI matches in declaration order).
     """
-    if scanner.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
+    require_library_idle()
 
     if not body.model_ids:
         raise HTTPException(status_code=400, detail="model_ids must not be empty.")

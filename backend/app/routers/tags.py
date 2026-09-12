@@ -10,6 +10,7 @@ from app.schemas import BulkTagUpdate, BulkEnrichUpdate, TagRenameBody, TagMerge
 from app.services.tag_sync import bulk_sync_model_tags
 from app.services import scanner
 from app.services.scanner import resolve_creator
+from app.routers._busy import require_library_idle
 from app.services.variant_sync import propagate_source_url
 from app.utils import utcnow
 
@@ -202,8 +203,7 @@ def bulk_enrich_models(body: BulkEnrichUpdate, db: Session = Depends(get_db)):
     ]):
         raise HTTPException(status_code=400, detail="At least one field to update must be provided")
 
-    if scanner.get_status()["running"]:
-        raise HTTPException(status_code=409, detail="A scan is running — try again after it completes.")
+    require_library_idle()
 
     creator_id = resolve_creator(creator_name, db).id if creator_name else None
     models_to_update = db.query(Model).filter(Model.id.in_(body.ids)).all()

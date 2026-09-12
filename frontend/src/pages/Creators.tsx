@@ -62,7 +62,10 @@ export default function Creators() {
         await new Promise((r) => setTimeout(r, 1500));
         if (!mountedRef.current) return;
         last = await api.scan.status();
-        if (!last.running) break;
+        // Wait for the write lock, not just the job (STUDIO-450) — the rescan's
+        // regroup pass runs after the job reports idle, so breaking on `running`
+        // alone reloaded creator counts from mid-regroup rows.
+        if (!last.running && !last.busy) break;
       }
       if (!mountedRef.current) return;
       await loadCreators();

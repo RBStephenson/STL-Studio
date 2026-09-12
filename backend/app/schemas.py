@@ -140,6 +140,14 @@ class ModelList(BaseModel):
 class ScanStatus(BaseModel):
     running: bool
     message: str
+    # Whether the library write lock is held, by anything — a scan, a reorganize
+    # apply/undo, or an install (STUDIO-450). `running` above is scan job state
+    # and answers a narrower question: it is False throughout an apply, and it
+    # goes False while a cancelled scan is still unwinding with the lock held.
+    # Anything deciding whether a write will be accepted, or telling the user the
+    # library is idle, reads this one. Defaulted so a caller constructing a
+    # ScanStatus by hand (the launch endpoints) doesn't have to.
+    busy: bool = False
     models_found: Optional[int] = None
     files_found: Optional[int] = None
     cancelled: bool = False
