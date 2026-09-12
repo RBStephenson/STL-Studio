@@ -16,6 +16,7 @@ A tour of every screen and what it does.
 - [Collections](#collections)
 - [Bulk editor (tags & enrich)](#bulk-editor-tags--enrich)
 - [Import folder](#import-folder)
+- [Install](#install)
 - [Creators & per-creator rescan](#creators--per-creator-rescan)
 - [Reorganize library](#reorganize-library)
 - [Settings](#settings)
@@ -671,6 +672,76 @@ confirm, never applies one automatically.
   reported as skipped, not moved. A destination that's already occupied by an
   unrelated file reports "a model with this name already exists in the
   library — check the library and naming" rather than a raw file path.
+
+## Install
+
+**Install** (in the nav, at **/install**) extracts a ZIP or copies a folder
+straight into a library as `<creator>/<character>`, replacing the manual
+download → extract → move → scan sequence. Where
+[Import folder](#import-folder) takes a pile of loose files and helps you work
+out what's in it, Install is for the case where you already know what the pack
+is and where it belongs.
+
+### Turning it on
+
+It ships **off**. Tick **Enable STL Installer (Experimental)** under
+**Settings → Library** and **Install** appears in the nav. The flag is
+enforced on the server as well as in the UI — with it off, the endpoint
+refuses even if you reach it directly.
+
+### The flow
+
+1. **Choose a ZIP or folder.** The browse dialog shows folders and `.zip`
+   files.
+2. **Destination** — pick the **Library**, then the **Creator** (or **New**
+   to type one that doesn't exist yet), then the **Character**. Only roots
+   marked **Import destination** appear in the library list, and if there's
+   exactly one it's selected for you.
+3. A **"Will install to"** line previews the exact destination path, using
+   your own platform's path separator.
+4. **Install** runs synchronously — the button spins until it's finished.
+   Seconds for a typical pack; a real 5.4 GiB, 67-file pack was measured at
+   about 27 seconds, which extrapolates to roughly a minute and a half for
+   one at the 20 GiB cap.
+5. **Scan now** indexes what landed. It's a
+   [per-creator rescan](#creators--per-creator-rescan), and it is deliberately
+   yours to trigger — installing never chains a scan on its own.
+
+### What it refuses, and why
+
+- **A non-default folder layout.** Only libraries on the default `{creator}`
+  layout are eligible. A layout like `{tag}/{creator}` puts the creator level
+  somewhere the installer can't reach without a tag value it never collects,
+  so it refuses rather than writing to the wrong path.
+- **An existing character folder.** A hard error whether that folder is full,
+  empty, or the wreckage of a crashed attempt. There is no auto-cleanup and
+  no resume — clear it by hand before retrying.
+- **A destination that isn't a writable library.** Same rule as Import and
+  [Reorganize](#reorganize-library), which makes Install standalone-only:
+  Docker mounts are read-only.
+- **Anything that isn't a ZIP or a folder.** RAR is out of scope.
+- **Over 20 GiB.** Checked against the archive's declared size before
+  extraction starts, and again against the bytes actually written.
+- **A source outside your allowed browse locations**, or a creator/character
+  that would resolve outside the destination library.
+- **A scan or reorganize already running.** Install takes the library write
+  lock without waiting, so a busy library fails it immediately instead of
+  queueing behind the other job.
+
+### Details worth knowing
+
+- **ZIP flattening** — when every file in the archive sits under one shared
+  top-level folder, that wrapper is stripped, so you don't end up with
+  `<character>/<the same name again>/…`. A bare file at the top level, or
+  more than one top-level folder (a `standard version/` + `bonus parts/`
+  pack), disables flattening and the archive lands as it was authored. A
+  Mac-authored `__MACOSX` folder is ignored when making that decision.
+- **Empty folders aren't recreated.** The copy walks files, so an empty
+  subdirectory in the source won't appear at the destination.
+- **A newly typed creator is created before the files are written**, and it
+  isn't removed if the install then fails — so a failed attempt can leave a
+  creator with no models on the [Creators](#creators--per-creator-rescan)
+  page. It's harmless: reuse it on the retry, or delete it.
 
 ## Creators & per-creator rescan
 

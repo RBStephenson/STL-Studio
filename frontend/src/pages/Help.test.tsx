@@ -24,10 +24,22 @@ describe("Help", () => {
     expect(screen.getByRole("heading", { name: "External storage recovery" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Desktop updates" })).toBeVisible();
     expect(screen.getByText(/optional AI and storefront integrations make network requests/i)).toBeVisible();
-    expect(screen.getByText(/file-moving tools such as Import and Reorganize/i)).toBeVisible();
+    expect(screen.getByText(/file-moving tools such as Import, Install, and Reorganize/i)).toBeVisible();
     expect(screen.getByRole("link", { name: /support and compatibility policy/i })).toHaveAttribute(
       "href",
       "https://github.com/RBStephenson/STL-Studio/wiki/Support-and-compatibility-policy",
     );
+  });
+
+  it("documents the STL Installer, that it is off by default, and that it never scans on its own", () => {
+    render(
+      <MemoryRouter>
+        <Help />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Install a pack" })).toBeVisible();
+    expect(screen.getByText(/Enable STL Installer \(Experimental\)/i)).toBeVisible();
+    expect(screen.getByText(/installing never scans on its own/i)).toBeVisible();
   });
 });

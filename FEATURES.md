@@ -81,6 +81,28 @@ organized. Moving requires the Reorganize Library feature flag and a
 writable destination (Docker mounts are read-only, so moving is effectively
 standalone-only — import/enrich work everywhere).
 
+## Install
+
+Off by default — tick **Enable STL Installer (Experimental)** in Settings →
+Library and **Install** joins the nav.
+
+Extracts a ZIP or copies a folder straight into a library as
+`<creator>/<character>`, replacing the manual download → extract → move →
+scan sequence. Pick the source, the destination library, a creator and a
+character; a **"Will install to"** line previews the exact path before you
+commit.
+
+- Destination must be a library marked **Import destination**, on the
+  default `{creator}` folder layout — any other layout is refused
+- An existing character folder is a hard error, full or empty: clear it by
+  hand and retry
+- ZIP and folders only (no RAR); a single wrapping top-level folder inside a
+  ZIP is stripped automatically
+- 20 GiB cap, and it runs synchronously — seconds for a typical pack, a
+  minute or two for a very large one
+- **Scan now** afterwards rescans just that creator; installing never scans
+  on its own
+
 ## Storefront Enrichment
 
 Paste a Gumroad, Cults3D, MyMiniFactory, or Loot Studios creator URL. Fuzzy-

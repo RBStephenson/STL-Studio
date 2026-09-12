@@ -198,6 +198,15 @@ The **Paint Shelf** is always available in the nav. Enabling **Settings → Pain
 - **Quick import (whole folder)** keeps the original one-shot index; imported models are flagged **inbox** (`?is_inbox=1` filter)
 - The move step needs the **Reorganize Library** feature flag on (Settings → Library, off by default) and a writable destination — Docker mounts are read-only, so it's effectively standalone-only; import + enrich work everywhere
 
+### Install (`/install`)
+- Extracts a ZIP or copies a folder straight into a library as **`<creator>/<character>`** — the download → extract → move → scan sequence in one action, with a live **"Will install to"** destination preview
+- Behind the **Enable STL Installer (Experimental)** flag (Settings → Library, off by default). Enforced server-side (403), not just hidden from the nav
+- Destination must be a library marked **Import destination** on the default `{creator}` layout; any other layout is refused, since there's no tag value collected to place a non-default level with
+- An existing character folder is a hard error — full, empty, or the wreckage of a crashed attempt. No auto-cleanup, no resume; clear it by hand and retry
+- ZIP and folders only (RAR is out of scope), 20 GiB cap checked against both the archive's declared size and the bytes actually written, and a single shared top-level folder inside a ZIP is flattened away
+- Synchronous, and held under the library write lock without waiting — a concurrent scan or reorganize fails the install immediately rather than queueing it
+- **Scan now** afterwards is a per-creator rescan you trigger yourself; installing never chains a scan on its own
+
 ### Scan
 - **Parallel** — scans up to 4 creator directories concurrently for faster indexing on large libraries
 - Incremental — skips unchanged folders (mtime check), caches STL file walks

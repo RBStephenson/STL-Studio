@@ -5,7 +5,11 @@ For the full reference, see [docs/](docs/README.md) (also published as the
 [GitHub Wiki](https://github.com/RBStephenson/STL-Studio/wiki)); for a quick
 feature-by-feature list, see [FEATURES.md](FEATURES.md).
 
-## 1. Install
+## 1. Setting up STL Studio
+
+(Looking for the **Install** page, which files a downloaded pack into your
+library? That's [Installing a new pack](#installing-a-new-pack-straight-into-your-library)
+under Everyday workflow. This section is about installing the app itself.)
 
 Two ways to run it:
 
@@ -117,6 +121,30 @@ Already have a big pile of unsorted models in your library? **Reorganize
 Library** (Settings-gated) previews and applies a folder template
 (`{creator}/{character}/{title}` by default) across your whole collection,
 not just fresh imports.
+
+### Installing a new pack straight into your library
+
+When the pack is still a ZIP (or a folder) sitting in your downloads and you
+already know whose it is, the **Install** page files it directly — no
+import-and-enrich round trip. It's off until you tick **Enable STL Installer
+(Experimental)** under **Settings → Library**; then **Install** appears in
+the nav.
+
+1. **Browse** to the `.zip` or folder you downloaded.
+2. Pick the destination **Library**, the **Creator** (or **New** to add one),
+   and type the **Character**. A line underneath shows exactly where it will
+   land: `<library>/<creator>/<character>`.
+3. **Install.** It runs right then — seconds for a typical pack, a minute or
+   two for a very large one.
+4. **Scan now** indexes what landed. It rescans just that creator, not your
+   whole library, and nothing appears in the Library until you do it.
+
+Things it deliberately refuses rather than guesses at: a character folder
+that already exists (clear it out yourself and retry — there's no resume), a
+library that isn't on the default `{creator}` folder layout, a RAR, anything
+over 20 GiB, and a scan or reorganize already in progress. Like the other
+file-moving tools it needs a writable destination, so it's standalone-only —
+Docker mounts are read-only.
 
 ### Filling in metadata automatically
 
