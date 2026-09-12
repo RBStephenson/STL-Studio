@@ -309,6 +309,12 @@ Tools** — it defaults off, and while off both Reorganize and import moves are
 refused. This mirrors [Reorganize](features.md#reorganize-library)'s safety
 posture.
 
+The [STL Installer](features.md#install) reuses the same eligibility — it only
+offers folders ticked as **Import destination** — but it is gated by its own
+flag (`installer_enabled`, **Settings → Library**, also off by default), not by
+`reorganize_enabled`. It adds one restriction the import move doesn't have: the
+destination root must be on the default `{creator}` layout.
+
 That flag gates *writes*, not the layout itself.
 
 An import move does **not** follow your destination template. It always lands in

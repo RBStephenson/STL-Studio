@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   Rocket, LayoutGrid, Layers, FileBox, Box, Image as ImageIcon,
   Star, Wrench, Globe, AlertTriangle, Tags, Users, FolderSearch,
-  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, Lock, Cpu, HardDrive, Download, type LucideIcon,
+  Settings as SettingsIcon, Database, EyeOff, LifeBuoy, FolderOpen, Heart, Palette, Pipette, Tag, FolderSync, Inbox, PackagePlus, Lock, Cpu, HardDrive, Download, type LucideIcon,
 } from "lucide-react";
 import SystemInfoPanel from "../components/SystemInfoPanel";
 
@@ -33,8 +33,9 @@ const SECTIONS: Section[] = [
         <p>
           STL Studio catalogues the 3D-model files already on your drives. Scanning is
           read-only: it builds a searchable index so you can browse, tag, preview, and
-          plan prints. File-moving tools such as Import and Reorganize are separate,
-          opt-in actions that show a preview before they change anything.
+          plan prints. File-moving tools such as Import, Install, and Reorganize are
+          separate, opt-in actions that show you what they'll do before they change
+          anything.
         </p>
         <ol>
           <li>Open <strong>Settings</strong> and add the folder path(s) where your models live.</li>
@@ -575,6 +576,51 @@ const SECTIONS: Section[] = [
           Like <a href="#reorganize">Reorganize</a>, the move step is{" "}
           <strong>standalone-only</strong> (Docker mounts are read-only) and needs write
           mode; importing and enriching work everywhere.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: "install",
+    title: "Install a pack",
+    icon: PackagePlus,
+    body: (
+      <>
+        <p>
+          <strong>Install</strong> (nav bar, at <code>/install</code>) extracts a ZIP or
+          copies a folder straight into a library as{" "}
+          <code>&lt;creator&gt;/&lt;character&gt;</code> — the manual download → extract →
+          move → scan sequence in one action. Use it when you already know whose pack this
+          is; use <a href="#import">Import folder</a> when you're sorting out a pile of
+          loose files. It's <strong>off by default</strong>: tick{" "}
+          <strong>Enable STL Installer (Experimental)</strong> under{" "}
+          <a href="#settings">Settings</a> → Library and it appears in the nav.
+        </p>
+        <ul>
+          <li>
+            <strong>Choose a ZIP or folder</strong>, then the destination{" "}
+            <strong>Library</strong>, <strong>Creator</strong> (or <strong>New</strong> to
+            add one), and <strong>Character</strong>. A <strong>"Will install to"</strong>{" "}
+            line previews the exact path first.
+          </li>
+          <li>
+            <strong>Install runs right then</strong> — seconds for a typical pack, a minute
+            or two for a very large one. The 20 GiB cap is a runaway-archive guard, not a
+            real-pack limit.
+          </li>
+          <li>
+            <strong>Scan now</strong> afterwards indexes what landed. It's a{" "}
+            <a href="#creators">per-creator rescan</a>, and it's deliberately yours to
+            trigger — installing never scans on its own.
+          </li>
+        </ul>
+        <p className="text-text-secondary-alt">
+          It refuses rather than guesses: an existing character folder is a hard error
+          (clear it by hand and retry — there's no resume), only libraries on the default{" "}
+          <code>{"{creator}"}</code> layout are eligible, RAR isn't supported, and a scan or
+          reorganize already in progress fails the install immediately. Like{" "}
+          <a href="#import">Import</a> and <a href="#reorganize">Reorganize</a>, it needs a
+          writable destination — so it's standalone-only.
         </p>
       </>
     ),
