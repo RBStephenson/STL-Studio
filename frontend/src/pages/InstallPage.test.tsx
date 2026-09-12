@@ -71,6 +71,25 @@ describe("InstallPage (STUDIO-389)", () => {
     expect(await screen.findByText("/library/Abe3D/Cobra Commander")).toBeInTheDocument();
   });
 
+  it("previews a Windows destination with the library's own separator (STUDIO-452)", async () => {
+    librariesMock.mockResolvedValue([
+      {
+        id: 3, name: "3D Model Library", path: "F:\\3DModelLibrary",
+        is_writable: true, write_enabled: true,
+      },
+    ]);
+
+    render(<InstallPage />);
+    await waitFor(() => expect(creatorsMock).toHaveBeenCalled());
+
+    await userEvent.selectOptions(await screen.findByLabelText(/library/i), "3");
+    await userEvent.selectOptions(screen.getByLabelText(/creator/i), "10");
+    await userEvent.type(screen.getByPlaceholderText(/zarana/i), "Hilda");
+
+    // Not "F:\3DModelLibrary/Abe3D/Hilda" — the whole point of the fix.
+    expect(await screen.findByText("F:\\3DModelLibrary\\Abe3D\\Hilda")).toBeInTheDocument();
+  });
+
   it("disables Install until source, library, creator, and character are all set", async () => {
     render(<InstallPage />);
     await waitFor(() => expect(creatorsMock).toHaveBeenCalled());
