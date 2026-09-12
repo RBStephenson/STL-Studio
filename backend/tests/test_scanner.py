@@ -4375,6 +4375,13 @@ class TestSeparatorInsensitiveIdentity:
     Linux-only CI run would report a green skip while the bug was live. These
     tests therefore INJECT a Windows-like normalizer rather than skipping on
     platform, so CI actually exercises the branch.
+
+    The case-SENSITIVE control below is the one exception, and it is not a
+    platform skip either. No injected normalizer can conjure a second directory
+    when the host folded `Auron/` and `auron/` into one before the test began,
+    so it is gated on a probed filesystem capability (STUDIO-451): a
+    case-sensitive volume on Windows still runs it, and a case-insensitive
+    macOS host correctly does not.
     """
 
     def _windows_like_normpath(self, monkeypatch):
@@ -4475,9 +4482,15 @@ class TestSeparatorInsensitiveIdentity:
         assert any("resolve to the same folder" in r.message for r in caplog.records), \
             "duplicate rows for one folder must be surfaced"
 
-    def test_case_sensitive_host_keeps_distinct_folders_distinct(self, db, tmp_path, monkeypatch):
+    def test_case_sensitive_host_keeps_distinct_folders_distinct(
+        self, db, tmp_path, monkeypatch, requires_case_sensitive_fs
+    ):
         """With a case-SENSITIVE normalizer the fallback is skipped entirely, so
-        two genuinely different folders stay two models (STUDIO-226)."""
+        two genuinely different folders stay two models (STUDIO-226).
+
+        Requires a case-sensitive host: the two fixture folders below collapse
+        into one on NTFS or default macOS, which fails the assertion for a
+        reason that has nothing to do with the scanner (STUDIO-451)."""
         monkeypatch.setattr(scanner, "_normpath", lambda p: os.path.normpath(p))
         creator = make_creator(db, "Creator")
         _stl(tmp_path / "Creator" / "Auron", name="a.stl")

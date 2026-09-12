@@ -10,6 +10,7 @@ import os
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 import pytest
+from pathlib import Path
 from app.utils import utcnow
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -196,3 +197,47 @@ def make_stl_file(
     db.add(f)
     db.flush()
     return f
+
+
+# ---------------------------------------------------------------------------
+# Host filesystem capability probes
+# ---------------------------------------------------------------------------
+
+def host_fs_is_case_sensitive(probe_dir: Path) -> bool:
+    """Report whether `probe_dir`'s filesystem keeps case-distinct names apart.
+
+    Probed rather than inferred from `sys.platform` (STUDIO-451). A platform
+    branch gets two real hosts wrong in opposite directions: NTFS is
+    case-insensitive by default but can be switched on per-directory, and macOS
+    is case-insensitive by default despite being POSIX. So ask the filesystem
+    the caller will actually write to, not the name of the operating system.
+
+    Creates two case-variant directories under `probe_dir` and reports whether
+    both survived. Idempotent, and it looks only for its own two names, so a
+    `probe_dir` that already holds other entries still reads correctly.
+    """
+    upper = probe_dir / "CaseProbe"
+    lower = probe_dir / "caseprobe"
+    upper.mkdir(exist_ok=True)
+    lower.mkdir(exist_ok=True)
+    return {upper.name, lower.name} <= {p.name for p in probe_dir.iterdir()}
+
+
+@pytest.fixture(scope="session")
+def requires_case_sensitive_fs(tmp_path_factory):
+    """Skip the requesting test unless pytest's temp tree is case-sensitive.
+
+    For tests whose FIXTURE cannot be built on a case-insensitive host — two
+    directories differing only by case collapse into one before the code under
+    test ever runs, so the failure says nothing about the code.
+
+    Anchored under `tmp_path_factory` because case-sensitivity is a
+    per-directory flag on NTFS: probing anywhere else can disagree with the
+    tree `tmp_path` actually hands the test. Session-scoped so the probe's
+    filesystem I/O happens once per run rather than once per test.
+    """
+    if not host_fs_is_case_sensitive(tmp_path_factory.mktemp("case-probe")):
+        pytest.skip(
+            "host filesystem is case-insensitive: case-variant directory names "
+            "collapse into one, so this test's fixture cannot be built here"
+        )
