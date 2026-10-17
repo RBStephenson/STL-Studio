@@ -1,6 +1,22 @@
+import json
+import sys
+
 import pytest
 
-from check_npm_audit import _advisory_urls, validate_report
+from check_npm_audit import _advisory_urls, main, validate_report
+
+
+def _run_main(tmp_path, monkeypatch, allowlist, report):
+    allowlist_path = tmp_path / "allowlist.json"
+    report_path = tmp_path / "report.json"
+    allowlist_path.write_text(json.dumps(allowlist), encoding="utf-8")
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["check_npm_audit.py", "--allowlist", str(allowlist_path), "--report", str(report_path)],
+    )
+    return main()
 
 
 def test_validate_report_allows_a_listed_advisory():
@@ -80,3 +96,19 @@ def test_advisory_urls_ignores_findings_below_high_severity():
 def test_advisory_urls_rejects_a_non_object_vulnerability_entry():
     with pytest.raises(ValueError, match="must be an object"):
         _advisory_urls({"vulnerabilities": {"react-router": "not-an-object"}})
+
+
+def test_main_fails_a_high_finding_when_the_allowlist_is_empty(tmp_path, monkeypatch):
+    # The shipped allowlist is empty (STUDIO-456), so an empty list must gate
+    # every high finding rather than being read as "nothing configured".
+    report = {
+        "vulnerabilities": {
+            "undici": {"via": [{"url": "https://github.com/advisories/GHSA-high", "severity": "high"}]},
+        },
+    }
+
+    assert _run_main(tmp_path, monkeypatch, {"allowed_advisories": []}, report) == 1
+
+
+def test_main_passes_a_clean_report_when_the_allowlist_is_empty(tmp_path, monkeypatch):
+    assert _run_main(tmp_path, monkeypatch, {"allowed_advisories": []}, {}) == 0
