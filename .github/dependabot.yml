@@ -21,10 +21,16 @@ version: 2
 # unit, majors included. `@vitest/coverage-v8` declares an exact peer on the
 # matching `vitest`, so splitting them can never pass — the vitest 5 bump
 # arrived as four PRs (#1411-#1414), each failing `npm ci` with ERESOLVE against
-# the other half's pin (STUDIO-457). Such a group is listed FIRST in its
-# ecosystem, because Dependabot assigns a package to the first group it matches;
-# listed after `dev-deps`, vitest's minor/patch bumps would land there and its
-# majors would split off again.
+# the other half's pin (STUDIO-457).
+#
+# Name every package in such a group EXACTLY, never by wildcard. Dependabot
+# puts a package in its most specific matching group, not the first one listed,
+# and a wildcard pattern ranks below `dev-deps`'s `dependency-type` rule. With
+# `@vitest/*`, the job log read "Skipping @vitest/coverage-v8 for group
+# 'vitest' - belongs to more specific group 'dev-deps'", and because dev-deps
+# takes only minor/patch bumps, the major split off on its own again. An exact
+# name outranks dev-deps, as `vitest` itself did. Check the grouping decisions
+# with `gh run view <id> --log | grep "for group"` on the Dependabot run.
 #
 # Note: security updates bypass grouping entirely — Dependabot always raises an
 # advisory fix as its own PR. That is the desired behaviour and this config does
@@ -40,7 +46,7 @@ updates:
     open-pull-requests-limit: 5
     groups:
       vitest:
-        patterns: ["vitest", "@vitest/*"]
+        patterns: ["vitest", "@vitest/coverage-v8"]
       dev-deps:
         dependency-type: "development"
         update-types: ["minor", "patch"]
@@ -62,7 +68,7 @@ updates:
     open-pull-requests-limit: 5
     groups:
       vitest:
-        patterns: ["vitest", "@vitest/*"]
+        patterns: ["vitest", "@vitest/coverage-v8"]
       dev-deps:
         dependency-type: "development"
         update-types: ["minor", "patch"]
