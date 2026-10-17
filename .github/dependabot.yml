@@ -17,6 +17,15 @@ version: 2
 # guide, and grouping it with four harmless patches would have held those
 # hostage to it.
 #
+# The one exception: packages that are version-locked to each other move as a
+# unit, majors included. `@vitest/coverage-v8` declares an exact peer on the
+# matching `vitest`, so splitting them can never pass — the vitest 5 bump
+# arrived as four PRs (#1411-#1414), each failing `npm ci` with ERESOLVE against
+# the other half's pin (STUDIO-457). Such a group is listed FIRST in its
+# ecosystem, because Dependabot assigns a package to the first group it matches;
+# listed after `dev-deps`, vitest's minor/patch bumps would land there and its
+# majors would split off again.
+#
 # Note: security updates bypass grouping entirely — Dependabot always raises an
 # advisory fix as its own PR. That is the desired behaviour and this config does
 # not change it.
@@ -30,6 +39,8 @@ updates:
       day: "monday"
     open-pull-requests-limit: 5
     groups:
+      vitest:
+        patterns: ["vitest", "@vitest/*"]
       dev-deps:
         dependency-type: "development"
         update-types: ["minor", "patch"]
@@ -50,6 +61,8 @@ updates:
       day: "monday"
     open-pull-requests-limit: 5
     groups:
+      vitest:
+        patterns: ["vitest", "@vitest/*"]
       dev-deps:
         dependency-type: "development"
         update-types: ["minor", "patch"]
