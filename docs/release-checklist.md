@@ -13,6 +13,11 @@ Before approving a release candidate:
   ships both. Their Section 2 must be rewritten each cycle to cover what
   actually changed since the previous build; changes verified only by unit
   tests have not been run in a packaged app until this pass runs them.
+- If the release changes the `anthropic` pin, the model list, or the thinking
+  or effort parameters, run the [AI live smoke](release/ai-live-smoke.md)
+  against a real API key and record its result in the release ticket. The
+  automated tests fake the Anthropic SDK, so CI cannot catch a request the real
+  API rejects.
 - Confirm the normal Tests, Build Check, CodeQL, and packaging jobs are green.
 - Require the Windows packaging smoke to pass its custom/default-directory,
   shortcut creation/removal, repair/reinstall, relaunch, user-data retention,
