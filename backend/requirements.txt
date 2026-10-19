@@ -16,7 +16,7 @@ cryptography==50.0.2  # Fernet encryption-at-rest for the AI API key (#517)
 # package does NOT bundle it.
 numpy==2.5.4
 scikit-image==0.26.0
-pillow==12.3.0
+pillow==13.0.0
 playwright==1.64.0
 anthropic==1.14.0
 pypdf==6.20.1  # merge per-guide PDFs into a series bundle (#490)
