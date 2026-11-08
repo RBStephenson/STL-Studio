@@ -59,6 +59,8 @@ class FakeBrowserWindow extends EventEmitter {
   focus = vi.fn();
   getNormalBounds = vi.fn().mockReturnValue({ width: 1280, height: 800 });
   isMaximized = vi.fn().mockReturnValue(false);
+  isDestroyed = vi.fn().mockReturnValue(false);
+  close = vi.fn();
 
   constructor(public opts: Record<string, unknown>) {
     super();
@@ -442,6 +444,106 @@ describe("main.ts wiring", () => {
     const handler = win.webContents.setWindowOpenHandler.mock.calls[0]?.[0];
     expect(handler({ url: "ms-msdt:/id PCWDiagnostic" })).toEqual({ action: "deny" });
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("opens the app's own page in a new, isolated app window (STUDIO-463)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const handler = win.webContents.setWindowOpenHandler.mock.calls[0]?.[0];
+    const result = handler({ url: "http://127.0.0.1:5555/models/42" });
+    expect(result.action).toBe("allow");
+    expect(result.overrideBrowserWindowOptions.webPreferences).toEqual(
+      expect.objectContaining({ contextIsolation: true, nodeIntegration: false }),
+    );
+    expect(result.overrideBrowserWindowOptions.webPreferences.preload).toContain("preload.js");
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("refuses window.open for a file: target (STUDIO-463)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const handler = win.webContents.setWindowOpenHandler.mock.calls[0]?.[0];
+    expect(handler({ url: "file:///C:/Windows/win.ini" })).toEqual({ action: "deny" });
+  });
+
+  it("gives a window opened from the app the same navigation policy (STUDIO-463)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const child = new FakeBrowserWindow({});
+    win.webContents.emit("did-create-window", child, {});
+
+    // In-window navigation off our origin is diverted, exactly as in the main window.
+    const external = { preventDefault: vi.fn() };
+    child.webContents.emit("will-navigate", external, "https://example.com");
+    expect(external.preventDefault).toHaveBeenCalled();
+    expect(openExternal).toHaveBeenCalledWith("https://example.com");
+
+    const dangerous = { preventDefault: vi.fn() };
+    child.webContents.emit("will-navigate", dangerous, "ms-msdt:/id PCWDiagnostic");
+    expect(dangerous.preventDefault).toHaveBeenCalled();
+    expect(openExternal).toHaveBeenCalledTimes(1);
+
+    // The child's own window.open is policed too, so a grandchild can't escape it.
+    const childHandler = child.webContents.setWindowOpenHandler.mock.calls[0]?.[0];
+    expect(childHandler({ url: "ms-msdt:/id PCWDiagnostic" })).toEqual({ action: "deny" });
+    expect(childHandler({ url: "http://127.0.0.1:5555/models/7" }).action).toBe("allow");
+
+    // The main window's backend-retry URL means nothing in a child: it is refused, not rebooted.
+    const retry = { preventDefault: vi.fn() };
+    child.webContents.emit("will-navigate", retry, "stl-studio://retry-backend");
+    expect(retry.preventDefault).toHaveBeenCalled();
+    expect(bootBackendAndLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not persist a child window's size over the main window's (STUDIO-463)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const child = new FakeBrowserWindow({});
+    win.webContents.emit("did-create-window", child, {});
+    child.emit("resize");
+    child.emit("close");
+    expect(child.getNormalBounds).not.toHaveBeenCalled();
+    expect(win.getNormalBounds).not.toHaveBeenCalled();
+  });
+
+  it("gives a child window the context menu and mouse back/forward of the main window (STUDIO-463)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const child = new FakeBrowserWindow({});
+    win.webContents.emit("did-create-window", child, {});
+
+    child.webContents.emit("context-menu", {}, { isEditable: false, editFlags: { canCopy: true, canPaste: false } });
+    expect(menuPopup).toHaveBeenCalledWith({ window: child });
+
+    child.webContents.navigationHistory.canGoBack.mockReturnValue(true);
+    child.emit("app-command", {}, "browser-backward");
+    expect(child.webContents.navigationHistory.goBack).toHaveBeenCalled();
+    expect(win.webContents.navigationHistory.goBack).not.toHaveBeenCalled();
+  });
+
+  it("closes windows opened from the app when the main window closes (STUDIO-463)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    const child = new FakeBrowserWindow({});
+    const alreadyGone = new FakeBrowserWindow({});
+    alreadyGone.isDestroyed.mockReturnValue(true);
+    win.webContents.emit("did-create-window", child, {});
+
+    win.emit("closed");
+
+    expect(child.close).toHaveBeenCalledTimes(1);
+    expect(alreadyGone.close).not.toHaveBeenCalled();
+    expect(win.close).not.toHaveBeenCalled();
+  });
+
+  it("matches a child window's zoom to the main window on load (STUDIO-463)", async () => {
+    await loadMain();
+    const win = FakeBrowserWindow.instances[0];
+    win.webContents.zoomFactor = 1.25;
+    const child = new FakeBrowserWindow({});
+    win.webContents.emit("did-create-window", child, {});
+    child.webContents.emit("did-finish-load");
+    expect(child.webContents.setZoomFactor).toHaveBeenCalledWith(1.25);
   });
 
   it("schedules a window-state save on resize/move and flushes on close", async () => {
