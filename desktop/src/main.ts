@@ -19,7 +19,7 @@ import { autoUpdater } from "electron-updater";
 import { createAppController } from "./appController";
 import { LOCKFILE_NAME, QUIT_TIMEOUT_MS, baseUrl, isBackendRetryUrl, resolveBackendExe } from "./config";
 import { registerCspHandler } from "./csp";
-import { routeNavigation, type NavigationHost } from "./externalNavigation";
+import { decideWindowOpen, routeNavigation, type NavigationHost } from "./externalNavigation";
 import { patchConsoleForDiagnostics, registerDiagnosticsIpcHandlers } from "./diagnostics";
 import {
   buildApplicationMenuTemplate,
@@ -263,6 +263,82 @@ function showKeyRevealWindow(key: string): void {
   void win.loadFile(KEY_REVEAL_HTML, { query: { key } });
 }
 
+/** Same isolation as the main window. Spelled out for app windows opened via
+ *  window.open rather than left to Electron's opener inheritance. */
+function appWebPreferences(): Electron.WebPreferences {
+  return {
+    contextIsolation: true,
+    nodeIntegration: false,
+    preload: join(__dirname, "preload.js"),
+  };
+}
+
+/**
+ * The STUDIO-259 navigation policy for one webContents: in-window navigation
+ * stays on our own origin, and window.open opens a new app window only for our
+ * own origin (STUDIO-463). Applied to the main window and, via
+ * did-create-window, to every window it opens — a child without it would be an
+ * app window with no navigation guard at all. `interceptNavigation` lets the
+ * main window claim its backend-retry URL first.
+ */
+function applyNavigationPolicy(
+  contents: Electron.WebContents,
+  interceptNavigation?: (event: Electron.Event, url: string) => boolean,
+): void {
+  contents.on("will-navigate", (event, url) => {
+    if (interceptNavigation?.(event, url)) return;
+    // Anything that isn't our own origin leaves the window: external links go
+    // to the system browser, everything else is refused (STUDIO-259).
+    if (!routeNavigation(url, navigationHost)) {
+      event.preventDefault();
+    }
+  });
+
+  contents.setWindowOpenHandler(({ url }) => {
+    if (decideWindowOpen(url, navigationHost) === "allow") {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          title: "STL Studio",
+          icon: APP_ICON,
+          backgroundColor: WINDOW_BG,
+          webPreferences: appWebPreferences(),
+        },
+      };
+    }
+    return { action: "deny" };
+  });
+
+  contents.on("did-create-window", (child) => configureChildWindow(child));
+}
+
+/** A window opened from the app (e.g. Triage's "Open full detail"). It gets
+ *  the navigation policy and the same navigation affordances as the main
+ *  window, but not window-state persistence — that stays the main window's. */
+function configureChildWindow(child: BrowserWindow): void {
+  applyNavigationPolicy(child.webContents);
+  registerRendererFailureHandler(child, failureUi);
+  attachNavigationAffordances(child);
+  // Match the main window's current zoom so the detail page isn't jarringly
+  // smaller or larger than the window it was opened from.
+  child.webContents.on("did-finish-load", () => {
+    const zoom = mainWindow?.webContents.zoomFactor;
+    if (zoom) child.webContents.setZoomFactor(zoom);
+  });
+}
+
+/** Right-click Back/Forward/Reload + clipboard menu, and the mouse
+ *  back/forward buttons, for any app window. */
+function attachNavigationAffordances(win: BrowserWindow): void {
+  win.webContents.on("context-menu", (_event, params) => {
+    const template = buildContextMenuTemplate(navFor(() => win.webContents), editContextFromParams(params));
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+  win.on("app-command", (_event, command) => {
+    handleAppCommand(command, win.webContents.navigationHistory);
+  });
+}
+
 function createWindow(): BrowserWindow {
   const savedState = readWindowState(userDataDir, screen.getAllDisplays());
   const win = new BrowserWindow({
@@ -271,11 +347,7 @@ function createWindow(): BrowserWindow {
     title: "STL Studio",
     icon: APP_ICON,
     backgroundColor: WINDOW_BG,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: join(__dirname, "preload.js"),
-    },
+    webPreferences: appWebPreferences(),
   });
   if (savedState.isMaximized) {
     win.maximize();
@@ -286,35 +358,22 @@ function createWindow(): BrowserWindow {
   void win.loadFile(SPLASH_HTML);
   registerRendererFailureHandler(win, failureUi);
 
-  win.webContents.on("will-navigate", (event, url) => {
-    if (isBackendRetryUrl(url)) {
-      event.preventDefault();
-      void win.loadFile(SPLASH_HTML).then(() => appController.bootBackendAndLoad(win));
-      return;
+  applyNavigationPolicy(win.webContents, (event, url) => {
+    if (!isBackendRetryUrl(url)) return false;
+    event.preventDefault();
+    void win.loadFile(SPLASH_HTML).then(() => appController.bootBackendAndLoad(win));
+    return true;
+  });
+
+  attachNavigationAffordances(win);
+
+  // Windows opened from the app (STUDIO-463) live and die with it. Left open,
+  // a detail window would keep the app — and its backend sidecar — running
+  // with no main window, and `mainWindow` would point at a destroyed object.
+  win.on("closed", () => {
+    for (const other of BrowserWindow.getAllWindows()) {
+      if (other !== win && !other.isDestroyed()) other.close();
     }
-    // Anything that isn't our own origin leaves the window: external links go
-    // to the system browser, everything else is refused (STUDIO-259).
-    if (!routeNavigation(url, navigationHost)) {
-      event.preventDefault();
-    }
-  });
-
-  // `target="_blank"` / window.open would otherwise render a remote page in a
-  // chromeless Electron window with no address bar.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    routeNavigation(url, navigationHost);
-    return { action: "deny" };
-  });
-
-  // Right-click context menu: Back/Forward/Reload + clipboard when relevant.
-  win.webContents.on("context-menu", (_event, params) => {
-    const template = buildContextMenuTemplate(navFor(() => win.webContents), editContextFromParams(params));
-    Menu.buildFromTemplate(template).popup({ window: win });
-  });
-
-  // Mouse back/forward buttons.
-  win.on("app-command", (_event, command) => {
-    handleAppCommand(command, win.webContents.navigationHistory);
   });
 
   const windowStatePersister = createWindowStatePersister({

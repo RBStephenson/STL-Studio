@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { classifyNavigation, routeNavigation } from "./externalNavigation";
+import { classifyNavigation, decideWindowOpen, routeNavigation } from "./externalNavigation";
 
 describe("classifyNavigation", () => {
   it.each([
@@ -82,4 +82,45 @@ describe("routeNavigation", () => {
       expect(h.log).toHaveBeenCalledWith(expect.stringContaining("could not open")),
     );
   });
+});
+
+describe("decideWindowOpen (STUDIO-463)", () => {
+  function host() {
+    return { openExternal: vi.fn().mockResolvedValue(undefined), log: vi.fn() };
+  }
+
+  it.each([
+    "http://127.0.0.1:5555/models/42",
+    "http://localhost:8484/models/42",
+    "http://[::1]:8484/models/42",
+  ])("opens the app's own page %s in a new app window", (url) => {
+    const h = host();
+    expect(decideWindowOpen(url, h)).toBe("allow");
+    expect(h.openExternal).not.toHaveBeenCalled();
+    expect(h.log).not.toHaveBeenCalled();
+  });
+
+  it("refuses a new window for a file: target even though it may load in place", () => {
+    const h = host();
+    expect(classifyNavigation("file:///C:/Windows/win.ini")).toBe("internal");
+    expect(decideWindowOpen("file:///C:/Windows/win.ini", h)).toBe("deny");
+    expect(h.openExternal).not.toHaveBeenCalled();
+    expect(h.log).toHaveBeenCalledWith(expect.stringContaining("blocked new window"));
+  });
+
+  it("sends an external https target to the browser instead of a window", () => {
+    const h = host();
+    expect(decideWindowOpen("https://www.patreon.com/x", h)).toBe("deny");
+    expect(h.openExternal).toHaveBeenCalledWith("https://www.patreon.com/x");
+  });
+
+  it.each(["ms-msdt:/id PCWDiagnostic", "http://example.com/x", "javascript:alert(1)", "not a url"])(
+    "denies %s without touching the shell",
+    (url) => {
+      const h = host();
+      expect(decideWindowOpen(url, h)).toBe("deny");
+      expect(h.openExternal).not.toHaveBeenCalled();
+      expect(h.log).toHaveBeenCalledWith(expect.stringContaining("blocked navigation"));
+    },
+  );
 });

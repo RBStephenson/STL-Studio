@@ -74,3 +74,25 @@ export function routeNavigation(url: string, host: NavigationHost): boolean {
   host.log(`[navigation] blocked navigation to ${url}`);
   return false;
 }
+
+export type WindowOpenVerdict = "allow" | "deny";
+
+/**
+ * Decide a renderer `window.open` / `target="_blank"` request (STUDIO-463).
+ *
+ * Only the app's own loopback origin may open a new app window — that is how
+ * Triage's "Open full detail" keeps the review queue in place while the model
+ * opens alongside it. This is deliberately narrower than `classifyNavigation`'s
+ * "internal": bundled `file:` pages may load in place, but a `file:` target
+ * must never get a fresh window with the app's preload attached. External
+ * targets still go to the system browser; everything else is refused.
+ */
+export function decideWindowOpen(url: string, host: NavigationHost): WindowOpenVerdict {
+  if (classifyNavigation(url) === "internal") {
+    if (new URL(url).protocol !== "file:") return "allow";
+    host.log(`[navigation] blocked new window for ${url}`);
+    return "deny";
+  }
+  routeNavigation(url, host);
+  return "deny";
+}
