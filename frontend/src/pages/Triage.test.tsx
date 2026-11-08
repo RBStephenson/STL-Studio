@@ -98,7 +98,7 @@ describe("Triage keyboard-hint row", () => {
 
     const kbd = screen.getByText("→ / Space").closest("kbd");
     expect(kbd?.tagName).toBe("KBD");
-    expect(kbd).toHaveStyle({ background: "#1c1e26", color: "#dcdde2" });
+    expect(kbd).toHaveStyle({ backgroundColor: "#1c1e26", color: "#dcdde2" });
   });
 
   it("dismisses the current model on Space, matching the → / Space hint", async () => {
