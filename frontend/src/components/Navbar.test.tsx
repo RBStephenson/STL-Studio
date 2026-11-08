@@ -148,7 +148,7 @@ describe("Navbar – NSFW toggle persists server-side (#32)", () => {
     renderNavbar();
 
     const btn = await screen.findByRole("button", { name: /nsfw off/i });
-    expect(btn).toHaveStyle({ borderColor: "#202329", background: "#181a20" });
+    expect(btn).toHaveStyle({ borderColor: "#202329", backgroundColor: "#181a20" });
 
     await userEvent.click(btn);
     const onBtn = await screen.findByRole("button", { name: /nsfw on/i });
