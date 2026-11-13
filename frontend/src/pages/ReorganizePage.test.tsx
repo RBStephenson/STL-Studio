@@ -1398,4 +1398,74 @@ describe("ReorganizePage per-scan-root templates", () => {
     // Explicit-wins-uniformly, which is what that field has always meant.
     await waitFor(() => expect(reorg.preview).toHaveBeenCalledWith("{creator}", undefined));
   });
+
+  it("keeps a template typed before the roots' seed effect has run (STUDIO-462)", async () => {
+    // The test above flaked in CI (2 in ~450 runs): the commit that delivers the
+    // roots schedules the seed effect, and when the keystroke landed before that
+    // effect flushed, the late seed overwrote it with "" for good. This forces
+    // that ordering every time instead of hoping a loaded runner produces it.
+    savedTemplate = "{creator}/{character}/{title}";
+    let resolveRoots!: (roots: unknown) => void;
+    scan.roots.mockReturnValue(new Promise((resolve) => { resolveRoots = resolve; }));
+    render(<ReorganizePage />);
+
+    const field = screen.getByRole("textbox", { name: /destination template/i }) as HTMLInputElement;
+    const rootSelect = screen.getByRole("combobox", { name: "Scan root" }) as HTMLSelectElement;
+
+    // A MutationObserver callback is a microtask straight after the DOM commit,
+    // which is before React runs the passive effects that commit scheduled.
+    let valueWhenTyped: string | null = null;
+    const typed = new Promise<void>((done) => {
+      const observer = new MutationObserver(() => {
+        if (rootSelect.disabled || valueWhenTyped !== null) return;
+        observer.disconnect();
+        valueWhenTyped = field.value;
+        fireEvent.change(field, { target: { value: "{creator}" } });
+        done();
+      });
+      observer.observe(document.body, { subtree: true, attributes: true, childList: true });
+    });
+
+    // Off, as testing-library's own waitFor sets it while the real test waits
+    // for the roots — otherwise act() flushes the effect synchronously and the
+    // gap this test needs never opens.
+    const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const previousActEnv = actEnv.IS_REACT_ACT_ENVIRONMENT;
+    actEnv.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      resolveRoots(OVERRIDING_ROOTS);
+      await typed;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      actEnv.IS_REACT_ACT_ENVIRONMENT = previousActEnv;
+    }
+
+    // Non-vacuity: the keystroke has to land while the field still holds the
+    // pre-roots seed, or this test is no longer exercising the race at all —
+    // which is how a React upgrade that reorders effects would show up here.
+    expect(valueWhenTyped).toBe("{creator}/{character}/{title}");
+    expect(field).toHaveValue("{creator}");
+
+    buildPlan();
+    await waitFor(() => expect(reorg.preview).toHaveBeenCalledWith("{creator}", undefined));
+  });
+
+  it("re-seeds a typed template when the scan root changes", async () => {
+    // Pins the other half of the STUDIO-462 guard: changing scope still discards
+    // a one-off template (STUDIO-403) rather than the guard carrying it across.
+    savedTemplate = "{creator}/{character}/{title}";
+    scan.roots.mockResolvedValue(OVERRIDING_ROOTS);
+    render(<ReorganizePage />);
+
+    const rootSelect = await screen.findByRole("combobox", { name: "Scan root" });
+    await waitFor(() => expect(rootSelect).toBeEnabled());
+    const field = screen.getByRole("textbox", { name: /destination template/i });
+    await waitFor(() => expect(field).toHaveValue(""));
+    fireEvent.change(field, { target: { value: "{creator}" } });
+    expect(field).toHaveValue("{creator}");
+
+    // Root 9 has no template of its own, so it falls back to the library's.
+    fireEvent.change(rootSelect, { target: { value: "9" } });
+    await waitFor(() => expect(field).toHaveValue("{creator}/{character}/{title}"));
+  });
 });
