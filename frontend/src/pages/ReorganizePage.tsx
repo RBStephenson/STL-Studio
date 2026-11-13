@@ -88,6 +88,13 @@ export default function ReorganizePage() {
   // starts from now depends on which root is selected, so it can't be computed
   // before `scanRoots` and `rootId` exist.
   const [templateTouched, setTemplateTouched] = useState(false);
+  // Mirrors `templateTouched`, but is written synchronously in the field's
+  // onChange (STUDIO-462). The seed effect scheduled by the commit that delivers
+  // the scan roots closes over the state value from THAT render, so a keystroke
+  // landing before the effect flushes would otherwise be overwritten by the
+  // seed — and `templateTouched` then blocks any re-seed, leaving the field
+  // wrong for good. The ref is what that late effect can still see.
+  const templateTouchedRef = useRef(false);
   const [overrides, setOverrides] = useState<Record<number, ReorganizeOverride>>({});
   const [preview, setPreview] = useState<ReorganizePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -149,7 +156,7 @@ export default function ReorganizePage() {
   // Seed the one-off field once settings/roots have loaded, and only until the
   // user starts typing their own template.
   useEffect(() => {
-    if (templateTouched) return;
+    if (templateTouched || templateTouchedRef.current) return;
     setTemplate(seedTemplateFor(rootId));
     // Deliberately NOT gated on `scanRootsLoading`. Waiting for the roots would
     // remove a brief flash of the library template before a per-root library
@@ -209,6 +216,7 @@ export default function ReorganizePage() {
     // mutation showed removing it changed nothing, because the debounce already
     // covers it. If that debounce is ever removed, this becomes a real extra
     // manifest build against the wrong template.
+    templateTouchedRef.current = false;
     setTemplateTouched(false);
     setPreview(null);
     setError(null);
@@ -502,7 +510,7 @@ export default function ReorganizePage() {
         {settingsLoaded ? (
           <TemplateEditor
             value={template}
-            onChange={(next) => { setTemplate(next); setTemplateTouched(true); }}
+            onChange={(next) => { templateTouchedRef.current = true; setTemplate(next); setTemplateTouched(true); }}
             rootId={rootId}
             defaultTemplate={settings.reorganize_template_default}
             keepEnabled={settings.reorganize_keep_level_enabled}
